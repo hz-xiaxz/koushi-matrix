@@ -3191,10 +3191,9 @@ fn viewport_reads_only_the_bottom_row_it_reports() {
 }
 
 #[test]
-fn thread_viewport_does_not_read_a_live_edge_the_client_scrolled_to() {
-    // #872: opening a thread snaps the pane to the newest reply. That snap is
-    // not the reader reading, and admitting the threaded receipt from it zeroed
-    // the attention count the same open had just computed.
+fn thread_viewport_reads_the_visible_live_edge_after_an_open_time_snap() {
+    // Opening the thread may place the newest reply in the viewport. Its actual
+    // visibility and settled bottom position are enough to acknowledge it.
     let reply = timeline_item("$r1:test", Some("reply"), "@other:test", false);
     let thread_kind = TimelineKind::Thread {
         room_id: "!r:test".to_owned(),
@@ -3211,8 +3210,8 @@ fn thread_viewport_does_not_read_a_live_edge_the_client_scrolled_to() {
             "$r1:test",
             TimelineBottomArrival::Programmatic,
         )
-        .is_none(),
-        "the open-time snap must not read the thread"
+        .is_some(),
+        "the latest visible reply should be read on sight"
     );
     assert!(
         viewed_boundary_target(

@@ -525,10 +525,7 @@ pub fn compute_room_list_projection(
             })
             .filter(|room| match active_filter {
                 RoomListFilter::Unread => {
-                    room.unread_count > 0
-                        || room.notification_count > 0
-                        || room.highlight_count > 0
-                        || room.marked_unread
+                    super::room::room_activity_unread_count(room) > 0 || room.marked_unread
                 }
                 RoomListFilter::People => room.is_dm,
                 RoomListFilter::Rooms => {

@@ -79,6 +79,7 @@ export interface AccountTabSummary {
   avatarSourceRef: string | null;
   status: AccountTabStatus;
   unreadCount: number;
+  inviteCount?: number;
 }
 
 export interface AccountTabsSnapshot {
@@ -2651,6 +2652,7 @@ export type ThreadsListState =
       room_id: string;
       request_id: number;
       failure_kind: OperationFailureKind;
+      items: ThreadsListItem[];
     };
 
 export type ScheduledSendsScope =
@@ -3085,8 +3087,11 @@ export interface RoomListItem {
   highlight_count: number;
   /** Rust-owned notification count selected for the row's display mode. */
   notification_count?: number;
-  /** Numeric badge value; zero means the row may render the unread dot. */
+  /** Verified numeric unread badge; manual markers remain nonnumeric. */
   display_count?: number;
+  /** Rust-owned parts of the numeric badge; their sum is `display_count`. */
+  main_unread_count?: number;
+  thread_unread_count?: number;
   has_unread_content?: boolean;
   is_attention_highlighted?: boolean;
   has_unread_mention?: boolean;

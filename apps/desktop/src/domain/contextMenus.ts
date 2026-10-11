@@ -64,6 +64,7 @@ export type ContextMenuRequest =
       roomId: string;
       tags?: RoomTags;
       dmUserIds?: string[];
+      canMarkRoomAsRead?: boolean;
     }
   | {
       kind: "space";
@@ -154,7 +155,7 @@ export function contextMenuItems(request: ContextMenuRequest): ContextMenuItem[]
         request.tags?.low_priority
           ? { id: "removeRoomLowPriority", labelMessageId: "context.removeFromLowPriority" }
           : { id: "setRoomLowPriority", labelMessageId: "context.addToLowPriority" },
-        { id: "markRoomAsRead", labelMessageId: "room.markAsRead" },
+        ...(request.canMarkRoomAsRead ? [{ id: "markRoomAsRead" as const, labelMessageId: "room.markAsRead" as const }] : []),
         { id: "markRoomAsUnread", labelMessageId: "room.markAsUnread" },
         // #373: last, destructive, and confirmation-gated by the caller. DM copy
         // differs only for readability — both ids drive the same Matrix

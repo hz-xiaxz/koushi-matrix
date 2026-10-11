@@ -146,7 +146,6 @@ describe("context menu registry", () => {
       "reportRoom",
       "setRoomFavourite",
       "setRoomLowPriority",
-      "markRoomAsRead",
       "markRoomAsUnread",
       "leaveRoom"
     ]);
@@ -157,6 +156,13 @@ describe("context menu registry", () => {
     expect(contextMenuItems({ kind: "account" }).map((item) => item.id)).toEqual([
       "openUserSettings"
     ]);
+  });
+
+  test("offers the read command only when a verified main-timeline target exists", () => {
+    expect(contextMenuItems({ kind: "room", roomId: "!room:example.invalid" }).map((item) => item.id))
+      .not.toContain("markRoomAsRead");
+    expect(contextMenuItems({ kind: "room", roomId: "!room:example.invalid", canMarkRoomAsRead: true })
+      .map((item) => item.id)).toContain("markRoomAsRead");
   });
 
   test("one-to-one DM room menu exposes User info without adding it to group rooms", () => {

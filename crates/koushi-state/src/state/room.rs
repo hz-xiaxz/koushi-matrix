@@ -370,37 +370,24 @@ pub fn room_attention_kind(
     }
 }
 
-/// Persistent conversation attention shared by room/sidebar, account and native
-/// badges. SDK message, notification and mention counters remain separate inputs.
+/// Persistent numeric unread shared by room/sidebar, account and native badges.
 ///
 /// #1238: the badge is the only place the main-timeline and thread counts meet.
 /// Thread replies are excluded from `unread_count` by the SDK's room read-receipt
 /// filter and counted per thread by the thread filters, so
 /// `unread_count + thread_unread_count` is the non-overlapping client
-/// decomposition. A homeserver's own `notification_count` may already include
-/// thread replies, so it is max'd in and never summed with a thread term.
+/// decomposition. A homeserver's `notification_count` has no event IDs and
+/// cannot make a message locatable, so it cannot add to a numeric unread badge.
 /// `unread_count` itself stays main-only for navigation.
 pub fn room_activity_unread_count(room: &RoomSummary) -> u64 {
-    let count = room
-        .unread_count
-        .saturating_add(room.thread_unread_count)
-        .max(room.notification_count)
-        .max(
-            room.highlight_count
-                .saturating_add(room.thread_highlight_count),
-        );
-    if count > 0 {
-        count
-    } else if room.marked_unread {
-        1
-    } else {
-        0
-    }
+    room.unread_count.saturating_add(room.thread_unread_count)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RoomAttentionProjection {
     pub unread_count: u64,
+    pub main_unread_count: u64,
+    pub thread_unread_count: u64,
     pub notification_count: u64,
     pub highlight_count: u64,
     pub has_unread_content: bool,
@@ -417,11 +404,7 @@ pub fn room_attention_projection(
     let is_muted = mode == Some(RoomNotificationMode::Mute);
     let thread_highlight_count = room.thread_highlight_count;
     let highlight_total = room.highlight_count.saturating_add(thread_highlight_count);
-    let has_unread_content = room.unread_count > 0
-        || room.thread_unread_count > 0
-        || room.notification_count > 0
-        || highlight_total > 0
-        || room.marked_unread;
+    let has_unread_content = room_activity_unread_count(room) > 0 || room.marked_unread;
     let unread_count = room_activity_unread_count(room);
     let highlight_count = if is_muted { 0 } else { highlight_total };
     let has_unread_mention = !is_muted && highlight_total > 0;
@@ -433,14 +416,12 @@ pub fn room_attention_projection(
         } else {
             room.notification_count
         };
-    let display_count = if is_muted {
-        room.unread_count.saturating_add(room.thread_unread_count)
-    } else {
-        notification_count
-    };
+    let display_count = unread_count;
 
     RoomAttentionProjection {
         unread_count,
+        main_unread_count: room.unread_count,
+        thread_unread_count: room.thread_unread_count,
         notification_count,
         highlight_count,
         has_unread_content,
@@ -457,12 +438,12 @@ fn room_attention_sort_rank(room: Option<&RoomSummary>, mode: Option<RoomNotific
     };
     let projection = room_attention_projection(room, mode);
 
-    if projection.has_unread_mention {
+    // Server notification/highlight counters cannot prove a visible unread
+    // message. They must not promote a room that has no SDK-local unread.
+    if !projection.is_muted && projection.unread_count > 0 {
         0
-    } else if projection.notification_count > 0 {
+    } else if !projection.is_muted && room.marked_unread {
         1
-    } else if projection.has_unread_content {
-        2
     } else {
         3
     }

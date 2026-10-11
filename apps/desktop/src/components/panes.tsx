@@ -105,7 +105,6 @@ export function ActivityPane({
   activity,
   onClose,
   onLoadMore,
-  onMarkRead,
   onOpenRow,
   onRetryResolution,
   onSetTab
@@ -122,17 +121,15 @@ export function ActivityPane({
     activity.kind === "open" ? activity.active_tab : activity.kind === "opening" ? activity.tab : "recent";
   const stream = activity.kind === "open" ? activityStream(activity, activeTab) : null;
   const rows = stream?.rows ?? [];
-  const resolution = activeTab === "unread" ? stream?.resolution : undefined;
+  // The background resolver hydrates Recent history. Verified room summaries
+  // in Unread stay usable even when that history request is slow or fails.
+  const resolution = activeTab === "recent" && activity.kind === "open"
+    ? activity.unread.resolution
+    : undefined;
   const visibleRows = activeTab === "unread"
-    ? rows.filter((row) => row.kind === "event")
+    ? rows.filter((row) => row.kind === "roomUnread")
     : rows;
   const markReadState = activity.kind === "open" ? activity.mark_read : { kind: "idle" as const };
-  const markAllPending =
-    markReadState.kind === "pending" && markReadState.target.kind === "all";
-  const markRoomPending = (row: ActivityRow) =>
-    markReadState.kind === "pending" &&
-    markReadState.target.kind === "room" &&
-    markReadState.target.room_id === row.room_id;
 
   return (
     <main className="main-pane activity-pane" aria-labelledby="activity-title">
@@ -142,17 +139,6 @@ export function ActivityPane({
           <h1 id="activity-title">{t("workspace.activity")}</h1>
         </div>
         <div className="activity-actions">
-          {activity.kind === "open" && activeTab === "unread" && rows.length > 0 ? (
-            <button
-              className="dialog-button secondary"
-              type="button"
-              disabled={markAllPending}
-              onClick={() => onMarkRead({ kind: "all" })}
-            >
-              <Check size={ICON_SIZE.small} />
-              <span>{t("activity.markAllRead")}</span>
-            </button>
-          ) : null}
           <Tooltip
             label={t("action.close", { title: t("workspace.activity") })}
             placement="below"
@@ -227,7 +213,7 @@ export function ActivityPane({
               return (
                 <li
                   className={`activity-row ${row.unread ? "is-unread" : ""} ${
-                    row.highlight ? "is-highlight" : ""
+                    !isPlaceholder && row.highlight ? "is-highlight" : ""
                   }`}
                   data-event-id={row.event_id ?? undefined}
                   data-room-id={row.room_id}
@@ -253,7 +239,6 @@ export function ActivityPane({
                         </span>
                         <span className="activity-row-meta">
                           {row.unread ? <span>{t("activity.unreadBadge")}</span> : null}
-                          {row.highlight ? <span>{t("activity.highlightBadge")}</span> : null}
                         </span>
                       </span>
                     </button>
@@ -292,28 +277,6 @@ export function ActivityPane({
                       </span>
                     </button>
                   )}
-                  {activeTab === "unread" && !isPlaceholder ? (
-                    <Tooltip label={t("activity.markRoomRead")} placement="below" align="end">
-                      {(tooltipProps) => (
-                        <button
-                          className="activity-row-action"
-                          type="button"
-                          aria-label={t("activity.markRoomRead")}
-                          disabled={markRoomPending(row)}
-                          onClick={() =>
-                            onMarkRead({
-                              kind: "room",
-                              room_id: row.room_id,
-                              up_to_event_id: row.event_id
-                            })
-                          }
-                          {...tooltipProps}
-                        >
-                          <Check size={ICON_SIZE.small} />
-                        </button>
-                      )}
-                    </Tooltip>
-                  ) : null}
                 </li>
               );
             })}
@@ -893,9 +856,6 @@ export function TimelinePane({
     trackingThreadAttention?.highlight_count,
     trackingThreadAttention?.live_event_marker_count
   ]);
-  const threadsHeaderNotificationCount = timelineThreadAttention?.notificationCount ?? 0;
-  const threadsHeaderHighlightCount = timelineThreadAttention?.highlightCount ?? 0;
-  const threadsHeaderLiveCount = timelineThreadAttention?.liveEventMarkerCount ?? 0;
   // #161: when the main pane is anchored (jump-to-date landed on an event), it
   // renders the focused (event-centered) timeline instead of the live room
   // timeline; the right panel is not opened.
@@ -1162,9 +1122,7 @@ export function TimelinePane({
               <button
                 className="icon-button"
                 type="button"
-                data-count={threadsHeaderNotificationCount || undefined}
-                data-live-count={threadsHeaderLiveCount || undefined}
-                data-mention-count={threadsHeaderHighlightCount || undefined}
+                data-count={activeRoom?.thread_unread_count || undefined}
                 aria-label={t("workspace.threads")}
                 onClick={onOpenThreadsStable}
                 {...tooltipProps}

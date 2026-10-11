@@ -348,7 +348,6 @@ export function TimelineItemRow({
   currentUserId,
   ignoredUserIds = [],
   onOpenContextMenu,
-  threadAttention = null,
   mediaDownload,
   keyRequestPending = false
 }: {
@@ -428,7 +427,6 @@ export function TimelineItemRow({
   /** Shared shell contract (#1100): a message target may carry the requesting
    * row's own inline-edit action. */
   onOpenContextMenu?: OpenContextMenu;
-  threadAttention?: TimelineThreadAttention | null;
   mediaDownload?: TimelineMediaDownloadState;
 }) {
   const itemDomId = timelineItemDomId(item.id);
@@ -775,16 +773,9 @@ export function TimelineItemRow({
         item.thread_summary.latest_timestamp_ms
       )
     : "";
-  const threadNotificationCount =
-    eventId && threadAttention?.rootEventId === eventId
-      ? threadAttention.notificationCount
-      : 0;
-  // #1259: the session read marker's reply delta is what shows a dot for a thread
-  // whose pane is not open. There is no mention information and no room-badge
-  // contribution.
-  const projectedThreadUnread = item.thread_summary?.unread_count ?? 0;
-  const paneTracksRoot = Boolean(eventId) && threadAttention?.rootEventId === eventId;
-  const threadUnreadCount = paneTracksRoot ? threadNotificationCount : projectedThreadUnread;
+  // The SDK thread-cache count is the per-root term in the room badge. A
+  // server notification counter cannot replace it while the pane is open.
+  const threadUnreadCount = item.thread_summary?.unread_count ?? 0;
   const threadNotificationsText =
     threadUnreadCount > 0
       ? t("timeline.threadNotificationCount", { count: threadUnreadCount })

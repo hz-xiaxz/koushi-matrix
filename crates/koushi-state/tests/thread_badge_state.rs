@@ -3,7 +3,7 @@
 //! The decomposition is non-overlapping by construction (`RoomReadReceiptEventFilter`
 //! excludes thread replies from `unread_count`; each `ThreadReadReceiptEventFilter`
 //! counts one thread), so the badge sums the two client counters while a
-//! thread-inclusive server `notification_count` is only max'd in. `unread_count`
+//! server `notification_count` cannot add an unlocatable number. `unread_count`
 //! stays the main-only navigation value.
 
 use koushi_state::{
@@ -64,13 +64,13 @@ fn main_and_thread_unread_compose_without_overlap() {
 }
 
 #[test]
-fn thread_inclusive_server_notification_count_is_maxed_not_summed() {
+fn server_notification_count_without_locatable_messages_does_not_badge() {
     let mut summary = room(0, 5, 0);
     summary.thread_unread_count = 3;
 
-    // A homeserver that already counts the thread reply in its own room counter
-    // must not be added to the thread term.
-    assert_eq!(room_activity_unread_count(&summary), 5);
+    // The server supplies only a count, so it cannot identify five unread
+    // replies. Only the three observed replies may appear in the red badge.
+    assert_eq!(room_activity_unread_count(&summary), 3);
 }
 
 #[test]
@@ -82,9 +82,7 @@ fn thread_only_unread_marks_the_room_as_having_unread_content() {
     let projection = room_attention_projection(&summary, None);
     assert!(projection.has_unread_content);
     assert_eq!(projection.unread_count, 2);
-    // The room's rendered number stays the notification count, so a plain
-    // thread-only unread renders the dot rather than a fabricated number.
-    assert_eq!(projection.display_count, 0);
+    assert_eq!(projection.display_count, 2);
 }
 
 #[test]
@@ -108,13 +106,14 @@ fn thread_mention_renders_mention_styling_instead_of_a_plain_count() {
 }
 
 #[test]
-fn marked_unread_fallback_is_unchanged() {
+fn manually_marked_unread_does_not_fabricate_a_numeric_count() {
     let summary = room(0, 0, 0);
     assert_eq!(room_activity_unread_count(&summary), 0);
 
     let mut marked = room(0, 0, 0);
     marked.marked_unread = true;
-    assert_eq!(room_activity_unread_count(&marked), 1);
+    assert_eq!(room_activity_unread_count(&marked), 0);
+    assert!(room_attention_projection(&marked, None).has_unread_content);
 }
 
 #[test]
@@ -154,6 +153,7 @@ fn thread_observation_fills_the_room_badge_and_survives_a_room_list_snapshot() {
     assert_eq!(state.rooms[0].thread_unread_count, 3);
     assert_eq!(state.rooms[0].unread_count, 1, "navigation stays main-only");
     assert_eq!(room_activity_unread_count(&state.rooms[0]), 4);
+    assert_eq!(state.native_attention.summary.badge_count, 4);
     assert_eq!(
         compose_sidebar_for_state(&state).account_home.unread_count,
         4
@@ -183,6 +183,92 @@ fn thread_observation_fills_the_room_badge_and_survives_a_room_list_snapshot() {
     );
     assert_eq!(state.rooms[0].thread_unread_count, 0);
     assert_eq!(room_activity_unread_count(&state.rooms[0]), 1);
+    assert_eq!(state.native_attention.summary.badge_count, 1);
+}
+
+#[test]
+fn leaving_and_rejoining_does_not_reuse_old_thread_unread() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::RoomListUpdated {
+            spaces: Vec::new(),
+            rooms: vec![room(0, 0, 0)],
+        },
+    );
+    let observation = || AppAction::ThreadUnreadObserved {
+        room_id: "!room:example.invalid".to_owned(),
+        root_event_id: "$root:example.invalid".to_owned(),
+        unread: 3,
+        highlight: 0,
+    };
+    reduce(&mut state, observation());
+    assert_eq!(state.rooms[0].thread_unread_count, 3);
+
+    reduce(
+        &mut state,
+        AppAction::RoomLeftLocally {
+            room_id: "!room:example.invalid".to_owned(),
+        },
+    );
+    assert!(state.rooms.is_empty());
+    assert!(state.thread_unread.is_empty());
+    // A queued observation from the old actor must not survive the leave.
+    reduce(&mut state, observation());
+    assert!(state.thread_unread.is_empty());
+
+    reduce(
+        &mut state,
+        AppAction::RoomJoinedLocally {
+            room_id: "!room:example.invalid".to_owned(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::RoomListUpdated {
+            spaces: Vec::new(),
+            rooms: vec![room(0, 0, 0)],
+        },
+    );
+    assert_eq!(state.rooms[0].thread_unread_count, 0);
+    assert_eq!(room_activity_unread_count(&state.rooms[0]), 0);
+}
+
+#[test]
+fn an_authoritative_room_removal_forgets_thread_unread() {
+    let mut state = ready_state();
+    reduce(
+        &mut state,
+        AppAction::RoomListUpdated {
+            spaces: Vec::new(),
+            rooms: vec![room(0, 0, 0)],
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::ThreadUnreadObserved {
+            room_id: "!room:example.invalid".to_owned(),
+            root_event_id: "$root:example.invalid".to_owned(),
+            unread: 2,
+            highlight: 0,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::RoomListUpdated {
+            spaces: Vec::new(),
+            rooms: Vec::new(),
+        },
+    );
+    assert!(state.thread_unread.is_empty());
+    reduce(
+        &mut state,
+        AppAction::RoomListUpdated {
+            spaces: Vec::new(),
+            rooms: vec![room(0, 0, 0)],
+        },
+    );
+    assert_eq!(state.rooms[0].thread_unread_count, 0);
 }
 
 #[test]

@@ -525,7 +525,7 @@ fn account_home_lists_all_non_dm_rooms_and_keeps_dms_global() {
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["room-a", "global-room"]
+        vec!["global-room", "room-a"]
     );
     assert_eq!(
         sidebar

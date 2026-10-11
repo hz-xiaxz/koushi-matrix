@@ -1246,6 +1246,46 @@ fn clearing_an_unsubscribed_room_allows_a_later_room_actor_to_start_a_fresh_atte
 }
 
 #[test]
+fn a_confirmed_leave_forgets_thread_unread_and_its_refresh_signature() {
+    let room = "!room:example.invalid";
+    let root = "$root:test";
+    let items = [canonical_timeline_item(
+        root,
+        ThreadSummaryDto {
+            reply_count: 1,
+            unread_count: 0,
+            latest_event_id: Some("$reply:test".to_owned()),
+            latest_sender: None,
+            latest_sender_label: None,
+            latest_body_preview: None,
+            latest_timestamp_ms: Some(1),
+        },
+    )];
+    let mut service = ThreadRootProjectionService::default();
+    let candidate = service.roots_needing_unread_refresh(room, &items);
+    assert_eq!(candidate.len(), 1);
+    service.apply_thread_unread(room, root, candidate[0].1.clone(), attention(3, 0));
+    assert!(
+        service
+            .roots_needing_unread_refresh(room, &items)
+            .is_empty()
+    );
+
+    service.clear_room(room);
+    // Switching rooms retains the unread term and avoids a redundant fetch.
+    assert_eq!(service.thread_unread_for(room, root).unread, 3);
+    assert!(
+        service
+            .roots_needing_unread_refresh(room, &items)
+            .is_empty()
+    );
+
+    service.forget_room_attention(room);
+    assert_eq!(service.thread_unread_for(room, root).unread, 0);
+    assert_eq!(service.roots_needing_unread_refresh(room, &items).len(), 1);
+}
+
+#[test]
 fn dormant_terminal_completion_retains_core_record_until_room_clear() {
     let mut service = ThreadRootProjectionService::default();
     let activity = ThreadRootProjectionActivity {
@@ -1373,6 +1413,13 @@ fn thread_unread_is_gated_on_the_room_side_summary_identity() {
         service.thread_unread_for(room, "$root:test"),
         attention(1, 0)
     );
+    assert!(service.has_tracked_unread_root(room));
+    // A read in a thread outside the current room window must still recheck
+    // that root, or its room badge can remain stuck indefinitely.
+    assert_eq!(
+        service.roots_forced_unread_refresh(room, &[]),
+        vec![("$root:test".to_owned(), stale[0].1.clone())]
+    );
 
     // An unchanged summary never re-reads the cache...
     assert!(
@@ -1399,6 +1446,7 @@ fn thread_unread_is_gated_on_the_room_side_summary_identity() {
         service.thread_unread_for(room, "$root:test"),
         attention(0, 0)
     );
+    assert!(!service.has_tracked_unread_root(room));
     // The window enumerates exactly the roots a refresh would read.
     assert_eq!(
         window_thread_roots(&[summary_item("$newer:test", 2)]).len(),

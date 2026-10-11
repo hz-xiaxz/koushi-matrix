@@ -88,13 +88,13 @@ fn dock_count(state: &AppState) -> u64 {
 }
 
 #[test]
-fn dock_and_sidebar_share_notification_mention_message_and_manual_attention_counts() {
+fn dock_and_sidebar_share_observed_message_counts_only() {
     for (unread, notification, highlight, marked, expected) in [
-        (0, 1, 0, false, 1),
-        (0, 0, 2, false, 2),
+        (0, 1, 0, false, 0),
+        (0, 0, 2, false, 0),
         (3, 1, 0, false, 3),
-        (1, 4, 2, false, 4),
-        (0, 0, 0, true, 1),
+        (1, 4, 2, false, 1),
+        (0, 0, 0, true, 0),
         (0, 0, 0, false, 0),
     ] {
         let mut state = AppState::default();
@@ -115,6 +115,7 @@ fn dock_and_sidebar_share_notification_mention_message_and_manual_attention_coun
         state.navigation.active_space_id = Some("!space:example.invalid".into());
         let sidebar = compose_sidebar_for_state(&state);
         assert_eq!(sidebar.sections.rooms[0].unread_count, expected);
+        assert_eq!(sidebar.sections.rooms[0].display_count, expected);
         assert_eq!(sidebar.space_rail[0].unread_count, expected);
         assert_eq!(sidebar.account_home.unread_count, expected);
         assert_eq!(
@@ -130,7 +131,7 @@ fn dock_and_sidebar_share_notification_mention_message_and_manual_attention_coun
 }
 
 #[test]
-fn native_reducer_keeps_a_notification_only_badge_until_counts_clear() {
+fn native_reducer_does_not_create_a_notification_only_badge() {
     let mut state = ready_state();
     let rooms = vec![room("!room:example.invalid", "Room", false, 0, 1, 0)];
     reduce(
@@ -140,10 +141,10 @@ fn native_reducer_keeps_a_notification_only_badge_until_counts_clear() {
             rooms,
         },
     );
-    assert_eq!(state.native_attention.summary.badge_count, 1);
+    assert_eq!(state.native_attention.summary.badge_count, 0);
     assert_eq!(
         compose_sidebar_for_state(&state).account_home.unread_count,
-        1
+        0
     );
     reduce(
         &mut state,
@@ -160,13 +161,13 @@ fn native_reducer_keeps_a_notification_only_badge_until_counts_clear() {
 }
 
 #[test]
-fn persistent_badges_share_mute_exclusions_and_keep_mentions_only_attention() {
+fn persistent_badges_share_mute_exclusions_and_keep_mentions_only_unread() {
     for (mode, expected) in [
         (RoomNotificationMode::Mute, 0),
         (RoomNotificationMode::Mentions, 1),
     ] {
         let mut state = AppState {
-            rooms: vec![room("!room:example.invalid", "Room", false, 0, 1, 0)],
+            rooms: vec![room("!room:example.invalid", "Room", false, 1, 1, 0)],
             ..AppState::default()
         };
         state.room_notification_settings.insert(

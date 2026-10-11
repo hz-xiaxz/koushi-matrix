@@ -848,6 +848,7 @@ export function ContextualRightPanel({
           localName={activeSpace ? spaceLocalOverrides[activeSpace.space_id]?.name ?? "" : ""}
           roomManagement={snapshot.state.domain.room_management}
           rooms={snapshot.state.domain.rooms}
+          roomNotificationSettings={snapshot.state.domain.room_notification_settings}
           space={activeSpace}
           historyExport={snapshot.state.ui.history_export}
           historyExportControls={historyExportControls}

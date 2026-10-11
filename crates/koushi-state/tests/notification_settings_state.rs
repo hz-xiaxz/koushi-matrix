@@ -110,7 +110,7 @@ fn room_notification_mode_changes_recompute_native_attention_badge() {
     assert!(effects.iter().any(|effect| matches!(
         effect,
         AppEffect::RecordNativeAttentionRecomputed {
-            observation: NativeAttentionObservationKind::Live,
+            observation: NativeAttentionObservationKind::InitialSync,
             ..
         }
     )));
@@ -304,7 +304,7 @@ fn loaded_notification_preferences_recompute_activity_projection_with_effective_
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["mention", "notification", "ordinary", "selected"]
+        vec!["ordinary", "selected", "notification", "mention"]
     );
 
     let preferences = RoomPreferencesState {
@@ -334,7 +334,7 @@ fn loaded_notification_preferences_recompute_activity_projection_with_effective_
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["ordinary", "notification", "mention", "selected"]
+        vec!["ordinary", "selected", "notification", "mention"]
     );
 
     let settings = state.settings.values.clone();
@@ -346,7 +346,7 @@ fn loaded_notification_preferences_recompute_activity_projection_with_effective_
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["ordinary", "notification", "mention", "selected"]
+        vec!["ordinary", "selected", "notification", "mention"]
     );
     assert_eq!(state.navigation.active_room_id.as_deref(), Some("selected"));
 }
@@ -742,7 +742,7 @@ fn authoritative_policy_resolves_conflicting_rule_and_fresh_sync_releases_echo_f
 /// The device-local preview setting must drive the Rust-owned notification
 /// body: OFF keeps counts only, ON shows the triggering event's content.
 #[test]
-fn message_previews_setting_drives_the_notification_body() {
+fn message_previews_setting_cannot_expose_an_unverified_event() {
     let room_with_trigger = || {
         let mut room = ready_state().rooms.remove(0);
         room.unread_count = 2;
@@ -791,9 +791,6 @@ fn message_previews_setting_drives_the_notification_body() {
         .native_attention
         .notification
         .expect("notification payload");
-    assert_eq!(on_payload.body, "Alice: private body");
-    assert_eq!(
-        on_payload.target.event_id.as_deref(),
-        Some("$trigger:example.invalid")
-    );
+    assert_eq!(on_payload.body, "2 unread");
+    assert_eq!(on_payload.target.event_id, None);
 }

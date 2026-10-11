@@ -87,7 +87,12 @@ Check **Room info** for **Mute** or **Mentions only**, then check **Account
 Settings → Notifications** for desktop notifications and **App Settings →
 Notifications** for sounds and badges. Also check the operating system's
 notification permission for Koushi. An unread badge and a desktop notification
-are different signals.
+are different signals. A red badge counts locally observed unread messages;
+server-only notification counts do not create a red number or a desktop alert.
+Desktop alerts state the verified room count and open the room; they do not show
+an unverified message preview or jump to an unverified event.
+The message-preview setting is hidden while exact unread event verification is
+unavailable.
 
 ## Ask for help or report a bug
 

@@ -259,10 +259,10 @@ describe("i18n message catalog", () => {
 
   test("localizes thread notification count copy", () => {
     expect(t("timeline.threadNotificationCount", { count: 3 })).toBe(
-      "Thread notifications · 3"
+      "Thread unread · 3"
     );
     expect(t("timeline.threadNotificationCount", { count: 3 }, "ja")).toBe(
-      "スレッド通知 · 3"
+      "スレッドの未読 · 3"
     );
   });
 

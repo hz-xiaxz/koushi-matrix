@@ -65,27 +65,33 @@ describe("ActivityPane", () => {
     setActiveLocaleProfile("en", "none");
   });
 
-  it("replaces resolving placeholders with status instead of terminal room rows", () => {
+  it("keeps verified unread summaries independent of Recent history loading", () => {
     const resolving = activityState([placeholderRow]);
     if (resolving.kind === "open") {
       resolving.unread.resolution = { kind: "resolving", generation: 2, unresolved_room_count: 1 };
     }
-    render(
+    const props = {
+      onClose: vi.fn(),
+      onLoadMore: vi.fn(),
+      onMarkRead: vi.fn(),
+      onOpenRow: vi.fn(),
+      onRetryResolution: vi.fn(),
+      onSetTab: vi.fn()
+    };
+    const rendered = render(
       <ActivityPane
         activity={resolving}
-        onClose={vi.fn()}
-        onLoadMore={vi.fn()}
-        onMarkRead={vi.fn()}
-        onOpenRow={vi.fn()}
-        onRetryResolution={vi.fn()}
-        onSetTab={vi.fn()}
+        {...props}
       />
     );
-    expect(screen.getByRole("status").textContent).toContain("Resolving");
-    expect(screen.queryByRole("listitem")).toBeNull();
+    expect(screen.queryByRole("status")).toBeNull();
+    expect(screen.getByRole("listitem").getAttribute("data-kind")).toBe("roomUnread");
+    if (resolving.kind === "open") resolving.active_tab = "recent";
+    rendered.rerender(<ActivityPane activity={resolving} {...props} />);
+    expect(screen.getByRole("status").textContent).toContain("Loading recent history");
   });
 
-  it("keeps event-backed rows clickable and markable", () => {
+  it("does not present an event as unread without event-specific proof", () => {
     const onOpenRow = vi.fn();
     const onMarkRead = vi.fn();
     render(
@@ -100,19 +106,10 @@ describe("ActivityPane", () => {
       />
     );
 
-    const listitem = screen.getByRole("listitem");
-    expect(listitem.getAttribute("data-event-id")).toBe("$event:example.invalid");
-    expect(listitem.getAttribute("data-kind")).toBe("event");
-
-    fireEvent.click(screen.getByRole("button", { name: /Open/ }));
-    expect(onOpenRow).toHaveBeenCalledWith(eventRow);
-
-    fireEvent.click(screen.getByRole("button", { name: /Mark room read/ }));
-    expect(onMarkRead).toHaveBeenCalledWith({
-      kind: "room",
-      room_id: "!room:example.invalid",
-      up_to_event_id: "$event:example.invalid"
-    });
+    expect(screen.queryByRole("listitem")).toBeNull();
+    expect(screen.queryByRole("button", { name: /Mark room read/ })).toBeNull();
+    expect(onOpenRow).not.toHaveBeenCalled();
+    expect(onMarkRead).not.toHaveBeenCalled();
   });
 
   it("prefers observed event rows over placeholders for the same room", () => {
@@ -136,9 +133,11 @@ describe("ActivityPane", () => {
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
   });
 
-  it("keeps retry and mark-all available when resolution is partial or failed", () => {
+  it("keeps retry available without offering unverified mark-all targets", () => {
     const failed = activityState([eventRow, placeholderRow]);
     if (failed.kind === "open") {
+      failed.active_tab = "recent";
+      failed.recent.rows = [eventRow];
       failed.unread.resolution = { kind: "failed", generation: 3, unresolved_room_count: 1, failure_kind: "network" };
     }
     const onRetryResolution = vi.fn();
@@ -156,12 +155,12 @@ describe("ActivityPane", () => {
     );
     fireEvent.click(screen.getByRole("button", { name: /Retry/ }));
     expect(onRetryResolution).toHaveBeenCalledOnce();
-    fireEvent.click(screen.getByRole("button", { name: /Mark all read/ }));
-    expect(onMarkRead).toHaveBeenCalledWith({ kind: "all" });
+    expect(screen.queryByRole("button", { name: /Mark all read/ })).toBeNull();
+    expect(onMarkRead).not.toHaveBeenCalled();
     expect(screen.getAllByRole("listitem")).toHaveLength(1);
   });
 
-  it("keeps mark-all available when every unread row is unresolved", () => {
+  it("does not offer mark-all when every unread row is unresolved", () => {
     const failed = activityState([placeholderRow]);
     if (failed.kind === "open") {
       failed.unread.resolution = { kind: "failed", generation: 3, unresolved_room_count: 1, failure_kind: "network" };
@@ -178,8 +177,8 @@ describe("ActivityPane", () => {
         onSetTab={vi.fn()}
       />
     );
-    fireEvent.click(screen.getByRole("button", { name: /Mark all read/ }));
-    expect(onMarkRead).toHaveBeenCalledWith({ kind: "all" });
+    expect(screen.queryByRole("button", { name: /Mark all read/ })).toBeNull();
+    expect(onMarkRead).not.toHaveBeenCalled();
   });
 });
 

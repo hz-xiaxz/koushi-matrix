@@ -4,9 +4,10 @@ use super::support::{
 };
 use koushi_state::{
     AppAction, AppEffect, AppState, AvatarImage, AvatarThumbnailState, InvitePreview,
-    NativeAttentionObservationKind, NativeAttentionProjectionInput, RoomListFilter, RoomSummary,
-    RoomTags, SessionState, SpaceSummary, ThreadPaneState, TimelinePaneState, UiEvent, UserProfile,
-    compose_sidebar, native_attention_state_from_rooms, reduce,
+    NativeAttentionObservationKind, NativeAttentionProjectionInput, RoomLatestEventSummary,
+    RoomListFilter, RoomSummary, RoomTags, SessionState, SpaceSummary, ThreadPaneState,
+    TimelinePaneState, UiEvent, UserProfile, compose_sidebar, native_attention_state_from_rooms,
+    reduce,
 };
 use serde_json::json;
 use std::collections::BTreeMap;
@@ -17,6 +18,21 @@ fn ready_avatar_thumbnail(label: &str) -> AvatarThumbnailState {
         width: Some(64),
         height: Some(64),
         mime_type: Some("image/png".to_owned()),
+    }
+}
+
+fn observed_latest_event() -> RoomLatestEventSummary {
+    RoomLatestEventSummary {
+        event_id: "$observed:example.invalid".to_owned(),
+        relation_type: None,
+        relation_event_id: None,
+        thread_root_event_id: None,
+        sender_id: None,
+        sender_label: None,
+        sender_avatar: None,
+        preview: None,
+        timestamp_ms: 1,
+        is_redacted: false,
     }
 }
 
@@ -354,7 +370,7 @@ fn local_alias_update_refreshes_open_dm_room_labels_and_notification_candidate()
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
-        latest_event: None,
+        latest_event: Some(observed_latest_event()),
         parent_space_ids: Vec::new(),
         dm_space_ids: Vec::new(),
         is_encrypted: false,
@@ -411,6 +427,7 @@ fn local_alias_update_keeps_candidate_on_eligible_room_when_muted_room_ties() {
     muted_room.display_label = "Aaron Upstream".to_owned();
     muted_room.original_display_label = "Aaron Upstream".to_owned();
     muted_room.dm_user_ids = vec!["@aaron:example.invalid".to_owned()];
+    muted_room.latest_event = Some(observed_latest_event());
     let mut eligible_room = muted_room.clone();
     eligible_room.room_id = "dm-eligible".to_owned();
     eligible_room.display_name = "Bob Upstream".to_owned();

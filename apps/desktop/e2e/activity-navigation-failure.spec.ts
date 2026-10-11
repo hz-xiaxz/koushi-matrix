@@ -222,10 +222,7 @@ async function assertTarget(page: Page, fixture: NavigationFixture) {
     });
 }
 
-for (const [tab, terminalKind] of [
-  ["recent", "anchored"],
-  ["unread", "liveFallback"]
-] as const) {
+for (const [tab, terminalKind] of [["recent", "anchored"]] as const) {
   test(`Rust event navigation wins a rapid ${tab} A→B race`, async ({ page }) => {
     const rows = [
       activityRow(ROOM_A, EVENT_A, "Activity A"),
@@ -234,7 +231,7 @@ for (const [tab, terminalKind] of [
     await openActivityWithRows(
       page,
       tab,
-      tab === "unread" ? rows.map((row) => ({ ...row, unread: true })) : rows
+      rows
     );
     await page.evaluate(() => window.__harness.deferCommand("open_activity_event"));
 

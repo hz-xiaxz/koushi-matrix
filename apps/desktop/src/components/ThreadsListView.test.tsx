@@ -8,6 +8,56 @@ import { ThreadsListView } from "./ThreadsListView";
 afterEach(cleanup);
 
 describe("ThreadsListView", () => {
+  it("keeps a known unread thread openable when metadata loading fails", () => {
+    const onOpenThread = vi.fn();
+    render(
+      <ThreadsListView
+        scope={{ kind: "room", room_id: "!room:example.invalid" }}
+        threadsList={{
+          kind: "failed", room_id: "!room:example.invalid", request_id: 1,
+          failure_kind: "network",
+          items: [{
+            room_id: "!room:example.invalid", root_event_id: "$known:example.invalid",
+            root_sender: "", root_sender_label: null, root_body_preview: null,
+            root_timestamp_ms: null, latest_event_id: null, latest_sender: null,
+            latest_sender_label: null, latest_body_preview: null,
+            latest_timestamp_ms: null, reply_count: 0, unread_count: 1
+          }]
+        }}
+        onClose={() => undefined}
+        onOpenThread={onOpenThread}
+        onPaginate={() => undefined}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Open unread thread|未読スレッドを開く/ }));
+    expect(onOpenThread).toHaveBeenCalledWith("!room:example.invalid", "$known:example.invalid", "existingThread");
+  });
+
+  it("lets users open a counted root while its metadata page is pending", () => {
+    const onOpenThread = vi.fn();
+    render(
+      <ThreadsListView
+        scope={{ kind: "room", room_id: "!room:example.invalid" }}
+        threadsList={{
+          kind: "open", room_id: "!room:example.invalid", request_id: 1,
+          items: [{
+            room_id: "!room:example.invalid", root_event_id: "$older:example.invalid",
+            root_sender: "", root_sender_label: null, root_body_preview: null,
+            root_timestamp_ms: null, latest_event_id: null, latest_sender: null,
+            latest_sender_label: null, latest_body_preview: null,
+            latest_timestamp_ms: null, reply_count: 0, unread_count: 3
+          }],
+          is_paginating: false, end_reached: false
+        }}
+        onClose={() => undefined}
+        onOpenThread={onOpenThread}
+        onPaginate={() => undefined}
+      />
+    );
+    fireEvent.click(screen.getByRole("button", { name: /Open unread thread|未読スレッドを開く/ }));
+    expect(onOpenThread).toHaveBeenCalledWith("!room:example.invalid", "$older:example.invalid", "existingThread");
+    expect(screen.getByLabelText(/3/)).toBeTruthy();
+  });
   it("uses friendly fallbacks instead of raw Matrix ids for sender metadata", () => {
     render(
       <ThreadsListView
@@ -190,7 +240,7 @@ describe("ThreadsListView unread thread replies", () => {
       />
     );
 
-    expect(screen.getByLabelText("Thread notifications · 2")).toBeTruthy();
+    expect(screen.getByLabelText("Thread unread · 2")).toBeTruthy();
     expect(document.querySelectorAll(".threads-list-row-unread")).toHaveLength(1);
   });
 });

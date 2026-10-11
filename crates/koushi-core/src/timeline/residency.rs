@@ -693,14 +693,17 @@ impl TimelineManagerActor {
             return;
         }
         let mut changed = 0_usize;
+        let mut left_room_ids = Vec::new();
         for transition in transitions {
             match transition.kind {
                 RoomMembershipTransitionKind::Left => {
-                    if self.room_leave_states.get(&transition.room_id)
-                        == Some(&RoomLeaveState::PendingLeftObservation)
+                    left_room_ids.push(transition.room_id.clone());
+                    self.session_subscribed_rooms.remove(&transition.room_id);
+                    if self
+                        .room_leave_states
+                        .insert(transition.room_id, RoomLeaveState::LeftObserved)
+                        != Some(RoomLeaveState::LeftObserved)
                     {
-                        self.room_leave_states
-                            .insert(transition.room_id, RoomLeaveState::LeftObserved);
                         changed += 1;
                     }
                 }
@@ -716,16 +719,49 @@ impl TimelineManagerActor {
             }
         }
         record_residency_intent("membership", "accepted", changed, 0);
+        for room_id in &left_room_ids {
+            self.quiesce_left_room_timelines(room_id).await;
+        }
         self.reconcile_subscriptions(SubscriptionReconcileTrigger::Membership)
             .await;
+        // All old timeline actors are quiesced before their cache is forgotten.
+        let mut service = self
+            .thread_root_projection_service
+            .lock()
+            .expect("thread-root projection service lock must not be poisoned");
+        for room_id in left_room_ids {
+            service.forget_room_attention(room_id.as_str());
+        }
     }
     pub(super) async fn handle_room_left(&mut self, room_id: OwnedRoomId, cause: RoomRemovalCause) {
         self.room_leave_states
             .insert(room_id.clone(), RoomLeaveState::PendingLeftObservation);
         self.session_subscribed_rooms.remove(&room_id);
         record_residency_intent("room_left", cause.token(), 0, 1);
+        self.quiesce_left_room_timelines(&room_id).await;
         self.reconcile_subscriptions(SubscriptionReconcileTrigger::RoomLeft)
             .await;
+        self.thread_root_projection_service
+            .lock()
+            .expect("thread-root projection service lock must not be poisoned")
+            .forget_room_attention(room_id.as_str());
+    }
+
+    async fn quiesce_left_room_timelines(&mut self, room_id: &OwnedRoomId) {
+        let mut keys = self
+            .timelines
+            .keys()
+            .filter(|key| key.room_id() == room_id.as_str())
+            .cloned()
+            .collect::<Vec<_>>();
+        for key in self.focused_builds.pending_keys() {
+            if key.room_id() == room_id.as_str() && !keys.contains(key) {
+                keys.push(key.clone());
+            }
+        }
+        for key in keys {
+            self.unsubscribe_timeline(&key).await;
+        }
     }
     pub(super) async fn handle_room_rejoined(&mut self, room_id: OwnedRoomId) {
         self.room_leave_states.remove(&room_id);

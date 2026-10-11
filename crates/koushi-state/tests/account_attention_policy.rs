@@ -281,16 +281,15 @@ fn account_policy_reads_only_its_own_state() {
 }
 
 #[test]
-fn dock_badge_shares_manually_marked_conversation_attention() {
-    // Manual unread state contributes one through the shared room attention
-    // function, even when every SDK counter is zero.
+fn manual_unread_marker_does_not_invent_a_numeric_badge() {
+    // A manual marker has no verified unread event behind it.
     let mut state = ready_state();
     let mut marked = room("!marked:example.invalid", "Marked", false, 0, 0, 0);
     marked.marked_unread = true;
     state.rooms.push(marked);
 
     let home = compose_sidebar_for_state(&state).account_home;
-    assert_eq!(home.unread_count, 1);
-    assert_eq!(account_tab_attention(&state), 1);
-    assert_eq!(dock_badge_count(&state), 1);
+    assert_eq!(home.unread_count, 0);
+    assert_eq!(account_tab_attention(&state), 0);
+    assert_eq!(dock_badge_count(&state), 0);
 }

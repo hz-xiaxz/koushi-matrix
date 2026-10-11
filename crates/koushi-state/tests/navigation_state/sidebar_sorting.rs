@@ -51,6 +51,33 @@ fn active_sort_room(
     }
 }
 
+#[test]
+fn unread_filter_excludes_server_only_notifications_without_sdk_unread() {
+    let mut server_only = active_sort_room("server-only", false, &[], &[], Some(100));
+    server_only.notification_count = 2;
+    server_only.highlight_count = 1;
+    let mut verified_thread = active_sort_room("verified-thread", false, &[], &[], Some(90));
+    verified_thread.thread_unread_count = 1;
+
+    let projection = compute_room_list_projection(
+        RoomListFilter::Unread,
+        RoomListSort::Activity,
+        None,
+        &[],
+        &[server_only, verified_thread],
+        &HashMap::new(),
+        &[],
+    );
+    assert_eq!(
+        projection
+            .items
+            .iter()
+            .map(|item| item.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["verified-thread"]
+    );
+}
+
 fn dm_room_for_activity(
     room_id: &str,
     display_label: &str,
@@ -302,17 +329,17 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
 
     let sidebar = compose_sidebar(None, &spaces, &rooms);
 
-    assert_eq!(sidebar.account_home.unread_count, 6);
+    assert_eq!(sidebar.account_home.unread_count, 5);
     assert_eq!(sidebar.space_rail[0].unread_count, 5);
     assert_eq!(sidebar.space_unread_count, 5);
-    assert_eq!(sidebar.dm_unread_count, 1);
+    assert_eq!(sidebar.dm_unread_count, 0);
     let plain = sidebar
         .space_rooms
         .iter()
         .find(|room| room.room_id == "plain")
         .expect("plain room should be projected");
     assert_eq!(plain.unread_count, 1);
-    assert_eq!(plain.display_count, 0);
+    assert_eq!(plain.display_count, 1);
     assert!(plain.has_unread_content);
     assert!(!plain.is_attention_highlighted);
     assert!(!plain.has_unread_mention);
@@ -322,7 +349,7 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
         .iter()
         .find(|room| room.room_id == "notified")
         .expect("notified room should be projected");
-    assert_eq!(notified.display_count, 2);
+    assert_eq!(notified.display_count, 4);
     assert!(notified.is_attention_highlighted);
 
     let marked = sidebar
@@ -520,8 +547,14 @@ fn sidebar_projection_carries_rust_owned_highlight_counts_for_mention_affordance
     assert_eq!(value["space_rail"][0]["unread_count"], json!(5));
     assert_eq!(value["account_home"]["highlight_count"], json!(1));
     assert_eq!(value["space_rail"][0]["highlight_count"], json!(1));
-    assert_eq!(value["space_rooms"][0]["unread_count"], json!(5));
-    assert_eq!(value["space_rooms"][0]["highlight_count"], json!(1));
+    let room_a = value["space_rooms"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|room| room["room_id"] == "room-a")
+        .unwrap();
+    assert_eq!(room_a["unread_count"], json!(5));
+    assert_eq!(room_a["highlight_count"], json!(1));
     assert_eq!(value["global_dms"][0]["unread_count"], json!(3));
     assert_eq!(value["global_dms"][0]["highlight_count"], json!(0));
     assert_eq!(value["space_unread_count"], json!(7));
@@ -1056,13 +1089,13 @@ fn active_sort_prioritizes_attention_before_newer_activity_and_keeps_stable_fall
             .map(|item| item.room_id.as_str())
             .collect::<Vec<_>>(),
         vec![
-            "mention",
-            "notification",
             "ordinary",
             "manual",
             "read-newest",
+            "notification",
             "same-a",
             "same-b",
+            "mention",
             "missing-a",
             "missing-b",
         ]
@@ -1119,10 +1152,10 @@ fn active_sort_orders_sidebar_rooms_and_dms_in_home_and_active_space() {
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
         vec![
-            "space-mention",
-            "space-notification",
             "home-ordinary",
             "space-read",
+            "space-notification",
+            "space-mention",
         ]
     );
     assert_eq!(
@@ -1130,7 +1163,7 @@ fn active_sort_orders_sidebar_rooms_and_dms_in_home_and_active_space() {
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["dm-mention", "dm-notification", "dm-read", "dm-outside"]
+        vec!["dm-read", "dm-outside", "dm-notification", "dm-mention"]
     );
 
     let active_space = compose_sidebar(Some("space-a"), &spaces, &rooms);
@@ -1140,7 +1173,7 @@ fn active_sort_orders_sidebar_rooms_and_dms_in_home_and_active_space() {
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["space-mention", "space-notification", "space-read"]
+        vec!["space-read", "space-notification", "space-mention"]
     );
     assert_eq!(
         active_space
@@ -1148,7 +1181,7 @@ fn active_sort_orders_sidebar_rooms_and_dms_in_home_and_active_space() {
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["dm-mention", "dm-notification", "dm-read"]
+        vec!["dm-read", "dm-notification", "dm-mention"]
     );
 }
 
@@ -1179,7 +1212,7 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["mention", "notification", "ordinary", "selected"]
+        vec!["ordinary", "selected", "notification", "mention"]
     );
 
     let mute_effects = reduce(
@@ -1198,7 +1231,7 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["notification", "ordinary", "mention", "selected"]
+        vec!["ordinary", "selected", "notification", "mention"]
     );
 
     let mentions_effects = reduce(
@@ -1217,7 +1250,7 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["ordinary", "notification", "mention", "selected"]
+        vec!["ordinary", "selected", "notification", "mention"]
     );
 
     let read_effects = reduce(
@@ -1235,7 +1268,7 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["notification", "mention", "selected", "ordinary"]
+        vec!["selected", "ordinary", "notification", "mention"]
     );
 
     let sidebar = compose_sidebar_with_account_facts(
@@ -1251,7 +1284,7 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["notification", "mention", "selected", "ordinary"]
+        vec!["selected", "ordinary", "notification", "mention"]
     );
     assert_eq!(state.navigation.active_room_id.as_deref(), Some("selected"));
 }

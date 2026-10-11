@@ -252,7 +252,7 @@ export function roomLatestDisplayEventId(
   if (!summary || summary.is_redacted) {
     return null;
   }
-  if (summary.relation_type) {
+  if (summary.relation_type || summary.thread_root_event_id) {
     return null;
   }
   return summary.event_id || null;
@@ -360,7 +360,6 @@ export const TimelineView = memo(function TimelineView({
   viewportScheduler: injectedViewportScheduler,
   listRefCallback,
   onRegisterJumpToLatest,
-  threadAttention = null,
   editMentionCandidates = [],
   editMentionCandidatesLoading = false,
   onMentionQueryChange
@@ -2237,6 +2236,12 @@ export const TimelineView = memo(function TimelineView({
     if (!canObserveTimelineViewport || !observeViewport) {
       return;
     }
+    // A changed arrival source is a new observation even when the visible IDs
+    // and bottom position are identical.
+    const bottomArrival =
+      container.scrollHeight <= container.clientHeight + SCROLL_EDGE_TOLERANCE_PX
+        ? "content_fits"
+        : bottomArrivalRef.current;
     const signature = [
       roomId,
       viewportThreadRootEventId ?? "",
@@ -2245,7 +2250,8 @@ export const TimelineView = memo(function TimelineView({
       visible.visibleGapIds
         .map((id) => `${id.topology_revision}:${id.ordinal}`)
         .join("\u0002"),
-      effectiveAtBottom ? "bottom" : "not-bottom"
+      effectiveAtBottom ? "bottom" : "not-bottom",
+      bottomArrival
     ].join("\u0000");
     if (lastViewportObservationRef.current === signature) {
       return;
@@ -2257,11 +2263,7 @@ export const TimelineView = memo(function TimelineView({
         visible.lastVisibleEventId,
         visible.visibleGapIds,
         effectiveAtBottom,
-        // Content shorter than the viewport is on screen as rendered, whatever
-        // scrolled it last.
-        container.scrollHeight <= container.clientHeight + SCROLL_EDGE_TOLERANCE_PX
-          ? "content_fits"
-          : bottomArrivalRef.current,
+        bottomArrival,
         viewportThreadRootEventId
       )
       .catch(() => undefined);
@@ -3642,7 +3644,6 @@ export const TimelineView = memo(function TimelineView({
                 mentionCandidates={editMentionCandidates}
                 mentionCandidatesLoading={editMentionCandidatesLoading}
                 onMentionQueryChange={onMentionQueryChange}
-                threadAttention={threadAttention}
                 showThreadSummary={presentationContext !== "thread"}
                 mediaDownload={contentEventId ? mediaDownloads[contentEventId] : undefined}
                 receipts={

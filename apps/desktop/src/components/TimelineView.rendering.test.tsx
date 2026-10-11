@@ -99,6 +99,11 @@ describe("TimelineView", () => {
       "other relation",
       latestEventSummary({ relation_type: "m.reference", relation_event_id: "$target:example.invalid" }),
       null
+    ],
+    [
+      "thread reply with an identified root",
+      latestEventSummary({ thread_root_event_id: "$root:example.invalid" }),
+      null
     ]
   ])("only maps an ordinary room summary to a display event for %s", (_label, summary, expected) => {
     expect(roomLatestDisplayEventId(summary)).toBe(expected);

@@ -44,6 +44,7 @@ export type MessageId =
   | "accountTabs.authenticating"
   | "accountTabs.needsVerification"
   | "accountTabs.ready"
+  | "accountTabs.inviteCount"
   | "accountTabs.signedOut"
   | "accountTabs.loggingOut"
   | "accountTabs.error"
@@ -707,6 +708,8 @@ export type MessageId =
   | "room.unbanMember"
   | "room.unread"
   | "room.unreadCount"
+  | "room.unreadBreakdown"
+  | "room.mutedUnreadBreakdown"
   | "roomList.category"
   | "roomList.categoryDms"
   | "roomList.categoryRooms"
@@ -755,6 +758,7 @@ export type MessageId =
   | "roomList.failed"
   | "room.markAsRead"
   | "room.markAsUnread"
+  | "room.manuallyMarkedUnread"
   | "search.indexingPending"
   | "search.noExactMatches"
   | "search.matchAttachmentFileName"
@@ -1620,6 +1624,7 @@ export type MessageId =
   | "threads.loading"
   | "threads.open"
   | "threads.replyCount"
+  | "threads.openUnreadRoot"
   | "threads.title"
   | "settings.searchHistory"
   | "settings.searchHistoryCrawler"
@@ -1909,6 +1914,7 @@ const en: Catalog = {
   "accountTabs.authenticating": "Signing in",
   "accountTabs.needsVerification": "Needs verification",
   "accountTabs.ready": "Ready",
+  "accountTabs.inviteCount": "{count} pending invitations",
   "accountTabs.signedOut": "Sign in again",
   "accountTabs.loggingOut": "Signing out",
   "accountTabs.error": "Account error",
@@ -1934,8 +1940,8 @@ const en: Catalog = {
   "activity.highlightBadge": "Mention",
   "activity.loadMore": "Load more activity",
   "activity.loading": "Loading activity",
-  "activity.resolvingUnread": "Resolving unread messages…",
-  "activity.resolveFailed": "Unread messages could not be loaded.",
+  "activity.resolvingUnread": "Loading recent history…",
+  "activity.resolveFailed": "Recent history could not be loaded.",
   "activity.retryResolution": "Retry",
   "activity.markAllRead": "Mark all read",
   "activity.markReadFailed": "Mark read failed",
@@ -1946,7 +1952,7 @@ const en: Catalog = {
   "activity.openItem": "Open activity item {room}",
   "activity.recent": "Recent",
   "activity.tabs": "Activity views",
-  "activity.unread": "Unread",
+  "activity.unread": "Unread conversations",
   "activity.unreadBadge": "Unread",
   "auth.checking": "Checking",
   "auth.checkLoginMethods": "Check login methods",
@@ -2590,6 +2596,8 @@ const en: Catalog = {
   "room.unbanMember": "Unban {name}",
   "room.unread": "Unread",
   "room.unreadCount": "{count} unread",
+  "room.unreadBreakdown": "Room messages {main} · thread replies {threads}",
+  "room.mutedUnreadBreakdown": "Muted, excluded from totals · room messages {main} · thread replies {threads}",
   "roomList.category": "Room list category",
   "roomList.categoryDms": "DMs",
   "roomList.categoryRooms": "Rooms",
@@ -2637,8 +2645,9 @@ const en: Catalog = {
   "roomList.sectionUnreadAccessible": "{section} unread: {count}",
   "roomList.loading": "Loading rooms…",
   "roomList.failed": "Rooms could not be loaded",
-  "room.markAsRead": "Mark as read",
+  "room.markAsRead": "Mark room timeline as read",
   "room.markAsUnread": "Mark as unread",
+  "room.manuallyMarkedUnread": "Manually marked unread",
   "search.indexingPending": "Indexing message history. More matches may appear shortly.",
   "search.noExactMatches": "No exact matches",
   "search.matchAttachmentFileName": "attachment filename",
@@ -3460,7 +3469,7 @@ const en: Catalog = {
   "timeline.threadSummaryWithBody": "{count} · {preview}",
   "timeline.threadSummaryWithPreview": "{count} · {sender}: {preview}",
   "timeline.threadSummaryWithSender": "{count} · {sender}",
-  "timeline.threadNotificationCount": "Thread notifications · {count}",
+  "timeline.threadNotificationCount": "Thread unread · {count}",
   "timeline.typingMany": "{count} people are typing",
   "timeline.typingOne": "{user} is typing",
   "timeline.openThreadSummary": "Open thread, {summary}",
@@ -3530,6 +3539,7 @@ const en: Catalog = {
   "threads.loading": "Loading threads…",
   "threads.open": "Open thread",
   "threads.replyCount": "{count} replies",
+  "threads.openUnreadRoot": "Open unread thread",
   "threads.title": "Threads",
   "settings.searchHistory": "Search history",
   "settings.searchHistoryCrawler": "Crawler",
@@ -3714,6 +3724,7 @@ const ja: Catalog = {
   "accountTabs.authenticating": "サインイン中",
   "accountTabs.needsVerification": "本人確認が必要",
   "accountTabs.ready": "利用可能",
+  "accountTabs.inviteCount": "保留中の招待 {count} 件",
   "accountTabs.signedOut": "再サインイン",
   "accountTabs.loggingOut": "サインアウト中",
   "accountTabs.error": "アカウントエラー",
@@ -3739,8 +3750,8 @@ const ja: Catalog = {
   "activity.highlightBadge": "メンション",
   "activity.loadMore": "アクティビティをさらに読み込む",
   "activity.loading": "アクティビティを読み込み中",
-  "activity.resolvingUnread": "未読メッセージを取得中…",
-  "activity.resolveFailed": "未読メッセージを読み込めませんでした。",
+  "activity.resolvingUnread": "最近の履歴を読み込み中…",
+  "activity.resolveFailed": "最近の履歴を読み込めませんでした。",
   "activity.retryResolution": "再試行",
   "activity.markAllRead": "すべて既読",
   "activity.markReadFailed": "既読化に失敗しました",
@@ -3751,7 +3762,7 @@ const ja: Catalog = {
   "activity.openItem": "{room}のアクティビティを開く",
   "activity.recent": "最近",
   "activity.tabs": "アクティビティ表示",
-  "activity.unread": "未読",
+  "activity.unread": "未読の会話",
   "activity.unreadBadge": "未読",
   "auth.checking": "確認中",
   "auth.checkLoginMethods": "ログイン方法を確認",
@@ -4391,6 +4402,8 @@ const ja: Catalog = {
   "room.unbanMember": "{name}のBANを解除",
   "room.unread": "未読",
   "room.unreadCount": "未読 {count} 件",
+  "room.unreadBreakdown": "ルーム本文 {main} 件・スレッド返信 {threads} 件",
+  "room.mutedUnreadBreakdown": "ミュート中（合計の対象外）・ルーム本文 {main} 件・スレッド返信 {threads} 件",
   "roomList.category": "ルームリストのカテゴリ",
   "roomList.categoryDms": "DM",
   "roomList.categoryRooms": "ルーム",
@@ -4438,8 +4451,9 @@ const ja: Catalog = {
   "roomList.sectionUnreadAccessible": "{section}の未読 {count} 件",
   "roomList.loading": "ルームを読み込み中…",
   "roomList.failed": "ルームを読み込めませんでした",
-  "room.markAsRead": "既読にする",
+  "room.markAsRead": "ルーム本文を既読にする",
   "room.markAsUnread": "未読にする",
+  "room.manuallyMarkedUnread": "手動で未読に設定",
   "search.indexingPending": "メッセージ履歴をインデックス中です。まもなく追加の一致が表示される場合があります。",
   "search.noExactMatches": "完全一致はありません",
   "search.matchAttachmentFileName": "添付ファイル名",
@@ -5256,7 +5270,7 @@ const ja: Catalog = {
   "timeline.threadSummaryWithBody": "{count} · {preview}",
   "timeline.threadSummaryWithPreview": "{count} · {sender}: {preview}",
   "timeline.threadSummaryWithSender": "{count} · {sender}",
-  "timeline.threadNotificationCount": "スレッド通知 · {count}",
+  "timeline.threadNotificationCount": "スレッドの未読 · {count}",
   "timeline.typingMany": "{count} 人が入力中",
   "timeline.typingOne": "{user} が入力中",
   "timeline.openThreadSummary": "スレッドを開く、{summary}",
@@ -5326,6 +5340,7 @@ const ja: Catalog = {
   "threads.loading": "スレッドを読み込み中…",
   "threads.open": "スレッドを開く",
   "threads.replyCount": "{count}件の返信",
+  "threads.openUnreadRoot": "未読スレッドを開く",
   "threads.title": "スレッド",
   "settings.searchHistory": "検索履歴",
   "settings.searchHistoryCrawler": "クローラー",

@@ -113,6 +113,7 @@ test("the Home rail badge totals unread messages and invites separately in its l
   const homeButton = rail(page).getByRole("button", { name: "Home" });
   const label = await homeButton.getAttribute("aria-label");
   const badge = await homeButton.getAttribute("data-count");
+  const inviteBadge = await homeButton.getAttribute("data-invite-count");
 
   expect(label).not.toBeNull();
   const counts = label!.match(/(\d+)\D+(\d+)/);
@@ -126,8 +127,9 @@ test("the Home rail badge totals unread messages and invites separately in its l
   expect(invites).toBeGreaterThan(0);
   expect(
     Number(badge),
-    "the badge shows the Rust-owned total of unread messages plus invites"
-  ).toBe(unread + invites);
+    "the red badge shows only confirmed unread messages"
+  ).toBe(unread);
+  expect(Number(inviteBadge)).toBe(invites);
 });
 
 test("Explore separates joining by address from searching a public directory", async ({

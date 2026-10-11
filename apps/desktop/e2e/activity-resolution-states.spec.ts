@@ -76,26 +76,26 @@ async function publishActivity(page: Page, activity: ActivityState): Promise<voi
   await pushDelta(page, { state: { domain: { activity } } });
 }
 
-test("a new unread DM resolves from a status into a real row while Activity is open", async ({
+test("a new unread DM keeps a verified room summary through resolution", async ({
   page
 }) => {
   await openEmptyUnreadActivity(page);
   const pane = activityPane(page);
 
   await publishActivity(page, STATES.newUnreadDmResolving);
-  // The unresolved placeholder is a status, never a terminal message row, and
-  // the stream does not claim there is nothing unread.
-  await expect(pane.getByRole("status")).toHaveText(t("activity.resolvingUnread"));
-  await expect(pane.getByRole("listitem")).toHaveCount(0);
+  // The SDK count identifies the room, not a particular unread message.
+  await expect(pane.getByRole("status")).toHaveCount(0);
+  await expect(pane.getByRole("listitem")).toHaveCount(1);
   await expect(pane.getByText(t("activity.noUnread"))).toHaveCount(0);
-  await expect(pane.getByRole("button", { name: t("activity.markAllRead") })).toBeVisible();
+  await expect(pane.getByRole("button", { name: t("activity.markAllRead") })).toHaveCount(0);
 
   await publishActivity(page, STATES.newUnreadDmResolved);
   await expect(pane.getByRole("status")).toHaveCount(0);
   const row = pane.getByRole("listitem");
   await expect(row).toHaveCount(1);
-  await expect(row).toHaveAttribute("data-event-id", RESOLVED_EVENT);
-  await expect(row).toContainText("Resolved message");
+  await expect(row).toHaveAttribute("data-kind", "roomUnread");
+  await expect(row).not.toHaveAttribute("data-event-id", RESOLVED_EVENT);
+  await expect(row).not.toContainText("Resolved message");
 });
 
 test("an old unread row with newer room activity keeps resolving or retry visible", async ({
@@ -105,17 +105,15 @@ test("an old unread row with newer room activity keeps resolving or retry visibl
   const pane = activityPane(page);
 
   await publishActivity(page, STATES.staleRowWithNewerActivityResolving);
-  // The old row stays readable, but the pane must not look complete while
-  // newer activity in the same room is still a resolution candidate.
+  // An old historical event must not be named as unread.
   const row = pane.getByRole("listitem");
   await expect(row).toHaveCount(1);
-  await expect(row).toHaveAttribute("data-event-id", OLD_EVENT);
-  await expect(pane.getByRole("status")).toHaveText(t("activity.resolvingUnread"));
+  await expect(row).toHaveAttribute("data-kind", "roomUnread");
+  await expect(row).not.toHaveAttribute("data-event-id", OLD_EVENT);
+  await expect(pane.getByRole("status")).toHaveCount(0);
 
   await publishActivity(page, STATES.staleRowWithNewerActivityFailed);
   await expect(pane.getByRole("status")).toHaveCount(0);
-  const failure = pane.getByRole("alert");
-  await expect(failure).toContainText(t("activity.resolveFailed"));
-  await expect(failure.getByRole("button", { name: t("activity.retryResolution") })).toBeVisible();
-  await expect(pane.getByRole("listitem")).toHaveAttribute("data-event-id", OLD_EVENT);
+  await expect(pane.getByRole("alert")).toHaveCount(0);
+  await expect(pane.getByRole("listitem")).not.toHaveAttribute("data-event-id", OLD_EVENT);
 });

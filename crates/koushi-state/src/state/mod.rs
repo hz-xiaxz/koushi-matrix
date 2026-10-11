@@ -227,6 +227,7 @@ pub use e2ee::{
 pub use local_encryption::{LocalEncryptionHealth, LocalEncryptionState};
 
 // ── Re-exports: native_attention ─────────────────────────────────────────────
+pub(crate) use native_attention::native_attention_projection_from_rooms_with_live_room;
 pub use native_attention::{
     NativeAttentionCandidate, NativeAttentionCapabilities, NativeAttentionCapability,
     NativeAttentionContext, NativeAttentionDispatchId, NativeAttentionDispatchState,

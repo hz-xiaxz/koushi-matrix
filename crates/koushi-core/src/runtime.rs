@@ -1717,7 +1717,7 @@ impl AppActor {
                 }
                 AppAction::ActivityResolutionRowsObserved { rows, .. } => {
                     self.activity_projection
-                        .ingest_resolution_rows(rows.clone());
+                        .ingest_resolution_rows(rows.clone(), &self.state);
                 }
                 _ => {}
             }
@@ -2289,13 +2289,16 @@ impl AppActor {
             .filter(|room| placeholder_room_ids.contains(room.room_id.as_str()))
             .map(|room| ActivityResolutionRequest {
                 room_id: room.room_id.clone(),
+                own_user_id: match &self.state.session {
+                    SessionState::Ready(info) => info.user_id.clone(),
+                    _ => String::new(),
+                },
                 fully_read_event_id: self
                     .state
                     .live_signals
                     .rooms
                     .get(&room.room_id)
                     .and_then(|signals| signals.fully_read_event_id.clone()),
-                minimum_unread_count: room.notification_count.max(room.highlight_count).max(1),
             })
             .collect::<Vec<_>>();
         if requests.is_empty() {
@@ -2304,6 +2307,8 @@ impl AppActor {
         self.activity_resolution_generation = self.activity_resolution_generation.saturating_add(1);
         let generation = self.activity_resolution_generation;
         let requests = cap_activity_resolution_requests(requests, generation);
+        self.activity_projection
+            .record_resolution_request_markers(&requests);
         let effects = self
             .reduce_app_action(AppAction::ActivityResolutionStarted {
                 generation,

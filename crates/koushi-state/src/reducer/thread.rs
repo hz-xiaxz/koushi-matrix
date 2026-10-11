@@ -631,10 +631,7 @@ pub(crate) fn handle_open_threads_list(
             state
                 .rooms
                 .iter()
-                .filter(|room| {
-                    space.child_room_ids.contains(&room.room_id)
-                        || room.parent_space_ids.iter().any(|id| id == space_id)
-                })
+                .filter(|room| space.child_room_ids.contains(&room.room_id))
                 .map(|room| room.room_id.clone())
                 .collect()
         }
@@ -675,6 +672,7 @@ pub(crate) fn handle_threads_list_opened(
     }
     sort_threads_list_items(&mut items, state.settings.values.thread_list_order);
     apply_thread_unread(state, &mut items);
+    append_observed_unread_roots(state, &room_id, &mut items);
     state.threads_list = ThreadsListState::Open {
         room_id,
         request_id,
@@ -701,6 +699,7 @@ pub(crate) fn handle_threads_list_updated(
     }
     sort_threads_list_items(&mut items, state.settings.values.thread_list_order);
     apply_thread_unread(state, &mut items);
+    append_observed_unread_roots(state, &room_id, &mut items);
     state.threads_list = ThreadsListState::Open {
         room_id,
         request_id,
@@ -726,6 +725,7 @@ pub(crate) fn handle_threads_list_pagination_completed(
     }
     sort_threads_list_items(&mut items, state.settings.values.thread_list_order);
     apply_thread_unread(state, &mut items);
+    append_observed_unread_roots(state, &room_id, &mut items);
     state.threads_list = ThreadsListState::Open {
         room_id,
         request_id,
@@ -748,10 +748,17 @@ pub(crate) fn handle_threads_list_failed(
     if state.threads_list.request_id() != Some(request_id) {
         return Vec::new();
     }
+    let mut items = match &state.threads_list {
+        ThreadsListState::Open { items, .. } => items.clone(),
+        _ => Vec::new(),
+    };
+    apply_thread_unread(state, &mut items);
+    append_observed_unread_roots(state, &room_id, &mut items);
     state.threads_list = ThreadsListState::Failed {
         room_id,
         request_id,
         failure_kind,
+        items,
     };
     vec![AppEffect::EmitUiEvent(UiEvent::ThreadsListChanged)]
 }
@@ -768,6 +775,54 @@ fn apply_thread_unread(
             .map(|attention| attention.unread)
             .unwrap_or(0);
     }
+}
+
+/// Every unread count in a room badge must have a selectable root in the
+/// Threads list, including roots beyond the service's current page. A blank
+/// sender marks a temporary row; the service replaces it with full metadata
+/// when pagination reaches that root.
+fn append_observed_unread_roots(
+    state: &AppState,
+    scope_key: &str,
+    items: &mut Vec<crate::state::ThreadsListItem>,
+) {
+    let scope = ThreadsListScope::from_scope_key(scope_key);
+    let missing: Vec<_> = state
+        .thread_unread
+        .iter()
+        .filter(|((room_id, root_id), attention)| {
+            attention.unread > 0
+                && state.rooms.iter().any(|room| room.room_id == *room_id)
+                && match &scope {
+                    ThreadsListScope::Room { room_id: target } => target == room_id,
+                    ThreadsListScope::Home => true,
+                    ThreadsListScope::Space { space_id } => state.spaces.iter().any(|space| {
+                        space.space_id == *space_id && space.child_room_ids.contains(room_id)
+                    }),
+                }
+                && !items
+                    .iter()
+                    .any(|item| item.room_id == *room_id && item.root_event_id == *root_id)
+        })
+        .map(
+            |((room_id, root_id), attention)| crate::state::ThreadsListItem {
+                room_id: room_id.clone(),
+                root_event_id: root_id.clone(),
+                root_sender: String::new(),
+                root_sender_label: None,
+                root_body_preview: None,
+                root_timestamp_ms: None,
+                latest_event_id: None,
+                latest_sender: None,
+                latest_sender_label: None,
+                latest_body_preview: None,
+                latest_timestamp_ms: None,
+                reply_count: 0,
+                unread_count: attention.unread,
+            },
+        )
+        .collect();
+    items.splice(0..0, missing);
 }
 
 /// #1238: recompute one room's thread badge fields from the per-root values the
@@ -821,6 +876,13 @@ pub(crate) fn handle_thread_unread_observed(
     if !is_session_ready(state) {
         return Vec::new();
     }
+    // A late thread-cache observation must not repopulate a room that has
+    // already left the authoritative joined-room projection.
+    if !state.rooms.iter().any(|room| room.room_id == room_id)
+        || state.room_list.locally_left_room_ids.contains(&room_id)
+    {
+        return Vec::new();
+    }
     let key = (room_id, root_event_id);
     let next = ThreadRootAttention { unread, highlight };
     let previous = state.thread_unread.get(&key).copied().unwrap_or_default();
@@ -833,12 +895,39 @@ pub(crate) fn handle_thread_unread_observed(
         state.thread_unread.insert(key.clone(), next);
     }
     let mut changed = false;
-    if let ThreadsListState::Open { items, .. } = &mut state.threads_list {
+    if let ThreadsListState::Open { items, .. } | ThreadsListState::Failed { items, .. } =
+        &mut state.threads_list
+    {
         for item in items.iter_mut() {
             if item.room_id == key.0 && item.root_event_id == key.1 {
                 item.unread_count = unread;
                 changed = true;
             }
+        }
+    }
+    let scope = match &state.threads_list {
+        ThreadsListState::Open { room_id, .. } | ThreadsListState::Failed { room_id, .. } => {
+            Some(room_id.clone())
+        }
+        _ => None,
+    };
+    if let Some(scope) = scope {
+        let before = match &state.threads_list {
+            ThreadsListState::Open { items, .. } | ThreadsListState::Failed { items, .. } => {
+                items.clone()
+            }
+            _ => Vec::new(),
+        };
+        let mut next = before.clone();
+        next.retain(|item| !item.root_sender.is_empty() || item.unread_count > 0);
+        append_observed_unread_roots(state, &scope, &mut next);
+        if next != before {
+            if let ThreadsListState::Open { items, .. } | ThreadsListState::Failed { items, .. } =
+                &mut state.threads_list
+            {
+                *items = next;
+            }
+            changed = true;
         }
     }
     let room_before = state
@@ -861,6 +950,17 @@ pub(crate) fn handle_thread_unread_observed(
     if room_changed {
         super::recompute_room_list_projection(state);
         effects.push(AppEffect::EmitUiEvent(UiEvent::RoomListChanged));
+        // The native badge shares the room's verified main+thread total.
+        // A thread cache observation is not a new message notification.
+        let (native_changed, diagnostic) =
+            super::native_attention::recompute_native_attention_from_rooms(
+                state,
+                crate::state::NativeAttentionObservationKind::InitialSync,
+            );
+        effects.push(diagnostic);
+        if native_changed {
+            effects.push(AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged));
+        }
     }
     if changed {
         effects.push(AppEffect::EmitUiEvent(UiEvent::ThreadsListChanged));

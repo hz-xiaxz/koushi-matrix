@@ -42,6 +42,7 @@
         "highlight_count": 0,
         "is_attention_highlighted": false,
         "is_muted": false,
+        "main_unread_count": 0,
         "membership": "not_joined",
         "notification_count": 0,
         "room_id": "!not-joined-room:example.invalid",
@@ -49,6 +50,7 @@
           "favourite": null,
           "low_priority": null
         },
+        "thread_unread_count": 0,
         "unread_count": 0
       }
     ],
@@ -69,6 +71,7 @@
           "highlight_count": 2,
           "is_attention_highlighted": true,
           "is_muted": false,
+          "main_unread_count": 7,
           "membership": "joined",
           "notification_count": 7,
           "room_id": "!low-priority-room:example.invalid",
@@ -78,6 +81,7 @@
               "order": "0.25"
             }
           },
+          "thread_unread_count": 0,
           "unread_count": 7
         }
       ],
@@ -101,6 +105,7 @@
           "highlight_count": 0,
           "is_attention_highlighted": false,
           "is_muted": false,
+          "main_unread_count": 0,
           "membership": "not_joined",
           "notification_count": 0,
           "room_id": "!not-joined-room:example.invalid",
@@ -108,6 +113,7 @@
             "favourite": null,
             "low_priority": null
           },
+          "thread_unread_count": 0,
           "unread_count": 0
         }
       ],
@@ -125,13 +131,14 @@
             }
           },
           "can_join": false,
-          "display_count": 2,
+          "display_count": 3,
           "display_name": "Fixture Room",
           "has_unread_content": true,
           "has_unread_mention": true,
           "highlight_count": 1,
           "is_attention_highlighted": true,
           "is_muted": false,
+          "main_unread_count": 3,
           "membership": "joined",
           "notification_count": 2,
           "room_id": "!room:example.invalid",
@@ -139,6 +146,7 @@
             "favourite": null,
             "low_priority": null
           },
+          "thread_unread_count": 0,
           "unread_count": 3
         }
       ]
@@ -228,6 +236,7 @@
         "highlight_count": 2,
         "is_attention_highlighted": true,
         "is_muted": false,
+        "main_unread_count": 7,
         "membership": "joined",
         "notification_count": 7,
         "room_id": "!low-priority-room:example.invalid",
@@ -237,6 +246,7 @@
             "order": "0.25"
           }
         },
+        "thread_unread_count": 0,
         "unread_count": 7
       },
       {
@@ -251,13 +261,14 @@
           }
         },
         "can_join": false,
-        "display_count": 2,
+        "display_count": 3,
         "display_name": "Fixture Room",
         "has_unread_content": true,
         "has_unread_mention": true,
         "highlight_count": 1,
         "is_attention_highlighted": true,
         "is_muted": false,
+        "main_unread_count": 3,
         "membership": "joined",
         "notification_count": 2,
         "room_id": "!room:example.invalid",
@@ -265,6 +276,7 @@
           "favourite": null,
           "low_priority": null
         },
+        "thread_unread_count": 0,
         "unread_count": 3
       }
     ],
