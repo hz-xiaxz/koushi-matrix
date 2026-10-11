@@ -160,6 +160,7 @@ fn diagnostic_snapshot_exports_current_media_memory_summaries() {
             high_water_variant_bytes: 160,
         },
         &memory_audit_fixture(),
+        &[],
         koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
     );
     let thumbnail = exported
@@ -219,6 +220,7 @@ fn diagnostic_snapshot_exports_the_process_memory_audit() {
         koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats::default(),
         koushi_core::media_preparation::MediaPreparationStats::default(),
         &memory_audit_fixture(),
+        &[],
         koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
     );
     let audit = exported
@@ -248,4 +250,85 @@ fn diagnostic_snapshot_exports_the_process_memory_audit() {
         koushi_diagnostics::DiagnosticValue::Count(_)
             | koushi_diagnostics::DiagnosticValue::Token(_)
     )));
+}
+
+#[test]
+fn diagnostic_snapshot_exports_the_search_retention_summary() {
+    let _guard = koushi_diagnostics::test_support::lock();
+    let fixture = koushi_core::search::AccountRetentionDiagnostics {
+        search: koushi_core::search::SearchRetentionCounters {
+            rooms_total: 3,
+            rooms_with_active_reader: 2,
+            opened_files_total: 41,
+            decrypted_bytes_total: 65_536,
+            live_decrypted_len_bytes: 8_192,
+            live_decrypted_capacity_bytes: 16_384,
+        },
+        event_cache: koushi_core::search::EventCacheRetentionCounters {
+            rooms: 4,
+            chunks: 5,
+            gap_chunks: 1,
+            events: 120,
+            zero_subscriber_rooms: 3,
+            zero_subscriber_rooms_with_events: 2,
+        },
+    };
+    let rows: &[(
+        usize,
+        Option<koushi_core::search::AccountRetentionDiagnostics>,
+    )] = &[(0, Some(fixture)), (1, None)];
+    let exported = snapshot_with_media_memory_summaries(
+        koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats::default(),
+        koushi_core::media_preparation::MediaPreparationStats::default(),
+        &memory_audit_fixture(),
+        rows,
+        koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
+    );
+    let aggregates = exported
+        .entries
+        .iter()
+        .filter(|entry| entry.source == "core.search_retention")
+        .map(|entry| entry.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        aggregates.contains(&"stage=summary account_total=2 account_available=1"),
+        "aggregate record missing: {aggregates:?}"
+    );
+    let account_row = exported
+        .entries
+        .iter()
+        .find(|entry| entry.message.contains("account_index=0"))
+        .expect("account retention row must be exported");
+    assert!(account_row.message.contains("search_rooms_total=3"));
+    assert!(
+        account_row
+            .message
+            .contains("search_rooms_with_active_reader=2")
+    );
+    assert!(
+        account_row
+            .message
+            .contains("search_live_decrypted_len_bytes=8192")
+    );
+    assert!(account_row.message.contains("event_cache_events=120"));
+    assert!(
+        account_row
+            .message
+            .contains("event_cache_scope=room_timeline_linked_chunk_only")
+    );
+    assert!(
+        account_row
+            .message
+            .contains("search_scope=decrypted_index_allocations")
+    );
+    let serialized = serde_json::to_string(&exported).unwrap();
+    for forbidden in [
+        "!room:synthetic.invalid",
+        "@user:synthetic.invalid",
+        "$event:synthetic.invalid",
+        "/Users/alice/private",
+        "secret message",
+    ] {
+        assert!(!serialized.contains(forbidden));
+    }
 }

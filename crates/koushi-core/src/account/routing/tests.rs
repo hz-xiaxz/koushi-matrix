@@ -342,3 +342,117 @@ fn classify_room_event_lookup_error_only_treats_not_found_as_missing() {
         RoomEventLookupResult::Failed
     );
 }
+
+#[tokio::test]
+async fn export_time_retention_sample_is_answered_or_settles_unavailable() {
+    use crate::search::{
+        AccountRetentionDiagnostics, EventCacheRetentionCounters, SearchActorHandle,
+        SearchActorMessage, SearchRetentionCounters,
+    };
+
+    let credentials = tempdir().unwrap();
+    let data = tempdir().unwrap();
+    let (account, _actions, _events) = spawn_actor_with_dirs(credentials.path(), data.path());
+
+    // No search actor configured: the sample settles as unavailable instead of
+    // holding the export.
+    let (response_tx, response_rx) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::SearchRetentionDiagnostics {
+                response: response_tx
+            })
+            .await
+    );
+    assert_eq!(
+        executor::timeout(Duration::from_secs(2), response_rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        None
+    );
+
+    // With a configured search actor, the reply channel is forwarded to it.
+    let (search_actor, mut inbox) = SearchActorHandle::controlled_inbox_for_testing();
+    let (acknowledged, ready) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::ConfigureSearchActorForTesting {
+                handle: Some(search_actor),
+                acknowledged,
+            })
+            .await
+    );
+    ready.await.unwrap();
+
+    let fixture = AccountRetentionDiagnostics {
+        search: SearchRetentionCounters {
+            rooms_total: 3,
+            rooms_with_active_reader: 2,
+            live_decrypted_len_bytes: 8192,
+            ..SearchRetentionCounters::default()
+        },
+        event_cache: EventCacheRetentionCounters::default(),
+    };
+    let (response_tx, response_rx) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::SearchRetentionDiagnostics {
+                response: response_tx
+            })
+            .await
+    );
+    let SearchActorMessage::RetentionDiagnostics { response } =
+        executor::timeout(Duration::from_secs(2), inbox.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    else {
+        panic!("expected an export-time retention request")
+    };
+    response.send(Some(fixture)).unwrap();
+    assert_eq!(
+        executor::timeout(Duration::from_secs(2), response_rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        Some(fixture)
+    );
+
+    // A held response does not stall the account actor: a later account
+    // message is processed while the retention reply is still outstanding.
+    let (response_tx, response_rx) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::SearchRetentionDiagnostics {
+                response: response_tx
+            })
+            .await
+    );
+    let (acknowledged, ready) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::ConfigureSearchActorForTesting {
+                handle: None,
+                acknowledged,
+            })
+            .await
+    );
+    ready.await.unwrap();
+    let SearchActorMessage::RetentionDiagnostics { response } =
+        executor::timeout(Duration::from_secs(2), inbox.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    else {
+        panic!("expected the second retention request")
+    };
+    response.send(None).unwrap();
+    assert_eq!(
+        executor::timeout(Duration::from_secs(2), response_rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        None
+    );
+}

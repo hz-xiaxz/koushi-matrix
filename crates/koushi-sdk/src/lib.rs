@@ -34,6 +34,7 @@ mod qa_reports;
 
 mod room_operations;
 
+mod retention;
 mod room_projection;
 
 mod space_children;
@@ -174,6 +175,11 @@ pub use room_projection::{
     room_list_snapshot_blocking, room_list_snapshot_from_sdk_rooms,
     room_list_snapshot_from_sdk_rooms_with_direct_targets,
     room_list_snapshot_from_sdk_rooms_with_invites,
+};
+
+pub use retention::{
+    MatrixEventCacheDiagnostics, MatrixRetentionDiagnostics, MatrixSearchIndexDiagnostics,
+    retention_diagnostics,
 };
 
 pub use search::{

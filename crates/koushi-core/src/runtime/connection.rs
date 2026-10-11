@@ -494,6 +494,9 @@ impl CoreCommandHandle {
             CoreCommandEnvelope::Qa(_) => {
                 unreachable!("composer admission creates a public command")
             }
+            CoreCommandEnvelope::RetentionDiagnostics(_) => {
+                unreachable!("composer admission creates a public command")
+            }
         };
         self.command_tx
             .send(CoreCommandEnvelope::Public {
@@ -587,6 +590,9 @@ impl CoreConnectionTestControl {
             }
             #[cfg(test)]
             CoreCommandEnvelope::ResolveReceiptWindow { .. } => {
+                unreachable!("test control expected a public command")
+            }
+            CoreCommandEnvelope::RetentionDiagnostics(_) => {
                 unreachable!("test control expected a public command")
             }
         })

@@ -1373,3 +1373,39 @@ responsiveness/cancellation tests in
 **Upstreaming intent:** submit the small SDK behavior fix and regression to
 matrix-rust-sdk; keep the downstream patch only until the upstream API has the
 same failure semantics.
+
+## 2026-10-11: #1344 owner-side retention counters
+
+Koushi issue #1344 (resident-memory audit) needs to attribute live bytes to
+owners before ratifying retention budgets. This fork patch adds content-free,
+observation-only owner-side counters; no eviction, no writer budget change, no
+reclamation.
+
+- `matrix-sdk-common::linked_chunk`: `LinkedChunk::memory_stats()` counts
+  resident chunks/items/gaps **without initializing the lazily created
+  sentinel chunk** (`chunks()`/`rchunks()` do initialize it). Diagnostic
+  sampling never mutates the structure.
+- `matrix-sdk-search::encrypted::EncryptedMmapDirectory`: optional shared
+  `DecryptedFileAccounting` (live len/capacity tracked through a
+  `StableDeref` owner stored inside `OwnedBytes`, so readers that convert to
+  `OwnedBytes`, such as a Delete file read into an `AliveBitSet`, keep the
+  allocation charged; lifetime transfer totals for `open_read`/`atomic_read`;
+  `atomic_read` bytes are caller-owned and transient). Threaded by
+  `EncryptedPhysicalRoomIndexBuilder`; `open_or_create_with_accounting` is
+  additive, existing callers keep the plain path.
+- `matrix-sdk-search::index::RoomIndex::has_active_reader()` observes the
+  cached `IndexReader` without initializing it.
+- `matrix-sdk::search_index::SearchIndex::diagnostics()` →
+  `SearchIndexDiagnostics` (rooms / rooms with an active reader / opened and
+  decrypted totals / live decrypted len and capacity).
+- `matrix-sdk::event_cache::EventCache::memory_diagnostics()` →
+  `EventCacheMemoryDiagnostics`: an in-memory-only aggregate of resident
+  room-timeline linked chunks (rooms / chunks / events / gap chunks /
+  zero-subscriber rooms, incl. those with resident events). It reads the
+  process-local state lock directly and never acquires the cross-process
+  store lock, so a dirty store cannot trigger a reload that unloads and
+  re-hydrates history while sampling. Scope is room-timeline linked chunks
+  only; thread/pinned/event-focused caches are separate owners.
+
+Fork branch `fix/1344-owner-counters` (commit `81ae185f5`). Delivered through
+the app's #1344 diagnostic export as `core.search_retention` records.

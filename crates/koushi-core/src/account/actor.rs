@@ -284,6 +284,11 @@ pub(crate) enum AccountMessage {
         room_id: String,
     },
     SearchCommand(SearchCommand),
+    /// Export-time retention sample (#1344): answered by the SearchActor (or
+    /// settled as unavailable) without holding the account actor.
+    SearchRetentionDiagnostics {
+        response: oneshot::Sender<Option<crate::search::AccountRetentionDiagnostics>>,
+    },
     /// A Search or Files request with the account's content policy at submission,
     /// instead of waiting for a crawler notification behind a busy mailbox.
     SearchWithPolicy {
@@ -1943,6 +1948,21 @@ impl AccountActor {
                 }
                 AccountMessage::SearchCommand(search_command) => {
                     self.route_search_command(search_command).await;
+                }
+                AccountMessage::SearchRetentionDiagnostics { response } => {
+                    match &self.search_actor {
+                        Some(search_actor) => {
+                            // Forwarded; on a failed send the sender is consumed
+                            // and the caller's bounded wait settles as
+                            // unavailable.
+                            let _ = search_actor.retention_diagnostics_forward(response).await;
+                        }
+                        None => {
+                            // No search session for this account: settle as
+                            // unavailable rather than holding the export.
+                            let _ = response.send(None);
+                        }
+                    }
                 }
                 AccountMessage::NotifySearchCrawlerRoomsAvailable {
                     room_ids,

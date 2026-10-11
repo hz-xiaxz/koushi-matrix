@@ -427,6 +427,30 @@ impl AccountRuntimeManager {
             })
     }
 
+    /// Snapshot every live account tab's retention counters at diagnostic
+    /// export time (#1344). Tab positions are captured under the manager lock
+    /// and released before any await; a tab without a session settles as
+    /// unavailable (`None`).
+    pub async fn search_retention_diagnostics(
+        &self,
+    ) -> Vec<(usize, Option<crate::search::AccountRetentionDiagnostics>)> {
+        let requested = self
+            .state
+            .lock()
+            .expect("account runtime manager mutex")
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(index, tab)| (index, tab.runtime.retention_diagnostics_probe()))
+            .collect::<Vec<_>>();
+
+        let mut rows = Vec::with_capacity(requested.len());
+        for (index, probe) in requested {
+            rows.push((index, probe.sample().await));
+        }
+        rows
+    }
+
     pub fn tab_connections(&self) -> Vec<(AccountTabDescriptor, CoreConnection)> {
         self.state
             .lock()

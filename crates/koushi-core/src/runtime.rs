@@ -109,6 +109,10 @@ use koushi_protocol::ids::{
 };
 
 pub const COMMAND_INBOX_CAPACITY: usize = 256;
+
+/// Reply bound for the #1344 export-time retention sampling; a stalled read
+/// settles as unavailable instead of holding the export.
+const SEARCH_RETENTION_REPLY_TIMEOUT_MS: u64 = 2_000;
 /// Per-consumer broadcast capacity. On large accounts (100+ rooms) initial and
 /// room-open sync bursts can emit thousands of `CoreEvent`s faster than a
 /// consumer (the Tauri forwarder, or a transient command connection waiting for
@@ -317,6 +321,9 @@ enum CoreCommandEnvelope {
     },
     #[cfg(any(test, feature = "test-hooks"))]
     Qa(CoreQaCommand),
+    /// Export-time retention sample (#1344). Answered with the account's
+    /// owner-side counters or `None`; the caller bounds the wait.
+    RetentionDiagnostics(oneshot::Sender<Option<crate::search::AccountRetentionDiagnostics>>),
 }
 
 #[cfg(test)]
@@ -327,11 +334,43 @@ impl CoreCommandEnvelope {
             Self::ReadReceiptWindow { .. } | Self::ReaderPrepared(_) => {
                 panic!("expected public command envelope")
             }
+            Self::RetentionDiagnostics(_) => panic!("expected public command envelope"),
             #[cfg(test)]
             Self::ResolveReceiptWindow { .. } => {
                 panic!("expected public command envelope")
             }
             Self::Qa(_) => panic!("expected public command envelope"),
+        }
+    }
+}
+
+/// Cloneable retention sampler for one account runtime (#1344).
+#[derive(Clone)]
+pub struct RetentionDiagnosticsProbe {
+    command_tx: mpsc::Sender<CoreCommandEnvelope>,
+}
+
+impl RetentionDiagnosticsProbe {
+    /// Sample the account's owner-side retention counters now. Bounded: a
+    /// stalled reply settles as `None` instead of holding the export.
+    pub async fn sample(&self) -> Option<crate::search::AccountRetentionDiagnostics> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        if self
+            .command_tx
+            .try_send(CoreCommandEnvelope::RetentionDiagnostics(response_tx))
+            .is_err()
+        {
+            // Inbox full: the export proceeds without this account.
+            return None;
+        }
+        match crate::executor::timeout(
+            std::time::Duration::from_millis(SEARCH_RETENTION_REPLY_TIMEOUT_MS),
+            response_rx,
+        )
+        .await
+        {
+            Ok(Ok(reply)) => reply,
+            _ => None,
         }
     }
 }
@@ -888,6 +927,15 @@ impl CoreRuntime {
 
     pub fn sliding_sync_diagnostics(&self) -> crate::SlidingSyncDiagnosticsSnapshot {
         self.sliding_sync_diagnostics.snapshot()
+    }
+
+    /// Cloneable probe for this runtime's retention sample (#1344). Captured
+    /// under the manager lock and sampled after it is released, so the export
+    /// never awaits while holding shared state.
+    pub fn retention_diagnostics_probe(&self) -> RetentionDiagnosticsProbe {
+        RetentionDiagnosticsProbe {
+            command_tx: self.command_tx.clone(),
+        }
     }
 
     /// Test hook: inject reducer actions as if an actor side effect produced
@@ -2363,6 +2411,9 @@ impl AppActor {
                 limit,
                 response,
             } => Box::pin(self.handle_read_receipt_window(source, start, limit, response)).await,
+            CoreCommandEnvelope::RetentionDiagnostics(response) => {
+                Box::pin(self.handle_retention_diagnostics(response)).await
+            }
             envelope => Box::pin(self.handle_public_command(envelope)).await,
         }
     }
@@ -2416,6 +2467,23 @@ impl AppActor {
         false
     }
 
+    async fn handle_retention_diagnostics(
+        &mut self,
+        response: oneshot::Sender<Option<crate::search::AccountRetentionDiagnostics>>,
+    ) -> bool {
+        // A diagnostic sample changes no app state: never report state
+        // changed, so the command loop skips the state-delta publication work.
+        // The forward is bounded; on timeout the sender is dropped and the
+        // caller's bounded wait settles as unavailable.
+        let _ = crate::executor::timeout(
+            std::time::Duration::from_millis(SEARCH_RETENTION_REPLY_TIMEOUT_MS),
+            self.account_actor
+                .send(AccountMessage::SearchRetentionDiagnostics { response }),
+        )
+        .await;
+        false
+    }
+
     async fn handle_read_receipt_window(
         &mut self,
         source: koushi_protocol::view::ReceiptSourceRef,
@@ -2457,6 +2525,9 @@ impl AppActor {
             CoreCommandEnvelope::Qa(command) => return self.handle_qa_command(command).await,
             CoreCommandEnvelope::ReaderPrepared(_)
             | CoreCommandEnvelope::ReadReceiptWindow { .. } => {
+                unreachable!("internal command routed to public handler")
+            }
+            CoreCommandEnvelope::RetentionDiagnostics(_) => {
                 unreachable!("internal command routed to public handler")
             }
             #[cfg(test)]
