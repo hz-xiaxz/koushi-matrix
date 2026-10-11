@@ -10,6 +10,7 @@ pub mod image_io_decoder;
 pub mod keyring_backend;
 mod media_save;
 mod oidc_browser;
+mod process_memory;
 mod spell_checking;
 mod tray;
 mod viewport_sync;
@@ -1367,6 +1368,9 @@ fn install_oidc_deep_link_handler(_app: &tauri::App) -> tauri::Result<()> {
 }
 
 pub fn run() {
+    // #1344: the diagnostic memory audit reports elapsed time since this entry.
+    process_memory::mark_process_start();
+
     #[cfg(target_os = "macos")]
     desktop_menu::configure_fullscreen_menu();
 

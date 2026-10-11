@@ -750,3 +750,27 @@ fn cleanup_legacy_plaintext_thumbnail_dirs_preserves_media_downloads() {
         b"download"
     );
 }
+
+#[test]
+fn stats_export_the_lease_budget_charge_and_named_cache_limits() {
+    let mut cache = RenderableThumbnailCache::default();
+    cache
+        .insert("avatar/first".into(), "", vec![7; 1024], "image/png".into())
+        .unwrap();
+    assert_eq!(cache.stats().lease_charged_bytes, 0);
+
+    let lease = cache.lease("avatar/first").unwrap();
+    // The export reports the conservative lease-budget charge, not unique bytes.
+    assert_eq!(cache.stats().lease_charged_bytes, 1024);
+    let message =
+        koushi_diagnostics::format_event(&renderable_thumbnail_summary_event(cache.stats()));
+    assert!(message.contains("lease_charged_bytes=1024"));
+    assert!(message.contains("max_entry_count=256"));
+    assert!(message.contains("max_bytes=33554432"));
+    assert!(message.contains("max_lease_bytes=100663296"));
+    assert!(message.contains("lease_accounting=charged_budget_overlaps_retained_bytes"));
+    assert!(message.contains("cache_scope=named_caches_only"));
+
+    drop(lease);
+    assert_eq!(cache.stats().lease_charged_bytes, 0);
+}

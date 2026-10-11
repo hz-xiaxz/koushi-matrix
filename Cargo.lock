@@ -3391,6 +3391,7 @@ dependencies = [
  "koushi-key",
  "koushi-protocol",
  "koushi-state",
+ "libc",
  "mac-notification-sys",
  "notify-rust",
  "objc2",
@@ -3414,6 +3415,7 @@ dependencies = [
  "tokio",
  "url",
  "webkit2gtk",
+ "windows-sys 0.61.2",
 ]
 
 [[package]]

@@ -4,6 +4,7 @@ import { afterEach, expect, test, vi } from "vitest";
 
 import {
   INITIAL_TIMELINE_DIAGNOSTICS,
+  qaRendererContextDiagnostics,
   qaRenderedDomDiagnostics,
   qaSecurityDiagnostics,
   timelineDiagnosticsEqual,
@@ -99,4 +100,52 @@ test("projects QA diagnostics without lifecycle ownership", () => {
     avatarRenderedImages: 8,
     avatarBrokenImages: 9
   })).toBe("items visible=1 downloaded=2 backfill=ready avatars mxc=3 ready=4 pending=5 failed=6 missing=7 rendered=8 broken=9");
+});
+
+test("samples renderer context as primitives without retaining DOM state", () => {
+  document.body.innerHTML =
+    '<div class="timeline-item-frame">private room name</div>' +
+    '<div class="timeline-item-frame"></div>' +
+    '<img src="https://cdn.example.invalid/private.png" alt="secret alt">';
+
+  const sample = qaRendererContextDiagnostics();
+  expect(sample.mountedTimelineRows).toBe(2);
+  expect(sample.mountedImages).toBe(1);
+  expect(sample.viewportWidth).toBeGreaterThan(0);
+  expect(sample.viewportHeight).toBeGreaterThan(0);
+  expect(typeof sample.visibility).toBe("string");
+
+  // A primitive snapshot: removing the nodes changes nothing, and no URL, text,
+  // or node reference is reachable from the sample.
+  document.body.innerHTML = "";
+  expect(sample.mountedTimelineRows).toBe(2);
+  const serialized = JSON.stringify(sample);
+  expect(serialized).not.toContain("private.png");
+  expect(serialized).not.toContain("private room name");
+  expect(serialized).not.toContain("secret alt");
+});
+
+test("reports the JS heap only for finite engine-measured bytes", () => {
+  const restore = () =>
+    Object.defineProperty(performance, "memory", { configurable: true, value: undefined });
+  restore();
+  expect(qaRendererContextDiagnostics().jsHeapUsedBytes).toBeNull();
+  expect(qaRendererContextDiagnostics().jsHeapTotalBytes).toBeNull();
+
+  Object.defineProperty(performance, "memory", {
+    configurable: true,
+    value: { usedJSHeapSize: 4096, totalJSHeapSize: 8192 }
+  });
+  const measured = qaRendererContextDiagnostics();
+  expect(measured.jsHeapUsedBytes).toBe(4096);
+  expect(measured.jsHeapTotalBytes).toBe(8192);
+
+  for (const invalid of [Number.NaN, -1, "4096", undefined]) {
+    Object.defineProperty(performance, "memory", {
+      configurable: true,
+      value: { usedJSHeapSize: invalid, totalJSHeapSize: invalid }
+    });
+    expect(qaRendererContextDiagnostics().jsHeapUsedBytes).toBeNull();
+  }
+  restore();
 });

@@ -219,6 +219,9 @@ pub struct MediaPreparationStats {
 pub fn media_preparation_summary_event(stats: MediaPreparationStats) -> DiagnosticEvent {
     DiagnosticEvent::new(DiagnosticLevel::Info, "core.media_preparation", "summary")
         .field(DiagnosticField::token("retention", "source_backed"))
+        // Named cache only: these counters cover the composer's prepared media,
+        // not the native heap.
+        .field(DiagnosticField::token("cache_scope", "named_caches_only"))
         .field(DiagnosticField::count(
             "source_count",
             stats.source_count as u64,
