@@ -5523,13 +5523,13 @@ preferences.
 stateDiagram-v2
     [*] --> Unsupported: packager marker present (reason=package_managed)
     [*] --> Unsupported: no install backend or updater trust material (reason=build)
-    [*] --> Idle: platform enabled with an install backend
+    [*] --> Idle: platform enabled with an install or notification backend
     Idle --> Checking: startup/24h/setting enabled/manual check
     Checking --> UpToDate: check has no newer release
     Checking --> Idle: update channel changes
     Available --> Idle: update channel changes before download approval
-    Checking --> Available: newer release found
-    Available --> Downloading: DownloadUpdate confirmed
+    Checking --> Available: newer release found (install-capable or notification-only)
+    Available --> Downloading: DownloadUpdate confirmed (install-capable candidate)
     Checking --> Failed: check failed
     Downloading --> Ready: download and signature verification succeeded
     Downloading --> Failed: download or verification failed
@@ -5566,11 +5566,14 @@ stateDiagram-v2
 - Download approval identifies the displayed candidate generation; stale clicks
   cannot approve a replacement candidate. Updater-owned work is canceled and
   joined on owner shutdown rather than detached.
-- `available` exposes the release version and an opaque candidate generation;
-  `ready` exposes the release version. `failed` exposes only a coarse
+- `available` exposes the release version, an opaque candidate generation, and
+  whether the candidate is notification-only. Notification-only candidates
+  also expose the selected public release URL; they cannot enter download or
+  install. `ready` exposes the release version. `failed` exposes only a coarse
   stage/kind and is recoverable; it never blocks startup or login.
 - Installation and relaunch require explicit user intent. macOS is the only
-  enabled platform in this phase; Windows and Linux remain `unsupported`.
+  install-capable platform in this phase. Windows may reach notification-only
+  `available` and opens the selected Release page; Linux remains `unsupported`.
 - `unsupported` carries a `reason`. `reason: build` means this target has no
   install backend or this build has no updater trust material; `reason:
   package_managed` means a distribution package that owns the installed files

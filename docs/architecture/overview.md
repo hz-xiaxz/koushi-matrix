@@ -1240,10 +1240,13 @@ download, or restart-to-install intent. It must not fetch manifests, compare
 versions, verify signatures, retain update bytes, or replace an application.
 
 The projection is platform-neutral (`unsupported`, `idle`, `up_to_date`,
-`checking`, `available`, `downloading`, `ready`, `failed`, or `installing`). Only macOS arm64 is enabled
-for the first release. Windows and Linux report `unsupported` until a separate
-change provides signed artifacts and an approved install contract; their normal
-installer builds must not require the macOS updater signing secret.
+`checking`, `available`, `downloading`, `ready`, `failed`, or `installing`).
+macOS arm64 is install-capable. Windows has a notification-only backend: it
+checks public GitHub Releases and exposes the selected release URL, but never
+downloads or installs an artifact until signed artifacts and an approved
+install contract are available. Linux remains `unsupported` until a separate
+change provides an install backend; normal installer builds must not require
+the macOS updater signing secret.
 
 When automatic checks are enabled, the adapter checks after startup and at most
 once per 24-hour interval, and checks once when the setting changes from off to
@@ -1272,11 +1275,12 @@ greatest-SemVer choice) compile on every desktop target and are tested on Linux
 CI with a fake backend. A backend supplies only capability, feed access and
 signature verification, artifact installation, and the native relaunch
 request, behind the `Backend` trait. The `koushi_updater_backend` cfg, set by
-the desktop `build.rs`, marks targets that ship a backend (macOS today). Other
-targets compile against an uninhabited placeholder, so they report
-`unsupported` and never start update work. A future Linux backend implements
-the same trait and enables that cfg. It reuses the engine unchanged and must
-first settle which distribution formats it owns.
+the desktop `build.rs`, marks targets that ship an update backend: macOS is
+install-capable and Windows is currently notification-only. Linux compiles
+against an uninhabited placeholder, so it reports `unsupported` and never
+starts update work. A future Linux backend implements the same trait and
+enables that cfg. It reuses the engine unchanged and must first settle which
+distribution formats it owns.
 
 `unsupported` carries a reason: `build` (no install backend or no updater trust
 material in this build) or `package_managed`. The packager opt-out (#1063) is a
