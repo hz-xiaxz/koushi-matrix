@@ -10,7 +10,7 @@ import { SNAPSHOT_SCHEMA_VERSION, type DesktopUpdateState, type SettingsPatch, t
 import { t } from "../i18n/messages";
 import { ModalDialog } from "./ModalDialog";
 
-const RELEASE_PAGE_URL = "https://github.com/shinaoka/koushi-matrix/releases/latest";
+const RELEASE_PAGE_URL = "https://github.com/shinaoka/koushi-matrix/releases";
 
 /** Application-level presentation over the single Rust updater owner. */
 export function DesktopUpdates() {
@@ -100,7 +100,11 @@ export function DesktopUpdates() {
               if (state.kind === "available") run(api.downloadDesktopUpdate(state.generation));
             }}
             onRestart={() => run(api.restartToInstallDesktopUpdate())}
-            onOpenReleasePage={() => run(openExternalHttpUrl(RELEASE_PAGE_URL))}
+            onOpenReleasePage={() => {
+              if (state.kind === "available") {
+                run(openExternalHttpUrl(state.release_url ?? RELEASE_PAGE_URL));
+              }
+            }}
           />
         ) : <p role="status">{t("settings.updateChecking")}</p>}
       </div>

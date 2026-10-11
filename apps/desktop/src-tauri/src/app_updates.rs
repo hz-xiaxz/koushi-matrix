@@ -45,6 +45,7 @@ pub enum DesktopUpdateState {
         version: String,
         generation: u64,
         notification_only: bool,
+        release_url: Option<String>,
     },
     Downloading {
         version: String,
@@ -87,6 +88,7 @@ pub enum DesktopUpdateFailureStage {
 struct PendingUpdate<C> {
     version: String,
     notification_only: bool,
+    release_url: Option<String>,
     // Read only by an install backend; unused where no backend is compiled.
     #[cfg_attr(not(koushi_updater_backend), allow(dead_code))]
     update: C,
@@ -315,6 +317,7 @@ impl<C> Lifecycle<C> {
                     version: pending.version.clone(),
                     generation: operation.generation,
                     notification_only: pending.notification_only,
+                    release_url: pending.release_url.clone(),
                 };
                 self.pending = Some(pending);
             }

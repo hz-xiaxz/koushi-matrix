@@ -1240,10 +1240,13 @@ download, or restart-to-install intent. It must not fetch manifests, compare
 versions, verify signatures, retain update bytes, or replace an application.
 
 The projection is platform-neutral (`unsupported`, `idle`, `up_to_date`,
-`checking`, `available`, `downloading`, `ready`, `failed`, or `installing`). Only macOS arm64 is enabled
-for the first release. Windows and Linux report `unsupported` until a separate
-change provides signed artifacts and an approved install contract; their normal
-installer builds must not require the macOS updater signing secret.
+`checking`, `available`, `downloading`, `ready`, `failed`, or `installing`).
+macOS arm64 is install-capable. Windows has a notification-only backend: it
+checks public GitHub Releases and exposes the selected release URL, but never
+downloads or installs an artifact until signed artifacts and an approved
+install contract are available. Linux remains `unsupported` until a separate
+change provides an install backend; normal installer builds must not require
+the macOS updater signing secret.
 
 When automatic checks are enabled, the adapter checks after startup and at most
 once per 24-hour interval, and checks once when the setting changes from off to

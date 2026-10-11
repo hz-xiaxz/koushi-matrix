@@ -97,7 +97,7 @@ describe("DesktopUpdateControls", () => {
     render(
       <DesktopUpdateControls
         current={{ auto_check: true, include_prereleases: false }}
-        state={{ kind: "available", version: "1.2.3", generation: 7, notification_only: false }}
+        state={{ kind: "available", version: "1.2.3", generation: 7, notification_only: false, release_url: null }}
         onSelect={() => undefined}
         onCheck={() => undefined}
         onDownload={onDownload}
@@ -115,7 +115,7 @@ describe("DesktopUpdateControls", () => {
     render(
       <DesktopUpdateControls
         current={{ auto_check: true, include_prereleases: false }}
-        state={{ kind: "available", version: "1.2.3", generation: 7, notification_only: true }}
+        state={{ kind: "available", version: "1.2.3", generation: 7, notification_only: true, release_url: "https://github.com/shinaoka/koushi-matrix/releases/tag/v1.2.3" }}
         onSelect={() => undefined}
         onCheck={() => undefined}
         onDownload={onDownload}

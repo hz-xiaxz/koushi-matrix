@@ -51,6 +51,7 @@ impl Backend<Update> for MacosBackend {
                 Completion::Check(Ok(update.map(|update| PendingUpdate {
                     version: update.version.clone(),
                     notification_only: false,
+                    release_url: None,
                     update,
                     bytes: None,
                 })))

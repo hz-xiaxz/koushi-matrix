@@ -21,11 +21,13 @@ pub(super) type Candidate = GitHubRelease;
 #[derive(Clone, Debug)]
 pub(super) struct GitHubRelease {
     pub(super) version: String,
+    pub(super) release_url: String,
 }
 
 #[derive(Debug, Deserialize)]
 struct ReleaseResponse {
     tag_name: String,
+    html_url: String,
     draft: bool,
     prerelease: bool,
 }
@@ -54,6 +56,7 @@ impl Backend<GitHubRelease> for WindowsBackend {
                     candidate.map(|candidate| PendingUpdate {
                         version: candidate.version.clone(),
                         notification_only: true,
+                        release_url: Some(candidate.release_url.clone()),
                         update: candidate,
                         bytes: None,
                     })
@@ -111,6 +114,7 @@ async fn check_releases(
         }
         let candidate = GitHubRelease {
             version: version.to_owned(),
+            release_url: release.html_url,
         };
         selected = Some(select_newer_candidate(selected, candidate, |candidate| {
             candidate.version.as_str()
