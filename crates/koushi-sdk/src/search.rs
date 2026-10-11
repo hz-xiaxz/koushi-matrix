@@ -685,7 +685,11 @@ pub async fn persisted_room_event_page(
             .map_err(|_| MatrixSearchError::Internal)?;
     }
 
-    Ok(MatrixPersistedEventPage { events, next, gap_at })
+    Ok(MatrixPersistedEventPage {
+        events,
+        next,
+        gap_at,
+    })
 }
 
 /// Index a room's events in the persistent ngram index now, awaiting the commit.

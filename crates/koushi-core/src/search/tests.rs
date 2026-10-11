@@ -1447,4 +1447,3 @@ async fn a_saved_record_is_loaded_and_skips_the_crawl() {
     }
     assert!(started.is_empty(), "no crawl starts: {started:?}");
 }
-

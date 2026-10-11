@@ -84,7 +84,10 @@ pub(crate) struct SearchProgress {
 
 impl SearchProgress {
     pub(crate) fn new(identity: SearchProgressIdentity) -> Self {
-        Self { identity, rooms: BTreeMap::new() }
+        Self {
+            identity,
+            rooms: BTreeMap::new(),
+        }
     }
 
     /// The rooms this record describes, when it still describes the running
@@ -93,7 +96,11 @@ impl SearchProgress {
         &self,
         identity: &SearchProgressIdentity,
     ) -> &BTreeMap<String, RoomCrawlProgress> {
-        if &self.identity == identity { &self.rooms } else { &EMPTY_ROOMS }
+        if &self.identity == identity {
+            &self.rooms
+        } else {
+            &EMPTY_ROOMS
+        }
     }
 
     pub(crate) fn room(&self, room_id: &str) -> Option<&RoomCrawlProgress> {
@@ -151,7 +158,9 @@ impl StoreActor {
         &self,
         key_id: &SessionKeyId,
     ) -> Result<String, CoreFailure> {
-        let path = self.account_search_index_dir(key_id).join(SEARCH_INDEX_INSTANCE_FILE);
+        let path = self
+            .account_search_index_dir(key_id)
+            .join(SEARCH_INDEX_INSTANCE_FILE);
         match std::fs::read_to_string(&path) {
             Ok(instance) => {
                 let instance = instance.trim();
@@ -216,7 +225,9 @@ impl StoreActor {
 
     /// Path of the account's crawl-progress file.
     pub(crate) fn account_search_progress_path(&self, key_id: &SessionKeyId) -> PathBuf {
-        self.account_root_dir(key_id).join("search").join("progress.v1.enc")
+        self.account_root_dir(key_id)
+            .join("search")
+            .join("progress.v1.enc")
     }
 }
 
