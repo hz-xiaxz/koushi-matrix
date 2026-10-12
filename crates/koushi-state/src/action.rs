@@ -292,6 +292,11 @@ pub enum AppAction {
     RoomPreferencesLoaded {
         preferences: RoomPreferencesState,
     },
+    /// #1364: the persisted per-room conversation-activity cache finished
+    /// loading. Merged into the installed rooms before the next projection.
+    RoomActivityLoaded {
+        activity: crate::RoomActivityState,
+    },
     OwnProfileUpdated {
         profile: OwnProfile,
     },

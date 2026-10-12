@@ -27,6 +27,7 @@ mod native_attention;
 mod navigation;
 mod profile;
 mod room;
+mod room_activity;
 mod room_interactions;
 mod room_management;
 mod search;
@@ -158,6 +159,9 @@ pub use room::{
     RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SpaceSummary, room_activity_unread_count,
     room_attention_kind, room_attention_projection, room_attention_summary,
 };
+
+// ── Re-exports: room_activity ───────────────────────────────────────────────
+pub use room_activity::{RoomActivityRecord, RoomActivityState};
 
 // ── Re-exports: invite_workflow ─────────────────────────────────────────────
 pub use invite_workflow::{
@@ -381,6 +385,11 @@ pub struct AppState {
     pub link_preview_settings: LinkPreviewSettingsState,
     #[serde(default)]
     pub room_preferences: RoomPreferencesState,
+    /// #1364: newest conversation activity observed per room. Merged into
+    /// `rooms` before the room-list projection runs, so Recent-first ordering
+    /// survives a restart. A local cache; never published to the frontend.
+    #[serde(skip)]
+    pub room_activity: RoomActivityState,
     pub profile: ProfileState,
     #[serde(default)]
     pub space_children: SpaceChildrenState,
@@ -504,6 +513,7 @@ impl Default for AppState {
             settings: SettingsState::default(),
             link_preview_settings: LinkPreviewSettingsState::default(),
             room_preferences: RoomPreferencesState::default(),
+            room_activity: RoomActivityState::default(),
             profile: ProfileState::default(),
             space_children: SpaceChildrenState::default(),
             space_members: SpaceMembersState::default(),
