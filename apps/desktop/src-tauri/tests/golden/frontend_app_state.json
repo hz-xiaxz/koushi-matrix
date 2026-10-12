@@ -227,29 +227,6 @@
     ],
     "space_rooms": [
       {
-        "avatar": null,
-        "can_join": false,
-        "display_count": 7,
-        "display_name": "Fixture Low Priority Room",
-        "has_unread_content": true,
-        "has_unread_mention": true,
-        "highlight_count": 2,
-        "is_attention_highlighted": true,
-        "is_muted": false,
-        "main_unread_count": 7,
-        "membership": "joined",
-        "notification_count": 7,
-        "room_id": "!low-priority-room:example.invalid",
-        "tags": {
-          "favourite": null,
-          "low_priority": {
-            "order": "0.25"
-          }
-        },
-        "thread_unread_count": 0,
-        "unread_count": 7
-      },
-      {
         "avatar": {
           "mxc_uri": "mxc://example.invalid/fixture-avatar",
           "thumbnail": {
@@ -278,6 +255,29 @@
         },
         "thread_unread_count": 0,
         "unread_count": 3
+      },
+      {
+        "avatar": null,
+        "can_join": false,
+        "display_count": 7,
+        "display_name": "Fixture Low Priority Room",
+        "has_unread_content": true,
+        "has_unread_mention": true,
+        "highlight_count": 2,
+        "is_attention_highlighted": true,
+        "is_muted": false,
+        "main_unread_count": 7,
+        "membership": "joined",
+        "notification_count": 7,
+        "room_id": "!low-priority-room:example.invalid",
+        "tags": {
+          "favourite": null,
+          "low_priority": {
+            "order": "0.25"
+          }
+        },
+        "thread_unread_count": 0,
+        "unread_count": 7
       }
     ],
     "space_unread_count": 3

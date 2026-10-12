@@ -2,8 +2,9 @@ use super::support::{avatar, ready_state, rooms, session_info, spaces};
 use koushi_state::{
     AppAction, AppEffect, AppState, ConversationActivity, ConversationActivitySource,
     RoomLatestEventSummary, RoomListFilter, RoomListSort, RoomNotificationMode,
-    RoomNotificationSettings, RoomSummary, RoomTags, SessionState, SpaceSummary, UiEvent,
-    compose_sidebar, compose_sidebar_with_account_facts, compute_room_list_projection, reduce,
+    RoomNotificationSettings, RoomSummary, RoomTags, SessionState, SidebarScopeSettings,
+    SidebarSectionSettings, SpaceSummary, UiEvent, compose_sidebar, compose_sidebar_for_state,
+    compose_sidebar_with_account_facts, compute_room_list_projection, reduce,
 };
 use serde_json::json;
 use std::collections::{BTreeMap, HashMap};
@@ -1482,4 +1483,100 @@ fn sidebar_room_rows_carry_the_projected_access_condition() {
         .find(|room| room.room_id == "unprojected")
         .expect("unprojected should be in the room list");
     assert_eq!(unknown.access_join_rule, None);
+}
+
+/// #1364: a room whose newest event is not a conversation event has no
+/// conversation timestamp, and the room-list Event Cache window can be one
+/// event deep. The server recency stamp must keep that group in true order
+/// instead of collapsing it into case-folded label order.
+#[test]
+fn recent_order_uses_the_server_recency_stamp_when_activity_is_absent() {
+    let mut state = ready_state();
+    let mut newer = dm_room_for_activity("dm-newer", "Member 2", None);
+    newer.recency_stamp = Some(200);
+    let mut older = dm_room_for_activity("dm-older", "Member 1", None);
+    older.recency_stamp = Some(100);
+    state.rooms = vec![newer, older];
+    use_recent_first_for_home_dms(&mut state);
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    assert_eq!(
+        sidebar
+            .sections
+            .people
+            .iter()
+            .map(|item| item.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["dm-newer", "dm-older"]
+    );
+}
+
+/// A recency stamp that only moved because of a join or a state event must not
+/// lift an activity-less room above a room with a real conversation.
+#[test]
+fn recent_order_keeps_a_real_conversation_above_a_recency_stamp_bump() {
+    let mut state = ready_state();
+    let mut joined = dm_room_for_activity("dm-joined", "Member 9", None);
+    joined.recency_stamp = Some(900);
+    let mut talked = dm_room_for_activity(
+        "dm-talked",
+        "Member 1",
+        Some(ConversationActivity {
+            timestamp_ms: 100,
+            source: ConversationActivitySource::Message,
+        }),
+    );
+    talked.recency_stamp = Some(100);
+    state.rooms = vec![joined, talked];
+    use_recent_first_for_home_dms(&mut state);
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    assert_eq!(
+        sidebar
+            .sections
+            .people
+            .iter()
+            .map(|item| item.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["dm-talked", "dm-joined"]
+    );
+}
+
+/// The activity-less fallback is shared by the attention sort, so an
+/// attention-first scope keeps a stable order for read rooms too.
+#[test]
+fn activity_sort_uses_the_server_recency_stamp_between_read_rooms() {
+    let mut state = ready_state();
+    let mut newer = dm_room_for_activity("dm-newer", "Member 2", None);
+    newer.recency_stamp = Some(200);
+    let mut older = dm_room_for_activity("dm-older", "Member 1", None);
+    older.recency_stamp = Some(100);
+    state.rooms = vec![newer, older];
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    assert_eq!(
+        sidebar
+            .sections
+            .people
+            .iter()
+            .map(|item| item.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["dm-newer", "dm-older"]
+    );
+}
+
+fn use_recent_first_for_home_dms(state: &mut AppState) {
+    state.settings.values.sidebar.scope_preferences.insert(
+        "__home__".to_owned(),
+        SidebarScopeSettings {
+            dms: SidebarSectionSettings {
+                collapsed: false,
+                sort: RoomListSort::RecentFirst,
+            },
+            ..Default::default()
+        },
+    );
 }
