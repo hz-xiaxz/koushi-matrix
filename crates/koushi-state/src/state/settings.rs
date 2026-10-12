@@ -37,8 +37,12 @@ fn default_timeline_thread_root_order() -> TimelineThreadRootOrder {
     TimelineThreadRootOrder::LatestReply
 }
 
+/// #542: the sidebar's product default is true recent-conversation order.
+/// Attention stays visible through badges, highlighting, and the Activity
+/// surface, but no longer moves a room; `Activity` remains deserializable for
+/// settings an older build persisted.
 fn default_room_list_sort() -> RoomListSort {
-    RoomListSort::Activity
+    RoomListSort::RecentFirst
 }
 
 fn canonicalize_recent_emojis(emojis: Vec<String>) -> Vec<String> {
@@ -1004,8 +1008,11 @@ pub enum ThreadListOrder {
 #[serde(tag = "kind", rename_all = "camelCase")]
 #[derive(Default)]
 pub enum RoomListSort {
-    #[default]
+    /// #438's attention-first order. No longer the default and no longer
+    /// offered by the sidebar selector (#542), but still deserialized so an
+    /// older persisted preference keeps its explicit choice.
     Activity,
+    #[default]
     RecentFirst,
     NormalLocale,
 }

@@ -1241,10 +1241,12 @@ function SectionTitle({
       ?.focus();
   }, [menuOpen]);
 
+  // #542: Recent is the product order and Name stays locale-aware. The
+  // attention-first `activity` value is still deserialized for a settings
+  // document an older build persisted, but it is no longer selectable.
   const sortOptions: Array<[RoomListSort, string]> = [
     [{ kind: "recentFirst" }, t("roomList.sortRecent")],
-    [{ kind: "normalLocale" }, t("roomList.sortName")],
-    [{ kind: "activity" }, t("roomList.sortAttention")]
+    [{ kind: "normalLocale" }, t("roomList.sortName")]
   ];
 
   return (

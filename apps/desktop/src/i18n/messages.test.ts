@@ -13,6 +13,19 @@ import {
 } from "./messages";
 
 describe("i18n message catalog", () => {
+  test("names the sidebar sort selector Recent and Name only (#542)", () => {
+    expect(catalogs.en["roomList.sortRecent"]).toBe("Recent");
+    expect(catalogs.ja["roomList.sortRecent"]).toBe("新着順");
+    expect(catalogs.en["roomList.sortName"]).toBeTruthy();
+    expect(catalogs.ja["roomList.sortName"]).toBeTruthy();
+    // The attention-first choice is legacy-only; it must not be offered and
+    // must not leave a stale "Active" label behind.
+    for (const locale of Object.keys(catalogs) as Locale[]) {
+      expect("roomList.sortActive" in catalogs[locale]).toBe(false);
+      expect("roomList.sortAttention" in catalogs[locale]).toBe(false);
+    }
+  });
+
   test("ships secure backup gate copy in both locales, including the account-wide warning", () => {
     const secureBackupIds = [
       "gate.secureBackupTitle",

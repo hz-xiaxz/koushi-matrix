@@ -344,7 +344,7 @@ export function defaultSnapshotResponse() {
             include_filenames: true
           },
           thread_list_order: { kind: "latestReply" },
-          room_list_sort: { kind: "activity" },
+          room_list_sort: { kind: "recentFirst" },
           sidebar: {
             category: "rooms",
             collapsed: { favourites: false, low_priority: false, not_joined: false }
@@ -417,7 +417,7 @@ export function defaultSnapshotResponse() {
       room_list: {
         readiness: { kind: "ready", source: "cache", generation: 0 },
         active_filter: { kind: "rooms" },
-        sort: { kind: "activity" },
+        sort: { kind: "recentFirst" },
         items: [
           { room_id: "!room-alpha:example.invalid", kind: "room" },
           { room_id: "!room-beta:example.invalid", kind: "room" },

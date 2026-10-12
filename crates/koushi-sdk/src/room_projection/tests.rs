@@ -53,6 +53,12 @@ fn conversation_activity_classifies_messages_encryption_and_threads_only() {
         ("m.room.encrypted", Some("m.thread"), Some(ThreadReply)),
         ("m.room.message", Some("m.replace"), None),
         ("m.room.message", Some("m.annotation"), None),
+        // #542: an encrypted edit or reaction carries its relation inside the
+        // ciphertext. When the decrypted event is what the client holds, the
+        // visible relation must classify it the same way as a plaintext one
+        // instead of counting as an ordinary encrypted message.
+        ("m.room.encrypted", Some("m.replace"), None),
+        ("m.room.encrypted", Some("m.annotation"), None),
         ("m.room.redaction", None, None),
         ("m.room.member", None, None),
         ("m.room.name", None, None),
@@ -70,6 +76,53 @@ fn conversation_activity_classifies_messages_encryption_and_threads_only() {
         );
     }
 }
+#[test]
+fn decrypted_encrypted_relation_events_do_not_create_conversation_activity() {
+    let encrypted = |content: serde_json::Value| {
+        matrix_sdk::deserialized_responses::TimelineEvent::from_plaintext(
+            matrix_sdk::ruma::serde::Raw::from_json_string(
+                serde_json::json!({
+                    "content": content,
+                    "event_id": "$encrypted:example.invalid",
+                    "origin_server_ts": 42,
+                    "sender": "@sender:example.invalid",
+                    "type": "m.room.encrypted"
+                })
+                .to_string(),
+            )
+            .expect("synthetic encrypted timeline event"),
+        )
+    };
+    let relation = |rel_type: &str| {
+        encrypted(serde_json::json!({
+            "algorithm": "m.megolm.v1.aes-sha2",
+            "ciphertext": "synthetic",
+            "m.relates_to": {
+                "rel_type": rel_type,
+                "event_id": "$target:example.invalid"
+            }
+        }))
+    };
+
+    for rel_type in ["m.replace", "m.annotation"] {
+        assert!(
+            matrix_conversation_activity_from_timeline_event(&relation(rel_type)).is_none(),
+            "{rel_type} must not count as conversation activity"
+        );
+    }
+
+    let message = encrypted(serde_json::json!({
+        "algorithm": "m.megolm.v1.aes-sha2",
+        "ciphertext": "synthetic",
+        "device_id": "DEVICE",
+        "sender_key": "synthetic"
+    }));
+    assert_eq!(
+        matrix_conversation_activity_from_timeline_event(&message).map(|activity| activity.source),
+        Some(MatrixConversationActivitySource::EncryptedMessage)
+    );
+}
+
 #[test]
 fn redacted_raw_latest_is_classified_without_private_diagnostics() {
     let event = matrix_sdk::deserialized_responses::TimelineEvent::from_plaintext(

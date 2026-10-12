@@ -730,7 +730,8 @@ fn room_list_sort_supports_recent_and_locale_modes() {
             filter: RoomListFilter::Rooms,
         },
     );
-    assert_eq!(state.room_list.sort, RoomListSort::Activity);
+    // #542: recent conversation order is the product default.
+    assert_eq!(state.room_list.sort, RoomListSort::RecentFirst);
     assert_eq!(
         state
             .room_list
@@ -1204,6 +1205,9 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
         mention,
     ];
 
+    // Attention-first ordering is no longer the default (#542), so this
+    // test selects it explicitly to keep proving the legacy recompute path.
+    state.settings.values.room_list_sort = RoomListSort::Activity;
     let settings = state.settings.values.clone();
     reduce(&mut state, AppAction::SettingsLoaded { values: settings });
     assert_eq!(
@@ -1579,4 +1583,171 @@ fn use_recent_first_for_home_dms(state: &mut AppState) {
             ..Default::default()
         },
     );
+}
+
+// ── #542: recent conversation order is the product default ──────────────────
+
+fn update_room_list(state: &mut AppState, rooms: Vec<RoomSummary>) {
+    reduce(
+        state,
+        AppAction::RoomListUpdated {
+            spaces: Vec::new(),
+            rooms,
+        },
+    );
+}
+
+fn item_order(state: &AppState) -> Vec<&str> {
+    state
+        .room_list
+        .items
+        .iter()
+        .map(|item| item.room_id.as_str())
+        .collect()
+}
+
+fn section_order(items: &[koushi_state::RoomListItem]) -> Vec<&str> {
+    items.iter().map(|item| item.room_id.as_str()).collect()
+}
+
+/// With no scope preference written, every section already opens in recent
+/// conversation order: unread and mention state stays visible but does not move
+/// a row.
+#[test]
+fn default_sidebar_order_is_recent_conversation_order_in_home_and_every_space() {
+    let mut state = ready_state();
+    let child_room_ids = vec![
+        "room-newer".to_owned(),
+        "room-unread".to_owned(),
+        "room-mention".to_owned(),
+        "dm-newer".to_owned(),
+        "dm-unread".to_owned(),
+    ];
+    state.spaces = vec![SpaceSummary {
+        space_id: "space-a".to_owned(),
+        raw_name: None,
+        display_name: "Space A".to_owned(),
+        avatar: None,
+        join_rule: None,
+        child_room_ids: child_room_ids.clone(),
+        parent_side_child_room_ids: child_room_ids,
+    }];
+    let mut room_unread = active_sort_room("room-unread", false, &["space-a"], &[], Some(500));
+    room_unread.unread_count = 4;
+    room_unread.notification_count = 4;
+    let mut room_mention = active_sort_room("room-mention", false, &["space-a"], &[], Some(100));
+    room_mention.highlight_count = 1;
+    room_mention.notification_count = 1;
+    let mut dm_unread = active_sort_room("dm-unread", true, &[], &["space-a"], Some(400));
+    dm_unread.unread_count = 2;
+    state.rooms = vec![
+        active_sort_room("room-newer", false, &["space-a"], &[], Some(900)),
+        room_unread,
+        room_mention,
+        active_sort_room("dm-newer", true, &[], &["space-a"], Some(950)),
+        dm_unread,
+    ];
+
+    let home = compose_sidebar_for_state(&state);
+    assert_eq!(
+        section_order(&home.sections.rooms),
+        vec!["room-newer", "room-unread", "room-mention"]
+    );
+    assert_eq!(
+        section_order(&home.sections.people),
+        vec!["dm-newer", "dm-unread"]
+    );
+
+    state.navigation.active_space_id = Some("space-a".to_owned());
+    let space = compose_sidebar_for_state(&state);
+    assert_eq!(
+        section_order(&space.sections.rooms),
+        vec!["room-newer", "room-unread", "room-mention"]
+    );
+    assert_eq!(
+        section_order(&space.sections.people),
+        vec!["dm-newer", "dm-unread"]
+    );
+    assert_eq!(space.sections.rooms[1].unread_count, 4);
+    assert_eq!(space.sections.rooms[2].highlight_count, 1);
+}
+
+/// Sliding Sync can restore an unread counter long after the message. That must
+/// not move an old room upward.
+#[test]
+fn restoring_stale_unread_counters_does_not_move_an_old_room() {
+    let mut state = ready_state();
+    let newer = active_sort_room("room-new", false, &[], &[], Some(900));
+    let mut older = active_sort_room("room-old", false, &[], &[], Some(100));
+    update_room_list(&mut state, vec![newer.clone(), older.clone()]);
+    assert_eq!(item_order(&state), vec!["room-new", "room-old"]);
+
+    older.unread_count = 5;
+    older.notification_count = 5;
+    older.highlight_count = 2;
+    older.marked_unread = true;
+    update_room_list(&mut state, vec![newer, older]);
+
+    assert_eq!(item_order(&state), vec!["room-new", "room-old"]);
+}
+
+/// #438's attention-first order stays reachable for a settings document an
+/// older build persisted, even though the selector no longer offers it.
+#[test]
+fn a_persisted_activity_sort_keeps_attention_order() {
+    let sort: RoomListSort =
+        serde_json::from_value(json!({ "kind": "activity" })).expect("legacy activity sort");
+    assert_eq!(sort, RoomListSort::Activity);
+
+    let mut state = ready_state();
+    state.settings.values.room_list_sort = sort;
+    let newer = active_sort_room("room-new", false, &[], &[], Some(900));
+    let mut older = active_sort_room("room-old", false, &[], &[], Some(100));
+    older.unread_count = 5;
+    update_room_list(&mut state, vec![newer, older]);
+
+    assert_eq!(item_order(&state), vec!["room-old", "room-new"]);
+}
+
+/// A live reorder must not drop the selection, and the filter must keep the
+/// projected order instead of re-sorting.
+#[test]
+fn a_reordered_snapshot_keeps_the_selected_room_and_preserves_order_through_filters() {
+    let mut state = ready_state();
+    state.navigation.active_room_id = Some("room-old".to_owned());
+    let newer = active_sort_room("room-new", false, &[], &[], Some(900));
+    let mut older = active_sort_room("room-old", false, &[], &[], Some(100));
+    older.unread_count = 1;
+    update_room_list(&mut state, vec![newer.clone(), older.clone()]);
+    assert_eq!(item_order(&state), vec!["room-new", "room-old"]);
+
+    reduce(
+        &mut state,
+        AppAction::RoomListFilterSelected {
+            filter: RoomListFilter::Unread,
+        },
+    );
+    assert_eq!(item_order(&state), vec!["room-old"]);
+    reduce(
+        &mut state,
+        AppAction::RoomListFilterSelected {
+            filter: RoomListFilter::Rooms,
+        },
+    );
+
+    // A newer message in the other room reorders the list.
+    let mut newer = newer;
+    newer.conversation_activity = Some(ConversationActivity {
+        timestamp_ms: 2_000,
+        source: ConversationActivitySource::Message,
+    });
+    newer.recency_stamp = Some(2_000);
+    update_room_list(&mut state, vec![newer, older]);
+
+    assert_eq!(
+        state.navigation.active_room_id.as_deref(),
+        Some("room-old"),
+        "a live reorder must not move the selection"
+    );
+    assert_eq!(item_order(&state), vec!["room-new", "room-old"]);
 }

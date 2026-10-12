@@ -995,9 +995,12 @@ stateDiagram-v2
   updates delivered after provisional entry, trust loss, logout, or account
   switching are stale and must not repopulate cleared normal projections.
 - Activity ordering first ranks the Rust-owned `room_attention_projection`
-  under each room's effective notification mode: unmuted mention, positive
-  projected notification, remaining unread content, then read/no attention.
-  Ties, and all Recent-first ordering, consume only the Rust-owned
+  under each room's effective notification mode: an unmuted room with SDK-local
+  unread content, then an unmuted room the user marked unread, then everything
+  else. A server notification or highlight counter cannot prove a visible unread
+  message, so alone it creates no rank, and muting a room removes it from both
+  ranks. This is the behavior an explicitly persisted `Activity` value keeps
+  (#542); ties, and all Recent-first ordering, consume only the Rust-owned
   `RoomSummary.conversation_activity` projection. The projection records an
   actual message, undecryptable encrypted message, or thread reply timestamp; it
   is independent from preview-oriented `latest_event`. The SDK's opaque
@@ -1016,6 +1019,15 @@ stateDiagram-v2
   the section into label order when the Event Cache window holds a single
   non-conversation event (#1364). React renders this order and must not re-sort
   room projections.
+- Recent-first order is the product default for every sidebar scope and
+  section: Home and each Space, for both the Rooms and DMs sections. Unread,
+  mention, notification, and mute state stay visible through badges and
+  highlighting but never change a row's position (#542). The sidebar's sort
+  selector offers Recent and Name only, and the Name mode stays locale-aware.
+  `RoomListSort::Activity` remains deserializable so a settings document an
+  older build persisted keeps attention-first ordering until the user picks
+  another mode, and the reducer owns that projection: React renders the
+  Rust-projected order without re-sorting or re-filtering it.
 - The reducer remembers the newest conversation activity it has observed per
   room in `AppState.room_activity`. It is a Rust-only local cache: it never
   enters the frontend snapshot, and it is persisted per account as an

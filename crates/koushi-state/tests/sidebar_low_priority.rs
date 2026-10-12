@@ -45,6 +45,13 @@ fn room(id: &str, label: &str, is_dm: bool, unread: u64, highlight: u64) -> Room
     }
 }
 
+/// Pin the server recency stamp so the section order is decided by recency
+/// instead of the display-label tiebreak (#542: unread no longer moves a row).
+fn with_recency(mut room: RoomSummary, recency_stamp: u64) -> RoomSummary {
+    room.recency_stamp = Some(recency_stamp);
+    room
+}
+
 /// Give a room a conversation timestamp so activity/recency ordering is
 /// decided by real activity instead of the display-label tiebreak.
 fn with_activity(mut room: RoomSummary, timestamp_ms: u64) -> RoomSummary {
@@ -88,7 +95,7 @@ fn mixed_state() -> AppState {
             ],
         }],
         rooms: vec![
-            room("!plain:example.invalid", "Plain", false, 5, 1),
+            with_recency(room("!plain:example.invalid", "Plain", false, 5, 1), 20),
             tag_favourite(room("!fav:example.invalid", "Favourite", false, 0, 0)),
             tag_low_priority(with_activity(
                 room("!low-room:example.invalid", "Zed Low", false, 8, 2),

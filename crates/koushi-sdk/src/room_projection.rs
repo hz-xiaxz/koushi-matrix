@@ -3299,6 +3299,15 @@ pub(super) fn newest_conversation_activity(
     }
 }
 
+/// Classify a timeline event as conversation activity.
+///
+/// #542: the relation comes from the event the client holds, which is the
+/// decrypted event whenever the SDK could decrypt it, so an encrypted edit or
+/// reaction is excluded on the same terms as a plaintext one. A ciphertext-only
+/// event carries no readable relation and therefore counts as an encrypted
+/// message; the SDK's `LatestEventValue` filter is the authority that keeps such
+/// an event out of the latest-event path (see
+/// `vendor/matrix-rust-sdk/crates/matrix-sdk/src/latest_events/latest_event/builder.rs`).
 pub(super) fn matrix_conversation_activity_source(
     event_type: &str,
     relation_type: Option<&str>,
