@@ -16,6 +16,7 @@ mod profile_display_diagnostics;
 mod readers;
 mod reducer_support;
 pub mod request_outcome;
+mod room_activity;
 mod scheduled_send;
 #[cfg(test)]
 mod secure_backup_admission_tests;
@@ -831,6 +832,7 @@ impl CoreRuntime {
             navigation_persistence_status: NavigationPersistenceStatus::Unloaded,
             scheduled_sends_loaded_for: None,
             room_preferences_loaded_for: None,
+            room_activity_loaded_for: None,
             account_settings_loaded_for: None,
             state_generation: 0,
             active_search_request: None,
@@ -1210,6 +1212,7 @@ struct AppActor {
     navigation_persistence_status: NavigationPersistenceStatus,
     scheduled_sends_loaded_for: Option<koushi_protocol::SessionKeyId>,
     room_preferences_loaded_for: Option<koushi_protocol::SessionKeyId>,
+    room_activity_loaded_for: Option<koushi_protocol::SessionKeyId>,
     account_settings_loaded_for: Option<koushi_protocol::SessionKeyId>,
     state_generation: u64,
     pending_composer_draft_persist: Option<PendingComposerDraftPersist>,
@@ -2087,6 +2090,7 @@ impl AppActor {
         let before_post_commit_loads = self.state.clone();
         self.load_account_settings_for_current_session().await;
         self.load_room_preferences_for_current_session().await;
+        self.load_room_activity_for_current_session().await;
         // A queued old-account navigation write must not be
         // overtaken by the new account's load (#971).
         self.flush_pending_navigation().await;

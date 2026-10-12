@@ -629,6 +629,10 @@ fn audit_app_state_delta_slices(state: &AppState) {
         settings: _,
         link_preview_settings: _,
         room_preferences: _,
+        // #1364: a local ordering cache. It changes `rooms` before the room-list
+        // projection runs, and that slice already publishes the result, so the
+        // cache itself never crosses to the frontend.
+        room_activity: _,
         profile: _,
         space_children: _,
         space_members: _,

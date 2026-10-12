@@ -16,6 +16,7 @@ mod account_settings;
 pub(crate) mod composer_drafts;
 mod navigation;
 mod read_state;
+mod room_activity;
 mod room_preferences;
 mod scheduled_sends;
 pub(crate) mod search_progress;

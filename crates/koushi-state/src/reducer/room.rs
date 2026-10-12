@@ -381,6 +381,26 @@ fn handle_room_list_updated_with_crawler(
     } else {
         false
     };
+    // #1364: merge the activity this client remembers for a room into the
+    // snapshot before it becomes authoritative, then advance the cache from the
+    // snapshot's live values. A provisional or partial list may only prune the
+    // rooms it knows left locally, exactly like the other room-keyed memory.
+    state.room_activity.merge_into_rooms(&mut rooms);
+    for room in &rooms {
+        if let Some(activity) = room.conversation_activity {
+            state.room_activity.observe(&room.room_id, activity);
+        }
+    }
+    if authoritative {
+        state
+            .room_activity
+            .retain_rooms(|room_id| retained_room_ids.contains(room_id));
+    } else {
+        let locally_left = &state.room_list.locally_left_room_ids;
+        state
+            .room_activity
+            .retain_rooms(|room_id| !locally_left.contains(room_id));
+    }
     state.rooms = rooms;
     retain_navigation_room_memory(state, authoritative);
     recompute_room_list_projection(state);
@@ -701,6 +721,23 @@ fn room_list_authoritative_matches_current(
             generation: current_generation,
         } if *current_generation == generation && *current_source == source
     )
+}
+
+/// #1364: apply the persisted per-room conversation-activity cache.
+///
+/// Merging is additive: a room keeps whichever timestamp is newer, so a load
+/// that lands after a live projection never moves a room backwards.
+pub(crate) fn handle_room_activity_loaded(
+    state: &mut AppState,
+    activity: crate::state::RoomActivityState,
+) -> Vec<AppEffect> {
+    state.room_activity = activity;
+    let merged = state.room_activity.merge_into_rooms(&mut state.rooms);
+    if !merged {
+        return Vec::new();
+    }
+    recompute_room_list_projection(state);
+    vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
 }
 
 fn newly_unread_room_id(previous_rooms: &[RoomSummary], rooms: &[RoomSummary]) -> Option<String> {

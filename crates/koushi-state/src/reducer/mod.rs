@@ -696,6 +696,9 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
         AppAction::RoomPreferencesLoaded { preferences } => {
             settings::handle_room_preferences_loaded(state, preferences)
         }
+        AppAction::RoomActivityLoaded { activity } => {
+            room::handle_room_activity_loaded(state, activity)
+        }
         AppAction::RoomNotificationModeSet {
             request_id,
             room_id,
@@ -2177,6 +2180,9 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.navigation = NavigationState::default();
     state.link_preview_settings = Default::default();
     state.room_preferences = Default::default();
+    // #1364: the activity cache describes the session being retired, so it must
+    // not leak into the next account's projection.
+    state.room_activity = Default::default();
     state.spaces.clear();
     state.rooms.clear();
     state.room_access.clear();

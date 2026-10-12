@@ -1016,6 +1016,20 @@ stateDiagram-v2
   the section into label order when the Event Cache window holds a single
   non-conversation event (#1364). React renders this order and must not re-sort
   room projections.
+- The reducer remembers the newest conversation activity it has observed per
+  room in `AppState.room_activity`. It is a Rust-only local cache: it never
+  enters the frontend snapshot, and it is persisted per account as an
+  envelope-encrypted `room-activity/activity.v1.enc` under the account root with
+  a key derived from the local unlock secret, so it is deleted with the account's
+  local data. It is written only when the map advances; a room-list update that
+  changes no activity writes nothing. Every installed snapshot merges the remembered value
+  in before the projection runs, keeping whichever timestamp is newer, so a load
+  that lands after a live projection never moves a room backwards; the cache
+  then advances from the snapshot's live values. An authoritative snapshot, a
+  confirmed local leave, and `RoomLeftLocally` prune rooms the client should no
+  longer remember. The record is never authoritative about the room and never
+  outranks a live value; it exists so a restart whose rooms carry no in-memory
+  conversation event still opens the section in true recent order (#1364).
 - Notification-mode and room-preference-load changes recompute the projection,
   emit `UiEvent::RoomListChanged`, and preserve the active selection.
   `RoomMarkedAsReadSucceeded` likewise reorders through its existing room-state
