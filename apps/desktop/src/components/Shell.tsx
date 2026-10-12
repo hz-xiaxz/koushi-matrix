@@ -47,6 +47,8 @@ import {
   roomAccessIndicator
 } from "../domain/accessCondition";
 import { RoomAccessGlyphIcon } from "./RoomAccessGlyph";
+import { onMenuKeyDown } from "./ContextMenuSurface";
+import { useOutsidePressDismissal } from "./popupDismissal";
 import { Tooltip, type TooltipTriggerProps } from "./Tooltip";
 import { ImeTextField } from "./ImeTextControl";
 import { useRecoverableImageSource } from "./avatarImage";
@@ -1207,6 +1209,17 @@ function SectionTitle({
   // explain itself with one word and announce another.
   const createActionLabel = createLabel ?? t("action.createRoom");
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
+  const menuRef = useRef<HTMLDivElement>(null);
+  // #1365/#1368: the menu is a non-modal popup with no backdrop, so the shared
+  // owner dismisses it on an outside press and keeps one section menu open at a
+  // time. The press is not swallowed: it still selects the room under it.
+  useOutsidePressDismissal({
+    open: menuOpen,
+    kind: "sidebar-section-menu",
+    contentRef: menuRef,
+    triggerRef: menuTriggerRef,
+    onDismiss: () => setMenuOpen(false)
+  });
   useEffect(() => {
     if (!menuOpen) return;
     function onKeyDown(event: KeyboardEvent) {
@@ -1218,6 +1231,14 @@ function SectionTitle({
     }
     window.addEventListener("keydown", onKeyDown);
     return () => window.removeEventListener("keydown", onKeyDown);
+  }, [menuOpen]);
+  // Focus enters the menu on open, so the arrow keys rove it like the shared
+  // context menu; Escape returns focus to the trigger (above).
+  useEffect(() => {
+    if (!menuOpen) return;
+    menuRef.current
+      ?.querySelector<HTMLElement>('[role^="menuitem"]')
+      ?.focus();
   }, [menuOpen]);
 
   const sortOptions: Array<[RoomListSort, string]> = [
@@ -1291,7 +1312,13 @@ function SectionTitle({
               )}
             </Tooltip>
             {menuOpen ? (
-              <div className="section-menu" role="menu" aria-label={t("roomList.sectionOptions", { section: label })}>
+              <div
+                className="section-menu"
+                ref={menuRef}
+                role="menu"
+                aria-label={t("roomList.sectionOptions", { section: label })}
+                onKeyDown={(event) => onMenuKeyDown(event, event.currentTarget)}
+              >
                 {onAddExisting ? (
                   <>
                     <button
@@ -1309,7 +1336,8 @@ function SectionTitle({
                     <div className="section-menu-separator" role="separator" />
                   </>
                 ) : null}
-                <div className="section-menu-title">{t("roomList.sort")}</div>
+                {/* A menu's own label is not a menu item. */}
+                <div className="section-menu-title" role="presentation">{t("roomList.sort")}</div>
                 {sortOptions.map(([sort, sortLabel]) => (
                   <button
                     className="section-menu-item"

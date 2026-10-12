@@ -1,9 +1,10 @@
 import { Copy, XCircle } from "lucide-react";
-import { useCallback } from "react";
+import { useCallback, useRef } from "react";
 import { t } from "../../i18n/messages";
 import type { TimelineMegolmSessionReason, TimelineMessageSource } from "../../domain/coreEvents";
 import { writeClipboardText } from "./TimelineMessageBody";
 import { FloatingLayer } from "../floatingLayer";
+import { useOutsidePressDismissal } from "../popupDismissal";
 import { Tooltip } from "../Tooltip";
 
 export function MessageSourceDialog({
@@ -15,6 +16,16 @@ export function MessageSourceDialog({
 }) {
   const sourceJson = messageSourceJson(source);
   const sourceText = JSON.stringify(sourceJson, null, 2);
+  const dialogRef = useRef<HTMLDivElement>(null);
+  // #1368: the panel renders in the body-level floating layer with no backdrop,
+  // so the shared owner closes it on an outside press. The press is not
+  // swallowed: the message under it still receives the click.
+  useOutsidePressDismissal({
+    open: true,
+    kind: "message-source",
+    contentRef: dialogRef,
+    onDismiss: onClose
+  });
   const copyEventId = useCallback(() => {
     void writeClipboardText(source.event_id);
   }, [source.event_id]);
@@ -30,6 +41,7 @@ export function MessageSourceDialog({
   return (
     <FloatingLayer><div
       className="message-source-dialog"
+      ref={dialogRef}
       role="dialog"
       aria-label={t("timeline.messageSource")}
       onKeyDown={(event) => {

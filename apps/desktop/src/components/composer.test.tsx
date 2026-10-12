@@ -1831,3 +1831,61 @@ describe("Composer", () => {
     });
   });
 });
+
+// #1368: the mention listbox renders without a backdrop, so a press outside the
+// composer must dismiss it instead of leaving it over the timeline.
+describe("mention autocomplete dismissal", () => {
+  const candidates: MentionCandidate[] = [
+    {
+      key: "@alice:example.invalid",
+      label: "Alice",
+      target: { kind: "user", user_id: "@alice:example.invalid", display_label: "Alice" }
+    }
+  ];
+
+  function renderComposer() {
+    return render(
+      <Composer
+        surface="main"
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        mentionCandidates={candidates}
+        roomName="Direct room"
+        document={documentFromText("@a")}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+      />
+    );
+  }
+
+  it("dismisses mention suggestions on a press outside the composer", () => {
+    const { container } = renderComposer();
+    expect(container.querySelector(".composer-autocomplete")).not.toBeNull();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(container.querySelector(".composer-autocomplete")).toBeNull();
+  });
+
+  it("offers the same query again when the editor is focused again", () => {
+    const { container } = renderComposer();
+
+    fireEvent.pointerDown(document.body);
+    expect(container.querySelector(".composer-autocomplete")).toBeNull();
+
+    fireEvent.focus(container.querySelector(".composer-inline-editor")!);
+
+    expect(container.querySelector(".composer-autocomplete")).not.toBeNull();
+  });
+
+  it("keeps mention suggestions while the press stays inside the composer", () => {
+    const { container } = renderComposer();
+    const composer = container.querySelector(".composer")!;
+
+    fireEvent.pointerDown(composer);
+    fireEvent.pointerDown(container.querySelector(".composer-inline-editor")!);
+
+    expect(container.querySelector(".composer-autocomplete")).not.toBeNull();
+  });
+});

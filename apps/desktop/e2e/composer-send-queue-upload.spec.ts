@@ -386,9 +386,9 @@ test("room mention candidates keep main and thread composer targets independent"
   await expect(
     threadSuggestions.getByRole("option", { name: "Alice @alice:example.invalid" })
   ).toHaveCount(0);
-  await expect(
-    mainSuggestions.getByRole("option", { name: "Alice @alice:example.invalid" })
-  ).toBeVisible();
+  // Opening the thread panel is a press outside the main composer, so the main
+  // suggestions are dismissed (#1368) instead of staying over the new panel.
+  await expect(mainSuggestions).toHaveCount(0);
   await threadSuggestions
     .getByRole("option", { name: "Bob @bob:example.invalid" })
     .click();
@@ -405,6 +405,7 @@ test("room mention candidates keep main and thread composer targets independent"
       surface: "thread",
       query: "b"
     });
+
 });
 
 test("markdown toolbar and slash composer input dispatch Rust-owned send bodies", async ({
