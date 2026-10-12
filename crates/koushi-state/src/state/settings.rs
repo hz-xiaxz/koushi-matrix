@@ -600,6 +600,13 @@ pub struct SidebarSectionSettings {
     pub collapsed: bool,
     #[serde(default)]
     pub sort: RoomListSort,
+    /// #1363/#1366: the persisted row bound of this section. `false`, the
+    /// default, keeps the section at
+    /// [`crate::SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT`] rows; `true` shows every
+    /// row. The bound is a second, independent dimension from `collapsed`:
+    /// collapsing hides every row, expanding shows the bounded list.
+    #[serde(default)]
+    pub expanded: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -624,6 +631,30 @@ pub enum SidebarSectionKind {
     LowPriority,
 }
 
+/// #1366: the section a conversation selection revealed in the current session.
+///
+/// A Space or the user can leave a section collapsed or bounded, and selecting a
+/// conversation through a notification or permalink must still show its row.
+/// The reducer records the reveal here when the selection settles; the sidebar
+/// projection renders that section open until the user's own collapse choice for
+/// the same scope and section clears it. Session-scoped on purpose: the persisted section
+/// preferences stay the user's, and a restart honors them.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SidebarSectionReveal {
+    /// The `SidebarSettings::scope` key: a Space id, or
+    /// [`SIDEBAR_HOME_SCOPE_KEY`] at Home.
+    pub scope: String,
+    pub section: SidebarSectionKind,
+}
+
+/// The Home scope's key in `SidebarSettings.scope_preferences`.
+pub const SIDEBAR_HOME_SCOPE_KEY: &str = "__home__";
+
+/// The `SidebarSettings::scope` key for a scope id (`None` is Home).
+pub fn sidebar_scope_key(scope: Option<&str>) -> &str {
+    scope.unwrap_or(SIDEBAR_HOME_SCOPE_KEY)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SidebarSectionPatch {
     pub scope: String,
@@ -632,11 +663,25 @@ pub struct SidebarSectionPatch {
     pub collapsed: Option<bool>,
     #[serde(default)]
     pub sort: Option<RoomListSort>,
+    #[serde(default)]
+    pub expanded: Option<bool>,
+}
+
+impl SidebarSectionKind {
+    /// The Settings scope field that owns this section, or `None` for a section
+    /// without a scope preference.
+    pub fn scope_field(self, settings: &SidebarScopeSettings) -> Option<&SidebarSectionSettings> {
+        match self {
+            SidebarSectionKind::Rooms => Some(&settings.rooms),
+            SidebarSectionKind::Dms => Some(&settings.dms),
+            SidebarSectionKind::LowPriority => settings.low_priority.as_ref(),
+        }
+    }
 }
 
 impl SidebarSettings {
     pub fn scope(&self, scope: Option<&str>, fallback_sort: RoomListSort) -> SidebarScopeSettings {
-        let scope = scope.unwrap_or("__home__");
+        let scope = sidebar_scope_key(scope);
         let mut resolved = self
             .scope_preferences
             .get(scope)
@@ -654,12 +699,16 @@ impl SidebarSettings {
             });
         // The Low priority section has no independent sort: it follows the
         // scope's Rooms order. Its unset collapse state falls back to the
-        // legacy device-global flag (state-machine.md, Settings).
+        // legacy device-global flag (state-machine.md, Settings). Its bound is
+        // scoped like the other sections and defaults to the bounded state.
         resolved.low_priority = Some(SidebarSectionSettings {
             collapsed: resolved
                 .low_priority
                 .map_or(self.collapsed.low_priority, |section| section.collapsed),
             sort: resolved.rooms.sort,
+            expanded: resolved
+                .low_priority
+                .is_some_and(|section| section.expanded),
         });
         resolved
     }
@@ -682,6 +731,9 @@ impl SidebarSettings {
         }
         if let Some(sort) = patch.sort {
             section.sort = sort;
+        }
+        if let Some(expanded) = patch.expanded {
+            section.expanded = expanded;
         }
     }
 }

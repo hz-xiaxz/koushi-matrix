@@ -1,9 +1,10 @@
 use crate::{
     effect::{AppEffect, UiEvent},
+    sidebar::compose_sidebar_for_state,
     state::{
         AppState, EventNavigationFailureKind, EventNavigationSource, EventNavigationState,
         NavigationState, RoomListFilter, ScheduledSendsListState, SearchScope, SearchState,
-        SpaceConversationSurface,
+        SidebarSectionKind, SidebarSectionReveal, SpaceConversationSurface, sidebar_scope_key,
     },
 };
 
@@ -17,6 +18,57 @@ use super::{
 };
 
 const MAX_ROOM_SCROLL_ANCHORS: usize = 200;
+
+/// #1366: record the section a settled conversation selection revealed.
+///
+/// Selecting a conversation through a notification or permalink must show its
+/// row even when the scope's persisted state would hide it: a collapsed section
+/// hides every row, and the bound hides rows past
+/// [`crate::SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT`]. The projection already keeps
+/// the open conversation inside the bound; this transition keeps its section
+/// uncollapsed. The reveal is scoped and session-only, and the user's own
+/// collapse choice for the same scope and section clears it, so the persisted
+/// preferences stay the user's. The bound toggle is a separate dimension and
+/// leaves the reveal alone.
+pub(crate) fn reveal_sidebar_section_for_room(state: &mut AppState, room_id: &str) {
+    let scope_key = sidebar_scope_key(state.navigation.active_space_id.as_deref()).to_owned();
+    let section = collapsed_section_containing(state, room_id);
+    state.navigation.revealed_sidebar_section = section.map(|section| SidebarSectionReveal {
+        scope: scope_key,
+        section,
+    });
+}
+
+/// Clear a reveal the user has overridden, or that no longer applies.
+pub(crate) fn clear_revealed_sidebar_section(state: &mut AppState) {
+    state.navigation.revealed_sidebar_section = None;
+}
+
+/// The section of the active scope that holds `room_id` and is collapsed.
+fn collapsed_section_containing(state: &AppState, room_id: &str) -> Option<SidebarSectionKind> {
+    let sections = compose_sidebar_for_state(state).sections;
+    let section = if sections.rooms.iter().any(|room| room.room_id == room_id) {
+        SidebarSectionKind::Rooms
+    } else if sections.people.iter().any(|room| room.room_id == room_id) {
+        SidebarSectionKind::Dms
+    } else if sections
+        .low_priority
+        .iter()
+        .any(|room| room.room_id == room_id)
+    {
+        SidebarSectionKind::LowPriority
+    } else {
+        return None;
+    };
+    let scope = state.settings.values.sidebar.scope(
+        state.navigation.active_space_id.as_deref(),
+        state.settings.values.room_list_sort,
+    );
+    section
+        .scope_field(&scope)
+        .is_some_and(|settings| settings.collapsed)
+        .then_some(section)
+}
 
 pub(crate) fn handle_invite_list_updated(
     state: &mut AppState,
@@ -349,6 +401,9 @@ pub(crate) fn handle_select_space(
             effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
         }
         close_current_room_search_for_room_change(state, None, &mut effects);
+        // #1366: selecting Home clears the open conversation, so no section
+        // stays revealed for a conversation that is no longer open.
+        clear_revealed_sidebar_section(state);
         if let Some(previous_room_id) = previous_room_id {
             clear_active_room_for_navigation(state, &mut effects, previous_room_id);
         }
@@ -379,6 +434,10 @@ pub(crate) fn handle_select_space(
                 }
             }
         }
+    }
+    match state.navigation.active_room_id.clone() {
+        Some(room_id) => reveal_sidebar_section_for_room(state, &room_id),
+        None => clear_revealed_sidebar_section(state),
     }
     remember_active_room_for_current_space(state);
     effects
@@ -474,9 +533,13 @@ pub(crate) fn handle_select_room(state: &mut AppState, room_id: String) -> Vec<A
     if state.navigation.active_room_id.as_deref() == Some(room_id.as_str())
         && state.timeline.room_id.as_deref() == Some(room_id.as_str())
     {
+        // #1366: re-selecting the open conversation still reveals its section,
+        // so a notification for the room already on screen shows its row.
+        reveal_sidebar_section_for_room(state, &room_id);
         remember_active_room_for_current_space(state);
         return effects;
     }
+    reveal_sidebar_section_for_room(state, &room_id);
     select_active_room_for_navigation(state, &mut effects, room_id);
     remember_active_room_for_current_space(state);
     effects

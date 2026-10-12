@@ -2201,6 +2201,33 @@ button:disabled {
   font-size: 12px;
 }
 
+/* #1363/#1366: full-width bound control at the end of a bounded section. It
+   reads as a quiet row action, so a bounded section still ends with the room
+   list instead of a dialog-like button. */
+.room-section-bound {
+  display: block;
+  inline-size: 100%;
+  padding: 6px 12px 8px;
+  border: 0;
+  background: none;
+  font: inherit;
+  font-size: 12px;
+  font-weight: 600;
+  text-align: start;
+  color: var(--text-muted);
+  cursor: pointer;
+}
+
+.room-section-bound:hover {
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.room-section-bound:focus-visible {
+  outline: 2px solid var(--text);
+  outline-offset: -2px;
+}
+
 .main-pane {
   display: flex;
   flex-direction: column;

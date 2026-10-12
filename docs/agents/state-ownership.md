@@ -612,6 +612,14 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   vector but must not classify tags/DMs, join room/Space membership, compute
   attention or sort. Account-global invites remain the Home navigation/count and
   are not a room section.
+- Section row bounds are Rust state
+  ([canon](../architecture/state-machine.md#sidebar-section-row-bound-1363-1366)):
+  the persisted `expanded` preference lives in `SidebarScopeSettings`, the
+  projection emits `SidebarModel.section_bounds`, and React only slices with
+  `visible_count` and renders the control Rust asked for. Frontend fakes must
+  look the numbers up in the Rust-generated
+  `apps/desktop/src/test/sidebarSectionBounds.generated.json` instead of
+  computing a bound, and a shape that fixture does not cover renders every row.
 - The Not joined section is fed by `AppState.space_children`, the selected
   Space's `/hierarchy` projection (#961). Rust owns it end to end: the reducer
   clears it and bumps its generation wherever the active Space changes

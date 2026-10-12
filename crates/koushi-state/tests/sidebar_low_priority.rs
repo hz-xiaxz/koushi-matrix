@@ -239,6 +239,7 @@ fn low_priority_collapse_falls_back_to_the_legacy_flag_until_the_scope_is_edited
             section: SidebarSectionKind::LowPriority,
             collapsed: Some(false),
             sort: None,
+            expanded: None,
         },
         RoomListSort::Activity,
     );
@@ -259,6 +260,7 @@ fn the_low_priority_section_follows_the_scope_rooms_sort() {
             section: SidebarSectionKind::Rooms,
             collapsed: None,
             sort: Some(RoomListSort::NormalLocale),
+            expanded: None,
         },
         RoomListSort::Activity,
     );
@@ -268,6 +270,7 @@ fn the_low_priority_section_follows_the_scope_rooms_sort() {
         Some(SidebarSectionSettings {
             collapsed: false,
             sort: RoomListSort::NormalLocale,
+            expanded: false,
         })
     );
 }

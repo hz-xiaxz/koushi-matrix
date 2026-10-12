@@ -63,6 +63,7 @@ import {
   type StagedUploadCompressionChoice
 } from "../domain/types";
 import { TauriIpcMock, type IpcInvocation } from "./tauriIpcMock";
+import { withSectionBounds } from "./withSectionBounds";
 import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
 import { avatarInitial } from "../app/uiShared";
 import {
@@ -492,15 +493,20 @@ function applySettingsPatch(
   const sidebarSection = patch.sidebar_section;
   const nextSidebar = sidebarSection
     ? (() => {
-        const scope = sidebar.scope_preferences?.[sidebarSection.scope] ?? {
-          rooms: { collapsed: false, sort: values.room_list_sort },
-          dms: { collapsed: false, sort: values.room_list_sort }
+        const scope: SidebarScopeSettings = sidebar.scope_preferences?.[
+          sidebarSection.scope
+        ] ?? {
+          rooms: { collapsed: false, sort: values.room_list_sort, expanded: false },
+          dms: { collapsed: false, sort: values.room_list_sort, expanded: false }
         };
         // `SidebarSectionKind` is camelCase on the wire; the stored scope keys
         // are the snake_case Rust field names.
         const field = SIDEBAR_SECTION_FIELD[sidebarSection.section];
-        const currentSection =
-          scope[field] ?? { collapsed: false, sort: scope.rooms?.sort ?? values.room_list_sort };
+        const currentSection = scope[field] ?? {
+          collapsed: false,
+          sort: scope.rooms?.sort ?? values.room_list_sort,
+          expanded: false
+        };
         return {
           ...sidebar,
           scope_preferences: {
@@ -512,7 +518,10 @@ function applySettingsPatch(
                 ...(sidebarSection.collapsed === undefined
                   ? {}
                   : { collapsed: sidebarSection.collapsed }),
-                ...(sidebarSection.sort === undefined ? {} : { sort: sidebarSection.sort })
+                ...(sidebarSection.sort === undefined ? {} : { sort: sidebarSection.sort }),
+                ...(sidebarSection.expanded === undefined
+                  ? {}
+                  : { expanded: sidebarSection.expanded })
               }
             }
           }
@@ -795,7 +804,7 @@ function harnessAccountTabsSnapshot() {
 // harness. Individual dialog behavior belongs in focused unit tests; existing
 // end-to-end flows should continue past an explicit destructive confirmation.
 mock.setCommandResponse("plugin:dialog|message", "Ok");
-let currentSnapshot = readySnapshot();
+let currentSnapshot = withSectionBounds(readySnapshot());
 let lastStateUpdateGeneration = currentSnapshot.state_generation ?? 0;
 
 type HarnessReceiptReaderScope = {
@@ -1170,7 +1179,7 @@ function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
     sort: { kind: "activity" as const },
     items: []
   };
-  currentSnapshot = {
+  currentSnapshot = withSectionBounds({
     ...next,
     state_generation: Math.max(
       previousSnapshot.state_generation ?? 0,
@@ -1189,7 +1198,7 @@ function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
         room_list: roomList
       },
     }
-  };
+  });
   reconcilePreparedUploadBytes(previousSnapshot, currentSnapshot);
   reconcileComposerLeases(currentSnapshot);
   return currentSnapshot;

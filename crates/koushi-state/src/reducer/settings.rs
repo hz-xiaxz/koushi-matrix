@@ -161,9 +161,29 @@ pub(crate) fn handle_settings_update_requested(
     let prev_room_list_sort = state.settings.values.room_list_sort;
     let prev_thread_list_order = state.settings.values.thread_list_order;
     let prev_sidebar = state.settings.values.sidebar.clone();
+    let prev_reveal = state.navigation.revealed_sidebar_section.clone();
 
     state.settings.values.apply_patch(patch.clone());
     state.settings.persistence = SettingsPersistenceState::Saving { request_id };
+
+    // #1366: the user's own collapse choice for a revealed section ends the
+    // session reveal, so the persisted preference decides again. Only the
+    // collapse choice: the bound toggle is a different dimension and must not
+    // re-collapse a section the user has open (a revealed section whose stored
+    // preference is collapsed would otherwise vanish on "Show more"). The
+    // reveal is navigation state and is never persisted with the patch.
+    if let Some(section) = patch.sidebar_section.as_ref()
+        && section.collapsed.is_some()
+        && state
+            .navigation
+            .revealed_sidebar_section
+            .as_ref()
+            .is_some_and(|reveal| {
+                reveal.scope == section.scope && reveal.section == section.section
+            })
+    {
+        super::navigation::clear_revealed_sidebar_section(state);
+    }
 
     let new_crawler = state.settings.values.search_crawler.clone();
     let mut effects = vec![
@@ -180,6 +200,7 @@ pub(crate) fn handle_settings_update_requested(
 
     if state.settings.values.room_list_sort != prev_room_list_sort
         || state.settings.values.sidebar != prev_sidebar
+        || state.navigation.revealed_sidebar_section != prev_reveal
     {
         recompute_room_list_projection(state);
         effects.push(AppEffect::EmitUiEvent(UiEvent::RoomListChanged));

@@ -118,12 +118,13 @@ pub use settings::{
     EmojiPreference, FontPreference, ImageUploadCompressionMode, ImageUploadCompressionPolicy,
     KeyboardSettings, LinkPreviewSettingsState, LocaleSettings, MediaSettings,
     NotificationSettings, RoomNotificationMode, RoomNotificationModeOperation,
-    RoomNotificationSettings, RoomPreference, RoomPreferencesState, RoomUrlPreviews, SettingsPatch,
-    SettingsPatchScope, SettingsPersistenceState, SettingsState, SettingsValues, SidebarCategory,
-    SidebarCollapsedSections, SidebarScopeSettings, SidebarSectionKind, SidebarSectionPatch,
-    SidebarSectionSettings, SidebarSettings, TextDirectionPreference, ThemePreference,
-    ThreadListOrder, TimelineSettings, TimelineThreadRootOrder, TypographySettings,
-    UpdatesSettings, WindowSettings,
+    RoomNotificationSettings, RoomPreference, RoomPreferencesState, RoomUrlPreviews,
+    SIDEBAR_HOME_SCOPE_KEY, SettingsPatch, SettingsPatchScope, SettingsPersistenceState,
+    SettingsState, SettingsValues, SidebarCategory, SidebarCollapsedSections, SidebarScopeSettings,
+    SidebarSectionKind, SidebarSectionPatch, SidebarSectionReveal, SidebarSectionSettings,
+    SidebarSettings, TextDirectionPreference, ThemePreference, ThreadListOrder, TimelineSettings,
+    TimelineThreadRootOrder, TypographySettings, UpdatesSettings, WindowSettings,
+    sidebar_scope_key,
 };
 
 // ── Re-exports: profile ─────────────────────────────────────────────────────

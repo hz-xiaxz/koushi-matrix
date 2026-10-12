@@ -1409,6 +1409,29 @@ fn composer_revision_tauri_wire_round_trips_max_and_rejects_numeric() {
     assert!(serde_json::from_value::<ComposerDraftRevision>(json!(1)).is_err());
 }
 
+/// #1363/#1366: the bound React slices with crosses the IPC boundary under the
+/// exact snake_case field names `apps/desktop/src/domain/types.ts` declares.
+///
+/// The DTO golden carries `section_bounds` for its maximally-populated state,
+/// but every section there is at or below the bound, so this also pins the
+/// values a long section produces (`hidden_count`, `shows_expand_control`).
+#[test]
+fn the_sidebar_section_bound_serializes_a_hidden_count() {
+    let bound = koushi_state::SidebarSectionBound::project(9, false, None);
+    assert_eq!(
+        serde_json::to_value(bound).expect("the bound should serialize"),
+        json!({
+            "visible_limit": 5,
+            "total_count": 9,
+            "visible_count": 5,
+            "hidden_count": 4,
+            "expanded": false,
+            "expanded_by_active_room": false,
+            "shows_expand_control": true,
+        })
+    );
+}
+
 /// Characterization / golden test for the complete `FrontendAppState` DTO wire shape.
 ///
 /// Purpose: lock in the exact JSON serialization of `FrontendDesktopSnapshot` so any
@@ -1672,6 +1695,9 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             section: koushi_state::SidebarSectionKind::LowPriority,
             collapsed: Some(true),
             sort: None,
+            // #1366: exercise the persisted bound preference next to the
+            // independent collapse choice.
+            expanded: Some(true),
         },
         state.settings.values.room_list_sort,
     );
@@ -1725,6 +1751,8 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         room_scroll_anchors: BTreeMap::new(),
         main_timeline_anchor: None,
         event_navigation: koushi_state::EventNavigationState::Idle,
+        // #1366: session-only, so it never reaches this DTO.
+        revealed_sidebar_section: None,
     };
 
     // room_interactions
