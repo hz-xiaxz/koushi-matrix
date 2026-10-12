@@ -2300,22 +2300,21 @@ impl AccountActor {
         generation: u64,
         deadline_serial: u64,
     ) {
-        // The sender task is already finished, so release its handle whenever
-        // it still owns the current serial. An expiry that arrived while the
-        // session was unpromoted or under an older generation cannot project a
-        // terminal, but leaving its handle behind would block every later defer
-        // from arming a fresh bounded wait (#1361).
-        if deadline_serial == self.secure_backup_defer_serial {
-            self.secure_backup_defer_deadline_task = None;
-        }
-        let is_current = self.session_promoted
-            && generation == self.trust_generation
-            && deadline_serial == self.secure_backup_defer_serial;
-        if !is_current {
+        if deadline_serial != self.secure_backup_defer_serial {
+            // A newer arm replaced this one and owns its own handle and expiry.
             return;
         }
-        // Consume the serial so a replayed expiry cannot fail the gate twice.
+        // The sender task is finished and still owns the current serial:
+        // release its handle and consume the serial, so a replayed message
+        // cannot release a later arm or fail the gate twice. An expiry that
+        // fired while the session was unpromoted or under an older generation
+        // cannot project a terminal; promotion re-arms a fresh bounded wait
+        // (#1361).
+        self.secure_backup_defer_deadline_task = None;
         self.secure_backup_defer_serial = self.secure_backup_defer_serial.wrapping_add(1).max(1);
+        if !self.session_promoted || generation != self.trust_generation {
+            return;
+        }
         self.secure_backup_inspection_pending = false;
         let Some(action) = secure_backup_inspection_completion_action(
             self.trust_generation,

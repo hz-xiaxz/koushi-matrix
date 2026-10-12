@@ -35,11 +35,14 @@ return, so nothing else replayed the missed edge.
     inspection can have settled between the retained edge and promotion.
   - an admitted request that cannot spawn because the session is unpromoted now
     stays pending instead of being dropped silently, so promotion can replay it.
-  - `handle_secure_backup_defer_deadline_expired` releases the finished
-    deadline handle even when the expiry is not current (it was unpromoted or
-    under an older generation). The sender task is finished, and leaving the
-    handle behind blocked every later defer from arming a fresh bounded wait,
-    which could strand `Checking` with no deadline, terminal, or monitor.
+  - `handle_secure_backup_defer_deadline_expired` now treats the armed serial as
+    the task identity: a message for an older serial is ignored, and a message
+    that still owns the current serial releases the finished handle and consumes
+    the serial before deciding eligibility. The finished handle used to stay
+    behind when the expiry was not current (unpromoted or an older generation),
+    which blocked every later defer from arming a fresh deadline and could
+    strand `Checking` with no deadline, terminal, or monitor; consuming the
+    serial also means a replayed message cannot release a newer arm.
 - `crates/koushi-core/src/account/trust_gate.rs`: both session-promotion paths
   (`promote_recovered_session_runtime` and the verified-projection promotion)
   call the replay next to the Secure Backup observer start.
@@ -70,6 +73,21 @@ fence.
 - Independent read-only review of the integrated diff found the unpromoted
   expiry-handle gap and the dropped unpromoted admission; both were fixed and
   covered by the tests above.
+
+## Known residual
+
+A deadline armed under an older `trust_generation` can still lose its automatic
+terminal. `promote_recovered_session_runtime` advances the generation through
+`stop_provisional_runtime` (which retires the session-check timers but not this
+deadline), and the promotion replay's re-arm is idempotent, so the surviving
+old-generation task fires, releases its handle, and is rejected by the
+generation fence. `pending` then waits for the next demand instead of reaching
+`BlockedFailed` on its own. There is no permanent hang (the freed handle lets
+Retry or an observer-driven defer arm a fresh wait), and this is pre-existing.
+It is not fixed here because driving a generation change together with an
+unpromoted inspection demand needs a harness that does not exist yet; the
+candidate fixes are to retire the deadline wherever `trust_generation` advances
+or to store the armed generation and re-arm only when it is stale.
 
 ## Pending manual checks
 
