@@ -4,7 +4,7 @@ use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, reco
 use koushi_protocol::event::{CoreEvent, IntentNoOpReason, IntentOutcome};
 use koushi_state::{
     ActivityState, AppAction, AppEffect, AppState, ComposerDraftStore, NavigationState,
-    SearchState, reduce,
+    RoomActivityState, SearchState, reduce,
 };
 
 use super::composer::{
@@ -19,6 +19,7 @@ use super::profile_display_diagnostics::{
     live_receipt_profile_diagnostic_event, profile_resolution_diagnostic_event,
     record_native_attention_recomputed,
 };
+use super::room_preferences_session_key;
 use super::scheduled_send::{DeferredScheduledSendPersist, scheduled_send_session_key};
 
 use crate::unread_trace;
@@ -164,6 +165,9 @@ pub(super) struct DeferredReducerSideEffects {
     cancel_activity_resolution: bool,
     cancel_event_navigation_owner: bool,
     navigation: Option<(koushi_protocol::SessionKeyId, NavigationState, bool)>,
+    /// #1364: the persisted per-room activity cache, written when a reduce
+    /// advanced it.
+    room_activity: Option<(koushi_protocol::SessionKeyId, RoomActivityState)>,
     composer_drafts: Option<(koushi_protocol::SessionKeyId, ComposerDraftStore)>,
     composer_drafts_discarded: bool,
     scheduled_sends: Option<DeferredScheduledSendPersist>,
@@ -233,6 +237,9 @@ impl super::AppActor {
         let previous_composer_targets = active_composer_targets(&self.state);
         let previous_navigation_session = navigation_session_key(&self.state);
         let previous_navigation = self.state.navigation.clone();
+        // #1364: the activity cache advances from the authoritative room list
+        // and from the persisted load; the runtime writes it when it changed.
+        let previous_room_activity = self.state.room_activity.clone();
         let previous_event_navigation = self.state.navigation.event_navigation;
         let previous_scheduled_session = scheduled_send_session_key(&self.state);
         let previous_scheduled_sends = self.state.scheduled_sends.clone();
@@ -424,6 +431,11 @@ impl super::AppActor {
                 ));
             }
         }
+        if previous_room_activity != self.state.room_activity
+            && let Some(key_id) = room_preferences_session_key(&self.state)
+        {
+            deferred.room_activity = Some((key_id, self.state.room_activity.clone()));
+        }
         if previous_drafts != self.state.composer_drafts {
             match composer_draft_transition {
                 ComposerDraftTransitionPolicy::Discard => {}
@@ -526,6 +538,9 @@ impl super::AppActor {
                     )),
                 );
             }
+        }
+        if let Some((key_id, activity)) = deferred.room_activity {
+            self.persist_room_activity(key_id, activity).await;
         }
         if let Some((key_id, drafts)) = deferred.composer_drafts {
             self.schedule_composer_draft_persist(key_id, drafts).await;

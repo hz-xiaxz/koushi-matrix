@@ -25,6 +25,7 @@ const COMPOSER_DRAFTS_INFO: &[u8] = b"koushi-desktop:composer-drafts";
 const SCHEDULED_SENDS_INFO: &[u8] = b"koushi-desktop:scheduled-sends";
 const NAVIGATION_INFO: &[u8] = b"koushi-desktop:navigation";
 const ROOM_PREFERENCES_INFO: &[u8] = b"koushi-desktop:room-preferences";
+const ROOM_ACTIVITY_INFO: &[u8] = b"koushi-desktop:room-activity";
 const ACCOUNT_SETTINGS_INFO: &[u8] = b"koushi-desktop:account-settings";
 const READ_STATE_OUTBOX_INFO: &[u8] = b"koushi-desktop:read-state-outbox";
 const SEARCH_PROGRESS_INFO: &[u8] = b"koushi-desktop:search-progress";
@@ -642,6 +643,12 @@ pub struct RoomPreferencesKey {
     key: Zeroizing<[u8; LOCAL_UNLOCK_SECRET_LEN]>,
 }
 
+/// #1364: per-room conversation-activity cache. Domain-separated from the
+/// preference and navigation stores even though it is also account-scoped.
+pub struct RoomActivityKey {
+    key: Zeroizing<[u8; LOCAL_UNLOCK_SECRET_LEN]>,
+}
+
 pub struct AccountSettingsKey {
     key: Zeroizing<[u8; LOCAL_UNLOCK_SECRET_LEN]>,
 }
@@ -678,6 +685,12 @@ impl RoomPreferencesKey {
     }
 }
 
+impl RoomActivityKey {
+    pub fn as_bytes(&self) -> &[u8; LOCAL_UNLOCK_SECRET_LEN] {
+        &self.key
+    }
+}
+
 impl SearchProgressKey {
     pub fn as_bytes(&self) -> &[u8; LOCAL_UNLOCK_SECRET_LEN] {
         &self.key
@@ -693,6 +706,12 @@ impl AccountSettingsKey {
 impl fmt::Debug for RoomPreferencesKey {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter.write_str("RoomPreferencesKey(..)")
+    }
+}
+
+impl fmt::Debug for RoomActivityKey {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("RoomActivityKey(..)")
     }
 }
 
@@ -876,6 +895,14 @@ impl LocalUnlockSecret {
         RoomPreferencesKey {
             key: self
                 .derive_key(ROOM_PREFERENCES_INFO)
+                .expect("32-byte HKDF output length is valid"),
+        }
+    }
+
+    pub fn derive_room_activity_key(&self) -> RoomActivityKey {
+        RoomActivityKey {
+            key: self
+                .derive_key(ROOM_ACTIVITY_INFO)
                 .expect("32-byte HKDF output length is valid"),
         }
     }
@@ -1213,6 +1240,25 @@ mod tests {
         assert_ne!(
             read_state.as_bytes(),
             secret.derive_navigation_key().as_bytes()
+        );
+    }
+
+    #[test]
+    fn room_activity_uses_a_dedicated_hkdf_domain() {
+        let secret = LocalUnlockSecret::generate();
+        let activity = secret.derive_room_activity_key();
+
+        assert_ne!(
+            activity.as_bytes(),
+            secret.derive_room_preferences_key().as_bytes()
+        );
+        assert_ne!(
+            activity.as_bytes(),
+            secret.derive_navigation_key().as_bytes()
+        );
+        assert_ne!(
+            activity.as_bytes(),
+            secret.derive_read_state_outbox_key().as_bytes()
         );
     }
 }

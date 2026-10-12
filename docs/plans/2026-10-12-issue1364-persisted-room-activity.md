@@ -57,8 +57,11 @@ ever seen per room:
   account-scoped file under `account_root_dir`, a versioned magic
   (`KOUSHI-ROOM-ACTIVITY-V1\0`), `koushi_store` envelope encryption, an empty
   state deleting the file, and `atomic_replace_file` for the write.
-- The persist effect is emitted only when the map advances, so a room-list
-  update that changes no activity writes nothing.
+- The runtime diffs the reducer's map across a commit (the navigation
+  persistence precedent) and writes it only when it advanced, so a room-list
+  update that changes no activity writes nothing. The field is
+  `#[serde(skip)]`: the cache stays Rust-only and never enters the frontend
+  snapshot or a DTO mirror.
 
 ## Consequence for #542
 
@@ -70,17 +73,19 @@ gate.
 
 ## Slices
 
-1. `crates/koushi-state`: `recency_stamp` fallback in
-   `compare_conversation_activity`; tests in
+1. Landed in PR #1367: the `recency_stamp` fallback in
+   `compare_conversation_activity`, with tests in
    `crates/koushi-state/tests/navigation_state/sidebar_sorting.rs`.
-2. `crates/koushi-state`: `RoomActivityState` in `AppState`, reducer merge,
-   advance, prune, and the persisted-activity effect; tests beside the room list
-   reducer tests.
-3. `crates/koushi-core`: `store/room_activity.rs` load/save with the round-trip
-   and corruption tests, `koushi-key` derivation and its domain test, runtime
-   session-start load and effect handling.
-4. Canon: `docs/architecture/state-machine.md` ordering key and the persisted
-   store; `docs/architecture/overview.md` if the ownership statement needs it.
+2. `crates/koushi-state`: `RoomActivityState` in `AppState`, the reducer merge,
+   advance, and prune, and `AppAction::RoomActivityLoaded`; tests in
+   `crates/koushi-state/tests/room_activity_persistence.rs`.
+3. `crates/koushi-core` / `koushi-key`: `store/room_activity.rs` load and save
+   with the round-trip, empty-delete, and corruption tests, the
+   `derive_room_activity_key` domain and its separation test, and the runtime
+   session-start load plus the commit diff that persists it.
+4. Canon: `docs/architecture/state-machine.md` ordering key and cache
+   paragraph. No `overview.md` change: the store mechanics stay inside Core's
+   existing `StoreActor` ownership.
 
 ## Not in scope
 
