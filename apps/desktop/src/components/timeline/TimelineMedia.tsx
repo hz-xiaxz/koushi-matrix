@@ -17,6 +17,7 @@ import { type CSSProperties, type ReactNode, type RefObject, useCallback, useEff
 
 import { t } from "../../i18n/messages";
 import { Tooltip } from "../Tooltip";
+import { useOutsidePressDismissal } from "../popupDismissal";
 import { onMenuKeyDown } from "../ContextMenuSurface";
 import type { MediaTransferProgress, TimelineItem } from "../../domain/coreEvents";
 import type { TimelineMediaDownloadState } from "../../domain/types";
@@ -522,7 +523,19 @@ function MediaDetailsPopup({ anchor, onClose, children }: {
   anchor: RefObject<HTMLButtonElement | null>; onClose: () => void; children: ReactNode;
 }) {
   const placement = useFloatingPlacement({ anchorRef: anchor, placement: "below", align: "end", inlineSize: 260, blockSize: 180 });
+  const popupRef = useRef<HTMLDivElement>(null);
+  // #1368: the details panel renders in the body-level floating layer with no
+  // backdrop, so the shared owner dismisses it on an outside press and keeps
+  // one row's details open at a time.
+  useOutsidePressDismissal({
+    open: true,
+    kind: "media-details",
+    contentRef: popupRef,
+    triggerRef: anchor,
+    onDismiss: onClose
+  });
   return <FloatingLayer><div className="message-media-details-popover" role="dialog"
+    ref={popupRef}
     aria-label={t("timeline.mediaDetailsTitle")} style={floatingPlacementStyle(placement)}
     onKeyDown={event => {
       if (event.key === "Escape" && !event.nativeEvent.isComposing) {

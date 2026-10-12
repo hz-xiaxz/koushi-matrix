@@ -764,6 +764,33 @@ To reduce conflicts on these files:
   the close and send actions with `elementFromPoint`, and click them; a
   `toBeVisible()` check or a screenshot alone is not containment evidence.
 
+### Popup Dismissal And Floating Surfaces
+
+- A non-modal floating surface (a menu, a details popover, a source panel, an
+  autocomplete) dismisses on a pointer press outside it and on Escape. A
+  surface that renders no backdrop has no other dismissal owner, so leaving it
+  to the next navigation, selection, or draft change is not dismissal.
+- One shared owner supplies the press-driven contract:
+  `useOutsidePressDismissal` in
+  `apps/desktop/src/components/popupDismissal.ts`. Popup open/closed is
+  ephemeral presentation state, so React owns it; a surface must not hand-roll
+  its own document listener.
+- The press that dismisses a popup is not swallowed: it still performs its own
+  action (selecting the room under it, moving the caret). Only a
+  pointer-anchored context menu keeps a click-guard backdrop, which
+  `ContextMenuSurface` already provides; a new surface does not add one.
+- One instance per popup kind is open at a time. A per-row or per-section open
+  flag passes a shared `kind`, so opening another instance closes the previous
+  one instead of stacking copies.
+- Escape closes the surface and returns focus to its trigger. An outside press
+  must not move focus, because the user is interacting with something else.
+- Popups that a pointer owns (a hover or focus bubble) keep that ownership
+  (`useHoverFocusPopup`); dismissal by press is for surfaces the user opened
+  and expects to close.
+- Headless regressions press outside the popup and then assert the popup is
+  gone, that one instance of the kind remains, and that the dismissing press
+  still reached its own action.
+
 ## Search Index And Room-Key Export
 
 - Manual room-key file export/import MUST use the Matrix key-export file

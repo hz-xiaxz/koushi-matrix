@@ -128,7 +128,9 @@ already shared.
 ## Conversation list sections
 
 The conversation list shows **Rooms** above **DMs**. Each heading can be
-collapsed and sorted from its own menu. The number to the right of a heading is
+collapsed and sorted from its own menu. The menu closes when you choose an
+option, press anywhere outside it, or press Escape, and only one section's menu
+is open at a time. The number to the right of a heading is
 its unread total for the current Home or Space view; it turns into a red badge
 when there is something unread, shows `99+` above 99, and disappears at zero. It
 stays on the Rust-reported total for the whole view, so filtering the list or

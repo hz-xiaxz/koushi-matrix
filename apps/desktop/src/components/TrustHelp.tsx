@@ -3,6 +3,7 @@ import { FloatingLayer, floatingPlacementStyle, useFloatingPlacement } from "./f
 import { HelpCircle } from "lucide-react";
 
 import { t } from "../i18n/messages";
+import { useOutsidePressDismissal } from "./popupDismissal";
 import { Tooltip } from "./Tooltip";
 import type { UserTrustState } from "../domain/types";
 
@@ -58,7 +59,19 @@ function TrustHelpPopup({ trigger, title, body, onClose }: {
   trigger: RefObject<HTMLButtonElement | null>; title: string; body: string; onClose: () => void;
 }) {
   const placement = useFloatingPlacement({ anchorRef: trigger, placement: "below", align: "start", inlineSize: 300, blockSize: 220 });
+  const popupRef = useRef<HTMLSpanElement>(null);
+  // #1368: the popover renders in the body-level floating layer with no
+  // backdrop, so the shared owner dismisses it on an outside press and keeps
+  // one trust help popup open at a time.
+  useOutsidePressDismissal({
+    open: true,
+    kind: "trust-help",
+    contentRef: popupRef,
+    triggerRef: trigger,
+    onDismiss: onClose
+  });
   return <FloatingLayer><span className="trust-help-popover" role="dialog" aria-label={title}
+    ref={popupRef}
     style={floatingPlacementStyle(placement)}
     onKeyDown={(event) => {
       if (event.key === "Escape" && !event.nativeEvent.isComposing) {

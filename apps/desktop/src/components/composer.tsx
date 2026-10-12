@@ -4,6 +4,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type MouseEvent,
+  type RefObject,
   memo,
   useCallback,
   useEffect,
@@ -66,6 +67,7 @@ import {
   type NativeFileDropEvent
 } from "../backend/nativeFileDropRuntime";
 import { EntityAvatar } from "./Shell";
+import { useOutsidePressDismissal } from "./popupDismissal";
 import { Tooltip } from "./Tooltip";
 import { useStableEvent } from "./useStableEvent";
 import {
@@ -1018,6 +1020,8 @@ export const Composer = memo(function Composer({
         candidates={activeMentionSuggestions}
         loading={mentionCandidatesLoading}
         activeOptionId={activeMentionOptionId}
+        anchorRef={sectionRef}
+        onDismiss={closeAutocompleteForCurrentQuery}
         onAccept={acceptMention}
         onMouseDown={keepComposerFocus}
       />
@@ -1031,6 +1035,11 @@ export const Composer = memo(function Composer({
         syncKey={draftKey}
         onDocumentChange={(nextDocument) => updateLocalDocument(nextDocument)}
         onSelectionChange={setDocumentSelection}
+        // #1368: an outside press dismisses the suggestions for the current
+        // mention query. Returning to the editor starts a new editing session,
+        // so the same query offers its candidates again instead of staying
+        // suppressed for the rest of the draft's life.
+        onFocus={() => setDismissedMentionKey(null)}
         onKeyDown={onComposerKeyDown}
         onPaste={(event) => {
           const files = filesFromAttachmentTransfer(event.clipboardData);
@@ -1328,6 +1337,8 @@ export function MentionAutocomplete({
   candidates,
   loading,
   activeOptionId,
+  anchorRef,
+  onDismiss,
   onAccept,
   onMouseDown
 }: {
@@ -1337,10 +1348,23 @@ export function MentionAutocomplete({
   candidates: MentionCandidate[];
   loading: boolean;
   activeOptionId?: string;
+  anchorRef: RefObject<HTMLElement | null>;
+  onDismiss: () => void;
   onAccept: (candidate: MentionCandidate) => void;
   onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
+  // #1368: the listbox renders in flow without a backdrop, so a press outside
+  // the composer dismisses it instead of leaving it over the timeline. Presses
+  // inside the composer (the editor, the tools, Send) keep it, because those
+  // deliberately keep editing focus.
+  useOutsidePressDismissal({
+    open,
+    kind: "composer-autocomplete",
+    contentRef: popupRef,
+    triggerRef: anchorRef,
+    onDismiss
+  });
 
   // #480: keep the keyboard-selected option visible inside the popup without
   // scrolling any ancestor. Only the popup's own scrollTop is adjusted, so the

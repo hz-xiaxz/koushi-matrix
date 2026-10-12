@@ -736,3 +736,99 @@ describe("composerSendingAccount", () => {
     ).toMatchObject({ name: "Same Name", userId: "@a:two.invalid" });
   });
 });
+
+  // #1365/#1368: the section options menu renders without a backdrop, so an
+  // outside press must dismiss it. The press that dismisses it still performs
+  // its own action, and only one section menu may be open at a time.
+  describe("section options menu dismissal", () => {
+    function sectionTrigger(section: "rooms" | "dms") {
+      const label = section === "rooms" ? t("roomList.categoryRooms") : t("roomList.categoryDms");
+      return within(screen.getByRole("region", { name: label }))
+        .getByRole("button", { name: t("roomList.sectionOptions", { section: label }) });
+    }
+
+    it("dismisses the open section options menu on an outside press", () => {
+      render(<Sidebar snapshot={readyDesktopSnapshotFixture()} {...sidebarProps()} />);
+
+      fireEvent.click(sectionTrigger("dms"));
+      expect(screen.getByRole("menu")).toBeTruthy();
+
+      fireEvent.pointerDown(document.body);
+
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(sectionTrigger("dms").getAttribute("aria-expanded")).toBe("false");
+    });
+
+    it("dismisses on the same press that selects another conversation", () => {
+      const props = sidebarProps();
+      render(<Sidebar snapshot={readyDesktopSnapshotFixture()} {...props} />);
+
+      fireEvent.click(sectionTrigger("dms"));
+      const conversation = screen.getByRole("button", { name: "synthetic-room" });
+
+      fireEvent.pointerDown(conversation);
+      fireEvent.click(conversation);
+
+      expect(props.onSelectRoom).toHaveBeenCalledWith("!room-alpha:example.invalid");
+      expect(screen.queryByRole("menu")).toBeNull();
+    });
+
+    it("dismisses the menu from another row, the filter, and a section header", () => {
+      render(<Sidebar snapshot={readyDesktopSnapshotFixture()} {...sidebarProps()} />);
+      const targets = [
+        // Another DM row.
+        () => screen.getByRole("button", { name: "Hiroshi" }),
+        // The room-list filter control.
+        () => screen.getByRole("searchbox"),
+        // A section header outside the menu.
+        () => screen.getByRole("button", { name: t("roomList.categoryRooms") })
+      ];
+
+      for (const target of targets) {
+        fireEvent.click(sectionTrigger("dms"));
+        expect(screen.getByRole("menu")).toBeTruthy();
+
+        fireEvent.pointerDown(target());
+
+        expect(screen.queryByRole("menu")).toBeNull();
+      }
+    });
+
+    it("keeps one section options menu open at a time", () => {
+      render(<Sidebar snapshot={readyDesktopSnapshotFixture()} {...sidebarProps()} />);
+
+      fireEvent.click(sectionTrigger("rooms"));
+      fireEvent.click(sectionTrigger("dms"));
+
+      expect(screen.getAllByRole("menu")).toHaveLength(1);
+      expect(sectionTrigger("rooms").getAttribute("aria-expanded")).toBe("false");
+      expect(sectionTrigger("dms").getAttribute("aria-expanded")).toBe("true");
+    });
+
+    it("moves focus into the menu and roves over its items", () => {
+      render(<Sidebar snapshot={readyDesktopSnapshotFixture()} {...sidebarProps()} />);
+
+      fireEvent.click(sectionTrigger("dms"));
+      const options = screen.getAllByRole("menuitemradio");
+      expect(document.activeElement).toBe(options[0]);
+
+      fireEvent.keyDown(document.activeElement!, { key: "ArrowDown" });
+      expect(document.activeElement).toBe(options[1]);
+
+      fireEvent.keyDown(document.activeElement!, { key: "End" });
+      expect(document.activeElement).toBe(options[options.length - 1]);
+
+      fireEvent.keyDown(document.activeElement!, { key: "Home" });
+      expect(document.activeElement).toBe(options[0]);
+    });
+
+    it("returns focus to the trigger when Escape closes the menu", () => {
+      render(<Sidebar snapshot={readyDesktopSnapshotFixture()} {...sidebarProps()} />);
+
+      fireEvent.click(sectionTrigger("dms"));
+      fireEvent.keyDown(window, { key: "Escape" });
+
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(document.activeElement).toBe(sectionTrigger("dms"));
+    });
+  });
