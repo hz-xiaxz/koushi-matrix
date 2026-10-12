@@ -49,6 +49,7 @@ import {
 } from "../domain/accessCondition";
 import { RoomAccessGlyphIcon } from "./RoomAccessGlyph";
 import { onMenuKeyDown } from "./ContextMenuSurface";
+import { FloatingLayer, floatingPlacementStyle, useFloatingPlacement } from "./floatingLayer";
 import { useOutsidePressDismissal } from "./popupDismissal";
 import { Tooltip, type TooltipTriggerProps } from "./Tooltip";
 import { ImeTextField } from "./ImeTextControl";
@@ -1295,6 +1296,16 @@ function SpaceMembersNavButton({
   );
 }
 
+/**
+ * #1369: the section menu floats above the sidebar but belongs to it, so the
+ * sidebar's scroll viewport is the boundary. The menu then stays inside the
+ * sidebar instead of drifting over the panes beside it, and — because the layer
+ * positions it `fixed` — it never extends the sidebar's scrollable content.
+ */
+function sectionMenuBoundaryElement(anchor: Element): Element | null {
+  return anchor.closest(".sidebar-scroll");
+}
+
 function SectionTitle({
   collapsed,
   count,
@@ -1326,6 +1337,19 @@ function SectionTitle({
   const createActionLabel = createLabel ?? t("action.createRoom");
   const menuTriggerRef = useRef<HTMLButtonElement>(null);
   const menuRef = useRef<HTMLDivElement>(null);
+  // #1369: the menu renders in the shared body-level floating layer, because
+  // `.sidebar-scroll` clips an absolutely positioned menu and adds it to the
+  // sidebar's own scroll extent. The sidebar scroll viewport is still the
+  // boundary, so the menu stays inside the sidebar instead of drifting over the
+  // panes beside it. Its rows decide its height, so the layer measures the menu
+  // itself instead of taking a caller size.
+  const menuPlacement = useFloatingPlacement({
+    anchorRef: menuTriggerRef,
+    align: "end",
+    contentRef: menuRef,
+    placement: "below",
+    resolveBoundaryElement: sectionMenuBoundaryElement
+  });
   // #1365/#1368: the menu is a non-modal popup with no backdrop, so the shared
   // owner dismisses it on an outside press and keeps one section menu open at a
   // time. The press is not swallowed: it still selects the room under it.
@@ -1349,13 +1373,23 @@ function SectionTitle({
     return () => window.removeEventListener("keydown", onKeyDown);
   }, [menuOpen]);
   // Focus enters the menu on open, so the arrow keys rove it like the shared
-  // context menu; Escape returns focus to the trigger (above).
+  // context menu; Escape returns focus to the trigger (above). #1369: the menu is
+  // `visibility: hidden` until the floating layer has placed it, and a hidden
+  // element cannot take focus, so this waits for the resolved placement instead
+  // of reading an unplaced menu. It runs once per opening, never on a later
+  // placement change, so a scroll cannot pull the roving focus back to the top.
+  const menuFocusEntered = useRef(false);
   useEffect(() => {
-    if (!menuOpen) return;
+    if (!menuOpen) {
+      menuFocusEntered.current = false;
+      return;
+    }
+    if (!menuPlacement || menuFocusEntered.current) return;
+    menuFocusEntered.current = true;
     menuRef.current
       ?.querySelector<HTMLElement>('[role^="menuitem"]')
       ?.focus();
-  }, [menuOpen]);
+  }, [menuOpen, menuPlacement]);
 
   // #542: Recent is the product order and Name stays locale-aware. The
   // attention-first `activity` value is still deserialized for a settings
@@ -1409,7 +1443,7 @@ function SectionTitle({
           </Tooltip>
         ) : null}
         {onSelectSort && selectedSort ? (
-          <span className="section-menu-wrap">
+          <span>
             <Tooltip
               label={t("roomList.sectionOptions", { section: label })}
               placement="below"
@@ -1430,50 +1464,53 @@ function SectionTitle({
               )}
             </Tooltip>
             {menuOpen ? (
-              <div
-                className="section-menu"
-                ref={menuRef}
-                role="menu"
-                aria-label={t("roomList.sectionOptions", { section: label })}
-                onKeyDown={(event) => onMenuKeyDown(event, event.currentTarget)}
-              >
-                {onAddExisting ? (
-                  <>
+              <FloatingLayer>
+                <div
+                  className="section-menu"
+                  ref={menuRef}
+                  role="menu"
+                  aria-label={t("roomList.sectionOptions", { section: label })}
+                  style={floatingPlacementStyle(menuPlacement, false)}
+                  onKeyDown={(event) => onMenuKeyDown(event, event.currentTarget)}
+                >
+                  {onAddExisting ? (
+                    <>
+                      <button
+                        className="section-menu-item"
+                        type="button"
+                        role="menuitem"
+                        onClick={() => {
+                          setMenuOpen(false);
+                          onAddExisting();
+                        }}
+                      >
+                        <span aria-hidden="true" />
+                        <span>{t("spaceAddRooms.action")}</span>
+                      </button>
+                      <div className="section-menu-separator" role="separator" />
+                    </>
+                  ) : null}
+                  {/* A menu's own label is not a menu item. */}
+                  <div className="section-menu-title" role="presentation">{t("roomList.sort")}</div>
+                  {sortOptions.map(([sort, sortLabel]) => (
                     <button
                       className="section-menu-item"
+                      key={sort.kind}
                       type="button"
-                      role="menuitem"
+                      role="menuitemradio"
+                      aria-checked={selectedSort.kind === sort.kind}
                       onClick={() => {
+                        onSelectSort(sort);
                         setMenuOpen(false);
-                        onAddExisting();
+                        menuTriggerRef.current?.focus();
                       }}
                     >
-                      <span aria-hidden="true" />
-                      <span>{t("spaceAddRooms.action")}</span>
+                      <span aria-hidden="true">{selectedSort.kind === sort.kind ? "✓" : ""}</span>
+                      <span>{sortLabel}</span>
                     </button>
-                    <div className="section-menu-separator" role="separator" />
-                  </>
-                ) : null}
-                {/* A menu's own label is not a menu item. */}
-                <div className="section-menu-title" role="presentation">{t("roomList.sort")}</div>
-                {sortOptions.map(([sort, sortLabel]) => (
-                  <button
-                    className="section-menu-item"
-                    key={sort.kind}
-                    type="button"
-                    role="menuitemradio"
-                    aria-checked={selectedSort.kind === sort.kind}
-                    onClick={() => {
-                      onSelectSort(sort);
-                      setMenuOpen(false);
-                      menuTriggerRef.current?.focus();
-                    }}
-                  >
-                    <span aria-hidden="true">{selectedSort.kind === sort.kind ? "✓" : ""}</span>
-                    <span>{sortLabel}</span>
-                  </button>
-                ))}
-              </div>
+                  ))}
+                </div>
+              </FloatingLayer>
             ) : null}
           </span>
         ) : null}

@@ -73,6 +73,15 @@ async function expectSection(page: Page, section: Section, collapsed: boolean, n
   await expect(region.locator(".room-name")).toHaveText(collapsed ? [] : names);
 }
 
+// #1369: the sort menu renders in the shared body-level floating layer, so it is
+// no longer a descendant of its section region. Its own accessible name keeps
+// the assertion scoped to this section's menu.
+function sectionMenu(page: Page, section: Section) {
+  return page.getByRole("menu", {
+    name: t("roomList.sectionOptions", { section: labels[section] }), exact: true
+  });
+}
+
 // #542: the attention-first sort is legacy-only. A section that still carries a
 // persisted `activity` value keeps the attention projection but offers no
 // selected radio, because the selector only lists Recent and Name.
@@ -82,8 +91,9 @@ async function expectNoSortSelected(page: Page, section: Section) {
     name: t("roomList.sectionOptions", { section: labels[section] }), exact: true
   });
   await trigger.click();
-  await expect(region.getByRole("menuitemradio")).toHaveCount(2);
-  await expect(region.getByRole("menuitemradio", { checked: true })).toHaveCount(0);
+  const menu = sectionMenu(page, section);
+  await expect(menu.getByRole("menuitemradio")).toHaveCount(2);
+  await expect(menu.getByRole("menuitemradio", { checked: true })).toHaveCount(0);
   await trigger.click();
   await expect(trigger).toHaveAttribute("aria-expanded", "false");
 }
@@ -94,9 +104,10 @@ async function expectSort(page: Page, section: Section, label: string) {
     name: t("roomList.sectionOptions", { section: labels[section] }), exact: true
   });
   await trigger.click();
-  await expect(region.getByRole("menuitemradio", { name: label, exact: true }))
+  const menu = sectionMenu(page, section);
+  await expect(menu.getByRole("menuitemradio", { name: label, exact: true }))
     .toHaveAttribute("aria-checked", "true");
-  await expect(region.getByRole("menuitemradio", { checked: true })).toHaveCount(1);
+  await expect(menu.getByRole("menuitemradio", { checked: true })).toHaveCount(1);
   await trigger.click();
   await expect(trigger).toHaveAttribute("aria-expanded", "false");
 }

@@ -1,11 +1,15 @@
 // @vitest-environment jsdom
 
-import { describe, expect, it } from "vitest";
+import { cleanup, render, screen } from "@testing-library/react";
+import { useRef } from "react";
+import { afterEach, describe, expect, it, vi } from "vitest";
 
 import {
   FLOATING_LAYER_VIEWPORT_MARGIN_PX as MARGIN,
   type FloatingPlacementInput,
-  resolveFloatingPlacement
+  floatingPlacementStyle,
+  resolveFloatingPlacement,
+  useFloatingPlacement
 } from "./floatingLayer";
 
 function input(overrides: Partial<FloatingPlacementInput> = {}): FloatingPlacementInput {
@@ -125,5 +129,65 @@ describe("resolveFloatingPlacement", () => {
 
     expect(ltr.left).toBe(600);
     expect(rtl.left).toBe(640 - 240);
+  });
+});
+
+describe("useFloatingPlacement with a content-measured panel", () => {
+  afterEach(() => {
+    cleanup();
+    vi.restoreAllMocks();
+  });
+
+  function MeasuredPanel() {
+    const anchorRef = useRef<HTMLButtonElement>(null);
+    const panelRef = useRef<HTMLDivElement>(null);
+    const placement = useFloatingPlacement({
+      align: "end",
+      anchorRef,
+      contentRef: panelRef,
+      placement: "above"
+    });
+    return (
+      <>
+        <button ref={anchorRef} type="button" />
+        {/* The layer positions this panel; its own CSS keeps the box. */}
+        <div data-testid="panel" ref={panelRef} style={floatingPlacementStyle(placement, false)} />
+      </>
+    );
+  }
+
+  function panelStyle() {
+    return (screen.getByTestId("panel") as HTMLElement).style;
+  }
+
+  it("places the panel from its own measured box and leaves the box to CSS", () => {
+    // The trigger sits at (300, 200) and the panel measures 180x106.
+    vi.spyOn(HTMLElement.prototype, "getBoundingClientRect").mockImplementation(
+      function (this: HTMLElement) {
+        return this.dataset.testid === "panel"
+          ? new DOMRect(220, 180, 180, 106)
+          : new DOMRect(300, 200, 24, 24);
+      }
+    );
+
+    render(<MeasuredPanel />);
+
+    // The measured 106px is what the placement math used: the panel sits above
+    // its trigger with one gap and its own height. Nothing writes that size
+    // back, because the next measurement would then read the clamped box
+    // instead of the content (#1369 review).
+    expect(panelStyle().top).toBe("88px");
+    expect(panelStyle().blockSize).toBe("");
+    expect(panelStyle().inlineSize).toBe("");
+    expect(panelStyle().visibility).toBe("");
+  });
+
+  it("still places a panel that has no rectangle of its own", () => {
+    // jsdom lays nothing out, so every rectangle is empty. The panel must be
+    // positioned rather than left hidden forever.
+    render(<MeasuredPanel />);
+
+    expect(panelStyle().visibility).toBe("");
+    expect(panelStyle().top).not.toBe("");
   });
 });
