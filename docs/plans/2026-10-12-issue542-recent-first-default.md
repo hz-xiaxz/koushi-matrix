@@ -81,6 +81,13 @@ message.
 - `cargo test -p koushi-core --lib` - state-delta sidebar publication;
 - `cargo fmt --check`, `cargo clippy -D warnings`;
 - frontend `npm run typecheck` / `npm test`;
+- `npx playwright test` for the tracked DOM tier. The selector change also had
+  to update `apps/desktop/e2e/sidebar-section-preferences.spec.ts`: it drove all
+  three sorts through the menu and read the removed `roomList.sortAttention`
+  label at module load, so the headless gate failed there first. The spec now
+  drives Recent and Name, pins a persisted legacy `activity` value as rendering
+  the attention projection with no selected radio, and asserts the menu offers
+  exactly two options;
 - golden `frontend_app_state.json` regenerated: the only diff is
   `"kind": "activity"` becoming `"kind": "recentFirst"` in the section, scope,
   and global settings values.
