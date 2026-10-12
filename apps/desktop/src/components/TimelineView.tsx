@@ -2517,6 +2517,12 @@ export const TimelineView = memo(function TimelineView({
     viewportSettlementAttemptRef.current = attempt;
     viewportSettlementFrameRef.current = null;
     if (!transaction.rangePrepared) {
+      if (viewportIntentRef.current.kind === "live-edge") {
+        // A history prepend changes the virtual height before the next frame.
+        // Settle the live edge in this layout pass so the old position is never painted.
+        attempt();
+        return;
+      }
       let scheduled: TimelineScheduledFrame | null = null;
       const frame: TimelineScheduledFrame = { cancel: () => scheduled?.cancel() };
       viewportSettlementFrameRef.current = frame;
