@@ -436,6 +436,13 @@ pub fn build_state_delta(
     changed_slice!(errors);
 
     if previous.navigation.active_space_id != next.navigation.active_space_id
+        // #1363/#1366: the sidebar bound depends on the open conversation and on
+        // a session reveal, so a selection that moves the open row past the
+        // bound, or a user toggle that clears the reveal, must publish the
+        // sidebar even when no setting or room list changed.
+        || previous.navigation.active_room_id != next.navigation.active_room_id
+        || previous.navigation.revealed_sidebar_section
+            != next.navigation.revealed_sidebar_section
         || previous.navigation.space_order != next.navigation.space_order
         || previous.navigation.space_local_presentations
             != next.navigation.space_local_presentations

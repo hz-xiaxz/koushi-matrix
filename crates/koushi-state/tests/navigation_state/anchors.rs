@@ -62,6 +62,7 @@ fn navigation_state_round_trips_scroll_anchors_through_serde() {
         home_selection: koushi_state::HomeSelection::default(),
         space_local_presentations: koushi_state::SpaceLocalPresentations::default(),
         legacy_frontend_preferences_imported: false,
+        revealed_sidebar_section: None,
         space_order: vec!["!space:test.example.com".to_owned()],
         last_room_by_space_id: BTreeMap::from([(
             "!space:test.example.com".to_owned(),

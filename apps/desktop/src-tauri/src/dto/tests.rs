@@ -1672,6 +1672,9 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             section: koushi_state::SidebarSectionKind::LowPriority,
             collapsed: Some(true),
             sort: None,
+            // #1366: exercise the persisted bound preference next to the
+            // independent collapse choice.
+            expanded: Some(true),
         },
         state.settings.values.room_list_sort,
     );
@@ -1725,6 +1728,8 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         room_scroll_anchors: BTreeMap::new(),
         main_timeline_anchor: None,
         event_navigation: koushi_state::EventNavigationState::Idle,
+        // #1366: session-only, so it never reaches this DTO.
+        revealed_sidebar_section: None,
     };
 
     // room_interactions

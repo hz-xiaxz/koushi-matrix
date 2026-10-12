@@ -38,6 +38,7 @@ import type {
   RoomSummary,
   SearchScopeKind,
   SettingsPatch,
+  SidebarSectionBound,
   SidebarSectionKind
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
@@ -87,6 +88,35 @@ function filterSidebarRooms(rooms: RoomListItem[], query: string): RoomListItem[
   return normalized.length === 0
     ? rooms
     : rooms.filter((room) => roomListItemLabel(room).toLocaleLowerCase().includes(normalized));
+}
+
+/**
+ * #1363/#1366: the rows and the bound control one section renders.
+ *
+ * The bound is Rust-projected (`SidebarSectionBound`); React only slices the
+ * matching section list and never derives the limit itself. Three things turn
+ * the bound off, and each one only ever shows more rows:
+ *
+ * - a non-empty search filter is presentation state Rust cannot see, so it
+ *   shows every match instead of hiding a match behind a control;
+ * - a collapsed section renders no rows, so it renders no control either;
+ * - a bound whose `total_count` does not describe the list in hand belongs to a
+ *   different list (a stale fake snapshot), so the renderer shows every row
+ *   rather than hiding a conversation.
+ */
+function boundedSection(
+  rooms: RoomListItem[],
+  bound: SidebarSectionBound | null | undefined,
+  collapsed: boolean,
+  filterActive: boolean
+): { rooms: RoomListItem[]; control: SidebarSectionBound | null } {
+  if (collapsed || filterActive || !bound || bound.total_count !== rooms.length) {
+    return { rooms, control: null };
+  }
+  return {
+    rooms: rooms.slice(0, bound.visible_count),
+    control: bound.shows_expand_control ? bound : null
+  };
 }
 
 /**
@@ -710,6 +740,10 @@ export function Sidebar({
   const visibleRooms = filterSidebarRooms(sections.rooms, roomFilter);
   const visibleDms = filterSidebarRooms(sections.people, roomFilter);
   const visibleLowPriority = filterSidebarRooms(sections.low_priority, roomFilter);
+  // #1363/#1366: the row bound per section is Rust-projected; the renderer
+  // slices with it and shows the control Rust asked for.
+  const sectionBounds = snapshot.sidebar.section_bounds ?? null;
+  const roomFilterActive = roomFilter.trim().length > 0;
   const roomsSort = snapshot.sidebar.rooms_sort ?? snapshot.state.domain.settings.values.room_list_sort;
   const dmsSort = snapshot.sidebar.dms_sort ?? snapshot.state.domain.settings.values.room_list_sort;
   const roomsCollapsed = snapshot.sidebar.rooms_collapsed ?? false;
@@ -726,7 +760,7 @@ export function Sidebar({
 
   function updateSectionPreference(
     section: SidebarSectionKind,
-    patch: { collapsed?: boolean; sort?: RoomListSort }
+    patch: { collapsed?: boolean; sort?: RoomListSort; expanded?: boolean }
   ) {
     onUpdateSettings({
       sidebar_section: { scope: scopeKey, section, ...patch }
@@ -870,6 +904,10 @@ export function Sidebar({
           onToggleCollapsed={() =>
             updateSectionPreference("rooms", { collapsed: !roomsCollapsed })
           }
+          bound={sectionBounds?.rooms}
+          filterActive={roomFilterActive}
+          sectionLabel={t("roomList.categoryRooms")}
+          onToggleExpanded={(expanded) => updateSectionPreference("rooms", { expanded })}
           selectedSort={roomsSort}
           onRequestAvatarThumbnail={onRequestAvatarThumbnail}
         />
@@ -890,6 +928,10 @@ export function Sidebar({
           onSelectRoom={onSelectRoom}
           onSelectSort={(sort) => updateSectionPreference("dms", { sort })}
           onToggleCollapsed={() => updateSectionPreference("dms", { collapsed: !dmsCollapsed })}
+          bound={sectionBounds?.dms}
+          filterActive={roomFilterActive}
+          sectionLabel={t("roomList.categoryDms")}
+          onToggleExpanded={(expanded) => updateSectionPreference("dms", { expanded })}
           selectedSort={dmsSort}
           onRequestAvatarThumbnail={onRequestAvatarThumbnail}
         />
@@ -910,6 +952,10 @@ export function Sidebar({
             onToggleCollapsed={() =>
               updateSectionPreference("lowPriority", { collapsed: !lowPriorityCollapsed })
             }
+            bound={sectionBounds?.low_priority}
+            filterActive={roomFilterActive}
+            sectionLabel={t("workspace.lowPriority")}
+            onToggleExpanded={(expanded) => updateSectionPreference("lowPriority", { expanded })}
             onRequestAvatarThumbnail={onRequestAvatarThumbnail}
           />
         ) : null}
@@ -1010,6 +1056,9 @@ function RoomSection({
   presence,
   roomById,
   rooms,
+  bound,
+  filterActive = false,
+  sectionLabel,
   emptyMessage,
   showHeader = true,
   showWhenEmpty = false,
@@ -1023,6 +1072,7 @@ function RoomSection({
   onSelectRoom,
   onSelectSort,
   onToggleCollapsed,
+  onToggleExpanded,
   selectedSort,
   onRequestAvatarThumbnail
 }: {
@@ -1035,6 +1085,12 @@ function RoomSection({
   presence: DesktopSnapshot["state"]["domain"]["live_signals"]["presence"];
   roomById: Map<string, RoomSummary>;
   rooms: RoomListItem[];
+  /** #1363/#1366: Rust-projected row bound for this section. */
+  bound?: SidebarSectionBound | null;
+  /** A non-empty search filter shows every match, whatever the bound says. */
+  filterActive?: boolean;
+  /** Accessible name for the bound control, naming this section. */
+  sectionLabel?: string;
   showHeader?: boolean;
   showWhenEmpty?: boolean;
   /**
@@ -1052,9 +1108,16 @@ function RoomSection({
   onSelectRoom: (roomId: string) => void;
   onSelectSort?: (sort: RoomListSort) => void;
   onToggleCollapsed?: () => void;
+  onToggleExpanded?: (expanded: boolean) => void;
   selectedSort?: RoomListSort;
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
 }) {
+  const { rooms: renderedRooms, control: boundControl } = boundedSection(
+    rooms,
+    bound,
+    collapsed,
+    filterActive
+  );
   if (!showWhenEmpty && rooms.length === 0) {
     return null;
   }
@@ -1078,27 +1141,80 @@ function RoomSection({
       ) : null}
       {!collapsed
         ? rooms.length > 0
-          ? rooms.map((room) => (
-              <RoomButton
-                activeRoomId={activeRoomId}
-                kind={kind}
-                presence={presence}
-                roomById={roomById}
-                key={room.room_id}
-                room={room}
-                onJoinRoom={onJoinRoom}
-                onOpenInvites={onOpenInvites}
-                onOpenContextMenu={onOpenContextMenu}
-                onSelectInvite={onSelectInvite}
-                onSelectRoom={onSelectRoom}
-                onRequestAvatarThumbnail={onRequestAvatarThumbnail}
-              />
-            ))
+          ? (
+            <>
+              {renderedRooms.map((room) => (
+                <RoomButton
+                  activeRoomId={activeRoomId}
+                  kind={kind}
+                  presence={presence}
+                  roomById={roomById}
+                  key={room.room_id}
+                  room={room}
+                  onJoinRoom={onJoinRoom}
+                  onOpenInvites={onOpenInvites}
+                  onOpenContextMenu={onOpenContextMenu}
+                  onSelectInvite={onSelectInvite}
+                  onSelectRoom={onSelectRoom}
+                  onRequestAvatarThumbnail={onRequestAvatarThumbnail}
+                />
+              ))}
+              {boundControl && onToggleExpanded ? (
+                <SectionBoundControl
+                  bound={boundControl}
+                  listId={`${id}-room-list`}
+                  sectionLabel={sectionLabel ?? label}
+                  onToggleExpanded={onToggleExpanded}
+                />
+              ) : null}
+            </>
+          )
           : emptyMessage
             ? <div className="room-list-empty">{emptyMessage}</div>
             : null
         : null}
     </section>
+  );
+}
+
+/**
+ * #1363/#1366: the bound control at the end of a bounded section.
+ *
+ * A plain button that names the action, the hidden count, and the section it
+ * belongs to, and reports its state through `aria-expanded` against the row
+ * list it controls.
+ */
+function SectionBoundControl({
+  bound,
+  listId,
+  sectionLabel,
+  onToggleExpanded
+}: {
+  bound: SidebarSectionBound;
+  listId: string;
+  sectionLabel: string;
+  onToggleExpanded: (expanded: boolean) => void;
+}) {
+  const label = bound.expanded
+    ? t("roomList.showFewerInSection", { section: sectionLabel })
+    : t("roomList.showMoreInSection", {
+        count: bound.hidden_count,
+        section: sectionLabel
+      });
+  return (
+    <button
+      className="room-section-bound"
+      type="button"
+      aria-controls={listId}
+      aria-expanded={bound.expanded}
+      aria-label={label}
+      title={label}
+      onClick={() => onToggleExpanded(!bound.expanded)}
+    >
+      {bound.expanded
+        ? t("roomList.showFewer")
+        : t("roomList.showMore", { count: bound.hidden_count })}
+    </button>
   );
 }
 

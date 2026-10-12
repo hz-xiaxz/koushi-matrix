@@ -19,6 +19,12 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
+[#1363 / #1366 sidebar section row bound](../plans/2026-10-12-issue1363-1366-sidebar-section-bound.md)
+bounds each visible section to five rows with a Rust-projected expand control,
+stores the per-scope `expanded` preference next to `collapsed`/`sort`, reveals a
+collapsed section on conversation entry for the session, and records the
+deliberate divergence from Element Web's non-truncating room list.
+
 [#1364 persisted room activity](../plans/2026-10-12-issue1364-persisted-room-activity.md)
 records why the Recent sidebar order collapsed into name order, the
 `recency_stamp` fallback for the activity-less group, and the persisted per-room

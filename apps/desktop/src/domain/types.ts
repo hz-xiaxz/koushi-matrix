@@ -333,6 +333,11 @@ export interface SidebarScopeSettings {
 export interface SidebarSectionSettings {
   collapsed: boolean;
   sort: RoomListSort;
+  /**
+   * #1366: whether this scope's section shows every row. A bounded section
+   * shows at most `SidebarSectionBound.visible_limit` rows.
+   */
+  expanded: boolean;
 }
 
 export type SidebarSectionKind = "rooms" | "dms" | "lowPriority";
@@ -342,6 +347,7 @@ export interface SidebarSectionPatch {
   section: SidebarSectionKind;
   collapsed?: boolean;
   sort?: RoomListSort;
+  expanded?: boolean;
 }
 
 export interface NotificationSettings {
@@ -2948,6 +2954,12 @@ export interface SidebarModel {
   dms_collapsed?: boolean;
   low_priority_collapsed?: boolean;
   sections: SidebarSections;
+  /**
+   * #1363/#1366: Rust-projected row bound for each visible section. The
+   * renderer slices the matching `sections` list and shows the control; it
+   * never computes the bound itself.
+   */
+  section_bounds?: SidebarSectionBounds | null;
   /** Rust-projected Add existing room rows for the active Space (#1007). */
   space_add_rooms?: SpaceAddRoomsModel | null;
   /** Rust-projected create-room dialog defaults for the active scope (#1023). */
@@ -2982,6 +2994,30 @@ export interface SidebarSections {
   people: RoomListItem[];
   low_priority: RoomListItem[];
   not_joined: RoomListItem[];
+}
+
+/**
+ * #1363/#1366: Rust-projected bound for one visible sidebar section.
+ *
+ * `expanded` is the effective bound state: `expanded_by_active_room` marks the
+ * case where the open conversation sits past the bound, so the bound cannot
+ * hide it. `shows_expand_control` is false while that override applies, because
+ * collapsing the section could not change what is visible.
+ */
+export interface SidebarSectionBound {
+  visible_limit: number;
+  total_count: number;
+  visible_count: number;
+  hidden_count: number;
+  expanded: boolean;
+  expanded_by_active_room: boolean;
+  shows_expand_control: boolean;
+}
+
+export interface SidebarSectionBounds {
+  rooms?: SidebarSectionBound | null;
+  dms?: SidebarSectionBound | null;
+  low_priority?: SidebarSectionBound | null;
 }
 
 export interface AccountHomeItem {

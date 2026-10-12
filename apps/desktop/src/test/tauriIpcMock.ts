@@ -17,6 +17,7 @@
 
 import type { CoreEventPayload } from "../domain/coreEvents";
 import type { ViewportSyncReceipt } from "../backend/desktopApi";
+import { sidebarSectionBoundsForFake } from "./sidebarSectionBoundsFixture";
 
 // ---------------------------------------------------------------------------
 // Invocation record
@@ -563,7 +564,15 @@ export function defaultSnapshotResponse() {
       dm_unread_count: 0,
       space_highlight_count: 0,
       dm_highlight_count: 0,
-      sections: { favourites: [], rooms: [], people: [], low_priority: [], not_joined: [] }
+      sections: { favourites: [], rooms: [], people: [], low_priority: [], not_joined: [] },
+      // #1363/#1366: the packaged DTO always projects the bound for every
+      // visible section, so the default mock snapshot mirrors that shape with
+      // the Rust-authored empty-section projection.
+      section_bounds: sidebarSectionBoundsForFake({
+        sections: { rooms: [], people: [], low_priority: [] },
+        expanded: { rooms: false, dms: false, lowPriority: false },
+        activeRoomId: null
+      })
     },
     timeline: [],
     thread: null

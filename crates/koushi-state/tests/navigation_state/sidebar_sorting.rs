@@ -1579,6 +1579,7 @@ fn use_recent_first_for_home_dms(state: &mut AppState) {
             dms: SidebarSectionSettings {
                 collapsed: false,
                 sort: RoomListSort::RecentFirst,
+                ..Default::default()
             },
             ..Default::default()
         },

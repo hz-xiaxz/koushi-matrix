@@ -1424,6 +1424,91 @@ Low priority is an attention-suppression tag, not a mute and not a read action:
   snapshot is canonical; an immediate local refresh can still contain stale
   tags and must not overwrite the reducer projection.
 
+#### Sidebar Section Row Bound (#1363, #1366)
+
+A visible section shows at most `SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT` (5) rows
+unless it is expanded. The bound covers `sections.rooms`, `sections.people`, and
+`sections.low_priority`; `sections.favourites` is a derived convenience list
+rather than a visible section, and not-joined keeps its unbounded rendering.
+
+```mermaid
+stateDiagram-v2
+    state "Bounded (visible_limit rows)" as Bounded
+    state "Expanded (persisted expanded)" as Expanded
+    state "Forced open (open conversation past the bound)" as Forced
+    [*] --> Bounded: settings without expanded
+    [*] --> Expanded: settings with expanded
+    Bounded --> Expanded: SettingsUpdateRequested(sidebar_section.expanded=true)
+    Expanded --> Bounded: SettingsUpdateRequested(sidebar_section.expanded=false)
+    Bounded --> Forced: SelectRoom/SelectSpace settles the open conversation past the bound
+    Forced --> Bounded: the open conversation moves inside the bound or closes
+```
+
+```mermaid
+stateDiagram-v2
+    state "No reveal" as Idle
+    state "revealed_sidebar_section (scope + section)" as Revealed
+    [*] --> Idle
+    Idle --> Revealed: SelectRoom/SelectSpace settles in a collapsed section
+    Revealed --> Idle: user collapse or bound toggle for that scope x section
+    Revealed --> Idle: the active conversation is cleared
+    Revealed --> Idle: NavigationLoaded replaces navigation
+```
+
+- The persisted preference is `SidebarSectionSettings.expanded` (default
+  `false`), stored per scope x section next to `collapsed` and `sort`, written
+  through `SidebarSectionPatch.expanded`. A scope key is `__home__` or the Space
+  id (`sidebar_scope_key`). An older settings file that lacks the field stays
+  bounded, and an inactive or legacy `low_priority` entry defaults to bounded.
+- Truncation is Rust state. `SidebarModel.section_bounds` carries one
+  `SidebarSectionBound` per section, projected by
+  `SidebarSectionBound::project(total_count, persisted_expanded,
+  active_room_index)`: `visible_limit`, `total_count`, `visible_count`,
+  `hidden_count`, `expanded`, `expanded_by_active_room`, and
+  `shows_expand_control`. React slices the matching `sections` list with
+  `visible_count` and renders the control only when Rust set
+  `shows_expand_control`; it must not derive a limit, a hidden count, or a
+  visibility decision, and no second truncation path may exist.
+- The open conversation is never hidden by the bound: `expanded` is
+  `persisted_expanded || active_room_index >= visible_limit`, with
+  `expanded_by_active_room` marking the forced case. `shows_expand_control` is
+  false while the bound is forced, because changing the bound could not change
+  what is visible. This also covers a reorder that pushes the open conversation
+  past the bound.
+- Collapse and bound are independent dimensions with a defined rendering for
+  every combination: a collapsed section renders no rows and no control, an
+  expanded section renders every row, and otherwise the section renders
+  `visible_count` rows plus the control. The section toggle changes only
+  `collapsed`; the bound control changes only `expanded`.
+- `SidebarModel.space_unread_count` / `dm_unread_count` /
+  `space_highlight_count` / `dm_highlight_count` and the section header count
+  report the whole section. The header count is the pre-truncation list length
+  and never the bounded row count, and the unread badge stays the Rust-owned
+  whole-section value.
+- Entry into a collapsed section reveals it: `NavigationState
+  .revealed_sidebar_section: Option<SidebarSectionReveal>` records the scope and
+  section of a settled conversation selection, set by `SelectRoom` and
+  `SelectSpace` and applied by the projection only while the open conversation
+  is in that section and the scope matches. The reveal is session state
+  (`serde(skip)`, never part of the encrypted navigation payload), so a restart
+  honors the persisted preferences instead of replaying it. The user's own
+  collapse or bound toggle for the same scope x section clears it, as does
+  clearing the active conversation.
+- The search/filter box is renderer presentation state: while it is non-empty
+  every matching row renders and no bound control appears, and clearing it
+  restores the bound. Ordering and truncation remain Rust-owned, so the filter
+  exception must not move ordering into React.
+- This is a deliberate divergence from Element Web's room list V3, which
+  virtualizes without truncating and keeps only per-section expansion state.
+  The rationale is recorded in
+  `docs/plans/2026-10-12-issue1363-1366-sidebar-section-bound.md`.
+- The browser harness and browser-fake snapshots look their bounds up in
+  `apps/desktop/src/test/sidebarSectionBounds.generated.json`, which a
+  `koushi-state` test writes and asserts against the Rust projection. A shape the
+  fixture does not cover renders every row, and so does a bound whose
+  `total_count` does not describe the list in hand (a stale fake snapshot); a
+  bound that Rust did not project for this list can never hide a conversation.
+
 ## Invites And Direct Messages
 
 Incoming invite state is Rust-owned in `AppState.invites`. React may render the

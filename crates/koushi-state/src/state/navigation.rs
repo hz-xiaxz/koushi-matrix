@@ -5,6 +5,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
+use crate::state::settings::SidebarSectionReveal;
+
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(rename_all = "camelCase")]
 pub enum EventNavigationSource {
@@ -184,6 +186,11 @@ pub struct NavigationState {
     pub room_scroll_anchors: BTreeMap<String, TimelineScrollAnchor>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub main_timeline_anchor: Option<MainTimelineAnchor>,
+    /// #1366: the section a conversation selection revealed in this session.
+    /// Session-scoped: `serde(skip)` keeps it out of the encrypted navigation
+    /// payload, so a restart honors the persisted section preferences.
+    #[serde(skip)]
+    pub revealed_sidebar_section: Option<SidebarSectionReveal>,
     #[serde(default)]
     pub event_navigation: EventNavigationState,
 }
@@ -201,6 +208,7 @@ impl Default for NavigationState {
             last_selection_by_space_id: BTreeMap::new(),
             room_scroll_anchors: BTreeMap::new(),
             main_timeline_anchor: None,
+            revealed_sidebar_section: None,
             event_navigation: EventNavigationState::Idle,
         }
     }
@@ -231,6 +239,10 @@ impl fmt::Debug for NavigationState {
             .field(
                 "main_timeline_anchored",
                 &self.main_timeline_anchor.is_some(),
+            )
+            .field(
+                "revealed_sidebar_section",
+                &self.revealed_sidebar_section.is_some(),
             )
             .field("event_navigation", &self.event_navigation)
             .finish()

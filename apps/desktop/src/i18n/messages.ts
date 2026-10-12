@@ -732,6 +732,10 @@ export type MessageId =
   | "roomList.sortRecent"
   | "roomList.sortName"
   | "roomList.sectionOptions"
+  | "roomList.showMore"
+  | "roomList.showMoreInSection"
+  | "roomList.showFewer"
+  | "roomList.showFewerInSection"
   | "spaceAddRooms.action"
   | "spaceAddRooms.title"
   | "spaceAddRooms.scope"
@@ -2619,6 +2623,10 @@ const en: Catalog = {
   "roomList.sortRecent": "Recent",
   "roomList.sortName": "Name",
   "roomList.sectionOptions": "Options for {section}",
+  "roomList.showMore": "Show {count} more",
+  "roomList.showMoreInSection": "Show {count} more in {section}",
+  "roomList.showFewer": "Show fewer",
+  "roomList.showFewerInSection": "Show fewer in {section}",
   "spaceAddRooms.action": "Add existing room",
   "spaceAddRooms.title": "Add existing rooms to {spaceName}",
   "spaceAddRooms.scope": "Rooms you have joined are listed. Adding a room lists it in this space for its members; it does not change who can join the room. You need permission to manage this space's rooms.",
@@ -4423,6 +4431,10 @@ const ja: Catalog = {
   "roomList.sortRecent": "新着順",
   "roomList.sortName": "名前",
   "roomList.sectionOptions": "{section}のオプション",
+  "roomList.showMore": "残り {count} 件を表示",
+  "roomList.showMoreInSection": "{section}の残り {count} 件を表示",
+  "roomList.showFewer": "折りたたむ",
+  "roomList.showFewerInSection": "{section}を折りたたむ",
   "spaceAddRooms.action": "既存のルームを追加",
   "spaceAddRooms.title": "{spaceName}に既存のルームを追加",
   "spaceAddRooms.scope": "参加中のルームが表示されます。追加すると、このスペースのメンバーに表示されます。ルームに参加できる人は変わりません。このスペースのルームを管理する権限が必要です。",

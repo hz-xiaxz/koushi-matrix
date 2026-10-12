@@ -121,9 +121,9 @@ pub use settings::{
     RoomNotificationSettings, RoomPreference, RoomPreferencesState, RoomUrlPreviews, SettingsPatch,
     SettingsPatchScope, SettingsPersistenceState, SettingsState, SettingsValues, SidebarCategory,
     SidebarCollapsedSections, SidebarScopeSettings, SidebarSectionKind, SidebarSectionPatch,
-    SidebarSectionSettings, SidebarSettings, TextDirectionPreference, ThemePreference,
-    ThreadListOrder, TimelineSettings, TimelineThreadRootOrder, TypographySettings,
-    UpdatesSettings, WindowSettings,
+    SidebarSectionReveal, SidebarSectionSettings, SidebarSettings, TextDirectionPreference,
+    ThemePreference, ThreadListOrder, TimelineSettings, TimelineThreadRootOrder,
+    TypographySettings, UpdatesSettings, WindowSettings, sidebar_scope_key,
 };
 
 // ── Re-exports: profile ─────────────────────────────────────────────────────

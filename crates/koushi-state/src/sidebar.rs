@@ -5,9 +5,10 @@ use serde::{Deserialize, Serialize};
 use crate::state::{
     AppState, AvatarImage, InvitePreview, RestrictedConditions, RoomAccessCondition, RoomJoinRule,
     RoomListSort, RoomNotificationMode, RoomNotificationSettings, RoomSummary, RoomTags,
-    SidebarScopeSettings, SpaceChildMembership, SpaceChildSummary, SpaceChildrenState,
-    SpaceLocalPresentations, SpaceSummary, compare_conversation_activity,
-    room_activity_unread_count, room_attention_projection,
+    SidebarScopeSettings, SidebarSectionKind, SidebarSectionReveal, SpaceChildMembership,
+    SpaceChildSummary, SpaceChildrenState, SpaceLocalPresentations, SpaceSummary,
+    compare_conversation_activity, room_activity_unread_count, room_attention_projection,
+    sidebar_scope_key,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -34,12 +35,107 @@ pub struct SidebarModel {
     #[serde(default)]
     pub low_priority_collapsed: bool,
     pub sections: SidebarSections,
+    /// #1363/#1366: the Rust-owned row bound of every bounded section of the
+    /// active scope. The `sections` lists stay complete so the renderer can
+    /// text-filter them; these counts decide how many rows the bound shows.
+    #[serde(default)]
+    pub section_bounds: SidebarSectionBounds,
     /// The active Space's add-existing-room rows (#1007); `None` at Home.
     #[serde(default)]
     pub space_add_rooms: Option<crate::space_add_rooms::SpaceAddRoomsModel>,
     /// Initial choices of the create-room dialog for the active scope (#1023).
     #[serde(default)]
     pub create_room_defaults: crate::room_address::CreateRoomDefaults,
+}
+
+/// #1363/#1366: the default number of conversations a sidebar section shows
+/// before the user expands it. The bound is a Rust-owned projection value; the
+/// renderer never computes it and only bypasses it for its search filter.
+pub const SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT: usize = 5;
+
+/// #1363/#1366: the projected row bound of one visible sidebar section.
+///
+/// `total_count` always reports the whole section, so the section header and its
+/// unread badge keep reporting the full section however many rows the bound
+/// shows. `expanded` is the effective state: the persisted preference, or the
+/// open conversation forcing the section open.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SidebarSectionBound {
+    /// The rows the bound shows while it applies
+    /// ([`SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT`]).
+    pub visible_limit: usize,
+    /// Every row the section holds, in its Rust-owned order.
+    pub total_count: usize,
+    /// The rows the renderer shows: at most `visible_limit`, or all of them
+    /// while `expanded`.
+    pub visible_count: usize,
+    /// `total_count - visible_count`: the count an expand control names.
+    pub hidden_count: usize,
+    /// The effective expansion state the renderer shows.
+    pub expanded: bool,
+    /// `expanded` holds only because the open conversation sits beyond the
+    /// bound. The renderer then offers no bound control: toggling the bound
+    /// cannot change what is visible while that conversation stays open.
+    pub expanded_by_active_room: bool,
+    /// Whether the renderer offers the bound control at all. A section of five
+    /// rows or fewer has nothing to reveal.
+    pub shows_expand_control: bool,
+}
+
+impl SidebarSectionBound {
+    /// Project one section's bound.
+    ///
+    /// `active_room_index` is the open conversation's position in this section,
+    /// or `None` when the open conversation is not in it. The open conversation
+    /// is never hidden by the bound: a room outside the first
+    /// [`SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT`] rows keeps its whole section
+    /// visible, whatever reordering did to its position.
+    pub fn project(
+        total_count: usize,
+        persisted_expanded: bool,
+        active_room_index: Option<usize>,
+    ) -> Self {
+        let visible_limit = SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT;
+        let active_room_beyond_bound =
+            active_room_index.is_some_and(|index| index >= visible_limit);
+        let expanded_by_active_room = !persisted_expanded && active_room_beyond_bound;
+        let expanded = persisted_expanded || active_room_beyond_bound;
+        let visible_count = if expanded {
+            total_count
+        } else {
+            total_count.min(visible_limit)
+        };
+        Self {
+            visible_limit,
+            total_count,
+            visible_count,
+            hidden_count: total_count - visible_count,
+            expanded,
+            expanded_by_active_room,
+            shows_expand_control: !expanded_by_active_room && total_count > visible_limit,
+        }
+    }
+}
+
+/// The bounded sections of one scope. `favourites` is a derived convenience
+/// list and Not joined keeps its own behavior, so neither is bounded here.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SidebarSectionBounds {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rooms: Option<SidebarSectionBound>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dms: Option<SidebarSectionBound>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub low_priority: Option<SidebarSectionBound>,
+}
+
+/// The projection inputs the row bound needs beyond the sections themselves.
+#[derive(Clone, Copy, Default)]
+pub struct SidebarSectionVisibility<'a> {
+    /// The open conversation, which the bound must never hide.
+    pub active_room_id: Option<&'a str>,
+    /// The section a selection revealed in this session (#1366), if any.
+    pub revealed: Option<&'a SidebarSectionReveal>,
 }
 
 /// The Rust-owned visible sidebar sections.
@@ -204,8 +300,10 @@ pub fn compose_sidebar_with_account_facts(
         &SpaceLocalPresentations::default(),
         &SpaceChildrenState::default(),
         &[],
-        // No projected access conditions without room-list state (#1166).
+        // No projected access conditions without room-list state (#1166), and no
+        // open-room or selection-reveal facts without navigation state.
         &BTreeMap::new(),
+        SidebarSectionVisibility::default(),
     )
 }
 
@@ -227,6 +325,10 @@ pub fn compose_sidebar_for_state(state: &AppState) -> SidebarModel {
         &state.space_children,
         &state.invites,
         &state.room_access,
+        SidebarSectionVisibility {
+            active_room_id: state.navigation.active_room_id.as_deref(),
+            revealed: state.navigation.revealed_sidebar_section.as_ref(),
+        },
     );
     let preferred_positions: HashMap<&str, usize> = state
         .navigation
@@ -264,6 +366,7 @@ fn compose_sidebar_with_preferences(
     invites: &[InvitePreview],
     // #1166: the projected per-room access conditions; empty means not yet known.
     room_access: &BTreeMap<String, RoomAccessCondition>,
+    visibility: SidebarSectionVisibility<'_>,
 ) -> SidebarModel {
     let rooms_by_id: HashMap<&str, &RoomSummary> = rooms
         .iter()
@@ -466,6 +569,38 @@ fn compose_sidebar_with_preferences(
         not_joined: not_joined_space_rooms.clone(),
     };
 
+    // #1366: a selection reveals the section that its persisted collapse would
+    // hide, so a notification or permalink entry still shows the selected row.
+    // The reveal applies only while the open conversation is in that section and
+    // only in the scope it was recorded for, so a stale reveal can never keep an
+    // unrelated section open. The user's own toggle for the same scope and
+    // section clears it.
+    let scope_key = sidebar_scope_key(active_space_id);
+    let section_revealed = |section: SidebarSectionKind, rooms: &[RoomListItem]| {
+        visibility.revealed.is_some_and(|reveal| {
+            reveal.scope == scope_key
+                && reveal.section == section
+                && active_room_position(rooms, visibility.active_room_id).is_some()
+        })
+    };
+    let section_bounds = SidebarSectionBounds {
+        rooms: Some(SidebarSectionBound::project(
+            sections.rooms.len(),
+            section_settings.rooms.expanded,
+            active_room_position(&sections.rooms, visibility.active_room_id),
+        )),
+        dms: Some(SidebarSectionBound::project(
+            sections.people.len(),
+            section_settings.dms.expanded,
+            active_room_position(&sections.people, visibility.active_room_id),
+        )),
+        low_priority: Some(SidebarSectionBound::project(
+            sections.low_priority.len(),
+            section_settings.low_priority.unwrap_or_default().expanded,
+            active_room_position(&sections.low_priority, visibility.active_room_id),
+        )),
+    };
+
     SidebarModel {
         active_space_id: active_space_id.map(str::to_owned),
         account_home,
@@ -475,10 +610,14 @@ fn compose_sidebar_with_preferences(
         dm_highlight_count: highlight_count(&sections.people, room_notification_settings),
         rooms_sort,
         dms_sort,
-        rooms_collapsed: section_settings.rooms.collapsed,
-        dms_collapsed: section_settings.dms.collapsed,
-        low_priority_collapsed: section_settings.low_priority.unwrap_or_default().collapsed,
+        rooms_collapsed: section_settings.rooms.collapsed
+            && !section_revealed(SidebarSectionKind::Rooms, &sections.rooms),
+        dms_collapsed: section_settings.dms.collapsed
+            && !section_revealed(SidebarSectionKind::Dms, &sections.people),
+        low_priority_collapsed: section_settings.low_priority.unwrap_or_default().collapsed
+            && !section_revealed(SidebarSectionKind::LowPriority, &sections.low_priority),
         sections,
+        section_bounds,
         space_rail,
         space_rooms,
         not_joined_space_rooms,
@@ -486,6 +625,14 @@ fn compose_sidebar_with_preferences(
         space_add_rooms: None,
         create_room_defaults: Default::default(),
     }
+}
+
+/// The open conversation's position in one section, or `None` when it is not in
+/// it. Position decides only whether the bound applies; the row order itself
+/// stays the Rust-owned sort order.
+fn active_room_position(rooms: &[RoomListItem], active_room_id: Option<&str>) -> Option<usize> {
+    let active_room_id = active_room_id?;
+    rooms.iter().position(|room| room.room_id == active_room_id)
 }
 
 fn sort_room_summaries(

@@ -58,6 +58,35 @@
     "rooms_sort": {
       "kind": "recentFirst"
     },
+    "section_bounds": {
+      "dms": {
+        "expanded": false,
+        "expanded_by_active_room": false,
+        "hidden_count": 0,
+        "shows_expand_control": false,
+        "total_count": 0,
+        "visible_count": 0,
+        "visible_limit": 5
+      },
+      "low_priority": {
+        "expanded": true,
+        "expanded_by_active_room": false,
+        "hidden_count": 0,
+        "shows_expand_control": false,
+        "total_count": 1,
+        "visible_count": 1,
+        "visible_limit": 5
+      },
+      "rooms": {
+        "expanded": false,
+        "expanded_by_active_room": false,
+        "hidden_count": 0,
+        "shows_expand_control": false,
+        "total_count": 1,
+        "visible_count": 1,
+        "visible_limit": 5
+      }
+    },
     "sections": {
       "favourites": [],
       "low_priority": [
@@ -1057,18 +1086,21 @@
               "!space:example.invalid": {
                 "dms": {
                   "collapsed": false,
+                  "expanded": false,
                   "sort": {
                     "kind": "recentFirst"
                   }
                 },
                 "low_priority": {
                   "collapsed": true,
+                  "expanded": true,
                   "sort": {
                     "kind": "recentFirst"
                   }
                 },
                 "rooms": {
                   "collapsed": false,
+                  "expanded": false,
                   "sort": {
                     "kind": "recentFirst"
                   }

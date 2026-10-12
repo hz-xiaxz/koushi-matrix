@@ -2644,6 +2644,9 @@ pub(crate) fn clear_active_room_for_navigation(
     // #161: clearing the active room resets the main pane to the live timeline.
     state.navigation.main_timeline_anchor = None;
     state.navigation.event_navigation = crate::state::EventNavigationState::Idle;
+    // #1366: a revealed sidebar section exists only for the conversation that
+    // revealed it; with no open conversation there is nothing to keep open.
+    state.navigation.revealed_sidebar_section = None;
     effects.push(AppEffect::EmitUiEvent(UiEvent::TimelineChanged {
         room_id: previous_room_id,
     }));
