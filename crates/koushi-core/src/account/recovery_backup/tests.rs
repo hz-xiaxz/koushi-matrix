@@ -1237,6 +1237,98 @@ async fn proven_connectivity_before_promotion_starts_the_pending_inspection_on_p
     shutdown_and_ack(&handle).await;
 }
 
+/// #1361: a proven edge recorded before the inspection request is processed
+/// must not let the unpromoted admission drop that request. It stays owed and
+/// starts at promotion instead of leaving `Checking` with no task, deadline,
+/// or monitor.
+#[tokio::test]
+async fn proven_connectivity_before_the_request_keeps_it_pending_until_promotion() {
+    let (handle, mut action_rx) = login_gated_actor().await;
+    handle
+        .send(AccountMessage::ConfigureSecureBackupDeferWait {
+            wait: Duration::from_secs(30),
+        })
+        .await;
+    consume_initial_unknown_trust_projection(&mut action_rx).await;
+    handle
+        .send(AccountMessage::SyncConnectivityChanged { proven: true })
+        .await;
+    handle.send(AccountMessage::InspectSecureBackup).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(
+        owners.inspection_pending,
+        "an unpromoted admitted request must stay owed"
+    );
+    assert!(!owners.has_inspection_task);
+
+    assert!(
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await
+    );
+    acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(
+        owners.has_inspection_task,
+        "promotion must start the retained request"
+    );
+    assert!(!owners.inspection_pending);
+    shutdown_and_ack(&handle).await;
+}
+
+/// #1361: the deferred wait can expire before the session is promoted. Its
+/// expiry cannot gate an unpromoted session, so it must release its handle and
+/// let promotion re-arm a fresh bounded wait instead of leaving `Checking`
+/// forever with no deadline and no terminal (#860).
+#[tokio::test]
+async fn deferred_deadline_expiring_before_promotion_is_rearmed_on_promotion() {
+    let (handle, mut action_rx) = login_gated_actor().await;
+    handle
+        .send(AccountMessage::ConfigureSecureBackupDeferWait {
+            wait: Duration::from_millis(300),
+        })
+        .await;
+    consume_initial_unknown_trust_projection(&mut action_rx).await;
+    handle.send(AccountMessage::InspectSecureBackup).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(owners.inspection_pending && owners.has_defer_deadline);
+
+    // The deadline fires while the session is still unpromoted: it must not
+    // project a terminal, but it must release its handle.
+    executor::sleep(Duration::from_millis(700)).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(owners.inspection_pending, "the request is still owed");
+    assert!(!owners.has_inspection_task);
+    assert!(
+        !owners.has_defer_deadline,
+        "an unpromoted expiry must release its handle"
+    );
+
+    assert!(
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await
+    );
+    acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(
+        owners.has_defer_deadline,
+        "promotion with unproven connectivity must re-arm the bounded wait"
+    );
+
+    // The re-armed bounded wait still settles as a retryable failure.
+    assert!(is_blocked_failed_timeout(
+        &recv_gate_action_matching(&handle, &mut action_rx, is_blocked_failed_timeout).await
+    ));
+    shutdown_and_ack(&handle).await;
+}
+
 /// Retry must ask the sync owner to re-project its current status when
 /// connectivity is still unproven, instead of only re-running admission
 /// against a possibly stale proven flag.

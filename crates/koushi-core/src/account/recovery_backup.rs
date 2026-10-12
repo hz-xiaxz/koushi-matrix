@@ -2010,6 +2010,10 @@ impl AccountActor {
         self.retire_secure_backup_monitor();
         self.disarm_secure_backup_defer_deadline();
         let Some(session) = self.session.clone().filter(|_| self.session_promoted) else {
+            // Connectivity is already proven but the session is not promoted
+            // yet, so no inspection can spawn. Keep the request owed instead
+            // of dropping it; promotion replays it (#1361).
+            self.secure_backup_inspection_pending = true;
             return;
         };
         let generation = self.trust_generation;
@@ -2223,26 +2227,32 @@ impl AccountActor {
         }
     }
 
-    /// #1361: a proven connectivity edge can arrive before session promotion,
-    /// because `start_secure_backup_inspection` only spawns once the session is
-    /// promoted. The edge retains its boolean but used to skip its admission, so
-    /// a request deferred behind the connectivity deadline kept that deadline
-    /// and expired into a retryable `BlockedFailed{Timeout}` about one wait
-    /// later even though sync was running. Promotion replays the owed admission
-    /// instead.
+    /// #1361: Secure Backup work that was owed while the session was unpromoted
+    /// must be replayed at promotion, because `start_secure_backup_inspection`
+    /// only spawns once the session is promoted.
     ///
-    /// The replay admits an inspection rather than the reconnection monitor by
-    /// presenting the retained edge as the first proven edge of its recovery
-    /// epoch, which is what it was when it arrived: cancellation resets the
-    /// epoch on every demotion, so no inspection can have settled between the
-    /// edge and this promotion. Clearing the pending flag keeps a repeat
-    /// promotion from launching a second inspection; the admission still
-    /// coalesces onto an in-flight one.
+    /// With connectivity already proven, the pending request is admitted and
+    /// its deadline retired. Otherwise the bounded wait is re-armed: an expiry
+    /// that fired before promotion could not gate the unpromoted session, and
+    /// without a fresh deadline the gate would stay `Checking` with neither a
+    /// terminal nor a monitor (the #860 guarantee).
+    ///
+    /// The proven branch admits an inspection rather than the reconnection
+    /// monitor by presenting the retained edge as the first proven edge of its
+    /// recovery epoch, which is what it was when it arrived: cancellation
+    /// resets the epoch on every demotion, so no inspection can have settled
+    /// between the edge and this promotion. Clearing the pending flag keeps a
+    /// repeat promotion from launching a second inspection; the admission
+    /// still coalesces onto an in-flight one.
     pub(super) fn replay_secure_backup_admission_on_promotion(&mut self) {
-        if !self.sync_connectivity_proven || !self.secure_backup_inspection_pending {
+        if !self.secure_backup_inspection_pending {
             return;
         }
-        self.admit_secure_backup_for_proven_connectivity(true);
+        if self.sync_connectivity_proven {
+            self.admit_secure_backup_for_proven_connectivity(true);
+        } else {
+            self.arm_secure_backup_defer_deadline();
+        }
     }
 
     fn retire_secure_backup_monitor(&mut self) {
@@ -2290,13 +2300,20 @@ impl AccountActor {
         generation: u64,
         deadline_serial: u64,
     ) {
+        // The sender task is already finished, so release its handle whenever
+        // it still owns the current serial. An expiry that arrived while the
+        // session was unpromoted or under an older generation cannot project a
+        // terminal, but leaving its handle behind would block every later defer
+        // from arming a fresh bounded wait (#1361).
+        if deadline_serial == self.secure_backup_defer_serial {
+            self.secure_backup_defer_deadline_task = None;
+        }
         let is_current = self.session_promoted
             && generation == self.trust_generation
             && deadline_serial == self.secure_backup_defer_serial;
         if !is_current {
             return;
         }
-        self.secure_backup_defer_deadline_task = None;
         // Consume the serial so a replayed expiry cannot fail the gate twice.
         self.secure_backup_defer_serial = self.secure_backup_defer_serial.wrapping_add(1).max(1);
         self.secure_backup_inspection_pending = false;
