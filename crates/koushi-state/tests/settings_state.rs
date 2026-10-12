@@ -644,9 +644,11 @@ fn thread_list_ordering_setting_defaults_to_latest_reply() {
 }
 
 #[test]
-fn room_list_sort_setting_defaults_to_activity_and_supports_recent_and_locale() {
+fn room_list_sort_setting_defaults_to_recent_and_still_reads_activity_and_locale() {
     let values = SettingsValues::default();
-    assert_eq!(values.room_list_sort, RoomListSort::Activity);
+    // #542: recent conversation order is the product default; `Activity` is
+    // retained for a settings document an older build persisted.
+    assert_eq!(values.room_list_sort, RoomListSort::RecentFirst);
 
     let mut state = AppState::default();
     reduce(

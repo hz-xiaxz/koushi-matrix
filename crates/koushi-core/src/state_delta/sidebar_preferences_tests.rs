@@ -202,7 +202,14 @@ fn repeated_and_effectively_unchanged_preferences_do_not_publish_sidebar() {
         for section in [SidebarSectionKind::Rooms, SidebarSectionKind::Dms] {
             let previous = fixture(active);
             let mut next = previous.clone();
-            let same = patch(active, section, Some(false), Some(RoomListSort::Activity));
+            // #542: `RecentFirst` is the default, so this patch is the
+            // effectively-unchanged preference the test is about.
+            let same = patch(
+                active,
+                section,
+                Some(false),
+                Some(RoomListSort::RecentFirst),
+            );
             update(&mut next, same.clone());
             assert!(
                 build_state_delta(1, &previous, &next)

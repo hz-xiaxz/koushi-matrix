@@ -24,6 +24,12 @@ records why the Recent sidebar order collapsed into name order, the
 `recency_stamp` fallback for the activity-less group, and the persisted per-room
 conversation-activity store that the #542 Recent-first default depends on.
 
+[#542 Recent-first default](../plans/2026-10-12-issue542-recent-first-default.md)
+makes recent conversation order the default for every scope and section, keeps
+`Activity` deserializable for settings an older build persisted, removes the
+attention-first selector option, and corrects the canon's attention ranks to the
+three the reducer implements.
+
 [#1150 index-first search and bounded memory](../plans/2026-10-06-issue1150-search-index-first.md)
 tracks M2: making the persistent ngram index the only candidate source and
 removing full-history RAM body/edit retention, with the remaining store shrink

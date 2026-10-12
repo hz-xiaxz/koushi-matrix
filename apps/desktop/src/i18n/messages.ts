@@ -729,8 +729,6 @@ export type MessageId =
   | "roomList.noMatchingConversations"
   | "roomList.sort"
   | "roomList.sortLabel"
-  | "roomList.sortActive"
-  | "roomList.sortAttention"
   | "roomList.sortRecent"
   | "roomList.sortName"
   | "roomList.sectionOptions"
@@ -2618,9 +2616,7 @@ const en: Catalog = {
   "roomList.noMatchingConversations": "No matching conversations",
   "roomList.sort": "Room list sort",
   "roomList.sortLabel": "Sort",
-  "roomList.sortActive": "Active",
-  "roomList.sortAttention": "Unread & mentions first",
-  "roomList.sortRecent": "Recent messages",
+  "roomList.sortRecent": "Recent",
   "roomList.sortName": "Name",
   "roomList.sectionOptions": "Options for {section}",
   "spaceAddRooms.action": "Add existing room",
@@ -4424,9 +4420,7 @@ const ja: Catalog = {
   "roomList.noMatchingConversations": "一致する会話がありません",
   "roomList.sort": "ルームリストの並び順",
   "roomList.sortLabel": "並び順",
-  "roomList.sortActive": "アクティブ",
-  "roomList.sortAttention": "未読・メンション優先",
-  "roomList.sortRecent": "新着メッセージ",
+  "roomList.sortRecent": "新着順",
   "roomList.sortName": "名前",
   "roomList.sectionOptions": "{section}のオプション",
   "spaceAddRooms.action": "既存のルームを追加",

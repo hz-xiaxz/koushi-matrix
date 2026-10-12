@@ -18,7 +18,7 @@
     "dm_unread_count": 0,
     "dms_collapsed": false,
     "dms_sort": {
-      "kind": "activity"
+      "kind": "recentFirst"
     },
     "global_dms": [],
     "low_priority_collapsed": true,
@@ -56,7 +56,7 @@
     ],
     "rooms_collapsed": false,
     "rooms_sort": {
-      "kind": "activity"
+      "kind": "recentFirst"
     },
     "sections": {
       "favourites": [],
@@ -1039,7 +1039,7 @@
             "sound": true
           },
           "room_list_sort": {
-            "kind": "activity"
+            "kind": "recentFirst"
           },
           "search_crawler": {
             "include_filenames": true,
@@ -1058,19 +1058,19 @@
                 "dms": {
                   "collapsed": false,
                   "sort": {
-                    "kind": "activity"
+                    "kind": "recentFirst"
                   }
                 },
                 "low_priority": {
                   "collapsed": true,
                   "sort": {
-                    "kind": "activity"
+                    "kind": "recentFirst"
                   }
                 },
                 "rooms": {
                   "collapsed": false,
                   "sort": {
-                    "kind": "activity"
+                    "kind": "recentFirst"
                   }
                 }
               }
@@ -1343,7 +1343,7 @@
           "source": "live"
         },
         "sort": {
-          "kind": "activity"
+          "kind": "recentFirst"
         }
       },
       "scheduled_sends_list": {

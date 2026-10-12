@@ -1,6 +1,6 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, ConversationActivity, ConversationActivitySource,
-    NativeAttentionObservationKind, NotificationSettings, OperationFailureKind,
+    NativeAttentionObservationKind, NotificationSettings, OperationFailureKind, RoomListSort,
     RoomNotificationMode, RoomNotificationModeOperation, RoomPreference, RoomPreferencesState,
     RoomSummary, SessionInfo, SessionState, SettingsPatch, SettingsValues, UiEvent, reduce,
 };
@@ -294,6 +294,9 @@ fn loaded_notification_preferences_recompute_activity_projection_with_effective_
     let mut ordinary = room("ordinary", 950);
     ordinary.unread_count = 1;
     state.rooms = vec![room("selected", 1_000), notification, ordinary, mention];
+    // Attention-first ordering is no longer the default (#542), so this test
+    // selects it explicitly to keep exercising the notification-mode recompute.
+    state.settings.values.room_list_sort = RoomListSort::Activity;
 
     let settings = state.settings.values.clone();
     reduce(&mut state, AppAction::SettingsLoaded { values: settings });
