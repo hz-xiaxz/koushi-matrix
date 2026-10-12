@@ -9,9 +9,10 @@
 
 use koushi_state::{
     AppAction, AppState, ConversationActivity, ConversationActivitySource, NavigationState,
-    RoomListSort, RoomSummary, RoomTags, SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT, SessionInfo,
-    SessionState, SettingsPatch, SettingsValues, SidebarSectionKind, SidebarSectionPatch,
-    SidebarSectionSettings, SpaceSummary, compose_sidebar_for_state, reduce,
+    RoomListSort, RoomSummary, RoomTags, SIDEBAR_HOME_SCOPE_KEY,
+    SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT, SessionInfo, SessionState, SettingsPatch,
+    SettingsValues, SidebarSectionKind, SidebarSectionPatch, SidebarSectionSettings, SpaceSummary,
+    compose_sidebar_for_state, reduce, sidebar_scope_key,
 };
 
 const SPACE_ID: &str = "!space:example.invalid";
@@ -401,6 +402,18 @@ fn selecting_a_conversation_reveals_a_collapsed_section() {
         },
     );
     assert!(compose_sidebar_for_state(&state).rooms_collapsed);
+}
+
+/// #1363/#1366: the Home scope key is a wire token the renderer spells too
+/// (`HOME_SCOPE_KEY` in `apps/desktop/src/components/Shell.tsx`), so pin it.
+#[test]
+fn the_home_scope_key_is_the_wire_token_the_renderer_sends() {
+    assert_eq!(SIDEBAR_HOME_SCOPE_KEY, "__home__");
+    assert_eq!(sidebar_scope_key(None), SIDEBAR_HOME_SCOPE_KEY);
+    assert_eq!(
+        sidebar_scope_key(Some("!space:example.invalid")),
+        "!space:example.invalid"
+    );
 }
 
 fn collapse(state: &mut AppState, scope: &str, section: SidebarSectionKind) {

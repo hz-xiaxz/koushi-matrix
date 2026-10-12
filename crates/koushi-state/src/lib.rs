@@ -133,8 +133,8 @@ pub use state::{
     RoomPermissionFacts, RoomPreference, RoomPreferencesState, RoomSettingChange,
     RoomSettingsSnapshot, RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, RoomUrlPreviews,
     SESSION_STATUS_FAILURE_BACKOFF_BASE_MS, SESSION_STATUS_FAILURE_BACKOFF_CAP_MS,
-    SESSION_STATUS_FRESHNESS_MS, SESSION_STATUS_SCHEDULED_REQUEST_ID_BASE, SasEmoji,
-    ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, ScheduledSendStore,
+    SESSION_STATUS_FRESHNESS_MS, SESSION_STATUS_SCHEDULED_REQUEST_ID_BASE, SIDEBAR_HOME_SCOPE_KEY,
+    SasEmoji, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem, ScheduledSendStore,
     ScheduledSendsListState, ScheduledSendsScope, SearchCrawlerFailureKind,
     SearchCrawlerLastActive, SearchCrawlerLastActiveStatus, SearchCrawlerRoomState,
     SearchCrawlerSettings, SearchCrawlerSpeed, SearchCrawlerState, SearchMatchField,
@@ -180,7 +180,7 @@ pub use state::{
     resolve_optional_user_display_name, resolve_people_label, resolve_user_display_name,
     room_activity_unread_count, room_attention_kind, room_attention_projection,
     room_attention_summary, search_query_too_short, session_status_failure_backoff_ms,
-    sort_threads_list_items, staged_upload_item_with_completed_output,
+    sidebar_scope_key, sort_threads_list_items, staged_upload_item_with_completed_output,
     staged_upload_send_consumes_composer_draft, staged_uploads_are_sendable,
 };
 
