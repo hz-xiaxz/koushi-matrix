@@ -145,7 +145,8 @@ the filter box has text, every matching conversation is shown and the control
 disappears until you clear the filter. If the conversation you have open is past
 the first five, its section stays expanded so its row is always visible, and a
 conversation opened from a notification shows its section even when you had
-collapsed it, until you collapse or bound that section yourself.
+collapsed it, until you collapse that section yourself (changing the five-row
+bound does not re-collapse it).
 
 A conversation's own unread badge counts unread replies in its threads as well as
 messages in the main timeline, so a room can show unread while the main timeline

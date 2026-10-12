@@ -27,8 +27,9 @@ const MAX_ROOM_SCROLL_ANCHORS: usize = 200;
 /// [`crate::SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT`]. The projection already keeps
 /// the open conversation inside the bound; this transition keeps its section
 /// uncollapsed. The reveal is scoped and session-only, and the user's own
-/// collapse/bound toggle for the same scope and section clears it, so the
-/// persisted preferences stay the user's.
+/// collapse choice for the same scope and section clears it, so the persisted
+/// preferences stay the user's. The bound toggle is a separate dimension and
+/// leaves the reveal alone.
 pub(crate) fn reveal_sidebar_section_for_room(state: &mut AppState, room_id: &str) {
     let scope_key = sidebar_scope_key(state.navigation.active_space_id.as_deref()).to_owned();
     let section = collapsed_section_containing(state, room_id);
