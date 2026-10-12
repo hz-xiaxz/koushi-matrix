@@ -81,7 +81,11 @@ describe("sidebar section bounds fixture", () => {
     }
   });
 
-  test("the default mock snapshot carries the Rust empty-section bound", () => {
+  // This is a shape-consistency check between the two fakes, not the wire
+  // guard: the Rust agreement is proved by the Rust test that writes and
+  // asserts `sidebarSectionBounds.generated.json`, which the lookup above
+  // replays case by case.
+  test("the default mock and the ready fixture attach the same looked-up bounds", () => {
     const snapshot = readyDesktopSnapshotFixture();
     const expected = sidebarSectionBoundsForFake({
       sections: { rooms: [], people: [], low_priority: [] },

@@ -74,6 +74,9 @@ function boundedSnapshot(
   snapshot.sidebar.space_rail = [];
   snapshot.sidebar.space_rooms = snapshotRooms;
   snapshot.sidebar.global_dms = people;
+  // A non-zero whole-section unread total, so a truncated badge would show.
+  snapshot.sidebar.space_unread_count = count;
+  snapshot.sidebar.dm_unread_count = count;
   snapshot.sidebar.sections = {
     favourites: [],
     rooms: snapshotRooms,
@@ -128,10 +131,12 @@ describe("sidebar section bound", () => {
     expect(lowPriority?.querySelector(".section-count")?.textContent).toBe("7");
     expect(sectionRows("low-priority")).toHaveLength(5);
     // Rooms and DMs replace the count with the Rust-owned whole-section unread
-    // badge, so the bound never leaks a truncated total into the header.
+    // badge, so the bound never leaks a truncated total into the header: the
+    // badge reports all seven rooms while five rows render.
     const rooms = document.querySelector('[data-room-section="rooms"]');
     expect(rooms?.querySelector(".section-count")).toBeNull();
-    expect(rooms?.querySelector(".section-unread-count")).toBeNull();
+    expect(rooms?.querySelector(".section-unread-count")?.textContent).toBe("7");
+    expect(sectionRows("rooms")).toHaveLength(5);
   });
 
   it("dispatches the persisted bound preference when the control is pressed", () => {
@@ -217,6 +222,31 @@ describe("sidebar section bound", () => {
       expect(sectionRows("rooms")).toHaveLength(0);
       expect(document.querySelector('[data-room-section="rooms"] .room-section-bound')).toBeNull();
     }
+  });
+
+  it("slices with Rust's visible_count instead of deriving it", () => {
+    // Every generated case satisfies `expanded ? total : min(total, 5)`, so a
+    // renderer that re-derived the rule would pass those. This bound disagrees
+    // with the rule on purpose: only reading `visible_count` renders two rows.
+    const snapshot = boundedSnapshot(8, { expanded: true });
+    snapshot.sidebar.section_bounds!.rooms = {
+      ...snapshot.sidebar.section_bounds!.rooms!,
+      visible_count: 2,
+      hidden_count: 6,
+      expanded: true,
+      expanded_by_active_room: false,
+      shows_expand_control: true
+    };
+    render(<Sidebar snapshot={snapshot} {...sidebarProps()} />);
+
+    expect(sectionRows("rooms")).toHaveLength(2);
+    const control = document.querySelector<HTMLElement>(
+      '[data-room-section="rooms"] .room-section-bound'
+    );
+    expect(control).not.toBeNull();
+    // `aria-controls` must point at the section it bounds, not at a missing id.
+    expect(document.getElementById(control!.getAttribute("aria-controls")!)).not.toBeNull();
+    expect(control).toHaveProperty("ariaExpanded", "true");
   });
 
   it("renders every row without a control when the open conversation holds the section open", () => {
