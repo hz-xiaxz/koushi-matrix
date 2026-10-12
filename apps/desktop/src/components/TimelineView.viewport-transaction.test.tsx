@@ -88,6 +88,62 @@ function setup(count: number, roundWrites = false) {
 }
 
 describe("TimelineView unified viewport transaction", () => {
+  it("keeps the live rows fixed during repeated offscreen history repair batches", () => {
+    const scheduler = createManualTimelineViewportScheduler();
+    let listener: ((event: CoreEventPayload) => void) | null = null;
+    const rects: Record<string, { top: number; height: number }> = {};
+    const initialCount = 180;
+    for (let index = 0; index < initialCount; index++) {
+      rects[`$item${index}`] = { top: index * 72, height: 72 };
+    }
+    const containerRef: { current: HTMLElement | null } = { current: null };
+    mockTimelineRects(rects, { top: 0, height: 600 }, containerRef);
+    render(<TimelineView timelineKey={KEY} roomId="!room:example.invalid"
+      transport={baseTransport({ listenCoreEvents(next) { listener = next; return () => undefined; } })}
+      onReply={() => undefined} enableAvatarThumbnailDownloads={false} viewportScheduler={scheduler}
+      listRefCallback={(node) => { containerRef.current = node?.closest<HTMLElement>("[data-testid=timeline-view]") ?? null; }}
+    />);
+    const view = screen.getByTestId("timeline-view");
+    let scrollHeight = initialCount * 72;
+    let scrollTop = 0;
+    const writes: number[] = [];
+    Object.defineProperties(view, {
+      scrollTop: { configurable: true, get: () => scrollTop, set: (value: number) => { writes.push(value); scrollTop = value; } },
+      scrollHeight: { configurable: true, get: () => scrollHeight },
+      clientHeight: { configurable: true, value: 600 }
+    });
+    act(() => listener?.({ kind: "Timeline", event: { InitialItems: {
+      request_id: null, key: KEY, generation: 1,
+      items: Array.from({ length: initialCount }, (_, index) => message(`$item${index}`, "Synthetic row"))
+    } } }));
+    act(() => scheduler.flushAll());
+    const latestOffset = () => view.querySelector<HTMLElement>(`[data-item-id="$item${initialCount - 1}"]`)?.getBoundingClientRect().top;
+    expect(latestOffset()).toBe(528);
+    writes.length = 0;
+
+    for (let batch = 0; batch < 3; batch++) {
+      const added = 8;
+      act(() => {
+        for (const rect of Object.values(rects)) rect.top += added * 72;
+        for (let index = 0; index < added; index++) {
+          rects[`$older${batch}-${index}`] = { top: (added - index - 1) * 72, height: 72 };
+        }
+        scrollHeight += added * 72;
+        listener?.({ kind: "Timeline", event: { ItemsUpdated: {
+          key: KEY, generation: 1, batch_id: batch + 1,
+          diffs: [
+            ...Array.from({ length: added }, (_, index) => ({ PushFront: { item: message(`$older${batch}-${index}`, "Older synthetic row") } })),
+            { Set: { index: 0, item: message(`$older${batch}-${added - 1}`, "Updated older row") } }
+          ]
+        } } });
+      });
+      expect(latestOffset()).toBe(528);
+      expect(scrollTop).toBe(scrollHeight - 600);
+      act(() => scheduler.flushAll());
+      expect(latestOffset()).toBe(528);
+    }
+    expect(writes).toHaveLength(3);
+  });
   for (const { count, withPrepend } of [{ count: 120, withPrepend: false }, { count: 601, withPrepend: false }, { count: 601, withPrepend: true }]) {
     it(`settles a native resize before its observer returns (${count} rows, prepend=${withPrepend})`, () => {
       let resize: () => void = () => undefined;
