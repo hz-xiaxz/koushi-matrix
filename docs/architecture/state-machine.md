@@ -488,7 +488,15 @@ stateDiagram-v2
   no automatic monitor, even when no
   proven edge ever arrives, so `Checking` cannot wait forever. Proven
   connectivity before the expiry disarms the deadline and admits the
-  inspection. The explicit typed retry re-enters inspection admission and,
+  inspection. A request that cannot spawn while the session is unpromoted
+  stays pending, and promotion replays it: with connectivity proven the
+  pending inspection starts once and its deadline is retired; with
+  connectivity still unproven the bounded wait is re-armed, and an expiry that
+  fired while unpromoted releases its handle without projecting a terminal, so
+  neither a stale defer nor an early expiry strands `Checking` (#1361).
+  Connectivity that stays unproven keeps the deadline and its retryable
+  failure. The explicit typed
+  retry re-enters inspection admission and,
   while connectivity is still unproven, also asks the sync owner to
   re-project its current status, so a missed `Running` projection cannot make
   retry a permanent no-op. Post-authority recoverable failures — as decided by
