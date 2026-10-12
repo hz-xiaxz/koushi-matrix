@@ -98,9 +98,11 @@ export type ComposerDraftAccountOwner = SavedSessionInfo;
 
 /**
  * IPC snapshot contract version. Must match `dto.rs`'s `SNAPSHOT_SCHEMA_VERSION`.
- * Version 8 adds the explicitly opened Home/Space scheduled-sends panel projection.
+ * Version 9 adds the persisted sidebar section bound
+ * (`SidebarSectionSettings.expanded`) and its projection
+ * (`SidebarModel.section_bounds`).
  */
-export const SNAPSHOT_SCHEMA_VERSION = 8;
+export const SNAPSHOT_SCHEMA_VERSION = 9;
 
 /**
  * Snapshot state. #87 Phase 4 sectioned this into domain (Matrix/product, Rust-owned,

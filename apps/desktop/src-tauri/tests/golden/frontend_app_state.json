@@ -1211,7 +1211,7 @@
         "platform": "linux"
       }
     },
-    "schema_version": 8,
+    "schema_version": 9,
     "ui": {
       "basic_operation": {
         "kind": "creatingRoom",

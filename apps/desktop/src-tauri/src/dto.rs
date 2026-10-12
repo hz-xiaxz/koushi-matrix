@@ -737,9 +737,10 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
     }
 }
 
-/// IPC snapshot contract version. Version 8 adds the explicitly opened
-/// Home/Space scheduled-sends panel projection.
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 8;
+/// IPC snapshot contract version. Version 9 adds the persisted sidebar section
+/// bound (`SidebarSectionSettings.expanded`) and its projection
+/// (`SidebarModel.section_bounds`).
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 9;
 
 pub(crate) fn frontend_display_platform() -> DisplayPlatform {
     #[cfg(target_os = "macos")]
