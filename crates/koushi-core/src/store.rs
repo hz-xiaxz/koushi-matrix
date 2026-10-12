@@ -18,8 +18,9 @@ mod navigation;
 mod read_state;
 mod room_preferences;
 mod scheduled_sends;
+pub(crate) mod search_progress;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};

@@ -555,6 +555,143 @@ pub async fn resolve_cached_message(
     }))
 }
 
+/// Opaque cursor into a room's persisted event chunks.
+///
+/// It names a persisted chunk identifier, which is stable and independent of
+/// anything resident in memory: a caller may hold it across pages, an actor
+/// turn, or a restart (through its stable id form) without depending on a loaded
+/// linked chunk.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub struct MatrixPersistedEventCursor(matrix_sdk::linked_chunk::ChunkIdentifier);
+
+impl MatrixPersistedEventCursor {
+    /// A text form a caller may store and hand back to
+    /// [`persisted_room_event_page`] later, e.g. in a durable crawl record.
+    pub fn as_stable_id(&self) -> String {
+        self.0.index().to_string()
+    }
+
+    /// Parse a cursor produced by [`MatrixPersistedEventCursor::as_stable_id`].
+    pub fn from_stable_id(id: &str) -> Option<Self> {
+        id.parse::<u64>().ok().map(|index| {
+            MatrixPersistedEventCursor(matrix_sdk::linked_chunk::ChunkIdentifier::new(index))
+        })
+    }
+}
+
+/// One bounded page of a room's persisted events, newest first.
+pub struct MatrixPersistedEventPage {
+    pub events: Vec<matrix_sdk::deserialized_responses::TimelineEvent>,
+    /// Pass to the next call. `None` when the store holds no older chunk, i.e.
+    /// the walk has reached the oldest chunk the local store has.
+    pub next: Option<MatrixPersistedEventCursor>,
+    /// How many events of this page are newer than the first gap chunk the walk
+    /// crossed, i.e. the position at which continuity breaks.
+    ///
+    /// A gap means the store does not hold the history between two of its
+    /// chunks. `events[..gap_at]` are contiguous with the previous page;
+    /// `events[gap_at..]` are contiguous amongst themselves but separated from
+    /// the newer block by missing history. `None` when no gap was crossed.
+    pub gap_at: Option<usize>,
+}
+
+/// Read one bounded page of a room's persisted events from the local encrypted
+/// event cache, newest chunk first.
+///
+/// Unlike `RoomEventCache::events` this is not limited to the chunks the cache
+/// holds in memory, and unlike `RoomEventCache::pagination().run_backwards_once`
+/// it never inserts what it reads into the shared room-timeline linked chunk and
+/// never reaches the network. That matters for a history crawl: paging through
+/// the shared cache left every crawled room's whole history resident (measured:
+/// 70,120 events in 1,015 chunks across 160 rooms).
+///
+/// The store lock is held only while one page is loaded, so a caller may page a
+/// whole room in bounded batches. Chunks are returned whole, so `max_events` is
+/// an approximate bound.
+pub async fn persisted_room_event_page(
+    session: &MatrixClientSession,
+    room_id: &str,
+    cursor: Option<MatrixPersistedEventCursor>,
+    max_events: usize,
+) -> Result<MatrixPersistedEventPage, MatrixSearchError> {
+    use matrix_sdk::linked_chunk::{ChunkContent, LinkedChunkId, RawChunk};
+    use matrix_sdk_base::event_cache::store::EventCacheStoreLockState;
+
+    let room_id = matrix_sdk::ruma::RoomId::parse(room_id).map_err(|_| MatrixSearchError::Query)?;
+    let linked_chunk_id = LinkedChunkId::Room(&room_id);
+    let state = session
+        .client()
+        .event_cache_store()
+        .lock()
+        .await
+        .map_err(|_| MatrixSearchError::Internal)?;
+    // `Dirty` says another holder may have written since this process last
+    // acquired the lock, which matters for synchronization; the rows are still
+    // readable, and this is a read-only traversal.
+    let guard = match state {
+        EventCacheStoreLockState::Clean(guard) | EventCacheStoreLockState::Dirty(guard) => guard,
+    };
+
+    let max_events = max_events.max(1);
+    let mut current = match cursor {
+        // The caller owns the cursor's validity. The store reports "no previous
+        // chunk" for a cursor whose chunk is gone exactly as it does for the
+        // oldest chunk, so a caller that persisted one must validate it against
+        // the room's chunk metadata before resuming; nothing here persists a
+        // cursor across sessions, so this is an in-session handle only.
+        Some(MatrixPersistedEventCursor(identifier)) => guard
+            .load_previous_chunk(linked_chunk_id, identifier)
+            .await
+            .map_err(|_| MatrixSearchError::Internal)?,
+        None => {
+            guard
+                .load_last_chunk(linked_chunk_id)
+                .await
+                .map_err(|_| MatrixSearchError::Internal)?
+                .0
+        }
+    };
+
+    let mut events = Vec::new();
+    let mut next = None;
+    let mut gap_at = None;
+    while let Some(chunk) = current.take() {
+        let RawChunk {
+            content,
+            identifier,
+            ..
+        } = chunk;
+        match content {
+            ChunkContent::Items(chunk_events) => {
+                // Items inside a chunk run oldest first while chunks are walked
+                // newest first, so reverse each chunk to keep the page ordered
+                // newest first.
+                events.extend(chunk_events.into_iter().rev());
+            }
+            ChunkContent::Gap(_) => {
+                if gap_at.is_none() {
+                    gap_at = Some(events.len());
+                }
+            }
+        }
+        if events.len() >= max_events {
+            // Stop at a chunk boundary so the cursor resumes exactly here.
+            next = Some(MatrixPersistedEventCursor(identifier));
+            break;
+        }
+        current = guard
+            .load_previous_chunk(linked_chunk_id, identifier)
+            .await
+            .map_err(|_| MatrixSearchError::Internal)?;
+    }
+
+    Ok(MatrixPersistedEventPage {
+        events,
+        next,
+        gap_at,
+    })
+}
+
 /// Index a room's events in the persistent ngram index now, awaiting the commit.
 ///
 /// The SDK's own indexing runs in a background subscriber task that consumes

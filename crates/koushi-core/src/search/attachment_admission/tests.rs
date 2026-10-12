@@ -45,6 +45,7 @@ async fn files_submission_adopts_policy_before_deferred_crawler_notification() {
     let (tx, mut rx) = mpsc::channel(1);
     let (index_tx, _) = mpsc::channel(1);
     let handle = SearchActorHandle {
+        report_task: None,
         tx,
         index_tx,
         task: None,

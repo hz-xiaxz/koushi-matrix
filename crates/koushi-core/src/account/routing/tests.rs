@@ -388,7 +388,6 @@ async fn export_time_retention_sample_is_answered_or_settles_unavailable() {
     let fixture = AccountRetentionDiagnostics {
         search: SearchRetentionCounters {
             rooms_total: 3,
-            rooms_with_active_reader: 2,
             live_decrypted_len_bytes: 8192,
             ..SearchRetentionCounters::default()
         },

@@ -322,6 +322,47 @@ impl AccountActor {
         );
         let search_index_tx = search_handle.index_sender();
 
+        // Load the account's durable crawl progress before the first room
+        // notification, so rooms whose backfill is already committed are not
+        // crawled again. A record that cannot be read crawls again rather than
+        // failing the session.
+        if let Some(key_id) = self.session_key_id.clone() {
+            let store = self.store.clone();
+            let load_key_id = key_id.clone();
+            let loaded = executor::spawn_blocking(move || {
+                let instance = store.search_index_instance(&load_key_id)?;
+                let progress = store.load_search_progress(&load_key_id)?;
+                Ok::<_, koushi_protocol::failure::CoreFailure>((progress, instance))
+            })
+            .await;
+            match loaded {
+                Ok(Ok((progress, instance))) => {
+                    let writer = Some((self.store.clone(), key_id));
+                    search_handle
+                        .adopt_crawl_progress(progress, instance, writer)
+                        .await;
+                }
+                Ok(Err(_failure)) => record(
+                    DiagnosticEvent::new(
+                        DiagnosticLevel::Debug,
+                        "core.search",
+                        "crawl_progress_load_failed",
+                    )
+                    .field(DiagnosticField::token("failure", "store_unavailable"))
+                    .field(DiagnosticField::token("outcome", "crawl_again")),
+                ),
+                Err(_) => record(
+                    DiagnosticEvent::new(
+                        DiagnosticLevel::Debug,
+                        "core.search",
+                        "crawl_progress_load_failed",
+                    )
+                    .field(DiagnosticField::token("failure", "task"))
+                    .field(DiagnosticField::token("outcome", "crawl_again")),
+                ),
+            }
+        }
+
         self.search_actor = Some(search_handle);
         // Replay any notification that arrived before the actor was ready so
         // rooms already known to the reducer at session-restore time are not

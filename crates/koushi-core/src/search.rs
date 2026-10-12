@@ -73,6 +73,7 @@ use crate::command_policy::{SEARCH_UNAVAILABLE_MESSAGE, search_scope_to_state};
 
 use crate::executor;
 use crate::search_crawler::{HistoryCrawlCheckpoint, HistoryCrawlPageResult};
+use crate::store::search_progress::{SearchProgress, SearchProgressIdentity};
 use koushi_protocol::command::{SearchCommand, SearchScope};
 use koushi_protocol::event::{CoreEvent, SearchEvent, SearchResultItem};
 use koushi_protocol::failure::{CoreFailure, SearchFailureKind};
@@ -107,6 +108,16 @@ const SEARCH_ACTOR_SHUTDOWN_JOIN_TIMEOUT: Duration = Duration::from_secs(2);
 /// (#1198): a deadline inside this hold expires while every crawl is still
 /// queued. Manual `StartHistoryCrawl` checkpoints are not held.
 pub const CRAWLER_STARTUP_DELAY: std::time::Duration = std::time::Duration::from_secs(60);
+
+/// How many skipped rooms and persisted pages one Files query rebuilds.
+///
+/// A room the restart skips has no attachment rows yet, and its history stays on
+/// disk, so the rows are rebuilt on demand. The query is bounded so opening the
+/// Files view never walks an account's whole history, and successive queries
+/// continue where the previous one stopped.
+const FILES_REBUILD_ROOMS_PER_QUERY: usize = 4;
+const FILES_REBUILD_PAGES_PER_QUERY: usize = 8;
+const FILES_REBUILD_PAGE_EVENTS: usize = 100;
 
 fn search_scope_trace_label(scope: &SearchScope) -> &'static str {
     match scope {
@@ -336,6 +347,27 @@ pub(crate) enum SearchActorMessage {
     RetentionDiagnostics {
         response: oneshot::Sender<Option<AccountRetentionDiagnostics>>,
     },
+    /// A late decryption changed events of a room in place.
+    ///
+    /// The resolution adds nothing newer to the room, so no tail comparison can
+    /// notice it: the room must be re-read from its persisted chunks.
+    LateDecryptionResolved {
+        room_id: String,
+    },
+    /// The redecryptor's room-key stream lagged, so any room may have missed a
+    /// resolution.
+    LateDecryptionLagging,
+    /// Attach the account's durable crawl progress to this session.
+    ///
+    /// Sent once, before the first room-availability notification, so the actor
+    /// can skip rooms whose backfill is already committed instead of re-crawling
+    /// them. The record is content-free: room ids, event ids, cursors and
+    /// counters only.
+    AdoptCrawlProgress {
+        progress: Option<SearchProgress>,
+        index_instance: String,
+        writer: Option<(crate::store::StoreActor, koushi_protocol::SessionKeyId)>,
+    },
     Shutdown,
 }
 
@@ -438,6 +470,14 @@ impl std::fmt::Debug for SearchActorMessage {
             Self::RetentionDiagnostics { .. } => {
                 write!(f, "SearchActorMessage::RetentionDiagnostics")
             }
+            Self::AdoptCrawlProgress { progress, .. } => f
+                .debug_struct("SearchActorMessage::AdoptCrawlProgress")
+                .field("present", &progress.is_some())
+                .finish(),
+            Self::LateDecryptionResolved { .. } => {
+                write!(f, "SearchActorMessage::LateDecryptionResolved")
+            }
+            Self::LateDecryptionLagging => write!(f, "SearchActorMessage::LateDecryptionLagging"),
             Self::Shutdown => write!(f, "SearchActorMessage::Shutdown"),
         }
     }
@@ -458,7 +498,6 @@ struct CompletedHistoryCrawl {
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
 pub struct SearchRetentionCounters {
     pub rooms_total: u64,
-    pub rooms_with_active_reader: u64,
     pub opened_files_total: u64,
     pub decrypted_bytes_total: u64,
     pub live_decrypted_len_bytes: u64,
@@ -491,6 +530,8 @@ pub struct SearchActorHandle {
     /// Cloned and handed to TimelineManagerActor on creation.
     index_tx: mpsc::Sender<SearchIndexMessage>,
     task: Option<executor::JoinHandle<()>>,
+    /// Forwards the SDK's late-decryption reports into the actor mailbox.
+    report_task: Option<executor::JoinHandle<()>>,
 }
 
 impl SearchActorHandle {
@@ -503,6 +544,7 @@ impl SearchActorHandle {
                 tx,
                 index_tx,
                 task: None,
+                report_task: None,
             },
             rx,
         )
@@ -606,12 +648,38 @@ impl SearchActorHandle {
         let Some(mut task) = self.task.take() else {
             return sent;
         };
-        if sent && executor::timeout(join_timeout, &mut task).await.is_ok() {
+        let settled = sent && executor::timeout(join_timeout, &mut task).await.is_ok();
+        if let Some(report_task) = self.report_task.take() {
+            report_task.abort();
+            let _ = report_task.await;
+        }
+        if settled {
             return true;
         }
         task.abort();
         let _ = task.await;
         false
+    }
+
+    /// Attach the account's durable crawl progress to this session.
+    ///
+    /// Reliable delivery: losing this record would re-crawl every room. It is
+    /// sent before the first room-availability notification, so the actor can
+    /// seed its completed set before it decides what to crawl.
+    pub(crate) async fn adopt_crawl_progress(
+        &self,
+        progress: Option<SearchProgress>,
+        index_instance: String,
+        writer: Option<(crate::store::StoreActor, koushi_protocol::SessionKeyId)>,
+    ) {
+        let _ = self
+            .tx
+            .send(SearchActorMessage::AdoptCrawlProgress {
+                progress,
+                index_instance,
+                writer,
+            })
+            .await;
     }
 
     /// Try to notify the actor that the set of joined rooms has changed.
@@ -671,6 +739,9 @@ impl Drop for SearchActorHandle {
         if let Some(task) = &self.task {
             task.abort();
         }
+        if let Some(task) = &self.report_task {
+            task.abort();
+        }
     }
 }
 
@@ -725,6 +796,23 @@ pub(crate) struct SearchActor {
     /// queued checkpoint records the current generation, and stale page results
     /// are discarded before they can update the index or reducer state.
     crawl_settings_generation: u64,
+    /// Durable crawl progress for this account, when one was loaded.
+    search_progress: Option<SearchProgress>,
+    /// Rooms whose attachment rows still have to be rebuilt from persisted store,
+    /// with the cursor each rebuild stopped at.
+    ///
+    /// A room the restart skipped has no rows in the body-free document store,
+    /// and rebuilding them from the store is what keeps the Files view honest
+    /// without replaying the room's history at startup.
+    files_rebuild_pending: HashMap<String, Option<koushi_sdk::MatrixPersistedEventCursor>>,
+    /// The index-directory instance the loaded record must name to be trusted.
+    search_progress_index_instance: String,
+    /// Where to write the record. Absent for sessions without a store.
+    search_progress_writer: Option<(crate::store::StoreActor, koushi_protocol::SessionKeyId)>,
+    /// Identity the running index and content policy produce; resolved on the
+    /// first settings the actor sees, because the policy arrives with the room
+    /// list rather than at spawn.
+    search_progress_identity: Option<SearchProgressIdentity>,
     /// True once the startup delay has elapsed (automatic crawls may start).
     crawl_delay_elapsed: bool,
     /// Last `(queued_crawl_index, attachment_retries)` counts emitted as a
@@ -812,6 +900,11 @@ impl SearchActor {
             completed_rooms: HashMap::new(),
             latest_event_ids: std::collections::BTreeMap::new(),
             crawl_settings_generation: 0,
+            search_progress: None,
+            files_rebuild_pending: HashMap::new(),
+            search_progress_index_instance: String::new(),
+            search_progress_writer: None,
+            search_progress_identity: None,
             crawl_delay_elapsed: false,
             last_crawl_backlog_counts: None,
             crawl_delay_timer: None,
@@ -832,13 +925,44 @@ impl SearchActor {
 
         let actor = Self::new(session, action_tx, event_tx, msg_rx, account_work);
 
+        let report_session = actor.session.clone();
         // Spawn the actor task.
         let task = executor::spawn(actor.run(index_rx));
+
+        // Observe the SDK's late-decryption reports for every room. A room that
+        // resolves a UTD in place must not stay marked as fully indexed: its
+        // stored event changed without anything newer being added. The forwarder
+        // ends when the actor's mailbox closes.
+        let report_tx = tx.clone();
+        let report_task = executor::spawn(async move {
+            use futures_util::StreamExt;
+            use matrix_sdk::event_cache::RedecryptorReport;
+            let mut reports = koushi_sdk::late_decryption_report_stream(&report_session);
+            while let Some(report) = reports.next().await {
+                let message = match report {
+                    // The stream lagging means reports were dropped, which is
+                    // exactly the case where a room's resolved UTD could go
+                    // unnoticed: reopen every joined room rather than ignore it.
+                    Err(_) => SearchActorMessage::LateDecryptionLagging,
+                    Ok(RedecryptorReport::ResolvedUtds { room_id, .. }) => {
+                        SearchActorMessage::LateDecryptionResolved {
+                            room_id: room_id.to_string(),
+                        }
+                    }
+                    Ok(RedecryptorReport::Lagging) => SearchActorMessage::LateDecryptionLagging,
+                    Ok(RedecryptorReport::BackupAvailable) => continue,
+                };
+                if report_tx.send(message).await.is_err() {
+                    break;
+                }
+            }
+        });
 
         SearchActorHandle {
             tx,
             index_tx,
             task: Some(task),
+            report_task: Some(report_task),
         }
     }
 
@@ -1019,6 +1143,37 @@ impl SearchActor {
                 self.rebuild_search_index().await;
                 true
             }
+            SearchActorMessage::LateDecryptionResolved { room_id } => {
+                self.mark_room_needs_reread(&room_id).await;
+                true
+            }
+            SearchActorMessage::LateDecryptionLagging => {
+                // Any room may have missed a resolution; there is no way to know
+                // which, so every joined room is re-read from its persisted
+                // chunks rather than left with a stale index.
+                let rooms = self
+                    .available_crawl_rooms
+                    .iter()
+                    .cloned()
+                    .collect::<Vec<_>>();
+                for room_id in rooms {
+                    self.mark_room_needs_reread(&room_id).await;
+                }
+                true
+            }
+            SearchActorMessage::AdoptCrawlProgress {
+                progress,
+                index_instance,
+                writer,
+            } => {
+                self.search_progress = progress;
+                self.search_progress_index_instance = index_instance;
+                self.search_progress_writer = writer;
+                // The identity needs the content policy, which arrives with the
+                // room list; the first settings the actor sees resolves it.
+                self.search_progress_identity = None;
+                true
+            }
             SearchActorMessage::RetentionDiagnostics { response } => {
                 // Bounded SDK read: a long-held index lock settles as
                 // unavailable instead of stalling the actor mailbox.
@@ -1041,7 +1196,6 @@ impl SearchActor {
         AccountRetentionDiagnostics {
             search: SearchRetentionCounters {
                 rooms_total: sdk.search.rooms_total,
-                rooms_with_active_reader: sdk.search.rooms_with_active_reader,
                 opened_files_total: sdk.search.opened_files_total,
                 decrypted_bytes_total: sdk.search.decrypted_bytes_total,
                 live_decrypted_len_bytes: sdk.search.live_decrypted_len_bytes,
@@ -1256,6 +1410,7 @@ impl SearchActor {
             return;
         }
         self.start_next_history_crawl_page();
+        self.rebuild_files_rows(&scope).await;
         let results = self.document_store.attachments(&scope, &filter, sort);
 
         let _ = self
@@ -1270,6 +1425,89 @@ impl SearchActor {
             request_id,
             results,
         }));
+    }
+
+    /// Rooms whose attachment rows this query may rebuild, bounded and scoped.
+    fn files_rebuild_rooms_for_scope(&self, scope: &AttachmentScope) -> Vec<String> {
+        let mut rooms = self
+            .files_rebuild_pending
+            .keys()
+            .filter(|room_id| match scope {
+                AttachmentScope::Room { room_id: scoped } => scoped == *room_id,
+                AttachmentScope::Space { child_room_ids, .. } => {
+                    child_room_ids.iter().any(|child| child == *room_id)
+                }
+                AttachmentScope::Account => true,
+            })
+            .cloned()
+            .collect::<Vec<_>>();
+        rooms.sort_unstable();
+        rooms.truncate(FILES_REBUILD_ROOMS_PER_QUERY);
+        rooms
+    }
+
+    /// Rebuild attachment rows from persisted store for the queried rooms.
+    ///
+    /// Rows are only ever added or refreshed: a focused or thread projection and
+    /// a concurrent tail insertion are not evidence that an existing row is
+    /// stale, so removing rows stays with the positive-redaction reconciliation
+    /// the Files query already runs.
+    async fn rebuild_files_rows(&mut self, scope: &AttachmentScope) {
+        let mut pages_left = FILES_REBUILD_PAGES_PER_QUERY;
+        for room_id in self.files_rebuild_rooms_for_scope(scope) {
+            while pages_left > 0 {
+                let cursor = self.files_rebuild_pending.get(&room_id).cloned().flatten();
+                let page = match koushi_sdk::persisted_room_event_page(
+                    &self.session,
+                    &room_id,
+                    cursor,
+                    FILES_REBUILD_PAGE_EVENTS,
+                )
+                .await
+                {
+                    Ok(page) => page,
+                    // A failed read leaves the room pending; the next query retries.
+                    Err(_) => break,
+                };
+                pages_left -= 1;
+                self.apply_rebuilt_rows(&room_id, &page.events).await;
+                match page.next {
+                    Some(next) => {
+                        self.files_rebuild_pending
+                            .insert(room_id.clone(), Some(next));
+                    }
+                    None => {
+                        self.files_rebuild_pending.remove(&room_id);
+                        break;
+                    }
+                }
+            }
+        }
+    }
+
+    /// Apply one rebuilt page to the body-free document store.
+    async fn apply_rebuilt_rows(
+        &mut self,
+        room_id: &str,
+        events: &[matrix_sdk::deserialized_responses::TimelineEvent],
+    ) {
+        let settings = self.crawler_settings.clone();
+        let mut pending_redactions = HashSet::new();
+        for event in events {
+            if event.kind.is_utd() {
+                continue;
+            }
+            let json = event.kind.raw().json().get();
+            let Some(message) = crate::search_crawler::event_json_to_index_message(
+                room_id,
+                json,
+                &settings,
+                &mut pending_redactions,
+            ) else {
+                continue;
+            };
+            self.handle_index(message).await;
+        }
     }
 
     /// Ask the state to admit a result set and publish it.
@@ -1674,6 +1912,11 @@ impl SearchActor {
                 }
                 // The permit covers page/index work, not Files cache admission.
                 drop(work_permit);
+                // The page's Tantivy commit is already acknowledged, so the
+                // record may advance. A crash between the commit and this write
+                // replays at most this page.
+                self.record_crawl_page_progress(&checkpoint, completed)
+                    .await;
                 self.queue_crawl_messages(messages);
                 let _ = self
                     .action_tx
@@ -1755,6 +1998,189 @@ impl SearchActor {
     ///
     /// A content-policy change invalidates any query that is verifying under the
     /// previous policy; a speed-only change does not.
+    /// Reopen one room's indexing because its stored events changed in place.
+    ///
+    /// The room stops being skippable, and it is re-read now rather than at the
+    /// next launch. Only joined rooms are recorded, so an unknown room cannot
+    /// grow the durable record.
+    async fn mark_room_needs_reread(&mut self, room_id: &str) {
+        let known = self.available_crawl_rooms.contains(room_id)
+            || self
+                .search_progress
+                .as_ref()
+                .is_some_and(|progress| progress.room(room_id).is_some());
+        if !known {
+            return;
+        }
+        let recorded = self
+            .search_progress
+            .as_ref()
+            .is_some_and(|progress| progress.room(room_id).is_some());
+        if let Some(progress) = self.search_progress.as_mut() {
+            progress.room_mut(room_id).needs_reread = true;
+        }
+        if recorded {
+            self.persist_search_progress().await;
+        }
+        self.completed_rooms.remove(room_id);
+        // The re-read rebuilds the room's rows as it goes, so the on-demand
+        // rebuild is no longer its owner.
+        self.files_rebuild_pending.remove(room_id);
+        if !self.available_crawl_rooms.contains(room_id) {
+            // The room list does not know this room yet. Its reopen is durable,
+            // and the next notification queues the read.
+            return;
+        }
+        // A crawl already reading this room started before the resolution, so it
+        // may have passed the changed event; restart it from the newest event
+        // rather than let its completion settle the room.
+        if self.history_crawl_room_is_known(room_id) {
+            self.remove_history_crawl_room(room_id).await;
+        }
+        self.enqueue_history_crawl(
+            HistoryCrawlCheckpoint::new(
+                room_id.to_owned(),
+                self.crawler_settings.clone(),
+                self.crawl_settings_generation,
+                false,
+            ),
+            0,
+        )
+        .await;
+        self.start_next_history_crawl_page();
+    }
+
+    /// Apply a record a previous session loaded, without the store round trip.
+    #[cfg(test)]
+    pub(crate) fn adopt_loaded_progress(
+        &mut self,
+        progress: SearchProgress,
+        index_instance: String,
+    ) {
+        self.search_progress = Some(progress);
+        self.search_progress_index_instance = index_instance;
+        self.search_progress_identity = None;
+    }
+
+    /// Record what a committed crawl page means for the durable record.
+    ///
+    /// Only automatic crawls are recorded: a manual probe may name a room
+    /// outside the joined set, and it is pruned on the next notification anyway.
+    async fn record_crawl_page_progress(
+        &mut self,
+        checkpoint: &HistoryCrawlCheckpoint,
+        completed: bool,
+    ) {
+        if checkpoint.manual || self.search_progress.is_none() {
+            return;
+        }
+        if let Some(progress) = self.search_progress.as_mut() {
+            let room = progress.room_mut(&checkpoint.room_id);
+            room.processed = checkpoint.processed;
+            room.indexed = checkpoint.indexed;
+            if completed {
+                room.backfill_complete = true;
+                room.latest_event_id = checkpoint.latest_event_id_at_start.clone();
+                // A completed crawl has just read the whole room, so a late
+                // decryption that reopened it is settled by this pass.
+                room.needs_reread = false;
+            }
+        }
+        self.persist_search_progress().await;
+    }
+
+    /// The identity the running index and content policy produce.
+    fn crawl_progress_identity(&self, settings: &SearchCrawlerSettings) -> SearchProgressIdentity {
+        SearchProgressIdentity {
+            index_contract_version: crate::store::SEARCH_INDEX_CONTRACT_VERSION,
+            index_instance: self.search_progress_index_instance.clone(),
+            include_media_captions: settings.include_media_captions,
+            include_filenames: settings.include_filenames,
+        }
+    }
+
+    /// Seed the in-session completed set from the durable record.
+    ///
+    /// Runs on the first settings the actor sees and whenever they change: a
+    /// record written under another index instance or content policy describes a
+    /// different index, so nothing from it is trusted. A room with queued
+    /// late-decryption work is deliberately not seeded, so it is re-crawled.
+    fn resolve_crawl_progress_identity(&mut self, settings: &SearchCrawlerSettings) {
+        let identity = self.crawl_progress_identity(settings);
+        if self.search_progress_identity.as_ref() == Some(&identity) {
+            return;
+        }
+        self.search_progress_identity = Some(identity.clone());
+        // A record the running index and content policy do not describe is a
+        // migration, and an account that has never crawled has no file at all.
+        // Either way the session holds a record under the running identity, so a
+        // later page writes one instead of nothing.
+        let mut progress = self
+            .search_progress
+            .take()
+            .unwrap_or_else(|| SearchProgress::new(identity.clone()));
+        progress.adopt_identity(identity.clone());
+        self.search_progress = Some(progress);
+        let progress = self.search_progress.as_ref().expect("progress just set");
+
+        let settled = progress
+            .rooms_for(&identity)
+            .iter()
+            .filter(|(_, room)| room.is_settled())
+            .map(|(room_id, room)| {
+                (
+                    room_id.clone(),
+                    CompletedHistoryCrawl {
+                        latest_event_id: room.latest_event_id.clone(),
+                        processed: room.processed,
+                        indexed: room.indexed,
+                    },
+                )
+            })
+            .collect::<Vec<_>>();
+        for (room_id, completed) in settled {
+            // A skipped room has no attachment rows in this session's body-free
+            // document store; they are rebuilt from persisted store on demand.
+            self.files_rebuild_pending
+                .entry(room_id.clone())
+                .or_insert(None);
+            self.completed_rooms.insert(room_id, completed);
+        }
+
+        // An unfinished backfill is not resumed: its position would be a
+        // persisted chunk cursor, and events that arrived while the app was
+        // closed sit above that cursor behind a gap the resumed walk never
+        // crosses. The room is crawled again from its newest event instead.
+    }
+
+    /// Write the durable record.
+    ///
+    /// Runs inline so the single-threaded actor never has two writes in flight,
+    /// which is what keeps a later record from being replaced by an earlier one.
+    async fn persist_search_progress(&mut self) {
+        let Some((store, key_id)) = self.search_progress_writer.clone() else {
+            return;
+        };
+        let Some(progress) = self.search_progress.clone() else {
+            return;
+        };
+        let saved =
+            executor::spawn_blocking(move || store.save_search_progress(&key_id, &progress)).await;
+        if !matches!(saved, Ok(Ok(()))) {
+            // Losing the write costs a re-crawl of what it described, never a
+            // skipped room, because the file only ever names committed rooms.
+            record(
+                DiagnosticEvent::new(
+                    DiagnosticLevel::Debug,
+                    "core.search",
+                    "crawl_progress_save_failed",
+                )
+                .field(DiagnosticField::token("failure", "store_unavailable"))
+                .field(DiagnosticField::token("outcome", "crawl_again")),
+            );
+        }
+    }
+
     fn set_crawler_settings(&mut self, settings: SearchCrawlerSettings) {
         if content_policy_changed(&self.crawler_settings, &settings) {
             self.content_policy_generation = self.content_policy_generation.wrapping_add(1);
@@ -1766,7 +2192,8 @@ impl SearchActor {
             self.attachment_retries.clear();
             self.queued_crawl_index.clear();
         }
-        self.crawler_settings = settings;
+        self.crawler_settings = settings.clone();
+        self.resolve_crawl_progress_identity(&settings);
     }
 
     async fn retain_history_crawl_rooms(&mut self) -> Vec<String> {
@@ -1792,7 +2219,27 @@ impl SearchActor {
             .map(|checkpoint| checkpoint.room_id.clone())
             .collect();
 
-        stopped_room_ids.into_iter().collect()
+        // A departed room must not keep a completion, or the next session would
+        // skip its backfill when it rejoins.
+        let stopped = stopped_room_ids.into_iter().collect::<Vec<_>>();
+        let forgets_recorded_room = self.search_progress.as_ref().is_some_and(|progress| {
+            stopped
+                .iter()
+                .any(|room_id| progress.room(room_id).is_some())
+        });
+        if forgets_recorded_room {
+            if let Some(progress) = self.search_progress.as_mut() {
+                for room_id in &stopped {
+                    progress.forget(room_id);
+                }
+            }
+            for room_id in &stopped {
+                self.files_rebuild_pending.remove(room_id);
+            }
+            self.persist_search_progress().await;
+        }
+
+        stopped
     }
 
     async fn abort_active_history_crawl_if_retired(&mut self) -> Option<String> {
@@ -1813,6 +2260,17 @@ impl SearchActor {
     }
 
     async fn remove_history_crawl_room(&mut self, room_id: &str) {
+        let forgets_recorded_room = self
+            .search_progress
+            .as_ref()
+            .is_some_and(|progress| progress.room(room_id).is_some());
+        if forgets_recorded_room {
+            if let Some(progress) = self.search_progress.as_mut() {
+                progress.forget(room_id);
+            }
+            self.files_rebuild_pending.remove(room_id);
+            self.persist_search_progress().await;
+        }
         self.crawl_queue
             .retain(|checkpoint| checkpoint.room_id != room_id);
         self.queued_crawl_rooms.remove(room_id);
@@ -1856,8 +2314,14 @@ impl SearchActor {
         self.document_store.clear();
         self.attachment_retries.clear();
         self.queued_crawl_index.clear();
-        // A settings change that could
-        // not be saved is still detected on the next start.
+        self.files_rebuild_pending.clear();
+        if let Some(progress) = self.search_progress.as_mut() {
+            // An explicit invalidation says the recorded completions no longer
+            // describe the index, so they go durably, not only in memory: a
+            // restart before the recrawl finishes must not trust them again.
+            progress.clear_rooms();
+            self.persist_search_progress().await;
+        }
         self.stop_all_history_crawls().await;
     }
 

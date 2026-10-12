@@ -258,7 +258,6 @@ fn diagnostic_snapshot_exports_the_search_retention_summary() {
     let fixture = koushi_core::search::AccountRetentionDiagnostics {
         search: koushi_core::search::SearchRetentionCounters {
             rooms_total: 3,
-            rooms_with_active_reader: 2,
             opened_files_total: 41,
             decrypted_bytes_total: 65_536,
             live_decrypted_len_bytes: 8_192,
@@ -300,11 +299,6 @@ fn diagnostic_snapshot_exports_the_search_retention_summary() {
         .find(|entry| entry.message.contains("account_index=0"))
         .expect("account retention row must be exported");
     assert!(account_row.message.contains("search_rooms_total=3"));
-    assert!(
-        account_row
-            .message
-            .contains("search_rooms_with_active_reader=2")
-    );
     assert!(
         account_row
             .message

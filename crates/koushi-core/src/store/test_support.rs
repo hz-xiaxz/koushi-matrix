@@ -4,7 +4,7 @@ use super::StoreActor;
 use koushi_protocol::SessionKeyId;
 use koushi_store::{CredentialStoreBackend, FileCredentialStore};
 
-pub(super) fn make_key_id() -> SessionKeyId {
+pub(crate) fn make_key_id() -> SessionKeyId {
     SessionKeyId {
         homeserver: "https://test.example.com".to_owned(),
         user_id: "@alice:test.example.com".to_owned(),
@@ -12,7 +12,7 @@ pub(super) fn make_key_id() -> SessionKeyId {
     }
 }
 
-pub(super) fn file_store_actor(
+pub(crate) fn file_store_actor(
     data_dir: &tempfile::TempDir,
     cred_dir: &tempfile::TempDir,
 ) -> StoreActor {
