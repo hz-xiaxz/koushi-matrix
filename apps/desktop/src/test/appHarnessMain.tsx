@@ -63,7 +63,7 @@ import {
   type StagedUploadCompressionChoice
 } from "../domain/types";
 import { TauriIpcMock, type IpcInvocation } from "./tauriIpcMock";
-import { sidebarSectionBoundsForFake } from "./sidebarSectionBoundsFixture";
+import { withSectionBounds } from "./withSectionBounds";
 import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
 import { avatarInitial } from "../app/uiShared";
 import {
@@ -1202,40 +1202,6 @@ function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
   reconcilePreparedUploadBytes(previousSnapshot, currentSnapshot);
   reconcileComposerLeases(currentSnapshot);
   return currentSnapshot;
-}
-
-/**
- * #1363/#1366: attach the Rust-projected row bounds to a fake snapshot.
- *
- * The numbers come from `sidebarSectionBounds.generated.json`, which the
- * `koushi-state` fixture test writes and asserts against
- * `SidebarSectionBound::project`. The harness only picks the case its own fake
- * settings and navigation correspond to; it never computes a bound itself.
- */
-function withSectionBounds(snapshot: DesktopSnapshot): DesktopSnapshot {
-  const values = snapshot.state.domain.settings.values;
-  const scope = values.sidebar.scope_preferences?.[
-    snapshot.state.ui.navigation.active_space_id ?? "__home__"
-  ];
-  return {
-    ...snapshot,
-    sidebar: {
-      ...snapshot.sidebar,
-      section_bounds: sidebarSectionBoundsForFake({
-        sections: {
-          rooms: snapshot.sidebar.sections.rooms,
-          people: snapshot.sidebar.sections.people,
-          low_priority: snapshot.sidebar.sections.low_priority
-        },
-        expanded: {
-          rooms: scope?.rooms?.expanded ?? false,
-          dms: scope?.dms?.expanded ?? false,
-          lowPriority: scope?.low_priority?.expanded ?? false
-        },
-        activeRoomId: snapshot.state.ui.navigation.active_room_id ?? null
-      })
-    }
-  };
 }
 
 function sidebarForSelection(activeSpaceId: string | null): DesktopSnapshot["sidebar"] {
