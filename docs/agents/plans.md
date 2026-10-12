@@ -19,6 +19,11 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
+[#1364 persisted room activity](../plans/2026-10-12-issue1364-persisted-room-activity.md)
+records why the Recent sidebar order collapsed into name order, the
+`recency_stamp` fallback for the activity-less group, and the persisted per-room
+conversation-activity store that the #542 Recent-first default depends on.
+
 [#1150 index-first search and bounded memory](../plans/2026-10-06-issue1150-search-index-first.md)
 tracks M2: making the persistent ngram index the only candidate source and
 removing full-history RAM body/edit retention, with the remaining store shrink

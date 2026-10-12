@@ -198,6 +198,23 @@ pub(crate) fn compare_conversation_activity(
                 .map(|activity| activity.timestamp_ms)
                 .cmp(&left_activity.map(|activity| activity.timestamp_ms))
         })
+        // #1364: a room whose newest event is not a conversation event (sticker,
+        // poll, call, reaction, state change) has no conversation timestamp to
+        // compare, and the room-list Event Cache window can be a single event
+        // deep. Keep the server's own room order inside that group instead of
+        // collapsing every activity-less room into case-folded label order. The
+        // recency stamp is consumed only here, below every room that has real
+        // conversation activity, so a newly joined room cannot outrank an
+        // existing conversation (state-machine.md, Sidebar Sections And Low
+        // Priority).
+        .then_with(|| {
+            let left_stamp = left.and_then(|room| room.recency_stamp);
+            let right_stamp = right.and_then(|room| room.recency_stamp);
+            right_stamp
+                .is_some()
+                .cmp(&left_stamp.is_some())
+                .then_with(|| right_stamp.cmp(&left_stamp))
+        })
         .then_with(|| {
             let left_label = left
                 .map(|room| room.display_label.to_lowercase())

@@ -999,17 +999,23 @@ stateDiagram-v2
   projected notification, remaining unread content, then read/no attention.
   Ties, and all Recent-first ordering, consume only the Rust-owned
   `RoomSummary.conversation_activity` projection. The projection records an
-  actual message, undecryptable encrypted message, or thread reply timestamp;
-  it is independent from preview-oriented `latest_event` and the SDK's opaque
-  `recency_stamp`. Membership/state events, reactions, edits/replacements,
-  redactions, receipts, typing, and presence never create conversation
-  activity.
+  actual message, undecryptable encrypted message, or thread reply timestamp; it
+  is independent from preview-oriented `latest_event`. The SDK's opaque
+  `recency_stamp` never creates conversation activity; it only orders the
+  activity-less group, as described below. Membership/state events, reactions,
+  edits/replacements, redactions, receipts, typing, and presence never create
+  conversation activity.
 - Within an Activity attention rank, and for Recent-first ordering, rooms with
   conversation activity sort before rooms without it, then by descending
-  conversation timestamp. Equal or absent timestamps fall back to case-folded
-  `display_label` and finally `room_id`, so a newly joined DM cannot outrank an
-  existing conversation merely because its SDK recency stamp is newer. React
-  renders this order and must not re-sort room projections.
+  conversation timestamp. Equal or absent conversation timestamps fall back to
+  the room's SDK `recency_stamp` in descending order (present before absent), and
+  then to case-folded `display_label` and finally `room_id`. The recency stamp is
+  consumed only below every room that has conversation activity, so a newly
+  joined DM still cannot outrank an existing conversation; inside the
+  activity-less group it preserves the server's room order instead of collapsing
+  the section into label order when the Event Cache window holds a single
+  non-conversation event (#1364). React renders this order and must not re-sort
+  room projections.
 - Notification-mode and room-preference-load changes recompute the projection,
   emit `UiEvent::RoomListChanged`, and preserve the active selection.
   `RoomMarkedAsReadSucceeded` likewise reorders through its existing room-state
