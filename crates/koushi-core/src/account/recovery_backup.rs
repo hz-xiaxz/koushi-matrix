@@ -2207,14 +2207,42 @@ impl AccountActor {
             {
                 self.request_authoritative_trust_recheck();
             }
-            self.secure_backup_inspection_pending = false;
-            self.disarm_secure_backup_defer_deadline();
-            if !self.secure_backup_recovery_epoch || recovery_reset {
-                self.start_secure_backup_inspection();
-            } else {
-                self.schedule_secure_backup_monitor(self.trust_generation, true);
-            }
+            self.admit_secure_backup_for_proven_connectivity(recovery_reset);
         }
+    }
+
+    /// Admission side effects of a proven connectivity edge. Kept separate so a
+    /// session promoted after the edge replays the same admission (#1361).
+    fn admit_secure_backup_for_proven_connectivity(&mut self, recovery_reset: bool) {
+        self.secure_backup_inspection_pending = false;
+        self.disarm_secure_backup_defer_deadline();
+        if !self.secure_backup_recovery_epoch || recovery_reset {
+            self.start_secure_backup_inspection();
+        } else {
+            self.schedule_secure_backup_monitor(self.trust_generation, true);
+        }
+    }
+
+    /// #1361: a proven connectivity edge can arrive before session promotion,
+    /// because `start_secure_backup_inspection` only spawns once the session is
+    /// promoted. The edge retains its boolean but used to skip its admission, so
+    /// a request deferred behind the connectivity deadline kept that deadline
+    /// and expired into a retryable `BlockedFailed{Timeout}` about one wait
+    /// later even though sync was running. Promotion replays the owed admission
+    /// instead.
+    ///
+    /// The replay admits an inspection rather than the reconnection monitor by
+    /// presenting the retained edge as the first proven edge of its recovery
+    /// epoch, which is what it was when it arrived: cancellation resets the
+    /// epoch on every demotion, so no inspection can have settled between the
+    /// edge and this promotion. Clearing the pending flag keeps a repeat
+    /// promotion from launching a second inspection; the admission still
+    /// coalesces onto an in-flight one.
+    pub(super) fn replay_secure_backup_admission_on_promotion(&mut self) {
+        if !self.sync_connectivity_proven || !self.secure_backup_inspection_pending {
+            return;
+        }
+        self.admit_secure_backup_for_proven_connectivity(true);
     }
 
     fn retire_secure_backup_monitor(&mut self) {

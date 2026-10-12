@@ -1182,6 +1182,61 @@ async fn proven_connectivity_before_deadline_disarms_deadline_and_starts_inspect
     shutdown_and_ack(&handle).await;
 }
 
+/// #1361 regression: with two restored accounts the proven connectivity edge
+/// can beat the actor's session promotion by a few hundred milliseconds. The
+/// edge is retained as a boolean, but its inspection side effects used to be
+/// skipped while the session was unpromoted, so the deferred request kept its
+/// deadline and expired into a retryable `BlockedFailed{Timeout}` even though
+/// sync was running. Promotion must replay the owed admission exactly once.
+#[tokio::test]
+async fn proven_connectivity_before_promotion_starts_the_pending_inspection_on_promotion() {
+    let (handle, mut action_rx) = login_gated_actor().await;
+    handle
+        .send(AccountMessage::ConfigureSecureBackupDeferWait {
+            wait: Duration::from_secs(30),
+        })
+        .await;
+    consume_initial_unknown_trust_projection(&mut action_rx).await;
+
+    // The initial inspection request lands before promotion and while sync
+    // connectivity is still unproven, so it defers behind the deadline.
+    handle.send(AccountMessage::InspectSecureBackup).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(owners.inspection_pending, "defer must leave work pending");
+    assert!(owners.has_defer_deadline, "defer must arm a deadline task");
+    assert!(!owners.has_inspection_task, "defer must not spawn yet");
+
+    // The proven edge arrives first. It cannot spawn the inspection yet, but
+    // it must not be forgotten once the session is promoted.
+    handle
+        .send(AccountMessage::SyncConnectivityChanged { proven: true })
+        .await;
+    assert!(
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await
+    );
+    acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(
+        owners.has_inspection_task,
+        "promotion after proven connectivity must start the pending inspection"
+    );
+    assert!(
+        !owners.has_defer_deadline,
+        "promotion must retire the deferred deadline"
+    );
+    assert!(
+        !owners.inspection_pending,
+        "the replayed inspection consumes the pending request"
+    );
+    shutdown_and_ack(&handle).await;
+}
+
 /// Retry must ask the sync owner to re-project its current status when
 /// connectivity is still unproven, instead of only re-running admission
 /// against a possibly stale proven flag.
