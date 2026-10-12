@@ -48,9 +48,12 @@ once; the other only adds its section-specific acceptance.
    conversation selection revealed. It is session state (`serde(skip)`, so it
    never enters the encrypted navigation payload), the projection applies it
    only while the open conversation is in that section and only in the scope it
-   was recorded for, and the user's own collapse or bound toggle for the same
-   scope x section clears it. A restart therefore honors the persisted
-   preference rather than replaying a reveal.
+   was recorded for, and the user's own collapse choice for the same scope x
+   section clears it. The bound toggle is deliberately *not* part of that: it is
+   the other dimension, so "Show more" on a revealed section with a stored
+   collapse preference shows more rows instead of re-collapsing the section. A
+   restart therefore honors the persisted preference rather than replaying a
+   reveal.
 6. **Renderer.** React slices the matching `sections` list with the Rust
    `visible_count` and renders `SectionBoundControl` only when Rust set
    `shows_expand_control`. The control is a normal button with `aria-expanded`,
@@ -103,11 +106,22 @@ rows, not hiding conversations).
   and a synthetic newest-first order that the bound cannot mask.
 - `apps/desktop/src/components/Sidebar.sectionBound.test.tsx` covers the
   renderer: five rows plus a control naming the hidden count, the whole-section
-  header count, both control directions dispatching `expanded`, no control at or
-  below the bound, independent DMs and Low priority bounds, the filter
-  exception, the collapsed combinations, and the forced-open case.
+  header count and unread badge, both control directions dispatching `expanded`,
+  a bound whose `visible_count` disagrees with the derivation rule (so a
+  re-derived limit would fail), `aria-controls` resolving to the row list, no
+  control at or below the bound, independent DMs and Low priority bounds, the
+  filter exception, the collapsed combinations, and the forced-open case.
+- `apps/desktop/e2e/sidebar-section-bound.spec.ts` covers the path in the
+  browser tier: the fake attaches the Rust-authored bound, five of seven rows
+  render, the control names the hidden count, pressing it dispatches one typed
+  `expanded` patch and shows every row, and the filter shows every match with no
+  control.
+- `apps/desktop/src/test/withSectionBounds.test.ts` covers the fake's own
+  helper, including the partial signed-out snapshot that carries no sidebar
+  projection.
 - The DTO golden (`apps/desktop/src-tauri/tests/golden/frontend_app_state.json`)
-  gained the projected `section_bounds` and the persisted `expanded` values.
+  gained the projected `section_bounds` and the persisted `expanded` values, and
+  `SNAPSHOT_SCHEMA_VERSION` moved to 9 with the core-event contract artifact.
 
 ## Not in this change
 

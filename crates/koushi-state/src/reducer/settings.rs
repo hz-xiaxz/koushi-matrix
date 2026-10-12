@@ -166,11 +166,14 @@ pub(crate) fn handle_settings_update_requested(
     state.settings.values.apply_patch(patch.clone());
     state.settings.persistence = SettingsPersistenceState::Saving { request_id };
 
-    // #1366: the user's own collapse or bound toggle for a revealed section ends
-    // the session reveal, so the persisted preference decides again. The reveal
-    // is navigation state and is never persisted with the settings patch.
+    // #1366: the user's own collapse choice for a revealed section ends the
+    // session reveal, so the persisted preference decides again. Only the
+    // collapse choice: the bound toggle is a different dimension and must not
+    // re-collapse a section the user has open (a revealed section whose stored
+    // preference is collapsed would otherwise vanish on "Show more"). The
+    // reveal is navigation state and is never persisted with the patch.
     if let Some(section) = patch.sidebar_section.as_ref()
-        && (section.collapsed.is_some() || section.expanded.is_some())
+        && section.collapsed.is_some()
         && state
             .navigation
             .revealed_sidebar_section

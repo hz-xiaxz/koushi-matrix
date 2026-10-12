@@ -1429,7 +1429,7 @@ Low priority is an attention-suppression tag, not a mute and not a read action:
 A visible section shows at most `SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT` (5) rows
 unless it is expanded. The bound covers `sections.rooms`, `sections.people`, and
 `sections.low_priority`; `sections.favourites` is a derived convenience list
-rather than a visible section, and not-joined keeps its unbounded rendering.
+and not a bounded section, and not-joined keeps its unbounded rendering.
 
 ```mermaid
 stateDiagram-v2
@@ -1450,7 +1450,7 @@ stateDiagram-v2
     state "revealed_sidebar_section (scope + section)" as Revealed
     [*] --> Idle
     Idle --> Revealed: SelectRoom/SelectSpace settles in a collapsed section
-    Revealed --> Idle: user collapse or bound toggle for that scope x section
+    Revealed --> Idle: user collapse choice for that scope x section
     Revealed --> Idle: the active conversation is cleared
     Revealed --> Idle: NavigationLoaded replaces navigation
 ```
@@ -1492,8 +1492,10 @@ stateDiagram-v2
   is in that section and the scope matches. The reveal is session state
   (`serde(skip)`, never part of the encrypted navigation payload), so a restart
   honors the persisted preferences instead of replaying it. The user's own
-  collapse or bound toggle for the same scope x section clears it, as does
-  clearing the active conversation.
+  collapse choice for the same scope x section clears it, as does clearing the
+  active conversation. The bound toggle is the other dimension and leaves the
+  reveal alone: ending it there would re-collapse a section the bound control
+  sits in, so "Show more" on a revealed section shows more rows.
 - The search/filter box is renderer presentation state: while it is non-empty
   every matching row renders and no bound control appears, and clearing it
   restores the bound. Ordering and truncation remain Rust-owned, so the filter
@@ -1505,9 +1507,9 @@ stateDiagram-v2
 - The browser harness and browser-fake snapshots look their bounds up in
   `apps/desktop/src/test/sidebarSectionBounds.generated.json`, which a
   `koushi-state` test writes and asserts against the Rust projection. A shape the
-  fixture does not cover renders every row, and so does a bound whose
-  `total_count` does not describe the list in hand (a stale fake snapshot); a
-  bound that Rust did not project for this list can never hide a conversation.
+  fixture does not cover renders every row, and so does a bound whose row count
+  disagrees with the list in hand (a stale fake snapshot): a bound Rust did not
+  project for this list cannot hide one of its rows.
 
 ## Invites And Direct Messages
 

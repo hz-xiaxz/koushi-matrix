@@ -245,8 +245,17 @@ fn the_low_priority_section_follows_the_same_bound() {
     assert_eq!(bound.visible_count, 5);
     assert_eq!(bound.hidden_count, 2);
     assert!(bound.shows_expand_control);
-    // Not joined keeps its own behavior and is not bounded (#1363 item 8).
-    assert!(sidebar.section_bounds.low_priority.is_some());
+    // Not joined keeps its own behavior and is not bounded (#1363 item 8): the
+    // bound struct has no entry for it, so its rows always render in full.
+    let bounds = serde_json::to_value(sidebar.section_bounds).expect("bounds JSON");
+    let mut bounded: Vec<&str> = bounds
+        .as_object()
+        .expect("the bound is an object")
+        .keys()
+        .map(String::as_str)
+        .collect();
+    bounded.sort_unstable();
+    assert_eq!(bounded, vec!["dms", "low_priority", "rooms"]);
     assert_eq!(sidebar.section_bounds.rooms.expect("rooms").total_count, 9);
 }
 
@@ -338,6 +347,55 @@ fn the_bound_preference_persists_per_scope_across_a_settings_round_trip() {
     }))
     .expect("a pre-#1363 settings file must still load");
     assert!(!legacy.scope(None, RoomListSort::RecentFirst).rooms.expanded);
+}
+
+/// #1366: revealing a collapsed section and then changing the *bound* must not
+/// re-collapse it. The two dimensions are independent, so "Show more" on a
+/// revealed section shows more rows; only the user's collapse choice ends the
+/// reveal (which would otherwise hide the section the bound control sits in).
+#[test]
+fn the_bound_toggle_does_not_end_a_reveal() {
+    let mut state = bounded_state();
+    collapse(&mut state, "__home__", SidebarSectionKind::Rooms);
+    // A room inside the bound, so the revealed section also offers a control.
+    reduce(
+        &mut state,
+        AppAction::SelectRoom {
+            room_id: "!room-1:example.invalid".to_owned(),
+        },
+    );
+    assert!(!compose_sidebar_for_state(&state).rooms_collapsed);
+
+    reduce(
+        &mut state,
+        AppAction::SettingsUpdateRequested {
+            request_id: 1,
+            patch: SettingsPatch {
+                sidebar_section: Some(SidebarSectionPatch {
+                    scope: "__home__".to_owned(),
+                    section: SidebarSectionKind::Rooms,
+                    collapsed: None,
+                    sort: None,
+                    expanded: Some(true),
+                }),
+                ..Default::default()
+            },
+        },
+    );
+
+    let sidebar = compose_sidebar_for_state(&state);
+    assert!(state.navigation.revealed_sidebar_section.is_some());
+    assert!(
+        !sidebar.rooms_collapsed,
+        "the bound toggle must not collapse"
+    );
+    let bound = sidebar.section_bounds.rooms.expect("projected bound");
+    // The user's own bound choice shows every row and keeps the control (now
+    // "Show fewer"); the open conversation is not what holds it open.
+    assert!(bound.expanded);
+    assert!(!bound.expanded_by_active_room);
+    assert!(bound.shows_expand_control);
+    assert!(bound.visible_count > SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT);
 }
 
 #[test]
