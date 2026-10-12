@@ -636,8 +636,8 @@ pub enum SidebarSectionKind {
 /// A Space or the user can leave a section collapsed or bounded, and selecting a
 /// conversation through a notification or permalink must still show its row.
 /// The reducer records the reveal here when the selection settles; the sidebar
-/// projection renders that section open until the user's own toggle for the same
-/// scope and section clears it. Session-scoped on purpose: the persisted section
+/// projection renders that section open until the user's own collapse choice for
+/// the same scope and section clears it. Session-scoped on purpose: the persisted section
 /// preferences stay the user's, and a restart honors them.
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SidebarSectionReveal {

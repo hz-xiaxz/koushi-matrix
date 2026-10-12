@@ -573,8 +573,8 @@ fn compose_sidebar_with_preferences(
     // hide, so a notification or permalink entry still shows the selected row.
     // The reveal applies only while the open conversation is in that section and
     // only in the scope it was recorded for, so a stale reveal can never keep an
-    // unrelated section open. The user's own toggle for the same scope and
-    // section clears it.
+    // unrelated section open. The user's own collapse choice for the same scope
+    // and section clears it; the bound toggle leaves the reveal alone.
     let scope_key = sidebar_scope_key(active_space_id);
     let section_revealed = |section: SidebarSectionKind, rooms: &[RoomListItem]| {
         visibility.revealed.is_some_and(|reveal| {
