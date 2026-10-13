@@ -451,6 +451,30 @@ impl AccountRuntimeManager {
         rows
     }
 
+    /// Snapshot every live account tab's resident timeline set at diagnostic
+    /// export time (#1394). Tab positions are captured under the manager lock
+    /// and released before any await; a tab that cannot answer settles as
+    /// unavailable (`None`).
+    pub async fn timeline_residency_diagnostics(
+        &self,
+    ) -> Vec<(usize, Option<crate::timeline::TimelineResidencyDiagnostics>)> {
+        let requested = self
+            .state
+            .lock()
+            .expect("account runtime manager mutex")
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(index, tab)| (index, tab.runtime.timeline_residency_probe()))
+            .collect::<Vec<_>>();
+
+        let mut rows = Vec::with_capacity(requested.len());
+        for (index, probe) in requested {
+            rows.push((index, probe.sample().await));
+        }
+        rows
+    }
+
     pub fn tab_connections(&self) -> Vec<(AccountTabDescriptor, CoreConnection)> {
         self.state
             .lock()

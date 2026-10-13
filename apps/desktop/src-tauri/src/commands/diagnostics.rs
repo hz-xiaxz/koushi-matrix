@@ -135,6 +135,75 @@ fn record_search_retention_summaries(
     }
 }
 
+/// #1394: export the resident timeline set of every live account tab. Counts
+/// only; the same per-account rows as the search-retention sample, so the
+/// resident Room/actor set can be read from one export instead of inferred
+/// from allocator samples.
+fn record_timeline_residency_summaries(
+    rows: &[(
+        usize,
+        Option<koushi_core::timeline::TimelineResidencyDiagnostics>,
+    )],
+) {
+    use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.timeline_residency", "summary")
+            .field(DiagnosticField::count("account_total", rows.len() as u64))
+            .field(DiagnosticField::count(
+                "account_available",
+                rows.iter()
+                    .filter(|(_, diagnostics)| diagnostics.is_some())
+                    .count() as u64,
+            )),
+    );
+    for (account_index, diagnostics) in rows {
+        let Some(diagnostics) = diagnostics else {
+            continue;
+        };
+        koushi_diagnostics::record(
+            DiagnosticEvent::new(DiagnosticLevel::Info, "core.timeline_residency", "summary")
+                .field(DiagnosticField::count(
+                    "account_index",
+                    *account_index as u64,
+                ))
+                .field(DiagnosticField::token("status", "available"))
+                .field(DiagnosticField::count(
+                    "session_resident_rooms",
+                    diagnostics.session_resident_rooms,
+                ))
+                .field(DiagnosticField::count(
+                    "actual_room_subscriptions",
+                    diagnostics.actual_room_subscriptions,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_actors",
+                    diagnostics.resident_actors,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_room_actors",
+                    diagnostics.resident_room_actors,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_thread_actors",
+                    diagnostics.resident_thread_actors,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_focused_actors",
+                    diagnostics.resident_focused_actors,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_event_items",
+                    diagnostics.resident_event_items,
+                ))
+                .field(DiagnosticField::count(
+                    "deepest_actor_event_items",
+                    diagnostics.deepest_actor_event_items,
+                )),
+        );
+    }
+}
+
 fn snapshot_with_media_memory_summaries(
     thumbnail_stats: koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats,
     media_stats: koushi_core::media_preparation::MediaPreparationStats,
@@ -143,12 +212,17 @@ fn snapshot_with_media_memory_summaries(
         usize,
         Option<koushi_core::search::AccountRetentionDiagnostics>,
     )],
+    timeline_rows: &[(
+        usize,
+        Option<koushi_core::timeline::TimelineResidencyDiagnostics>,
+    )],
     sliding_sync: koushi_core::SlidingSyncDiagnosticsSnapshot,
 ) -> FrontendDiagnosticLogSnapshot {
     // #1344: the native process/allocator audit observes only. It never trims,
     // purges, evicts, or forces a collection while sampling.
     koushi_diagnostics::record(process_memory_audit_event(memory_audit));
     record_search_retention_summaries(retention_rows);
+    record_timeline_residency_summaries(timeline_rows);
     koushi_core::renderable_thumbnail::record_renderable_thumbnail_summary(thumbnail_stats);
     koushi_core::media_preparation::record_media_preparation_summary(media_stats);
     koushi_core::session_check_diagnostics::record_session_check_summary();
@@ -164,6 +238,7 @@ pub async fn get_diagnostic_snapshot(
         state.runtime.media_preparation().stats().await,
         &sample_process_memory_audit(),
         &state.runtime.search_retention_diagnostics().await,
+        &state.runtime.timeline_residency_diagnostics().await,
         state.runtime.sliding_sync_diagnostics(),
     ))
 }

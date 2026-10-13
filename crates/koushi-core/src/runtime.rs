@@ -111,9 +111,10 @@ use koushi_protocol::ids::{
 
 pub const COMMAND_INBOX_CAPACITY: usize = 256;
 
-/// Reply bound for the #1344 export-time retention sampling; a stalled read
-/// settles as unavailable instead of holding the export.
-const SEARCH_RETENTION_REPLY_TIMEOUT_MS: u64 = 2_000;
+/// Reply bound for the export-time diagnostic sampling (#1344 search
+/// retention, #1394 timeline residency); a stalled read settles as unavailable
+/// instead of holding the export.
+const EXPORT_SAMPLE_REPLY_TIMEOUT_MS: u64 = 2_000;
 /// Per-consumer broadcast capacity. On large accounts (100+ rooms) initial and
 /// room-open sync bursts can emit thousands of `CoreEvent`s faster than a
 /// consumer (the Tauri forwarder, or a transient command connection waiting for
@@ -325,6 +326,11 @@ enum CoreCommandEnvelope {
     /// Export-time retention sample (#1344). Answered with the account's
     /// owner-side counters or `None`; the caller bounds the wait.
     RetentionDiagnostics(oneshot::Sender<Option<crate::search::AccountRetentionDiagnostics>>),
+    /// Export-time resident-set sample (#1394). Answered with the account's
+    /// resident timeline counts or `None`; the caller bounds the wait.
+    TimelineResidencyDiagnostics(
+        oneshot::Sender<Option<crate::timeline::TimelineResidencyDiagnostics>>,
+    ),
 }
 
 #[cfg(test)]
@@ -336,6 +342,7 @@ impl CoreCommandEnvelope {
                 panic!("expected public command envelope")
             }
             Self::RetentionDiagnostics(_) => panic!("expected public command envelope"),
+            Self::TimelineResidencyDiagnostics(_) => panic!("expected public command envelope"),
             #[cfg(test)]
             Self::ResolveReceiptWindow { .. } => {
                 panic!("expected public command envelope")
@@ -365,7 +372,40 @@ impl RetentionDiagnosticsProbe {
             return None;
         }
         match crate::executor::timeout(
-            std::time::Duration::from_millis(SEARCH_RETENTION_REPLY_TIMEOUT_MS),
+            std::time::Duration::from_millis(EXPORT_SAMPLE_REPLY_TIMEOUT_MS),
+            response_rx,
+        )
+        .await
+        {
+            Ok(Ok(reply)) => reply,
+            _ => None,
+        }
+    }
+}
+
+/// Cloneable resident-set sampler for one account runtime (#1394).
+#[derive(Clone)]
+pub struct TimelineResidencyProbe {
+    command_tx: mpsc::Sender<CoreCommandEnvelope>,
+}
+
+impl TimelineResidencyProbe {
+    /// Sample the account's resident timeline set now. Bounded: a stalled reply
+    /// settles as `None` instead of holding the export.
+    pub async fn sample(&self) -> Option<crate::timeline::TimelineResidencyDiagnostics> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        if self
+            .command_tx
+            .try_send(CoreCommandEnvelope::TimelineResidencyDiagnostics(
+                response_tx,
+            ))
+            .is_err()
+        {
+            // Inbox full: the export proceeds without this account.
+            return None;
+        }
+        match crate::executor::timeout(
+            std::time::Duration::from_millis(EXPORT_SAMPLE_REPLY_TIMEOUT_MS),
             response_rx,
         )
         .await
@@ -936,6 +976,13 @@ impl CoreRuntime {
     /// never awaits while holding shared state.
     pub fn retention_diagnostics_probe(&self) -> RetentionDiagnosticsProbe {
         RetentionDiagnosticsProbe {
+            command_tx: self.command_tx.clone(),
+        }
+    }
+
+    /// Cloneable probe for this runtime's resident timeline set (#1394).
+    pub fn timeline_residency_probe(&self) -> TimelineResidencyProbe {
+        TimelineResidencyProbe {
             command_tx: self.command_tx.clone(),
         }
     }
@@ -2423,6 +2470,9 @@ impl AppActor {
             CoreCommandEnvelope::RetentionDiagnostics(response) => {
                 Box::pin(self.handle_retention_diagnostics(response)).await
             }
+            CoreCommandEnvelope::TimelineResidencyDiagnostics(response) => {
+                Box::pin(self.handle_timeline_residency_diagnostics(response)).await
+            }
             envelope => Box::pin(self.handle_public_command(envelope)).await,
         }
     }
@@ -2485,11 +2535,26 @@ impl AppActor {
         // The forward is bounded; on timeout the sender is dropped and the
         // caller's bounded wait settles as unavailable.
         let _ = crate::executor::timeout(
-            std::time::Duration::from_millis(SEARCH_RETENTION_REPLY_TIMEOUT_MS),
+            std::time::Duration::from_millis(EXPORT_SAMPLE_REPLY_TIMEOUT_MS),
             self.account_actor
                 .send(AccountMessage::SearchRetentionDiagnostics { response }),
         )
         .await;
+        false
+    }
+
+    async fn handle_timeline_residency_diagnostics(
+        &mut self,
+        response: oneshot::Sender<Option<crate::timeline::TimelineResidencyDiagnostics>>,
+    ) -> bool {
+        // A diagnostic sample changes no app state: never report state
+        // changed, so the command loop skips the state-delta publication work.
+        // Enqueued without waiting for mailbox capacity (#1060): an export must
+        // never hold AppActor's loop, so a full mailbox settles the caller's
+        // bounded wait as unavailable instead.
+        let _ = self
+            .account_actor
+            .try_send(AccountMessage::TimelineResidencyDiagnostics { response });
         false
     }
 
@@ -2537,6 +2602,9 @@ impl AppActor {
                 unreachable!("internal command routed to public handler")
             }
             CoreCommandEnvelope::RetentionDiagnostics(_) => {
+                unreachable!("internal command routed to public handler")
+            }
+            CoreCommandEnvelope::TimelineResidencyDiagnostics(_) => {
                 unreachable!("internal command routed to public handler")
             }
             #[cfg(test)]

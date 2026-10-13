@@ -75,8 +75,60 @@ use super::thread_projection::{
 /// Bounded diff queue capacity per subscribed timeline (overview.md, Async rule 10).
 pub const TIMELINE_DIFF_QUEUE_CAPACITY: usize = 128;
 
+/// Export-time snapshot of the resident Room timeline set (#1394).
+///
+/// Counts only: no Room, thread, event or user identifiers and no message
+/// content. `resident_event_items` sums the position-evidence entry count of
+/// every resident actor, so it measures distinct event-ID-backed canonical
+/// depth; transaction-backed local echoes, date separators and receipt-only
+/// items are not part of that evidence.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TimelineResidencyDiagnostics {
+    /// Session-resident desired Room subscriptions.
+    pub session_resident_rooms: u64,
+    /// Room subscriptions actually held by the SDK Sliding Sync session, which
+    /// expiry can empty while the logical subscription set is unchanged.
+    pub actual_room_subscriptions: u64,
+    /// Resident timeline actors, and their split by timeline kind.
+    pub resident_actors: u64,
+    pub resident_room_actors: u64,
+    pub resident_thread_actors: u64,
+    pub resident_focused_actors: u64,
+    /// Canonical event items held by all resident actors, and the deepest one.
+    pub resident_event_items: u64,
+    pub deepest_actor_event_items: u64,
+}
+
 fn initial_thread_backfill_is_authoritative(end_reached: bool, item_count: usize) -> bool {
     end_reached || item_count > 0
+}
+
+/// Fold one `(kind, canonical event-item count)` row per resident actor into a
+/// [`TimelineResidencyDiagnostics`] snapshot (#1394). An actor without position
+/// evidence contributes an actor but no depth.
+pub(super) fn fold_residency_actors<'a>(
+    session_resident_rooms: usize,
+    actual_room_subscriptions: usize,
+    actors: impl IntoIterator<Item = (&'a TimelineKind, Option<usize>)>,
+) -> TimelineResidencyDiagnostics {
+    let mut diagnostics = TimelineResidencyDiagnostics {
+        session_resident_rooms: session_resident_rooms as u64,
+        actual_room_subscriptions: actual_room_subscriptions as u64,
+        ..TimelineResidencyDiagnostics::default()
+    };
+    for (kind, event_items) in actors {
+        diagnostics.resident_actors += 1;
+        match kind {
+            TimelineKind::Room { .. } => diagnostics.resident_room_actors += 1,
+            TimelineKind::Thread { .. } => diagnostics.resident_thread_actors += 1,
+            TimelineKind::Focused { .. } => diagnostics.resident_focused_actors += 1,
+        }
+        let event_items = event_items.unwrap_or(0) as u64;
+        diagnostics.resident_event_items += event_items;
+        diagnostics.deepest_actor_event_items =
+            diagnostics.deepest_actor_event_items.max(event_items);
+    }
+    diagnostics
 }
 
 async fn await_initial_thread_projection<S>(end_reached: bool, counts: S) -> bool
@@ -320,6 +372,12 @@ pub(super) enum TimelineManagerControl {
     Shutdown {
         acknowledged: oneshot::Sender<()>,
     },
+    /// #1394: answer an export-time resident-set sample. The caller forwards the
+    /// reply channel, so the manager never awaits and a dropped request settles
+    /// the caller's bounded wait as unavailable.
+    ResidencyDiagnostics {
+        response: oneshot::Sender<Option<TimelineResidencyDiagnostics>>,
+    },
 }
 
 impl TimelineManagerHandle {
@@ -447,6 +505,18 @@ impl TimelineManagerHandle {
             return false;
         }
         acknowledgement.await.is_ok()
+    }
+
+    /// #1394: request an export-time resident-set snapshot. Enqueued without
+    /// waiting; a full control mailbox drops the reply channel, which settles
+    /// the caller's bounded wait as unavailable instead of blocking the export.
+    pub(crate) fn residency_diagnostics(
+        &self,
+        response: oneshot::Sender<Option<TimelineResidencyDiagnostics>>,
+    ) {
+        let _ = self
+            .control_tx
+            .try_send(TimelineManagerControl::ResidencyDiagnostics { response });
     }
 
     pub(crate) async fn shutdown(&self) -> bool {
@@ -781,6 +851,10 @@ impl TimelineManagerActor {
                                     .await;
                             }
                             let _ = acknowledged.send(());
+                            continue;
+                        }
+                        Some(TimelineManagerControl::ResidencyDiagnostics { response }) => {
+                            let _ = response.send(Some(self.residency_diagnostics()));
                             continue;
                         }
                         Some(TimelineManagerControl::Shutdown { acknowledged }) => {
@@ -2033,6 +2107,27 @@ impl TimelineManagerActor {
                     .await;
             }
         }
+    }
+
+    /// #1394: content-free snapshot of the resident timeline set, sampled by
+    /// the diagnostics export. Reads the manager's own handles only and never
+    /// awaits an actor, so a busy mailbox cannot hold the export.
+    pub(super) fn residency_diagnostics(&self) -> TimelineResidencyDiagnostics {
+        fold_residency_actors(
+            self.session_subscribed_rooms.len(),
+            self.room_list_service
+                .as_ref()
+                .map_or(0, |service| service.actual_subscribed_rooms().len()),
+            self.timelines.iter().map(|(key, handle)| {
+                (
+                    &key.kind,
+                    handle
+                        .position_rx
+                        .as_ref()
+                        .map(|position| position.borrow().ranks.len()),
+                )
+            }),
+        )
     }
 
     fn current_subscription_generation(&self) -> Option<u64> {

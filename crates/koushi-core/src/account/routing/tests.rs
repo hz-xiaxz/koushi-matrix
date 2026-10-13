@@ -455,3 +455,46 @@ async fn export_time_retention_sample_is_answered_or_settles_unavailable() {
         None
     );
 }
+
+#[tokio::test]
+async fn export_time_timeline_residency_sample_answers_the_resident_set() {
+    let credentials = tempdir().unwrap();
+    let data = tempdir().unwrap();
+    let (account, _actions, _events) = spawn_actor_with_dirs(credentials.path(), data.path());
+
+    // A fresh account has no resident Room set: the sample is answered with the
+    // empty snapshot rather than settling as unavailable (#1394).
+    let (response_tx, response_rx) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::TimelineResidencyDiagnostics {
+                response: response_tx
+            })
+            .await
+    );
+    assert_eq!(
+        executor::timeout(Duration::from_secs(2), response_rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        Some(crate::timeline::TimelineResidencyDiagnostics::default())
+    );
+
+    // A second sample is answered too, so one outstanding sample does not
+    // consume the account actor.
+    let (second_tx, second_rx) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::TimelineResidencyDiagnostics {
+                response: second_tx
+            })
+            .await
+    );
+    assert_eq!(
+        executor::timeout(Duration::from_secs(2), second_rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        Some(crate::timeline::TimelineResidencyDiagnostics::default())
+    );
+}
