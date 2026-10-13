@@ -55,6 +55,13 @@ export default defineConfig({
         /activity-shell-scroll\.spec\.ts$/,
         /timeline-scroll-anchor-drift\.spec\.ts$/,
         /scheduled-messages-layout\.spec\.ts$/,
+        /scrollable-list-bounds\.spec\.ts$/,
+        // Remote-text direction (#1378) is resolved by the engine's own bidi
+        // implementation, and the mention pill's paint (#1328) is read from
+        // computed styles, whose `color-mix()` serialization differs per engine.
+        /thread-summary-bidi\.spec\.ts$/,
+        /mention-pill-rendering\.spec\.ts$/,
+        /thread-mention-pill\.spec\.ts$/,
         /upload-staging-scroll\.spec\.ts$/
       ]
     }
