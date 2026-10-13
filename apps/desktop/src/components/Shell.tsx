@@ -6,6 +6,7 @@ import {
   type RefObject,
   useEffect,
   useId,
+  useLayoutEffect,
   useRef,
   useState
 } from "react";
@@ -15,6 +16,7 @@ import {
   Bell,
   Bug,
   ChevronDown,
+  ChevronsDownUp,
   Clock3,
   Compass,
   Home,
@@ -92,7 +94,12 @@ function filterSidebarRooms(rooms: RoomListItem[], query: string): RoomListItem[
 }
 
 /**
- * #1363/#1366: the rows and the bound control one section renders.
+ * #1363/#1366: the rows and the bound controls one section renders.
+ *
+ * #1387: each bound action has exactly one control, so the two are mutually
+ * exclusive. While bounded, the end-of-list control expands the section; once
+ * expanded, the fold control moves into the section header, because the end of
+ * a section holding dozens of rows is no place to reach for.
  *
  * The bound is Rust-projected (`SidebarSectionBound`); React only slices the
  * matching section list and never derives the limit itself. Three things turn
@@ -110,13 +117,19 @@ function boundedSection(
   bound: SidebarSectionBound | null | undefined,
   collapsed: boolean,
   filterActive: boolean
-): { rooms: RoomListItem[]; control: SidebarSectionBound | null } {
+): {
+  rooms: RoomListItem[];
+  expandControl: SidebarSectionBound | null;
+  foldControl: SidebarSectionBound | null;
+} {
   if (collapsed || filterActive || !bound || bound.total_count !== rooms.length) {
-    return { rooms, control: null };
+    return { rooms, expandControl: null, foldControl: null };
   }
+  const shown = bound.shows_expand_control ? bound : null;
   return {
     rooms: rooms.slice(0, bound.visible_count),
-    control: bound.shows_expand_control ? bound : null
+    expandControl: shown && !bound.expanded ? shown : null,
+    foldControl: shown && bound.expanded ? shown : null
   };
 }
 
@@ -1113,18 +1126,67 @@ function RoomSection({
   selectedSort?: RoomListSort;
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
 }) {
-  const { rooms: renderedRooms, control: boundControl } = boundedSection(
+  const { rooms: renderedRooms, expandControl, foldControl } = boundedSection(
     rooms,
     bound,
     collapsed,
     filterActive
   );
+  // #1387: expanding and folding swap the bound control between the row list and
+  // the section header, so the button the user just pressed unmounts and the
+  // focus falls to the document, leaving the section with nothing focused. Hand
+  // it to the replacement. The handoff is armed only when the pressed control
+  // itself held the focus, and it lands only while nothing else has taken the
+  // focus in the meantime.
+  //
+  // ponytail: arbitration is per section. Two sections pressed before the
+  // snapshot settles can hand the focus to the earlier one, and a pending
+  // handoff survives a Home/Space switch. Both only redirect the focus onto a
+  // bound control of a section the user just expanded; ordering them would need
+  // one handoff owned by Sidebar instead of one per section.
+  const sectionRef = useRef<HTMLElement>(null);
+  const boundFocusHandoff = useRef<{
+    from: "fold" | "expand" | null;
+    to: "fold" | "expand";
+  } | null>(null);
+  const boundControlState = foldControl ? "fold" : expandControl ? "expand" : null;
+  useLayoutEffect(() => {
+    const handoff = boundFocusHandoff.current;
+    if (handoff === null) return;
+    // The snapshot the press asked for has not settled yet: keep waiting, and do
+    // not read the focus, because the pressed control is still on screen.
+    if (boundControlState === handoff.from) return;
+    // The bound state moved. Any focus the user took somewhere else ends the
+    // handoff, as does a state that brings no replacement control.
+    boundFocusHandoff.current = null;
+    if (document.activeElement !== document.body || boundControlState !== handoff.to) return;
+    sectionRef.current
+      ?.querySelector<HTMLButtonElement>(
+        handoff.to === "fold"
+          ? `.section-title-action[aria-controls="${id}-room-list"]`
+          : ".room-section-bound"
+      )
+      ?.focus();
+  }, [boundControlState, id]);
+  const toggleBoundControl = (expanded: boolean, trigger: HTMLElement) => {
+    boundFocusHandoff.current =
+      document.activeElement === trigger
+        ? { from: boundControlState, to: expanded ? "fold" : "expand" }
+        : null;
+    onToggleExpanded?.(expanded);
+  };
   if (!showWhenEmpty && rooms.length === 0) {
     return null;
   }
 
   return (
-    <section className="room-section" id={`${id}-room-list`} data-room-section={id} aria-label={label}>
+    <section
+      className="room-section"
+      id={`${id}-room-list`}
+      ref={sectionRef}
+      data-room-section={id}
+      aria-label={label}
+    >
       {showHeader ? (
         <SectionTitle
           collapsed={collapsed}
@@ -1134,9 +1196,11 @@ function RoomSection({
           onCreate={onCreate}
           onAddExisting={onAddExisting}
           createLabel={kind === "dm" ? t("workspace.newDm") : t("action.createRoom")}
+          foldControl={foldControl}
           onSelectSort={onSelectSort}
           sectionId={id}
           onToggle={onToggleCollapsed ?? (() => undefined)}
+          onToggleExpanded={toggleBoundControl}
           selectedSort={selectedSort}
         />
       ) : null}
@@ -1160,12 +1224,12 @@ function RoomSection({
                   onRequestAvatarThumbnail={onRequestAvatarThumbnail}
                 />
               ))}
-              {boundControl && onToggleExpanded ? (
+              {expandControl && onToggleExpanded ? (
                 <SectionBoundControl
-                  bound={boundControl}
+                  bound={expandControl}
                   listId={`${id}-room-list`}
                   sectionLabel={sectionLabel ?? label}
-                  onToggleExpanded={onToggleExpanded}
+                  onToggleExpanded={toggleBoundControl}
                 />
               ) : null}
             </>
@@ -1179,11 +1243,12 @@ function RoomSection({
 }
 
 /**
- * #1363/#1366: the bound control at the end of a bounded section.
+ * #1363/#1366: the expand control at the end of a bounded section.
  *
  * A plain button that names the action, the hidden count, and the section it
  * belongs to, and reports its state through `aria-expanded` against the row
- * list it controls.
+ * list it controls. #1387: this control only ever expands; folding back is the
+ * section header's fold control.
  */
 function SectionBoundControl({
   bound,
@@ -1194,27 +1259,23 @@ function SectionBoundControl({
   bound: SidebarSectionBound;
   listId: string;
   sectionLabel: string;
-  onToggleExpanded: (expanded: boolean) => void;
+  onToggleExpanded: (expanded: boolean, trigger: HTMLElement) => void;
 }) {
-  const label = bound.expanded
-    ? t("roomList.showFewerInSection", { section: sectionLabel })
-    : t("roomList.showMoreInSection", {
-        count: bound.hidden_count,
-        section: sectionLabel
-      });
+  const label = t("roomList.showMoreInSection", {
+    count: bound.hidden_count,
+    section: sectionLabel
+  });
   return (
     <button
       className="room-section-bound"
       type="button"
       aria-controls={listId}
-      aria-expanded={bound.expanded}
+      aria-expanded={false}
       aria-label={label}
       title={label}
-      onClick={() => onToggleExpanded(!bound.expanded)}
+      onClick={(event) => onToggleExpanded(true, event.currentTarget)}
     >
-      {bound.expanded
-        ? t("roomList.showFewer")
-        : t("roomList.showMore", { count: bound.hidden_count })}
+      {t("roomList.showMore", { count: bound.hidden_count })}
     </button>
   );
 }
@@ -1310,11 +1371,13 @@ function SectionTitle({
   collapsed,
   count,
   createLabel,
+  foldControl,
   label,
   onCreate,
   onAddExisting,
   onSelectSort,
   onToggle,
+  onToggleExpanded,
   sectionId,
   selectedSort,
   unreadCount
@@ -1322,12 +1385,15 @@ function SectionTitle({
   collapsed: boolean;
   count: number;
   createLabel?: string;
+  /** #1387: present only while Rust reports the section bounded and expanded. */
+  foldControl?: SidebarSectionBound | null;
   label: string;
   unreadCount?: number;
   onCreate?: () => void;
   onAddExisting?: () => void;
   onSelectSort?: (sort: RoomListSort) => void;
   onToggle: () => void;
+  onToggleExpanded?: (expanded: boolean, trigger: HTMLElement) => void;
   sectionId: string;
   selectedSort?: RoomListSort;
 }) {
@@ -1438,6 +1504,23 @@ function SectionTitle({
                 {...tooltipProps}
               >
                 <Plus size={ICON_SIZE.compact} aria-hidden="true" />
+              </button>
+            )}
+          </Tooltip>
+        ) : null}
+        {foldControl && onToggleExpanded ? (
+          <Tooltip label={t("roomList.showFewer")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="section-title-action"
+                type="button"
+                aria-controls={`${sectionId}-room-list`}
+                aria-expanded={true}
+                aria-label={t("roomList.showFewerInSection", { section: label })}
+                onClick={(event) => onToggleExpanded(false, event.currentTarget)}
+                {...tooltipProps}
+              >
+                <ChevronsDownUp size={ICON_SIZE.compact} aria-hidden="true" />
               </button>
             )}
           </Tooltip>
