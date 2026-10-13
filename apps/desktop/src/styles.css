@@ -3711,12 +3711,25 @@ button:disabled {
 .scheduled-messages {
   display: grid;
   gap: var(--scheduled-panel-gap);
+  /* The card is content-sized: without this, a `stretch`ed track (the right
+     panel's `minmax(0, 1fr)` row) spreads the auto rows across the whole
+     allocated height, so the heading, note and item drift apart. */
+  align-content: start;
   margin: 0 var(--scheduled-panel-margin-inline) var(--scheduled-panel-gap);
   padding: var(--scheduled-panel-padding-block)
     var(--scheduled-panel-padding-inline);
   border: 1px solid var(--line);
   border-radius: var(--r-md);
   background: var(--surface);
+}
+
+/* #1160 follow-up: in the right panel this section is the middle row of the
+   shared panel shell. Hug the content instead of filling the pane, and scroll
+   inside the card once the queue is longer than the row. */
+.thread-pane > .scheduled-messages {
+  align-self: start;
+  max-block-size: 100%;
+  overflow-y: auto;
 }
 
 .scheduled-messages-heading {
@@ -3763,9 +3776,14 @@ button:disabled {
   list-style: none;
 }
 
+/* One explicit `minmax(0, 1fr)` track: an implicit `auto` action column grew to
+   the buttons' intrinsic width and left the preview a few characters wide (the
+   edit form was worse still), which the containment contract prohibits. The
+   preview, the action row, and the edit form stack instead, so every width the
+   panel or the timeline card can take stays readable. */
 .scheduled-message-item {
   display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
+  grid-template-columns: minmax(0, 1fr);
   gap: var(--scheduled-panel-gap);
   align-items: start;
   padding-block: var(--scheduled-panel-gap);
@@ -3870,6 +3888,30 @@ button:disabled {
 .scheduled-send-field input:focus {
   border-color: var(--brand);
   outline: 0;
+}
+
+/* The composer's send-later clock carries this room's pending reservation
+   count. It uses the same badge vocabulary as the room header's thread control
+   and the workspace header, so a count reads the same everywhere. */
+.composer-schedule-button {
+  position: relative;
+}
+
+.composer-schedule-badge {
+  position: absolute;
+  inset-block-start: -2px;
+  inset-inline-end: -2px;
+  min-inline-size: var(--nav-badge-size);
+  block-size: var(--nav-badge-size);
+  padding: 0 var(--nav-badge-padding-inline);
+  border: 2px solid var(--surface);
+  border-radius: var(--r-pill);
+  color: var(--brand-contrast);
+  font-size: var(--nav-badge-font-size);
+  font-weight: 820;
+  line-height: calc(var(--nav-badge-size) - 4px);
+  text-align: center;
+  background: var(--brand);
 }
 
 .reaction-control {

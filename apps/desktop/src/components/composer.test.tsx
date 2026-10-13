@@ -13,6 +13,7 @@ import type {
   ResolveComposerKeyAction
 } from "../domain/types";
 import { readClipboardImageFile } from "../backend/clipboardImageRuntime";
+import { t } from "../i18n/messages";
 import {
   claimNativeDroppedFiles,
   subscribeNativeFileDrops,
@@ -462,6 +463,48 @@ describe("Composer", () => {
         "Local scheduled-send changes could not be saved; they may not survive restarting the app."
       )
     ).toBeTruthy();
+  });
+
+  it("badges the send-later clock with this room's pending reservation count", () => {
+    const { container, rerender } = render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("sendable")}
+        scheduledSendCount={3}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+        onScheduleSend={() => undefined}
+      />
+    );
+
+    // The count is part of the accessible name, not only the badge: the badge
+    // itself is presentation-only.
+    const clock = screen.getByRole("button", {
+      name: t("scheduled.sendLaterWithCount", { count: 3 })
+    });
+    expect(clock.getAttribute("data-count")).toBe("3");
+    expect(container.querySelector(".composer-schedule-badge")?.textContent).toBe("3");
+
+    rerender(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("sendable")}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+        onScheduleSend={() => undefined}
+      />
+    );
+
+    // An empty queue keeps the plain label and renders no badge.
+    expect(screen.getByRole("button", { name: t("scheduled.sendLater") })).toBeTruthy();
+    expect(container.querySelector(".composer-schedule-badge")).toBeNull();
+    expect(container.querySelector(".composer-schedule-button")?.getAttribute("data-count")).toBeNull();
   });
 
   it("renders a localized notice for rejected slash commands and hides it without one", () => {

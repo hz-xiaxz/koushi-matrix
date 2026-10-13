@@ -127,6 +127,7 @@ export const Composer = memo(function Composer({
   editorHandleRef,
   onDiagnosticLogEntry,
   notice = null,
+  scheduledSendCount = 0,
   scheduledSendPersistenceFailed = false
 }: {
   surface?: ComposerSurface;
@@ -172,6 +173,12 @@ export const Composer = memo(function Composer({
   onDiagnosticLogEntry?: (entry: DiagnosticLogEntry) => void;
   /** Localized transient notice rendered above the composer (issue #450). */
   notice?: string | null;
+  /**
+   * This room's pending scheduled-send count, projected from Rust
+   * (`state.ui.timeline.scheduled_sends`). The send-later clock badges it so the
+   * reservation queue is visible from the composer that creates it.
+   */
+  scheduledSendCount?: number;
   /**
    * Core reported that local scheduled-send changes could not be saved
    * (#1159). Rendered as its own notice, so transient slash-command feedback
@@ -773,6 +780,14 @@ export const Composer = memo(function Composer({
     </span>
   );
 
+  // The count is part of the clock's accessible name as well as its badge: the
+  // badge itself is presentation-only, so assistive technology still learns how
+  // many messages this room already has waiting.
+  const scheduleLaterLabel =
+    scheduledSendCount > 0
+      ? t("scheduled.sendLaterWithCount", { count: scheduledSendCount })
+      : t("scheduled.sendLater");
+
   const footerControls = (
     <div className="composer-footer-controls">
       <input
@@ -816,17 +831,23 @@ export const Composer = memo(function Composer({
       </Tooltip>
       {emojiControl}
       {onScheduleSend ? (
-        <Tooltip label={t("scheduled.sendLater")} placement="above">
+        <Tooltip label={scheduleLaterLabel} placement="above">
           {(tooltipProps) => (
             <button
-              className="icon-button"
+              className="icon-button composer-schedule-button"
               type="button"
-              aria-label={t("scheduled.sendLater")}
+              data-count={scheduledSendCount > 0 ? scheduledSendCount : undefined}
+              aria-label={scheduleLaterLabel}
               disabled={!canEdit || isSending || !localValue.trim() || hasStagedUploads}
               onClick={openScheduleForm}
               {...tooltipProps}
             >
               <Clock3 size={ICON_SIZE.control} />
+              {scheduledSendCount > 0 ? (
+                <span className="composer-schedule-badge" aria-hidden="true">
+                  {scheduledSendCount}
+                </span>
+              ) : null}
             </button>
           )}
         </Tooltip>
