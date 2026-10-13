@@ -1060,6 +1060,7 @@ export type MessageId =
   | "scheduled.save"
   | "scheduled.schedule"
   | "scheduled.sendLater"
+  | "scheduled.sendLaterWithCount"
   | "scheduled.serverDelayedEvents"
   | "scheduled.threadReply"
   | "scheduled.timeInput"
@@ -2969,6 +2970,7 @@ const en: Catalog = {
   "scheduled.save": "Save scheduled send",
   "scheduled.schedule": "Schedule send",
   "scheduled.sendLater": "Send later",
+  "scheduled.sendLaterWithCount": "Send later ({count} scheduled)",
   "scheduled.serverDelayedEvents": "Server scheduled",
   "scheduled.threadReply": "Thread reply",
   "scheduled.timeInput": "Scheduled send time",
@@ -4779,6 +4781,7 @@ const ja: Catalog = {
   "scheduled.save": "予約送信を保存",
   "scheduled.schedule": "予約送信",
   "scheduled.sendLater": "あとで送信",
+  "scheduled.sendLaterWithCount": "あとで送信（予約 {count} 件）",
   "scheduled.serverDelayedEvents": "サーバー予約",
   "scheduled.threadReply": "スレッド返信",
   "scheduled.timeInput": "予約送信日時",

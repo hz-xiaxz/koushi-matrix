@@ -1296,6 +1296,7 @@ export function TimelinePane({
         resolveComposerKeyAction={resolveComposerKeyActionStable}
         document={composerDocument}
         notice={composerNotice}
+        scheduledSendCount={snapshot.state.ui.timeline.scheduled_sends.length}
         scheduledSendPersistenceFailed={hasScheduledSendPersistenceFailure(
           snapshot.state.ui.errors
         )}
