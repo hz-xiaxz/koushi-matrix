@@ -1,0 +1,11 @@
+blank_issues_enabled: false
+contact_links:
+  - name: User guide
+    url: https://github.com/shinaoka/koushi-matrix/tree/main/docs/help
+    about: Setup, sign-in, messaging, search, encryption, and settings, with the exact UI labels.
+  - name: Troubleshooting
+    url: https://github.com/shinaoka/koushi-matrix/blob/main/docs/help/troubleshooting.md
+    about: Self-service steps for sign-in, sync, history, sending, encryption, and update problems.
+  - name: Releases
+    url: https://github.com/shinaoka/koushi-matrix/releases
+    about: Check whether the problem is already fixed in a newer version.

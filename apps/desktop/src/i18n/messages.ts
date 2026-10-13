@@ -341,6 +341,11 @@ export type MessageId =
   | "diagnostics.copyFailed"
   | "diagnostics.copying"
   | "diagnostics.open"
+  | "diagnostics.privacyNote"
+  | "diagnostics.save"
+  | "diagnostics.saveFailed"
+  | "diagnostics.saved"
+  | "diagnostics.saving"
   | "diagnostics.title"
   | "emoji.category.people"
   | "emoji.category.nature"
@@ -2222,6 +2227,11 @@ const en: Catalog = {
   "diagnostics.copyFailed": "Could not copy diagnostics. Try again.",
   "diagnostics.copying": "Copying diagnostics…",
   "diagnostics.open": "Open diagnostics",
+  "diagnostics.privacyNote": "Diagnostics contain no private data: no message text, room or member names, Matrix IDs, email addresses, or file paths. The report is long, so save it as a file and attach the file to your report.",
+  "diagnostics.save": "Save to file…",
+  "diagnostics.saveFailed": "Could not save diagnostics. Try again.",
+  "diagnostics.saved": "Diagnostics saved.",
+  "diagnostics.saving": "Saving diagnostics…",
   "diagnostics.title": "Diagnostics",
   "emoji.category.people": "Smileys & People",
   "emoji.category.nature": "Animals & Nature",
@@ -4031,6 +4041,11 @@ const ja: Catalog = {
   "diagnostics.copyFailed": "診断情報をコピーできませんでした。もう一度お試しください。",
   "diagnostics.copying": "診断情報をコピー中…",
   "diagnostics.open": "診断情報を開く",
+  "diagnostics.privacyNote": "診断情報には、メッセージ本文、ルーム名やメンバー名、Matrix ID、メールアドレス、ファイルパスなどの個人情報が含まれないように設計されています。内容が長いため、ファイルとして保存し、不具合報告に添付してください。",
+  "diagnostics.save": "ファイルに保存…",
+  "diagnostics.saveFailed": "診断情報を保存できませんでした。もう一度お試しください。",
+  "diagnostics.saved": "診断情報を保存しました。",
+  "diagnostics.saving": "診断情報を保存中…",
   "diagnostics.title": "診断情報",
   "emoji.category.people": "顔と人",
   "emoji.category.nature": "動物と自然",

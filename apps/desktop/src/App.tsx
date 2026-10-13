@@ -3385,6 +3385,19 @@ function AccountContent({
     setDiagnosticsOpen(true);
   }
 
+  // The adapter owns the native save dialog. The report is built here and is
+  // private-data-free by construction; the adapter writes it verbatim.
+  async function saveDiagnosticsReport(): Promise<boolean> {
+    if (!isTauriRuntime() || !snapshot) {
+      return false;
+    }
+    const saved = await api.saveDiagnosticsReport(
+      diagnosticReportFor(snapshot, runtimeDiagnosticSnapshot),
+      t("diagnostics.title")
+    );
+    return saved !== null;
+  }
+
   async function retrySecureBackupInspection() {
     if (!api.retrySecureBackupInspection || secureBackupInspectionRetryInFlightRef.current) {
       return;
@@ -6878,6 +6891,7 @@ function AccountContent({
           <DiagnosticDialog
             report={diagnosticReportFor(snapshot, runtimeDiagnosticSnapshot)}
             onClose={() => setDiagnosticsOpen(false)}
+            onSaveReport={isTauriRuntime() ? saveDiagnosticsReport : undefined}
           />
         ) : null}
       </>
@@ -8033,6 +8047,7 @@ function AccountContent({
         return <DiagnosticDialog
           report={diagnosticReportFor(snapshot, runtimeDiagnosticSnapshot)}
           onClose={() => setDiagnosticsOpen(false)}
+          onSaveReport={isTauriRuntime() ? saveDiagnosticsReport : undefined}
         />;
       })() : null}
       </div>

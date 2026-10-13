@@ -66,10 +66,10 @@ async function seedTimelineWithItems(
       async () =>
         page.evaluate(
           async ({ key, nextItems }) => {
-            const itemDomIds = nextItems.map(
-              (item) =>
-                (item as { id: { Event: { event_id: string } } }).id.Event.event_id
-            );
+            const itemDomIds = nextItems.flatMap((item) => {
+              const eventId = (item as { id: { Event?: { event_id: string } } }).id.Event?.event_id;
+              return eventId ? [eventId] : [];
+            });
             await window.__harness.pushCoreEvent({
               kind: "Timeline",
               event: {
@@ -230,6 +230,192 @@ test("a 147-row room keeps mounting bounded while scrolling and measuring rows",
   await expectAnchorStayedPut(page, anchorEventId, originalOffset);
 });
 
+test("virtualized date dividers have the same modeled and physical height", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await gotoReadyApp(page);
+  const items = Array.from({ length: 115 }, (_, index) => makeEventItem(index));
+  for (let index = 17; index >= 0; index -= 1) {
+    const timestamp = 1_800_000_000_000 + index * 86_400_000;
+    items.splice(index * 6, 0, {
+      ...makeEventItem(1000 + index),
+      id: { Synthetic: { synthetic_id: `date-divider-${timestamp}` } },
+      timestamp_ms: timestamp
+    } as unknown as ReturnType<typeof makeEventItem>);
+  }
+  await seedTimelineWithItems(page, items);
+  const timeline = page.locator("[data-testid=timeline-view]");
+  await expect(timeline).toHaveAttribute("data-total-items", "133");
+  await timeline.evaluate((node) => {
+    node.scrollTop = 0;
+    node.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  await waitAnimationFrames(page, 4);
+  const mismatch = await page.evaluate(() => {
+    const list = document.querySelector<HTMLElement>(".timeline-item-list");
+    if (!list) throw new Error("Missing timeline list");
+    const children = Array.from(list.children) as HTMLElement[];
+    const sum = children.reduce((height, child) => height + child.getBoundingClientRect().height, 0);
+    return Math.abs(list.getBoundingClientRect().height - sum);
+  });
+  expect(mismatch).toBeLessThanOrEqual(1);
+  const { anchorEventId, originalOffset } = await placeAnchorInViewport(page, 70);
+  for (let reversal = 0; reversal < 20; reversal += 1) {
+    await timeline.evaluate((node) => {
+      node.scrollTop += 400;
+      node.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await waitAnimationFrames(page, 2);
+    await timeline.evaluate((node) => {
+      node.scrollTop -= 400;
+      node.dispatchEvent(new Event("scroll", { bubbles: true }));
+    });
+    await waitAnimationFrames(page, 2);
+  }
+  await expectAnchorStayedPut(page, anchorEventId, originalOffset);
+  await timeline.hover();
+  for (let reversal = 0; reversal < 60; reversal += 1) {
+    await page.mouse.wheel(0, reversal % 2 === 0 ? 480 : -380);
+    await waitAnimationFrames(page, 2);
+    await expect(page.getByRole("main", { name: "Conversation timeline" })).toBeVisible();
+    expect(await timeline.locator("[data-frame-item-id]").count()).toBeLessThanOrEqual(80);
+  }
+  expect(pageErrors).toEqual([]);
+});
+
+test("crossing the virtualization threshold keeps the reading row mounted", async ({ page }) => {
+  await gotoReadyApp(page);
+  await seedTimelineWithItems(
+    page,
+    Array.from({ length: 79 }, (_, index) => makeEventItem(index + 52))
+  );
+
+  const timeline = page.locator("[data-testid=timeline-view]");
+  await expect(timeline).not.toHaveAttribute("data-virtualized", "true");
+  const anchorEventId = "$scroll-anchor-item-0070:example.invalid";
+  await timeline.evaluate((node) => {
+    node.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -500 }));
+    node.scrollTop = 18 * 72;
+    node.dispatchEvent(new Event("scroll", { bubbles: true }));
+  });
+  const anchor = page.locator(`[data-event-id="${anchorEventId}"]`);
+  await expect(anchor).toBeInViewport();
+  const originalOffset = await anchorOffsetFromContainer(page, anchorEventId);
+  expect(originalOffset).not.toBeNull();
+  await page.evaluate((eventId) => {
+    const row = document.querySelector(`[data-event-id="${eventId}"]`);
+    const list = document.querySelector(".timeline-item-list");
+    if (!row || !list) throw new Error("missing initial anchor");
+    document.documentElement.dataset["anchorRemovedDuringThresholdCrossing"] = "false";
+    let mountedRows = list.querySelectorAll(".timeline-item-frame").length;
+    let peakMountedRows = mountedRows;
+    new MutationObserver((records) => {
+      for (const record of records) {
+        for (const node of record.removedNodes) {
+          if (node === row || (node instanceof Element && node.contains(row))) {
+            document.documentElement.dataset["anchorRemovedDuringThresholdCrossing"] = "true";
+          }
+          if (node instanceof Element && node.classList.contains("timeline-item-frame")) mountedRows -= 1;
+        }
+        for (const node of record.addedNodes) {
+          if (node instanceof Element && node.classList.contains("timeline-item-frame")) mountedRows += 1;
+        }
+        peakMountedRows = Math.max(peakMountedRows, mountedRows);
+      }
+      document.documentElement.dataset["peakMountedRowsDuringThresholdCrossing"] = String(peakMountedRows);
+    }).observe(list, { childList: true, subtree: true });
+  }, anchorEventId);
+
+  await page.evaluate(({ key, items }) => {
+    window.__harness.pushCoreEvent({
+      kind: "Timeline",
+      event: {
+        ItemsUpdated: {
+          key,
+          generation: 2,
+          batch_id: 1,
+          diffs: items.map((item) => ({ PushFront: { item } }))
+        }
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+  }, {
+    key: TIMELINE_KEY,
+    items: Array.from({ length: 52 }, (_, index) => makeEventItem(index)).reverse()
+  });
+
+  await expect(timeline).toHaveAttribute("data-total-items", "131");
+  await expect(timeline).toHaveAttribute("data-virtualized", "true");
+  await expect(page.getByRole("main", { name: "Conversation timeline" })).toBeVisible();
+  expect(await page.evaluate(() => document.documentElement.dataset["anchorRemovedDuringThresholdCrossing"])).toBe("false");
+  expect(Number(await page.evaluate(() => document.documentElement.dataset["peakMountedRowsDuringThresholdCrossing"]))).toBeLessThanOrEqual(100);
+  expect(await timeline.locator("[data-frame-item-id]").count()).toBeLessThanOrEqual(80);
+  await expectAnchorStayedPut(page, anchorEventId, originalOffset!);
+
+  // Backfill again after virtualization is already active. The previous
+  // window's indices now refer to older rows, so this transition must also
+  // preserve the reading row and its bounded DOM window.
+  await page.evaluate(({ key, items }) => {
+    window.__harness.pushCoreEvent({
+      kind: "Timeline",
+      event: {
+        ItemsUpdated: {
+          key,
+          generation: 2,
+          batch_id: 2,
+          diffs: items.map((item) => ({ PushFront: { item } }))
+        }
+      }
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+  }, {
+    key: TIMELINE_KEY,
+    items: Array.from({ length: 52 }, (_, index) => makeEventItem(index - 52)).reverse()
+  });
+  await expect(timeline).toHaveAttribute("data-total-items", "183");
+  expect(await page.evaluate(() => document.documentElement.dataset["anchorRemovedDuringThresholdCrossing"])).toBe("false");
+  expect(Number(await page.evaluate(() => document.documentElement.dataset["peakMountedRowsDuringThresholdCrossing"]))).toBeLessThanOrEqual(100);
+  expect(await timeline.locator("[data-frame-item-id]").count()).toBeLessThanOrEqual(80);
+  await expectAnchorStayedPut(page, anchorEventId, originalOffset!);
+
+  await timeline.hover();
+  for (let reversal = 0; reversal < 48; reversal += 1) {
+    await page.mouse.wheel(0, reversal % 2 === 0 ? -520 : 420);
+    await waitAnimationFrames(page, 2);
+    await expect(page.getByRole("main", { name: "Conversation timeline" })).toBeVisible();
+    expect(await timeline.locator("[data-frame-item-id]").count()).toBeLessThanOrEqual(80);
+  }
+});
+
+test("repeated scroll reversals across variable-height rows keep the application mounted", async ({ page }) => {
+  const pageErrors: string[] = [];
+  page.on("pageerror", (error) => pageErrors.push(error.message));
+  await gotoReadyApp(page);
+  await seedTimelineWithItems(
+    page,
+    Array.from({ length: 180 }, (_, index) =>
+      makeEventItem(
+        index,
+        index % 7 === 0
+          ? Array.from({ length: 12 }, (_, line) => `message ${index} line ${line} ${"long text ".repeat(12)}`).join("\n")
+          : index % 3 === 0
+            ? `message ${index} ${"medium text ".repeat(10)}`
+            : `message ${index}`
+      )
+    )
+  );
+
+  const timeline = page.locator("[data-testid=timeline-view]");
+  await expect(timeline).toHaveAttribute("data-virtualized", "true");
+  await timeline.hover();
+  for (let reversal = 0; reversal < 60; reversal += 1) {
+    await page.mouse.wheel(0, reversal % 2 === 0 ? -680 : 540);
+    await waitAnimationFrames(page, 2);
+    await expect(page.getByRole("main", { name: "Conversation timeline" })).toBeVisible();
+  }
+  expect(pageErrors).toEqual([]);
+});
+
 test("virtualized free-scroll viewport stays stable while row measurements settle", async ({
   page
 }) => {
@@ -264,10 +450,9 @@ test("virtualized free-scroll viewport accepts small user wheel movement", async
   await timeline.hover();
   const beforeScrollTop = await timelineScrollTop(page);
   await page.mouse.wheel(0, 180);
-  await waitAnimationFrames(page, 8);
-  const afterScrollTop = await timelineScrollTop(page);
-
-  expect(afterScrollTop).toBeGreaterThan(beforeScrollTop + 20);
+  // WebKit may deliver the compositor's wheel scroll after the next several
+  // animation frames on a busy CI runner. Observe the resulting position.
+  await expect.poll(() => timelineScrollTop(page)).toBeGreaterThan(beforeScrollTop + 20);
 });
 
 test("virtualized free-scroll viewport accepts small user wheel movement toward older messages", async ({
@@ -282,8 +467,5 @@ test("virtualized free-scroll viewport accepts small user wheel movement toward 
   await timeline.hover();
   const beforeScrollTop = await timelineScrollTop(page);
   await page.mouse.wheel(0, -180);
-  await waitAnimationFrames(page, 8);
-  const afterScrollTop = await timelineScrollTop(page);
-
-  expect(afterScrollTop).toBeLessThan(beforeScrollTop - 20);
+  await expect.poll(() => timelineScrollTop(page)).toBeLessThan(beforeScrollTop - 20);
 });

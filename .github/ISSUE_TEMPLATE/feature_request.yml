@@ -1,0 +1,63 @@
+name: Feature request
+description: Suggest a change that would make Koushi more useful.
+title: "[Feature]: "
+labels: ["enhancement"]
+body:
+  - type: markdown
+    attributes:
+      value: |
+        Describe the problem you want solved, not only the solution. Please keep
+        this request free of private data: never paste message text, room or
+        member names, Matrix IDs, screenshots of real conversations, or
+        credentials.
+
+        Voice and video calls and recorded voice messages are not currently
+        planned, so requests for them are out of scope for now.
+
+  - type: textarea
+    id: problem
+    attributes:
+      label: What problem are you trying to solve?
+      description: Describe the situation where Koushi gets in your way.
+      placeholder: |
+        Example: When I join a busy room I cannot tell which mentions still
+        need an answer without scrolling the whole timeline.
+    validations:
+      required: true
+
+  - type: textarea
+    id: proposal
+    attributes:
+      label: What would you like Koushi to do?
+      description: Describe the behavior you expect, including what should happen on failure.
+      placeholder: |
+        Example: A "Mentions" filter above the timeline that keeps only messages
+        that mention me. Show an empty state when there are none.
+    validations:
+      required: true
+
+  - type: textarea
+    id: alternatives
+    attributes:
+      label: What do you do instead today?
+      description: Describe any workaround, and why it is not enough. Leave empty when there is none.
+    validations:
+      required: false
+
+  - type: textarea
+    id: context
+    attributes:
+      label: Additional context
+      description: Links, mockups, or Element Web / Element X behavior worth matching. Do not include private data or real account content.
+    validations:
+      required: false
+
+  - type: checkboxes
+    id: confirmations
+    attributes:
+      label: Before submitting
+      options:
+        - label: I searched existing issues for this request.
+          required: true
+        - label: This request contains no private data, credentials, or real conversation content.
+          required: true

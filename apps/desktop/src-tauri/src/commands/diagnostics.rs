@@ -1,5 +1,8 @@
+use std::path::Path;
+
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::{
     CoreRuntimeState,
@@ -163,6 +166,56 @@ pub async fn get_diagnostic_snapshot(
         &state.runtime.search_retention_diagnostics().await,
         state.runtime.sliding_sync_diagnostics(),
     ))
+}
+
+/// The default file name offered by the native save dialog (#1383).
+const DIAGNOSTICS_FILE_NAME: &str = "koushi-diagnostics.txt";
+
+/// Ask for a destination and write the renderer-built diagnostics report there
+/// (#1383).
+///
+/// The report is private-data-free by construction: structured kinds, counts,
+/// and lengths only. It is written verbatim and never logged, and a dismissed
+/// dialog writes nothing. The adapter owns the native dialog, so the renderer
+/// supplies text and localized dialog labels and receives the chosen path or
+/// `None`.
+#[tauri::command]
+pub async fn save_diagnostics_report(
+    report: String,
+    dialog_title: String,
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title(dialog_title.clone())
+        .set_file_name(DIAGNOSTICS_FILE_NAME)
+        .add_filter(dialog_title, &["txt"]);
+    // Save next to the user's other downloads unless they choose elsewhere.
+    if let Ok(downloads) = app.path().download_dir() {
+        dialog = dialog.set_directory(downloads);
+    }
+    dialog.save_file(move |selected| {
+        let _ = sender.send(selected);
+    });
+    let Some(selected) = receiver.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let path = selected
+        .into_path()
+        .map_err(|_| "diagnostics destination is not a local path".to_owned())?;
+    write_diagnostics_report(&path, &report)?;
+    path.into_os_string()
+        .into_string()
+        .map(Some)
+        .map_err(|_| "diagnostics destination is not valid UTF-8".to_owned())
+}
+
+fn write_diagnostics_report(path: &Path, report: &str) -> Result<(), String> {
+    std::fs::write(path, report).map_err(|_| "could not write the diagnostics report".to_owned())
 }
 
 #[tauri::command]
@@ -608,6 +661,9 @@ mod qa_tests {
         assert!(title.contains("viewport_decision=repair_to_parent_bounds"));
     }
 }
+
+#[cfg(test)]
+mod export_tests;
 
 #[cfg(test)]
 mod snapshot_tests;

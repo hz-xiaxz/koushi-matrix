@@ -41,7 +41,8 @@ const SNAPSHOT_READ_COMMANDS = new Set([
 const RESOURCE_COMMANDS = new Set([
   "read_receipt_reader_resource",
   "choose_room_key_export_destination",
-  "choose_room_key_import_source"
+  "choose_room_key_import_source",
+  "save_diagnostics_report"
 ]);
 const REQUEST_COMMANDS = new Set(["download_avatar_thumbnail"]);
 const VOID_COMMANDS = new Set([

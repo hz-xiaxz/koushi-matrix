@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { cleanup, fireEvent, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { setActiveLocaleProfile, t } from "../i18n/messages";
 import { DiagnosticDialog } from "./dialogs";
@@ -8,6 +8,7 @@ import { DiagnosticDialog } from "./dialogs";
 afterEach(() => {
   cleanup();
   setActiveLocaleProfile("en", "none");
+  vi.unstubAllGlobals();
 });
 
 describe("DiagnosticDialog", () => {
@@ -21,5 +22,81 @@ describe("DiagnosticDialog", () => {
     expect(close.getAttribute("aria-label")).not.toContain("{title}");
     fireEvent.click(close);
     expect(onClose).toHaveBeenCalledOnce();
+  });
+
+  it.each(["en", "ja"] as const)(
+    "states that diagnostics carry no private data and belong in an attached file in %s",
+    (locale) => {
+      setActiveLocaleProfile(locale, "none");
+      render(<DiagnosticDialog report="Koushi diagnostics" onClose={() => undefined} />);
+
+      const note = t("diagnostics.privacyNote");
+      expect(note).not.toContain("{");
+      expect(screen.getByText(note)).toBeTruthy();
+    }
+  );
+
+  it("saves the report to a file and reports the saved state", async () => {
+    const onSaveReport = vi.fn(async () => true);
+    render(
+      <DiagnosticDialog
+        report="Koushi diagnostics"
+        onClose={() => undefined}
+        onSaveReport={onSaveReport}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t("diagnostics.save") }));
+
+    expect(onSaveReport).toHaveBeenCalledOnce();
+    await waitFor(() => expect(screen.getByRole("status").textContent).toBe(t("diagnostics.saved")));
+  });
+
+  it("returns to rest when the native save dialog is dismissed", async () => {
+    const onSaveReport = vi.fn(async () => false);
+    render(
+      <DiagnosticDialog
+        report="Koushi diagnostics"
+        onClose={() => undefined}
+        onSaveReport={onSaveReport}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t("diagnostics.save") }));
+
+    await waitFor(() => expect(onSaveReport).toHaveBeenCalledOnce());
+    expect(screen.queryByRole("status")).toBeNull();
+  });
+
+  it("surfaces a failed save next to the button", async () => {
+    const onSaveReport = vi.fn(async () => {
+      throw new Error("destination unavailable");
+    });
+    render(
+      <DiagnosticDialog
+        report="Koushi diagnostics"
+        onClose={() => undefined}
+        onSaveReport={onSaveReport}
+      />
+    );
+
+    fireEvent.click(screen.getByRole("button", { name: t("diagnostics.save") }));
+
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe(t("diagnostics.saveFailed"))
+    );
+  });
+
+  it("copies the full report and reports the copied state", async () => {
+    const writeText = vi.fn(async () => undefined);
+    vi.stubGlobal("navigator", { clipboard: { writeText } });
+    render(<DiagnosticDialog report="Koushi diagnostics" onClose={() => undefined} />);
+
+    fireEvent.click(screen.getByRole("button", { name: t("diagnostics.copy") }));
+
+    expect(writeText).toHaveBeenCalledWith("Koushi diagnostics");
+    await waitFor(() =>
+      expect(screen.getByRole("status").textContent).toBe(t("diagnostics.copied"))
+    );
   });
 });
