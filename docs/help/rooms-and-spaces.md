@@ -121,9 +121,11 @@ an invitation before participating.
 If the action is unavailable, your role or the current room state may not allow
 it. Room history visibility and room entry rules are separate settings.
 **Since invite**, **Since join**, and **Shared history** describe different
-history access. In encrypted rooms, reading older history also requires the
-appropriate encryption keys. Changing a setting does not revoke events or keys
-already shared.
+history access. In an encrypted room with shared history, past room keys may be
+shared with the invitee automatically, but the share needs verification on both
+sides and may be skipped, so some or all earlier messages can stay unreadable
+until a key becomes available another way. Changing a setting does not revoke
+events or keys already shared.
 
 ## Conversation list sections
 
