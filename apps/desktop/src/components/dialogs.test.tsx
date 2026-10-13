@@ -154,6 +154,50 @@ describe("UploadStagingDialog", () => {
     expect(screen.queryByRole("group", { name: t("upload.previewMode") })).toBeNull();
   });
 
+  it("opens on the first caption editor, never the clear action", () => {
+    render(
+      dialog([
+        stagedImage("", { kind: "preparing" }, "staged-1", "first.png"),
+        stagedImage("", { kind: "preparing" }, "staged-2", "second.png")
+      ])
+    );
+    const caption = screen.getByRole("textbox", { name: "Caption for first.png" });
+
+    // The clear action is destructive and explains itself with a bubble, so an
+    // attachment never opens the staging dialog on it.
+    expect(document.activeElement).toBe(caption);
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: t("upload.clear") }));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("cancels the staging dialog from an Escape resolved in the caption", async () => {
+    const onClear = vi.fn();
+    const resolveComposerKeyAction = vi.fn(async () => "cancel" as const);
+    render(
+      <UploadStagingDialog
+        items={[stagedImage("", { kind: "preparing" })]}
+        onClear={onClear}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={vi.fn()}
+        onSendAttachments={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={resolveComposerKeyAction}
+        surface="main"
+      />
+    );
+
+    // The caption consumes Escape before the modal sees it, so the dialog's
+    // cancel path has to be reachable from the editor it opens on.
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Caption for synthetic.png" }), {
+      key: "Escape",
+      code: "Escape"
+    });
+
+    await waitFor(() => expect(onClear).toHaveBeenCalledTimes(1));
+  });
+
   it("renders the shared caption editor and emits a structured document from formatting", () => {
     const onUpdateCaption = vi.fn();
     render(dialog([stagedImage("caption", { kind: "preparing" })], onUpdateCaption));

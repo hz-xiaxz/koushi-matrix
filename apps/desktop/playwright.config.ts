@@ -52,7 +52,8 @@ export default defineConfig({
         /room-list-filter-native-clear\.spec\.ts$/,
         /upload-preview-heic\.spec\.ts$/,
         /inline-math-baseline\.spec\.ts$/,
-        /activity-shell-scroll\.spec\.ts$/
+        /activity-shell-scroll\.spec\.ts$/,
+        /upload-staging-scroll\.spec\.ts$/
       ]
     }
   ],

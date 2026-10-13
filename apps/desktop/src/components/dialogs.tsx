@@ -5,6 +5,7 @@ import { ModalDialog, NativeModal } from "./ModalDialog";
 import {
   type RefObject,
   useEffect,
+  useLayoutEffect,
   useRef,
   useState
 } from "react";
@@ -55,7 +56,7 @@ import {
   type ImageUploadVariantKindPayload,
   type ImageCompressionPlan
 } from "../app/uiShared";
-import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
+import { ImeSafeForm, ImeTextField, type ImeInlineMentionEditorHandle } from "./ImeTextControl";
 import { Composer } from "./composer";
 import { FloatingLayer } from "./floatingLayer";
 import { Tooltip } from "./Tooltip";
@@ -1284,9 +1285,13 @@ export function UploadStagingDialog({
   onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
   roomName?: string;
 }) {
-  const closeButtonRef = useRef<HTMLButtonElement>(null);
-  useEffect(() => {
-    closeButtonRef.current?.focus();
+  const firstCaptionRef = useRef<ImeInlineMentionEditorHandle>(null);
+  // The dialog exists to caption and send the staged files, so its first
+  // caption editor takes focus. The clear action is destructive and explains
+  // itself with a bubble, so opening on it showed that explanation every time
+  // an attachment was staged.
+  useLayoutEffect(() => {
+    firstCaptionRef.current?.focus();
   }, []);
   const sendable = uploadStagingItemsAreSendable(items);
   const sendButtonRef = useRef<HTMLButtonElement>(null);
@@ -1314,7 +1319,6 @@ export function UploadStagingDialog({
             <Tooltip label={t("upload.clear")} placement="below" align="end">
               {(tooltipProps) => (
                 <button
-                  ref={closeButtonRef}
                   className="icon-button"
                   type="button"
                   aria-label={t("upload.clear")}
@@ -1394,9 +1398,15 @@ export function UploadStagingDialog({
                       resolveComposerKeyAction={resolveComposerKeyAction}
                       document={item.caption ?? documentFromText("")}
                       draftKey={item.staged_id}
+                      editorHandleRef={index === 0 ? firstCaptionRef : undefined}
                       ariaLabel={t("upload.captionForFile", { filename: item.filename })}
                       placeholder={t("upload.captionForFile", { filename: item.filename })}
                       roomName={roomName}
+                      // Escape in the caption resolves to Rust's `cancel` and
+                      // the composer consumes that key before the modal's own
+                      // Escape handling. Dismissing the dialog is this
+                      // caption's cancel action, exactly like the clear button.
+                      onCancel={onClear}
                       onCancelReply={() => undefined}
                       onDocumentChange={(document) => {
                         const update = Promise.resolve(onUpdateCaption(item.staged_id, document));
