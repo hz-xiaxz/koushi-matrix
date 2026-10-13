@@ -19,6 +19,12 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
+[#1392 topology-first gap inspection](../superpowers/plans/2026-10-13-issue1392-gap-inspection-topology.md)
+describes the SDK-fork store path (`EventCacheStore::load_chunk_topology`) that
+removes full-history decryption from healthy room gap inspection, the koushi
+counter records, and the benchmark evidence obligations; two PRs split at the
+fork/application repository boundary.
+
 [#1363 / #1366 sidebar section row bound](../plans/2026-10-12-issue1363-1366-sidebar-section-bound.md)
 bounds each visible section to five rows with a Rust-projected expand control,
 stores the per-scope `expanded` preference next to `collapsed`/`sort`, reveals a
