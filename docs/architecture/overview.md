@@ -1009,11 +1009,14 @@ contribution join a room badge is proven at the SDK event-cache boundary: the ro
 cache's `RoomReadReceiptEventFilter` excludes thread replies while each thread
 cache's `ThreadReadReceiptEventFilter` counts exactly one thread's replies, so the
 client counters partition into `unread_count` (main timeline, also the navigation
-value) plus `thread_unread_count` (threads). A homeserver's own room counters may
-already include thread replies, so the server `notification_count` is max'd in,
-never summed: the badge is
-`max(unread_count + thread_unread_count, notification_count, highlight_count +
-thread_highlight_count)`.
+value) plus `thread_unread_count` (threads). `room_activity_unread_count` sums
+exactly those two fields and is the numeric conversation badge every surface
+renders. A homeserver's own `notification_count` has no event IDs and cannot make
+a message locatable, so it never joins that sum; server notification counters,
+highlight counts and manual unread markers keep their separate attention purposes
+without adding an unlocatable number to a conversation badge. See
+[state machines](state-machine.md) for the shared helper and the account, Home
+rail and native badge aggregates built on it.
 
 A session-scoped Core thread-summary projection reconciles SDK/event-cache
 aggregates with accepted live reply activity once per `(room_id,
