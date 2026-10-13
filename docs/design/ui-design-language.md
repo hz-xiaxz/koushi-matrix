@@ -16,6 +16,10 @@ Mockups (open in a browser or any SVG viewer):
 - `docs/design/ui-shell-dark.svg` — full shell, dark. This artifact predates
   the 2026-07-09 neutral dark recolor and is stale until regenerated.
 
+Proposal mockups for open issues sit beside them and are not design language:
+- `docs/design/sidebar-section-fold-mock.svg` (`.png` beside it) — current vs
+  proposed sidebar section fold control for #1387. Synthetic data only.
+
 ## 0. Relationship to canon (binding)
 
 This is a *design* document; it does not override the rule book.
