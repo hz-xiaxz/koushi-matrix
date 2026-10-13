@@ -36,6 +36,7 @@ import {
 } from "./TimelineView";
 import type { MentionCandidate } from "../app/uiShared";
 import { documentFromText } from "../domain/composerDocument";
+import { hoverTooltip } from "../test/tooltipHover";
 import {
   inlineMentionEditorSelection,
   setInlineMentionEditorSelection
@@ -66,7 +67,8 @@ function changeInlineEditorText(editor: HTMLDivElement, text: string) {
 }
 
 function expectLocalizedTooltip(button: HTMLButtonElement, label: string): void {
-  fireEvent.focus(button);
+  // The shared bubble is hover-owned (#1388).
+  hoverTooltip(button);
   // The bubble renders in the body-level floating layer so pane scrollports
   // cannot clip it (#1166), so it is looked up by the trigger's description id.
   const describedBy = button.getAttribute("aria-describedby");
@@ -74,7 +76,7 @@ function expectLocalizedTooltip(button: HTMLButtonElement, label: string): void 
   const tooltip = document.querySelector<HTMLElement>(`[id="${describedBy}"]`);
   expect(tooltip?.textContent).toBe(label);
   expect(tooltip?.getAttribute("role")).toBe("tooltip");
-  fireEvent.blur(button);
+  fireEvent.mouseLeave(button);
 }
 
 afterEach(() => {

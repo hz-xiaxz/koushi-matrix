@@ -3,6 +3,7 @@ import { act, cleanup, fireEvent, render, screen, within } from "@testing-librar
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { RoomInfoPanel } from "./RoomInfoPanel";
+import { hoverTooltip } from "../test/tooltipHover";
 import { setActiveLocaleProfile, t } from "../i18n/messages";
 import type {
   LinkPreviewSettingsState,
@@ -1425,19 +1426,19 @@ describe("Room Info status summary (#1327)", () => {
     // Encryption is a fact of its own and is not a link: it cannot be edited here.
     const encryption = screen.getByText(t("room.statusEncrypted"));
     expect(encryption.closest(".room-status-badge")?.tagName).toBe("SPAN");
-    // One pill at a time: keyboard focus reveals this badge's explanation.
-    fireEvent.focus(encryption.closest(".room-status-badge") as HTMLElement);
+    // One pill at a time: hovering this badge reveals its explanation.
+    hoverTooltip(encryption.closest(".room-status-badge") as HTMLElement);
     expect(screen.getByRole("tooltip").textContent).toBe(t("room.encryptedDescription"));
-    fireEvent.blur(encryption.closest(".room-status-badge") as HTMLElement);
+    fireEvent.mouseLeave(encryption.closest(".room-status-badge") as HTMLElement);
     expect(screen.queryByRole("tooltip")).toBeNull();
 
     // The join rule is the projected one, not the settings snapshot's.
     const join = screen.getByRole("button", {
       name: t("room.statusShowSetting", { status: t("access.inviteOnly") })
     });
-    fireEvent.focus(join);
+    hoverTooltip(join);
     expect(screen.getByRole("tooltip").textContent).toBe(t("access.inviteOnlyDescription"));
-    fireEvent.blur(join);
+    fireEvent.mouseLeave(join);
     expect(screen.queryByRole("tooltip")).toBeNull();
 
     // History follows the actual visibility value, never the join rule, and
@@ -1445,11 +1446,11 @@ describe("Room Info status summary (#1327)", () => {
     const history = screen.getByRole("button", {
       name: t("room.statusShowSetting", { status: t("room.statusHistoryLimited") })
     });
-    fireEvent.focus(history);
+    hoverTooltip(history);
     expect(screen.getByRole("tooltip").textContent).toBe(
       t("room.statusHistoryLimitedDescription")
     );
-    fireEvent.blur(history);
+    fireEvent.mouseLeave(history);
     expect(screen.queryByRole("tooltip")).toBeNull();
 
     fireEvent.click(history);
@@ -1502,7 +1503,7 @@ describe("Room Info status summary (#1327)", () => {
       })
     ).toBeTruthy();
     // The invitation explanation drops only the Space sentence for a DM.
-    fireEvent.focus(
+    hoverTooltip(
       screen.getByRole("button", {
         name: t("room.statusShowSetting", { status: t("access.inviteOnly") })
       })
@@ -1550,7 +1551,7 @@ describe("Room Info status summary (#1327)", () => {
     const history = screen.getByRole("button", {
       name: t("room.statusShowSetting", { status: t("room.statusHistoryWorldReadable") })
     });
-    fireEvent.focus(history);
+    hoverTooltip(history);
     expect(screen.getByRole("tooltip").textContent).toBe(
       t("room.statusHistoryWorldReadableDescription")
     );
@@ -1635,7 +1636,7 @@ describe("Room Info status summary (#1327)", () => {
 
     const badge = screen.getByText(t("access.spaceMembersCanJoin")).closest(".room-status-badge");
     expect(badge?.tagName).toBe("SPAN");
-    fireEvent.focus(badge as HTMLElement);
+    hoverTooltip(badge as HTMLElement);
     expect(screen.getByRole("tooltip").textContent).toBe(
       t("access.spaceMembersCanJoinDescription", { space: "Synthetic Space" })
     );

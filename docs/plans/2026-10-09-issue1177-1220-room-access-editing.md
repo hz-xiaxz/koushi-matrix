@@ -279,7 +279,9 @@ Frontend:
     and no stale details after an out-of-order preview result.
 11. The three access surfaces agree for one room in Home, a Space, People/DM,
     favourites and low-priority contexts; the tooltip names the Space on hover and
-    keyboard focus; both `knockRestricted` badges survive.
+    keyboard focus; both `knockRestricted` badges survive. (#1388 supersedes the
+    focus half: the shared bubble is hover-only, and the Space route stays
+    reachable from Room Info.)
 
 Production path:
 

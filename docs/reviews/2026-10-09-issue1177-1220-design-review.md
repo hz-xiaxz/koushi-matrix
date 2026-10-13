@@ -193,7 +193,7 @@ Finally, `knockRestricted` currently carries **two routes**, conditions and requ
 
 **Smallest correct alternative:** extend the existing shared indicator contract with Rust-projected specific/generic facts and tooltip substitutions; consume it in all three surfaces. Preserve summary-to-property navigation and the request route.
 
-**Required acceptance:** named tooltip on hover and keyboard focus; both knock-restricted badges; Home, Space, People/DM, favourites and low-priority contexts; summary remains confirmed while the editor contains an unsaved draft.
+**Required acceptance:** named tooltip on hover and keyboard focus; both knock-restricted badges; Home, Space, People/DM, favourites and low-priority contexts; summary remains confirmed while the editor contains an unsaved draft. (#1388 supersedes the focus half of the tooltip requirement: the shared bubble is hover-only.)
 
 ---
 

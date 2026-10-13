@@ -1,6 +1,5 @@
 import {
   type CSSProperties,
-  type FocusEvent,
   type KeyboardEvent,
   type MouseEvent,
   type PointerEvent,
@@ -19,8 +18,6 @@ export type TooltipPlacement = "right" | "above" | "below";
 
 export type TooltipTriggerProps = {
   "aria-describedby"?: string;
-  onBlur: (event: FocusEvent<HTMLElement>) => void;
-  onFocus: (event: FocusEvent<HTMLElement>) => void;
   onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
   onMouseEnter: (event: MouseEvent<HTMLElement>) => void;
   onMouseLeave: (event: MouseEvent<HTMLElement>) => void;
@@ -59,6 +56,14 @@ const TOOLTIP_VIEWPORT_MARGIN_PX = 12;
 /** Distance between the trigger and the bubble. */
 const TOOLTIP_ANCHOR_GAP_PX = 8;
 
+/**
+ * The shared explanation bubble for an icon-only control.
+ *
+ * #1388: the bubble is pointer-owned and opens on hover only. Keyboard and
+ * programmatic focus must not open it — returning focus to a menu trigger after a
+ * selection used to leave the explanation floating over the sidebar. The wrapped
+ * control keeps its own `aria-label`, which is what assistive technology reads.
+ */
 export function Tooltip({
   children,
   label,
@@ -75,13 +80,11 @@ export function Tooltip({
   const bubbleRef = useRef<HTMLSpanElement>(null);
   const [style, setStyle] = useState<CSSProperties>({ visibility: "hidden" });
   // A press answers the question the tooltip was asking, and the pointer stays
-  // parked on the control afterwards. Chromium also focuses the pressed button,
-  // so without this the focus that follows the press re-opened the bubble and it
-  // stayed on screen — duplicating the label the action had just revealed and
-  // shadowing that text for anything matching it. Leaving the control re-arms
-  // the explanation, so the next hover still describes the button, and a
-  // keyboard visit re-arms it too: the suppression answers a pointer press, not
-  // a keyboard user.
+  // parked on the control afterwards, so without this the parked hover re-opened
+  // the bubble and it stayed on screen — duplicating the label the action had
+  // just revealed and shadowing that text for anything matching it. Leaving the
+  // control re-arms the explanation, so the next hover still describes the
+  // button.
   const pressDismissed = useRef(false);
 
   function clearOpenTimer() {
@@ -122,25 +125,12 @@ export function Tooltip({
     setIsOpen(false);
   }
 
-  /**
-   * `:focus-visible` is the browser's own answer to "was this focus from the
-   * keyboard?", which is exactly the visit the press suppression must not
-   * swallow. A trigger that cannot be asked keeps the suppression.
-   */
-  function isKeyboardFocus(element: HTMLElement) {
-    try {
-      return element.matches(":focus-visible");
-    } catch {
-      return false;
-    }
-  }
-
   function press(event: PointerEvent<HTMLElement>) {
     // Only the primary button acts on the control, so a secondary press must not
     // swallow the explanation. It still dismisses it: the bubble renders above
     // the context menu layer, and a bubble left over a freshly opened menu would
-    // paint on top of that menu. Dismissing without arming keeps a later
-    // keyboard visit free to explain the control again.
+    // paint on top of that menu. Dismissing without arming keeps a later hover
+    // free to explain the control again.
     if (event.button !== 0) {
       close();
       return;
@@ -149,26 +139,7 @@ export function Tooltip({
     close();
   }
 
-  function focus(event: FocusEvent<HTMLElement>) {
-    // `target` rather than `currentTarget`: focus also arrives from a control
-    // nested inside the wrapped trigger, and that visit is still a keyboard one.
-    const focused = event.target;
-    if (
-      pressDismissed.current &&
-      focused instanceof HTMLElement &&
-      isKeyboardFocus(focused)
-    ) {
-      pressDismissed.current = false;
-    }
-    openNow();
-  }
-
-  /**
-   * Leaving the control re-arms the bubble. Suppression deliberately survives a
-   * blur: opening the pane a button controls can move focus off the button, and
-   * re-arming on that blur let a follow-up hover re-open the bubble over the
-   * label the action had just revealed.
-   */
+  /** Leaving the control re-arms the bubble for the next hover. */
   function release() {
     pressDismissed.current = false;
     close();
@@ -293,7 +264,7 @@ export function Tooltip({
     positionBubble();
   }, [isOpen, label, placement, align, positionBubble]);
 
-  // A focused trigger can stay open while its pane scrolls or the window
+  // A hovered trigger can stay open while its pane scrolls or the window
   // resizes, so the bubble follows the anchor instead of staying behind.
   useEffect(() => {
     if (!isOpen) {
@@ -310,8 +281,6 @@ export function Tooltip({
 
   const triggerProps: TooltipTriggerProps = {
     "aria-describedby": isOpen ? tooltipId : undefined,
-    onBlur: close,
-    onFocus: focus,
     onKeyDown: (event) => {
       if (event.key === "Escape") {
         close();

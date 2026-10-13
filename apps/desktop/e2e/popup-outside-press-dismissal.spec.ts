@@ -12,6 +12,7 @@
  *  3. Escape closes the menu and returns focus to its trigger.
  *  4. The timeline pane and the shell outside the sidebar also dismiss it.
  *  5. A control surface that already owned its dismissal keeps working.
+ *  6. Choosing a sort item leaves no explanation bubble over the sidebar (#1388).
  */
 
 import { expect, test, type Page } from "@playwright/test";
@@ -109,6 +110,22 @@ test("an outside press dismisses the section menu and still selects the conversa
     (window as unknown as { __harness: Harness }).__harness.invocationsOf("select_room")
       .map((invocation) => invocation.args.roomId));
   expect(selections).toEqual([other!.room_id]);
+});
+
+// #1388: choosing an item returns focus to the trigger, and that visit must not
+// leave the trigger's explanation bubble floating over the sidebar.
+test("choosing a section sort option leaves no explanation bubble", async ({ page }) => {
+  await page.goto("/appHarness.html");
+  await expect(section(page, labels.dms)).toBeVisible();
+  await seedDirectMessage(page);
+
+  await optionsTrigger(page, labels.dms).click();
+  await expect(page.locator(".section-menu")).toHaveCount(1);
+
+  await page.getByRole("menuitemradio", { name: t("roomList.sortName") }).click();
+
+  await expect(page.locator(".section-menu")).toHaveCount(0);
+  await expect(page.locator(".tooltip-bubble.is-open")).toHaveCount(0);
 });
 
 test("only one section menu is open at a time", async ({ page }) => {
