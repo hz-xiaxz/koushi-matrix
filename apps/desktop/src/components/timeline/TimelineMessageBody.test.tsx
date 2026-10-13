@@ -249,6 +249,35 @@ describe("renderFormattedBody mention pills (#874, #1123)", () => {
     expect(markup.match(/message-mention-pill/g)).toHaveLength(1);
   });
 
+  // #1328: Element writes the anchor text without `@` (`>Alice<`), while the
+  // composer's chip and the plain-body pill both read `@Alice`. The pill adds the
+  // prefix itself, and a label that already carries one is not doubled. The
+  // event's HTML and the copied plain text keep the sender's spelling.
+  test("spells an Element-shaped mention anchor like the composer's chip", () => {
+    const renderAnchor = (label: string) =>
+      renderToStaticMarkup(
+        renderFormattedBody(
+          {
+            html: `<a href="https://matrix.to/#/%40alice%3Aexample.test">${label}</a> please look`,
+            plain_text: `${label} please look`,
+            code_blocks: []
+          } satisfies TimelineFormattedBody,
+          [],
+          false,
+          () => undefined,
+          [],
+          { revealed: new Set<string>(), reveal: () => undefined },
+          undefined,
+          { userIds: new Set(["@alice:example.test"]), room: false }
+        )
+      );
+
+    const element = renderAnchor("Alice");
+    expect(element).toContain(">@Alice</a>");
+    expect(renderAnchor("@Alice")).toContain(">@Alice</a>");
+    expect(renderAnchor("@Alice")).not.toContain(">@@Alice</a>");
+  });
+
   test("draws no pill for a message that mentions nobody", () => {
     const markup = render(new Set());
 

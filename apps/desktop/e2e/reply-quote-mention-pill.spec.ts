@@ -123,7 +123,9 @@ test("a reply quote keeps the quoted message's mention as a pill", async ({ page
   const pill = quoteBody.locator("a.message-mention-pill");
   await expect(pill).toHaveCount(1);
   await expect(pill).toHaveAttribute("data-mention-user-id", MENTIONED_USER_ID);
-  await expect(pill).toHaveText(MENTION_LABEL);
+  // #1328: the quoted anchor carries the label without `@`, so the pill spells it
+  // the way the composer's chip does.
+  await expect(pill).toHaveText(`@${MENTION_LABEL}`);
   await expect(quoter).toBeVisible();
 
   // The message that carries the mention still pills on its own row.
