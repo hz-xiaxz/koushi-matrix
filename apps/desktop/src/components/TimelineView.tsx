@@ -494,6 +494,7 @@ export const TimelineView = memo(function TimelineView({
   const [virtualRange, setVirtualRange] =
     useState<TimelineVirtualRangeState>(EMPTY_TIMELINE_RANGE);
   const virtualRangeModelRef = useRef<ReturnType<typeof buildTimelineHeightModel> | null>(null);
+  const virtualRangeRowsRef = useRef<readonly TimelineDisplayRow[] | null>(null);
   const [projectionSettlementRevision, setProjectionSettlementRevision] = useState(0);
   const virtualRangeRef = useRef<TimelineVirtualRangeState>(EMPTY_TIMELINE_RANGE);
   const [linkPreviewRequestRange, setLinkPreviewRequestRange] =
@@ -1912,6 +1913,7 @@ export const TimelineView = memo(function TimelineView({
         model: timelineHeightModel
       });
       virtualRangeModelRef.current = timelineHeightModel;
+      virtualRangeRowsRef.current = visibleRows;
       if (virtualRangeEquals(virtualRangeRef.current, next)) {
         return next;
       }
@@ -1937,17 +1939,15 @@ export const TimelineView = memo(function TimelineView({
         paddingTop: 0,
         paddingBottom: 0
       };
-    } else if (
-      transaction === null ||
-      (virtualRange.virtualized && virtualRangeModelRef.current === timelineHeightModel)
-    ) {
+    } else if (virtualRange.virtualized && virtualRangeModelRef.current === timelineHeightModel) {
       range = virtualRange;
-    } else {
+    } else if (transaction || (virtualRange.virtualized && virtualRangeRowsRef.current !== visibleRows)) {
       // A prepend or height change can make the committed range refer to an
-      // older row model. Derive a bounded window around the held anchor until
-      // the layout effect commits a range for this model.
+      // older row model after its rows change, even if its transaction has
+      // settled. Derive a bounded window around the held or stable anchor
+      // until the layout effect commits a range for these rows.
       const metrics = viewportMetricsRef.current;
-      const anchor = transaction.anchor;
+      const anchor = transaction?.anchor ?? stableAnchor();
       const anchorIndex = anchor
         ? visibleRows.findIndex((row) => row.row_id === anchor.itemId)
         : -1;
@@ -1963,13 +1963,17 @@ export const TimelineView = memo(function TimelineView({
         metrics: { ...metrics, scrollTop: Math.max(0, scrollTop) },
         model: timelineHeightModel
       });
+    } else {
+      // An initial projection or a height-only update has no shifted row
+      // indices to repair. Its viewport metrics settle in the layout effect.
+      range = virtualRange;
     }
 
     return {
       ...range,
       items: visibleRows.slice(range.startIndex, range.endIndex)
     };
-  }, [timelineHeightModel, virtualRange, visibleRows]);
+  }, [stableAnchor, timelineHeightModel, virtualRange, visibleRows]);
   useLayoutEffect(() => {
     commitVirtualRangeForMetrics(readViewportMetrics());
   }, [commitVirtualRangeForMetrics, readViewportMetrics]);
