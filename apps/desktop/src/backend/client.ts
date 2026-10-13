@@ -186,6 +186,14 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<DiagnosticLogSnapshot>("get_diagnostic_snapshot");
   }
 
+  /** Native save dialog owned by the adapter; `null` when it was dismissed. */
+  async saveDiagnosticsReport(report: string, dialogTitle: string): Promise<string | null> {
+    return this.invokeCommand<string | null>("save_diagnostics_report", {
+      report,
+      dialogTitle
+    });
+  }
+
   async observeViewportSync(
     observation: ViewportSyncObservation
   ): Promise<ViewportSyncReceipt> {

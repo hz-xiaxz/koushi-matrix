@@ -11,6 +11,7 @@ import {
 } from "react";
 import {
   Copy,
+  Download,
   FileText,
   Image as ImageIcon,
   X
@@ -799,13 +800,61 @@ export function ImageCompressionDialog({
 
 // ===== DiagnosticDialog =====
 
+type DiagnosticsAction = "copy" | "save";
+type DiagnosticsStatus =
+  | { kind: "idle" }
+  | { kind: "busy"; action: DiagnosticsAction }
+  | { kind: "done"; action: DiagnosticsAction }
+  | { kind: "failed"; action: DiagnosticsAction };
+
+function diagnosticsStatusMessage(status: DiagnosticsStatus): MessageId | null {
+  switch (status.kind) {
+    case "idle":
+      return null;
+    case "busy":
+      return status.action === "save" ? "diagnostics.saving" : "diagnostics.copying";
+    case "done":
+      return status.action === "save" ? "diagnostics.saved" : "diagnostics.copied";
+    case "failed":
+      return status.action === "save" ? "diagnostics.saveFailed" : "diagnostics.copyFailed";
+  }
+}
+
 export function DiagnosticDialog({
   report,
-  onClose
+  onClose,
+  onSaveReport
 }: {
   report: string;
   onClose: () => void;
+  /** Adapter-owned native save dialog; resolves false when the user dismisses it. */
+  onSaveReport?: () => Promise<boolean>;
 }) {
+  const [status, setStatus] = useState<DiagnosticsStatus>({ kind: "idle" });
+  const statusMessageId = diagnosticsStatusMessage(status);
+
+  async function copyReport() {
+    setStatus({ kind: "busy", action: "copy" });
+    try {
+      await writeClipboardText(report);
+      setStatus({ kind: "done", action: "copy" });
+    } catch {
+      setStatus({ kind: "failed", action: "copy" });
+    }
+  }
+
+  async function saveReport() {
+    if (!onSaveReport) {
+      return;
+    }
+    setStatus({ kind: "busy", action: "save" });
+    try {
+      const saved = await onSaveReport();
+      setStatus(saved ? { kind: "done", action: "save" } : { kind: "idle" });
+    } catch {
+      setStatus({ kind: "failed", action: "save" });
+    }
+  }
 
   return (
     <NativeModal onDismiss={onClose}
@@ -836,13 +885,34 @@ export function DiagnosticDialog({
           </Tooltip>
         </div>
         <pre className="diagnostics-output">{diagnosticReportPreview(report)}</pre>
+        <p className="diagnostics-privacy-note">{t("diagnostics.privacyNote")}</p>
+        {statusMessageId ? (
+          <p className="diagnostics-status" role="status">
+            {t(statusMessageId)}
+          </p>
+        ) : null}
         <div className="dialog-actions">
+          {onSaveReport ? (
+            <button
+              className="dialog-button"
+              type="button"
+              aria-label={t("diagnostics.save")}
+              disabled={status.kind === "busy"}
+              onClick={() => {
+                void saveReport();
+              }}
+            >
+              <Download size={ICON_SIZE.small} />
+              <span>{t("diagnostics.save")}</span>
+            </button>
+          ) : null}
           <button
             className="dialog-button is-primary"
             type="button"
             aria-label={t("diagnostics.copy")}
+            disabled={status.kind === "busy"}
             onClick={() => {
-              void writeClipboardText(report);
+              void copyReport();
             }}
           >
             <Copy size={ICON_SIZE.small} />

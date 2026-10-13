@@ -90,6 +90,7 @@ describe("DesktopApi command contract", () => {
         "previewRoomAccess",
         "previewCreateRoomAccess",
         "ignoreDesktopUpdate",
+        "saveDiagnosticsReport",
         "cancelOidcLogin"
       )
       .sort();

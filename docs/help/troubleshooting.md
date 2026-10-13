@@ -98,15 +98,23 @@ unavailable.
 
 You can [ask an AI assistant](README.md#ask-an-ai-assistant) using the public
 repository and your version. If the issue persists, open a
-[GitHub issue](https://github.com/shinaoka/koushi-matrix/issues/new) with:
+[GitHub issue](https://github.com/shinaoka/koushi-matrix/issues/new/choose) with:
 
-- Koushi version, operating system, and whether the problem began after updating.
+- Koushi version (**About Koushi** in the application menu, or **Check for
+  updates** in **App Settings → Software update**), operating system, and
+  whether the problem began after updating.
 - The steps you took, what you expected, and what happened instead.
 - Whether the affected room is encrypted and whether the issue affects one room
   or several, without disclosing private room IDs or messages.
-- A sanitized error description. Review any screenshot or diagnostic attachment
-  before sharing it.
+- A sanitized error description. Review any screenshot before sharing it.
+
+When the problem involves sign-in, startup, sync, encryption, or a crash,
+attach the diagnostics report as a file. Select **Open diagnostics** at the top
+right of the window, select **Save to file…**, and attach the saved
+`koushi-diagnostics.txt`. The report is too long to paste, and the dialog notes
+that it omits private data: no message text, room or member names, Matrix IDs,
+email addresses, or file paths.
 
 Never include passwords, recovery keys, access tokens, private messages, or
-key export files. If you are unsure what a diagnostic file contains, describe
-the visible symptom first.
+key export files. If you are unsure what a diagnostics file contains, open it
+before attaching it or describe the visible symptom first.
