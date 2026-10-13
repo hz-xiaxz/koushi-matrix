@@ -272,15 +272,11 @@ fn gap_inspection_work_diagnostics_are_content_free_counts() {
     );
     assert_eq!(
         fields.get(&"trigger"),
-        Some(&&koushi_diagnostics::DiagnosticValue::Token(
-            "live_edge".into()
-        ))
+        Some(&&koushi_diagnostics::DiagnosticValue::Token("live_edge"))
     );
     assert_eq!(
         fields.get(&"continuity"),
-        Some(&&koushi_diagnostics::DiagnosticValue::Token(
-            "complete".into()
-        ))
+        Some(&&koushi_diagnostics::DiagnosticValue::Token("complete"))
     );
     // Privacy: no private identifiers appear in the emitted record.
     for field in work[0].event.fields.iter() {
