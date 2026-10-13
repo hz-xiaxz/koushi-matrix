@@ -52,7 +52,8 @@ export const NIGHTLY_SCENARIOS = Object.freeze([
   "search_crawler_catchup",
   "thread_late_joiner",
   "account_notifications",
-  "user_verification"
+  "user_verification",
+  "idle_sync_gap_inspection"
 ]);
 
 // Registered scenarios deliberately in no automated lane, with the reason.
