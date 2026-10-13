@@ -53,6 +53,7 @@ export default defineConfig({
         /upload-preview-heic\.spec\.ts$/,
         /inline-math-baseline\.spec\.ts$/,
         /activity-shell-scroll\.spec\.ts$/,
+        /timeline-scroll-anchor-drift\.spec\.ts$/,
         /scheduled-messages-layout\.spec\.ts$/,
         /upload-staging-scroll\.spec\.ts$/
       ]

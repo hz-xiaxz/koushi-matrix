@@ -3185,6 +3185,12 @@ button:disabled {
   max-inline-size: 100%;
 }
 
+/* The virtual height model measures each frame's border box. Keep date and
+   read-marker margins inside that box so physical and modeled offsets agree. */
+.timeline-item-frame {
+  display: flow-root;
+}
+
 .timeline-virtual-spacer {
   inline-size: 100%;
   overflow-anchor: none;

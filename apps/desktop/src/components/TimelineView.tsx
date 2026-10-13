@@ -493,6 +493,7 @@ export const TimelineView = memo(function TimelineView({
   });
   const [virtualRange, setVirtualRange] =
     useState<TimelineVirtualRangeState>(EMPTY_TIMELINE_RANGE);
+  const virtualRangeModelRef = useRef<ReturnType<typeof buildTimelineHeightModel> | null>(null);
   const [projectionSettlementRevision, setProjectionSettlementRevision] = useState(0);
   const virtualRangeRef = useRef<TimelineVirtualRangeState>(EMPTY_TIMELINE_RANGE);
   const [linkPreviewRequestRange, setLinkPreviewRequestRange] =
@@ -1866,7 +1867,7 @@ export const TimelineView = memo(function TimelineView({
       const transaction = viewportTransactionRef.current.active();
       const anchor = transaction?.anchor;
       if (
-        transaction?.rangePrepared && anchor &&
+        transaction && anchor &&
         viewportIntentRef.current.kind !== "live-edge" &&
         transaction.key === timelineKeyHash &&
         transaction.generation === generation
@@ -1910,6 +1911,7 @@ export const TimelineView = memo(function TimelineView({
         metrics,
         model: timelineHeightModel
       });
+      virtualRangeModelRef.current = timelineHeightModel;
       if (virtualRangeEquals(virtualRangeRef.current, next)) {
         return next;
       }
@@ -1925,22 +1927,49 @@ export const TimelineView = memo(function TimelineView({
     commitVirtualRangeForMetrics(metrics);
   }, [commitVirtualRangeForMetrics, readViewportMetrics]);
   const virtualWindow = useMemo<TimelineVirtualWindow>(() => {
-    const range =
-      visibleRows.length <= TIMELINE_VIRTUALIZATION_THRESHOLD
-        ? {
-            virtualized: false,
-            startIndex: 0,
-            endIndex: visibleRows.length,
-            paddingTop: 0,
-            paddingBottom: 0
-          }
-        : virtualRange;
+    const transaction = viewportTransactionRef.current.active();
+    let range: TimelineVirtualRangeState;
+    if (visibleRows.length <= TIMELINE_VIRTUALIZATION_THRESHOLD) {
+      range = {
+        virtualized: false,
+        startIndex: 0,
+        endIndex: visibleRows.length,
+        paddingTop: 0,
+        paddingBottom: 0
+      };
+    } else if (
+      transaction === null ||
+      (virtualRange.virtualized && virtualRangeModelRef.current === timelineHeightModel)
+    ) {
+      range = virtualRange;
+    } else {
+      // A prepend or height change can make the committed range refer to an
+      // older row model. Derive a bounded window around the held anchor until
+      // the layout effect commits a range for this model.
+      const metrics = viewportMetricsRef.current;
+      const anchor = transaction.anchor;
+      const anchorIndex = anchor
+        ? visibleRows.findIndex((row) => row.row_id === anchor.itemId)
+        : -1;
+      const scrollTop =
+        viewportIntentRef.current.kind === "live-edge"
+          ? metrics.listOffsetTop + timelineHeightModel.totalHeight - metrics.clientHeight
+          : anchorIndex >= 0 && anchor
+            ? metrics.listOffsetTop +
+              (timelineHeightModel.offsets[anchorIndex] ?? 0) - anchor.offsetTop
+            : metrics.scrollTop;
+      range = calculateTimelineVirtualRange({
+        visibleItemsLength: visibleRows.length,
+        metrics: { ...metrics, scrollTop: Math.max(0, scrollTop) },
+        model: timelineHeightModel
+      });
+    }
 
     return {
       ...range,
       items: visibleRows.slice(range.startIndex, range.endIndex)
     };
-  }, [virtualRange, visibleRows]);
+  }, [timelineHeightModel, virtualRange, visibleRows]);
   useLayoutEffect(() => {
     commitVirtualRangeForMetrics(readViewportMetrics());
   }, [commitVirtualRangeForMetrics, readViewportMetrics]);
