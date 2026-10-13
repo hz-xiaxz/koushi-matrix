@@ -450,10 +450,9 @@ test("virtualized free-scroll viewport accepts small user wheel movement", async
   await timeline.hover();
   const beforeScrollTop = await timelineScrollTop(page);
   await page.mouse.wheel(0, 180);
-  await waitAnimationFrames(page, 8);
-  const afterScrollTop = await timelineScrollTop(page);
-
-  expect(afterScrollTop).toBeGreaterThan(beforeScrollTop + 20);
+  // WebKit may deliver the compositor's wheel scroll after the next several
+  // animation frames on a busy CI runner. Observe the resulting position.
+  await expect.poll(() => timelineScrollTop(page)).toBeGreaterThan(beforeScrollTop + 20);
 });
 
 test("virtualized free-scroll viewport accepts small user wheel movement toward older messages", async ({
@@ -468,8 +467,5 @@ test("virtualized free-scroll viewport accepts small user wheel movement toward 
   await timeline.hover();
   const beforeScrollTop = await timelineScrollTop(page);
   await page.mouse.wheel(0, -180);
-  await waitAnimationFrames(page, 8);
-  const afterScrollTop = await timelineScrollTop(page);
-
-  expect(afterScrollTop).toBeLessThan(beforeScrollTop - 20);
+  await expect.poll(() => timelineScrollTop(page)).toBeLessThan(beforeScrollTop - 20);
 });
