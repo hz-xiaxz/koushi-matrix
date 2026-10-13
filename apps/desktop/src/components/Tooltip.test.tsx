@@ -2,7 +2,7 @@
 import { readFileSync } from "node:fs";
 import { resolve } from "node:path";
 
-import { cleanup, fireEvent, render, screen } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { t } from "../i18n/messages";
@@ -30,10 +30,15 @@ function rect(top: number, left: number, width: number, height: number) {
   };
 }
 
-function renderTooltip(placement?: "right" | "above" | "below", align?: "start" | "end") {
+/** `delayMs=0` makes the hover that opens the bubble synchronous. */
+function renderTooltip(
+  placement?: "right" | "above" | "below",
+  align?: "start" | "end",
+  delayMs = 0
+) {
   const label = t("composer.bold");
   render(
-    <Tooltip label={label} placement={placement} align={align}>
+    <Tooltip label={label} placement={placement} align={align} delayMs={delayMs}>
       {(triggerProps) => (
         <button type="button" aria-label={label} {...triggerProps}>
           <span aria-hidden="true" />
@@ -67,22 +72,62 @@ describe("Tooltip", () => {
     expect(tooltipSource).toContain("openNow();");
   });
 
+  test("opens the bubble only after the hover delay and closes it on leave", () => {
+    vi.useFakeTimers();
+    try {
+      const trigger = renderTooltip("below", "start", 250);
+
+      fireEvent.mouseEnter(trigger);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+
+      act(() => {
+        vi.advanceTimersByTime(249);
+      });
+      expect(screen.queryByRole("tooltip")).toBeNull();
+
+      act(() => {
+        vi.advanceTimersByTime(1);
+      });
+      expect(screen.getByRole("tooltip")).toBeTruthy();
+
+      fireEvent.mouseLeave(trigger);
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    } finally {
+      vi.useRealTimers();
+    }
+  });
+
+  // The reported case (#1388): choosing a section sort option returns focus to
+  // the menu trigger, and that visit must not leave an explanation on screen.
+  test("a keyboard visit does not open the bubble", () => {
+    const trigger = renderTooltip("below");
+
+    fireEvent.focus(trigger);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+    expect(trigger.getAttribute("aria-describedby")).toBeNull();
+
+    fireEvent.blur(trigger);
+    fireEvent.focus(trigger);
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
   test("describes the trigger only while the bubble is open", () => {
     const trigger = renderTooltip("below");
     expect(trigger.getAttribute("aria-describedby")).toBeNull();
 
-    fireEvent.focus(trigger);
+    fireEvent.mouseEnter(trigger);
     const tooltip = screen.getByRole("tooltip");
     expect(tooltip.classList.contains("is-open")).toBe(true);
     expect(trigger.getAttribute("aria-describedby")).toBe(tooltip.id);
 
-    fireEvent.blur(trigger);
+    fireEvent.mouseLeave(trigger);
+    expect(screen.queryByRole("tooltip")).toBeNull();
     expect(trigger.getAttribute("aria-describedby")).toBeNull();
   });
 
   test("an Escape press dismisses the bubble", () => {
     const trigger = renderTooltip("below");
-    fireEvent.focus(trigger);
+    fireEvent.mouseEnter(trigger);
     expect(screen.getByRole("tooltip")).toBeTruthy();
 
     fireEvent.keyDown(trigger, { key: "Escape" });
@@ -92,24 +137,21 @@ describe("Tooltip", () => {
 
   test("a press dismisses the bubble and it stays dismissed while the pointer rests on the control", () => {
     const trigger = renderTooltip("below");
-    fireEvent.focus(trigger);
+    fireEvent.mouseEnter(trigger);
     expect(screen.getByRole("tooltip")).toBeTruthy();
 
     fireEvent.pointerDown(trigger);
     expect(screen.queryByRole("tooltip")).toBeNull();
     expect(trigger.getAttribute("aria-describedby")).toBeNull();
 
-    // Chromium focuses the pressed button and the action can move focus again:
-    // neither a focus change nor a repeated hover may re-open the bubble while
-    // the pointer is still parked on the control.
-    fireEvent.focus(trigger);
-    fireEvent.blur(trigger);
+    // The pointer is parked on the control, so the hover that follows the press
+    // may not re-open the bubble over the label the action just revealed.
     fireEvent.mouseEnter(trigger);
     expect(screen.queryByRole("tooltip")).toBeNull();
 
     // Leaving the control re-arms the explanation.
     fireEvent.mouseLeave(trigger);
-    fireEvent.focus(trigger);
+    fireEvent.mouseEnter(trigger);
     expect(screen.getByRole("tooltip")).toBeTruthy();
   });
 
@@ -122,7 +164,7 @@ describe("Tooltip", () => {
   test("places a below bubble from the trigger rectangle", () => {
     mockGeometry();
     const trigger = renderTooltip("below", "start");
-    fireEvent.focus(trigger);
+    fireEvent.mouseEnter(trigger);
     const style = screen.getByRole("tooltip").style;
     expect(style.position).toBe("fixed");
     expect(style.left).toBe("300px");
@@ -133,7 +175,7 @@ describe("Tooltip", () => {
   test("places an above bubble aligned to the trigger's end edge", () => {
     mockGeometry();
     const trigger = renderTooltip("above", "end");
-    fireEvent.focus(trigger);
+    fireEvent.mouseEnter(trigger);
     const style = screen.getByRole("tooltip").style;
     expect(style.left).toBe(`${300 + 24 - 120}px`);
     expect(style.top).toBe(`${400 - 8 - 30}px`);
@@ -142,7 +184,7 @@ describe("Tooltip", () => {
 
   test("a secondary press dismisses without arming the suppression", () => {
     const trigger = renderTooltip("below");
-    fireEvent.focus(trigger);
+    fireEvent.mouseEnter(trigger);
     expect(screen.getByRole("tooltip")).toBeTruthy();
 
     // The bubble renders above the context menu layer, so a secondary press
@@ -150,23 +192,9 @@ describe("Tooltip", () => {
     fireEvent.pointerDown(trigger, { button: 2 });
     expect(screen.queryByRole("tooltip")).toBeNull();
 
-    // A secondary press must not arm the suppression the next focus would hit.
-    fireEvent.focus(trigger);
+    // A secondary press must not arm the suppression the next hover would hit.
+    fireEvent.mouseEnter(trigger);
     expect(screen.getByRole("tooltip")).toBeTruthy();
-  });
-
-  test("keyboard focus re-arms an explanation a press dismissed", () => {
-    const trigger = renderTooltip("below");
-    fireEvent.focus(trigger);
-    fireEvent.pointerDown(trigger);
-    expect(screen.queryByRole("tooltip")).toBeNull();
-
-    // jsdom does not implement `:focus-visible`, so the browser's answer is
-    // stubbed: a keyboard visit must clear the pointer-press suppression.
-    const matches = vi.spyOn(HTMLElement.prototype, "matches").mockReturnValue(true);
-    fireEvent.focus(trigger);
-    expect(screen.getByRole("tooltip")).toBeTruthy();
-    matches.mockRestore();
   });
 
   test("keeps start/end logical for a right-to-left root", () => {
@@ -174,7 +202,7 @@ describe("Tooltip", () => {
     document.documentElement.dir = "rtl";
     try {
       const trigger = renderTooltip("below", "end");
-      fireEvent.focus(trigger);
+      fireEvent.mouseEnter(trigger);
       // Inline-end in RTL is the physical left edge, so `end` aligns to it.
       expect(screen.getByRole("tooltip").style.left).toBe("300px");
     } finally {
@@ -193,7 +221,7 @@ describe("Tooltip", () => {
       return rect(4, 300, 24, 24);
     });
     const trigger = renderTooltip("above", "start");
-    fireEvent.focus(trigger);
+    fireEvent.mouseEnter(trigger);
     expect(screen.getByRole("tooltip").style.top).toBe(`${4 + 24 + 8}px`);
     vi.restoreAllMocks();
   });

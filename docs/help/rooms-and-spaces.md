@@ -200,8 +200,9 @@ row, the room header, the Space rail, the Space header, and **Room info** show
 the participation indicator; the conversation header and **Room info** also
 show the encryption indicator.
 
-The participation indicator is one icon with one label. Hover it, or reach it
-with the keyboard, to read what it means for that room or Space.
+The participation indicator is one icon with one label. Hover it to read what it
+means for that room or Space; the icon, the short label beside it, and the
+control's accessible name state the kind without the longer explanation.
 
 - **Public** (globe): anyone can join without an invitation.
 - **Invite only** (person with a plus): an invitation is required to join.

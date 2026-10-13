@@ -4,6 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "./Shell";
 import { readyDesktopSnapshotFixture } from "../test/desktopApiFixture";
+import { hoverTooltip } from "../test/tooltipHover";
 import { t } from "../i18n/messages";
 import type { DesktopSnapshot } from "../domain/types";
 
@@ -107,9 +108,9 @@ describe("unified Home/Space toolbar", () => {
     expect(screen.getByRole("button", { name: t("workspace.spaceInfoSettings") })).toBeTruthy();
 
     const scheduled = screen.getByRole("button", { name: t("workspace.scheduledMessages") });
-    fireEvent.focus(scheduled);
+    hoverTooltip(scheduled);
     expect(screen.getByRole("tooltip").textContent).toBe(t("workspace.scheduledMessages"));
-    fireEvent.blur(scheduled);
+    fireEvent.mouseLeave(scheduled);
     expect(screen.queryByRole("tooltip")).toBeNull();
   });
 

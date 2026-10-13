@@ -831,4 +831,17 @@ describe("composerSendingAccount", () => {
       expect(screen.queryByRole("menu")).toBeNull();
       expect(document.activeElement).toBe(sectionTrigger("dms"));
     });
+
+    // #1388: choosing an item returns focus to the trigger, and that visit must
+    // not leave the trigger's explanation bubble floating over the sidebar.
+    it("leaves no explanation over the sidebar after a sort choice", () => {
+      render(<Sidebar snapshot={readyDesktopSnapshotFixture()} {...sidebarProps()} />);
+
+      fireEvent.click(sectionTrigger("dms"));
+      fireEvent.click(screen.getByRole("menuitemradio", { name: t("roomList.sortName") }));
+
+      expect(screen.queryByRole("menu")).toBeNull();
+      expect(document.activeElement).toBe(sectionTrigger("dms"));
+      expect(screen.queryByRole("tooltip")).toBeNull();
+    });
   });

@@ -615,7 +615,7 @@ test("the header keeps its one pinned row at 62px and 56px, above timeline and c
     "aria-label",
     t("room.statusEncrypted")
   );
-  await page.locator(".channel-header [data-room-access]").focus();
+  await page.locator(".channel-header [data-room-access]").hover();
   await expect(
     page.locator("body > .tooltip-bubble.is-open").filter({
       hasText: t("access.knockRestrictedDescription")
@@ -866,9 +866,8 @@ test("the Space rail summarises each access condition and keeps the unread badge
   await expect(bubble).toHaveCount(1);
   await expect(bubble).toBeInViewport({ ratio: 1 });
 
-  // Keyboard focus on the rail item reaches the same explanation, through the
-  // button's own description.
-  await inviteItem.focus();
+  // The hovered rail item carries the same explanation as its own description
+  // (#1388: keyboard focus no longer opens the bubble).
   const describedBy = await inviteItem.getAttribute("aria-describedby");
   expect(describedBy).toBeTruthy();
   await expect(page.locator(`[id="${describedBy}"]`)).toHaveText(

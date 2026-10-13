@@ -2444,7 +2444,7 @@ test("notification attention snapshot drives room, space, thread, and click rout
   await expect(attentionRoom).toHaveClass(/is-active/);
 });
 
-test("Home rail tooltip is absent while Space rail tooltip remains on hover and focus", async ({
+test("Home rail tooltip is absent while Space rail tooltip remains hover-only", async ({
   page
 }) => {
   await gotoReadyShell(page);
@@ -2473,11 +2473,15 @@ test("Home rail tooltip is absent while Space rail tooltip remains on hover and 
   await expect(accountButton).not.toHaveAttribute("title", /.+/);
   await expect(accountButton).not.toHaveAttribute("aria-describedby", /.+/);
 
+  // #1388: the shared bubble is hover-owned, so a keyboard visit no longer
+  // explains the control.
   await spaceButton.focus();
-  await expect(spaceTooltip).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(spaceTooltip).toBeHidden();
+  await expect(spaceTooltip).toHaveCount(0);
   await expect(spaceButton).not.toHaveAttribute("aria-describedby", /.+/);
+
+  // A fresh hover explains it again.
+  await spaceButton.hover();
+  await expect(spaceTooltip).toBeVisible();
 });
 
 test("room selection keeps a delta that arrives before its command receipt", async ({

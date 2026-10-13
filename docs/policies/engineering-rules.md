@@ -787,9 +787,19 @@ To reduce conflicts on these files:
 - Popups that a pointer owns (a hover or focus bubble) keep that ownership
   (`useHoverFocusPopup`); dismissal by press is for surfaces the user opened
   and expects to close.
+- The shared explanation bubble (`Tooltip` in
+  `apps/desktop/src/components/Tooltip.tsx`) is pointer-owned: it opens on hover
+  only, and a press dismisses it and keeps it dismissed while the pointer rests
+  on the control. Keyboard and programmatic focus never open it, because a
+  control that returns focus to itself after a selection (a menu trigger, for
+  example) must not leave an explanation on screen (#1388). A fact stated only
+  in a hover bubble also needs a keyboard-reachable statement: the wrapped
+  control keeps its own accessible name, and the visible label or a permanent
+  description carries anything the bubble adds.
 - Headless regressions press outside the popup and then assert the popup is
   gone, that one instance of the kind remains, and that the dismissing press
-  still reached its own action.
+  still reached its own action. A regression for a pointer-owned bubble hovers
+  the control instead of focusing it.
 
 ## Search Index And Room-Key Export
 

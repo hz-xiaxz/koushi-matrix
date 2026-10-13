@@ -7,6 +7,7 @@ import { clearAppStoreSnapshot, setAppStoreSnapshot } from "../domain/appStore";
 import { sidebarRoomAccess } from "../domain/accessCondition";
 import { createTimelineStore } from "../domain/timelineStore";
 import { readyDesktopSnapshotFixture } from "../test/desktopApiFixture";
+import { hoverTooltip } from "../test/tooltipHover";
 import type {
   DesktopSnapshot,
   RoomListItem,
@@ -248,7 +249,7 @@ describe("the three access surfaces agree on the verified Space route (#1220, #1
     );
   });
 
-  test("the in-room header shows the access pill and names the Space on keyboard focus", () => {
+  test("the in-room header shows the access pill and names the Space on hover", () => {
     const snapshot = snapshotWithRoute();
     snapshot.state.ui.timeline.room_id = ROOM_ID;
     snapshot.state.domain.rooms = [roomSummary()];
@@ -257,7 +258,8 @@ describe("the three access surfaces agree on the verified Space route (#1220, #1
     const header = document.querySelector(".channel-header");
     expect(header).not.toBeNull();
     const badge = within(header as HTMLElement).getByText(t("access.spaceMembersCanJoin"));
-    fireEvent.focus(badge);
+    // The pill's own button owns the hover, not the label span inside it.
+    hoverTooltip(badge.closest("button") as HTMLElement);
     expect(screen.getByRole("tooltip").textContent).toBe(
       t("access.spaceMembersCanJoinDescription", { space: SPACE_NAME })
     );
@@ -274,7 +276,7 @@ describe("the three access surfaces agree on the verified Space route (#1220, #1
     ).toBeTruthy();
   });
 
-  test("the Room Info summary explains its route on hover and keyboard focus", () => {
+  test("the Room Info summary explains its route on hover only", () => {
     vi.useFakeTimers();
     try {
       renderRoomInfo(snapshotWithRoute(), roomSettings("restricted"));
@@ -294,11 +296,9 @@ describe("the three access surfaces agree on the verified Space route (#1220, #1
       fireEvent.mouseLeave(membership);
       expect(screen.queryByRole("tooltip")).toBeNull();
 
-      // Keyboard focus reveals the same explanation.
+      // #1388: keyboard focus no longer opens the explanation.
       fireEvent.focus(membership);
-      expect(screen.getByRole("tooltip").textContent).toBe(
-        t("access.spaceMembersCanJoinDescription", { space: SPACE_NAME })
-      );
+      expect(screen.queryByRole("tooltip")).toBeNull();
 
       // And the summary still navigates to the property it summarizes.
       fireEvent.click(membership);
@@ -325,7 +325,7 @@ describe("the three access surfaces agree on the verified Space route (#1220, #1
     const summary = screen.getByRole("button", {
       name: t("room.statusShowSetting", { status: t("access.knockRestrictedLabel") })
     });
-    fireEvent.focus(summary);
+    hoverTooltip(summary);
     expect(screen.getByRole("tooltip").textContent).toBe(
       t("access.restrictedNoUsableConditionsCanRequestDescription")
     );
@@ -381,7 +381,7 @@ describe("the three access surfaces agree on the verified Space route (#1220, #1
         name: t("room.statusShowSetting", { status: t("access.inviteOnly") })
       })
     ).toBeNull();
-    fireEvent.focus(checking);
+    hoverTooltip(checking);
     expect(screen.getByRole("tooltip").textContent).toBe(t("access.checkingDescription"));
   });
 });
@@ -483,11 +483,11 @@ describe("the conversation header status pills (#1327)", () => {
     const encryption = document.querySelector("[data-room-encryption]") as HTMLElement;
     expect(encryption.getAttribute("data-room-encryption")).toBe("plaintext");
     expect(encryption.textContent).toContain(t("room.statusNotEncrypted"));
-    fireEvent.focus(encryption);
+    hoverTooltip(encryption);
     expect(screen.getByRole("tooltip").textContent).toBe(t("room.notEncryptedDescription"));
   });
 
-  test("each pill explains itself on hover and focus and dismisses on Escape and blur", () => {
+  test("each pill explains itself on hover and dismisses on Escape or leave", () => {
     vi.useFakeTimers();
     try {
       const snapshot = snapshotWithRow(conditionalRoom());
@@ -507,16 +507,26 @@ describe("the conversation header status pills (#1327)", () => {
       fireEvent.mouseLeave(encryption);
       expect(screen.queryByRole("tooltip")).toBeNull();
 
-      fireEvent.focus(access);
+      fireEvent.mouseEnter(access);
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
       expect(screen.getByRole("tooltip").textContent).toBe(
         t("access.spaceMembersCanJoinDescription", { space: SPACE_NAME })
       );
       fireEvent.keyDown(access, { key: "Escape" });
       expect(screen.queryByRole("tooltip")).toBeNull();
 
-      fireEvent.focus(access);
+      // A pointer that never left the pill explains it again.
+      fireEvent.mouseLeave(access);
+      fireEvent.mouseEnter(access);
+      act(() => {
+        vi.advanceTimersByTime(300);
+      });
       expect(screen.getByRole("tooltip")).toBeTruthy();
-      fireEvent.blur(access);
+      // #1388: keyboard focus does not open it.
+      fireEvent.mouseLeave(access);
+      fireEvent.focus(access);
       expect(screen.queryByRole("tooltip")).toBeNull();
     } finally {
       vi.useRealTimers();
@@ -555,7 +565,7 @@ describe("the conversation header status pills (#1327)", () => {
       );
 
     const { rerender } = render(tree(first));
-    fireEvent.focus(document.querySelector("[data-room-access]") as HTMLElement);
+    hoverTooltip(document.querySelector("[data-room-access]") as HTMLElement);
     expect(screen.getByRole("tooltip")).toBeTruthy();
 
     // The next room's own projection, so the pill keeps its place in the header.
@@ -588,7 +598,7 @@ describe("the conversation header status pills (#1327)", () => {
     expect(screen.queryByRole("tooltip")).toBeNull();
 
     // Hovering again explains the new room.
-    fireEvent.focus(document.querySelector("[data-room-access]") as HTMLElement);
+    hoverTooltip(document.querySelector("[data-room-access]") as HTMLElement);
     expect(screen.getByRole("tooltip").textContent).toBe(t("access.publicDescription"));
   });
 
@@ -618,7 +628,7 @@ describe("the conversation header status pills (#1327)", () => {
     expect(header.querySelector("[data-room-encryption]")).not.toBeNull();
     const access = header.querySelector("[data-room-access]") as HTMLElement;
     expect(access.getAttribute("data-room-access")).toBe("userRoundPlus");
-    fireEvent.focus(access);
+    hoverTooltip(access);
     expect(screen.getByRole("tooltip").textContent).toBe(t("access.inviteOnlyDmDescription"));
   });
 });
