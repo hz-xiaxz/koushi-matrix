@@ -124,6 +124,7 @@ export const Composer = memo(function Composer({
   onSendStagedUploads,
   onTabToSend,
   preferSendOnForwardTab = false,
+  editorHandleRef,
   onDiagnosticLogEntry,
   notice = null,
   scheduledSendPersistenceFailed = false
@@ -159,6 +160,12 @@ export const Composer = memo(function Composer({
   onTabToSend?: () => void;
   /** Makes Send the first main-surface focus target after the editor. */
   preferSendOnForwardTab?: boolean;
+  /**
+   * Optional external handle on the editor, for a hosting surface that owns
+   * when the editor takes focus (the upload staging dialog focuses its first
+   * caption when the dialog opens).
+   */
+  editorHandleRef?: RefObject<ImeInlineMentionEditorHandle | null>;
   /** #send-key-unification: routed when the send shortcut is pressed while
    *  staged uploads are ready, instead of sending the composer body. */
   onSendStagedUploads?: () => void;
@@ -206,7 +213,11 @@ export const Composer = memo(function Composer({
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null);
   const [fileDragActive, setFileDragActive] = useState(false);
-  const editorRef = useRef<ImeInlineMentionEditorHandle>(null);
+  // A surface that hosts the editor (the upload staging dialog) owns the
+  // decision of when its editor takes focus, so it can hand in its own handle
+  // instead of the composer keeping the only reference.
+  const localEditorRef = useRef<ImeInlineMentionEditorHandle>(null);
+  const editorRef = editorHandleRef ?? localEditorRef;
   const documentEpochRef = useRef(0);
   const keyResolutionPendingRef = useRef(false);
   const mountedRef = useRef(true);

@@ -53,6 +53,26 @@ test("Escape in the staging emoji picker preserves the attachment and its captio
   await expect(opener).toBeFocused();
 });
 
+test("staging a file opens on its caption editor without explaining the clear action", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await page.getByRole("button", { name: "Attach file", exact: true }).click();
+  await page
+    .locator('input[type="file"][aria-label="Attach file input"]')
+    .setInputFiles(stagedPortraitImage());
+  const staging = page.getByRole("dialog", { name: t("upload.dialogTitle"), exact: true });
+  const caption = staging.getByRole("textbox", { name: "Caption for portrait.png" });
+
+  // Focus belongs where the caption is typed, not on the destructive clear
+  // action whose focus bubble used to appear on every staged attachment.
+  await expect(caption).toBeFocused();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+
+  await page.keyboard.type("captioned from the keyboard");
+  await expect(caption).toHaveText("captioned from the keyboard");
+});
+
 /** Rendered geometry of the staging dialog, its scroll list, and its actions. */
 async function stagingGeometry(page: Page) {
   return page.evaluate(() => {
