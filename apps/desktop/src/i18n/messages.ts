@@ -5507,6 +5507,14 @@ export function tInvariant(id: MessageId): string {
   return en[id];
 }
 
+/**
+ * The `{name}` placeholder grammar of a catalog template. Owned here so a
+ * caller that has to render a template's parts itself (for example to give a
+ * remote-text value its own `dir="auto"` element) parses exactly what `t`
+ * interpolates.
+ */
+export const MESSAGE_PLACEHOLDER_PATTERN = /\{([a-zA-Z0-9_]+)\}/g;
+
 export function t(
   id: MessageId,
   values: MessageValues = {},
@@ -5518,7 +5526,7 @@ export function t(
     selectedLocale === "pseudo" && pseudoMode === "bidi"
       ? pseudoLocalize(catalogs.en[id], "bidi")
       : catalogs[selectedLocale][id] ?? catalogs.en[id];
-  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key: string) =>
+  return template.replace(MESSAGE_PLACEHOLDER_PATTERN, (_, key: string) =>
     String(values[key] ?? `{${key}}`)
   );
 }

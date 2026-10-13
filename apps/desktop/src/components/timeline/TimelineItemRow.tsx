@@ -15,6 +15,7 @@ import {
   XCircle
 } from "lucide-react";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -32,7 +33,7 @@ import {
 } from "../../app/uiShared";
 import type { MediaSaveNameFacts } from "../../backend/linkMediaPort";
 import { contextMenuItems } from "../../domain/contextMenus";
-import { getActiveLocale, t } from "../../i18n/messages";
+import { MESSAGE_PLACEHOLDER_PATTERN, getActiveLocale, t, type MessageId } from "../../i18n/messages";
 import { onMenuKeyDown } from "../ContextMenuSurface";
 import { LazyEmojiPicker } from "../LazyEmojiPicker";
 import { Tooltip } from "../Tooltip";
@@ -763,7 +764,7 @@ export function TimelineItemRow({
           originalDisplayLabel: senderOriginalLabel
         }
       : null;
-  const threadSummaryText = item.thread_summary
+  const threadSummary = item.thread_summary
     ? formatThreadSummary(
         item.thread_summary.reply_count,
         item.thread_summary.latest_sender
@@ -772,7 +773,8 @@ export function TimelineItemRow({
         item.thread_summary.latest_body_preview,
         item.thread_summary.latest_timestamp_ms
       )
-    : "";
+    : null;
+  const threadSummaryText = threadSummary ? formatThreadSummaryText(threadSummary) : "";
   // The SDK thread-cache count is the per-root term in the room badge. A
   // server notification counter cannot replace it while the pane is open.
   const threadUnreadCount = item.thread_summary?.unread_count ?? 0;
@@ -1208,7 +1210,17 @@ export function TimelineItemRow({
             onClick={submitOpenThread}
           >
             <MessageCircle size={13} />
-            <span>{threadSummaryText}</span>
+            <span>
+              {threadSummary && threadSummary.template ? (
+                <ThreadSummaryTemplateText
+                  template={threadSummary.template}
+                  values={threadSummary.values}
+                />
+              ) : (
+                threadSummary?.count
+              )}
+              {threadSummary?.timestamp ? <> · {threadSummary.timestamp}</> : null}
+            </span>
           </button>
         ) : null}
         {canShowReactions || receiptTotalCount > 0 ? (
@@ -1744,38 +1756,132 @@ function localizedTimelineItemBody(item: TimelineItem): string {
   }
 }
 
+/**
+ * A thread summary chip's composed parts (#1378).
+ *
+ * The chip interpolates the latest sender's display name and the latest reply
+ * preview into a catalog template. Rendered as one string, an RTL sender name
+ * ending in a neutral (its trailing `!`) resolves against the LTR template
+ * instead of against the name, and an RTL preview drags the trailing timestamp
+ * into its own run. Those values are therefore kept out of the string: the chip
+ * renders each of them in its own `dir="auto"` element (i18n "Remote/user text …
+ * is rendered with dir=auto at the UI boundary"), and the accessible name wraps
+ * them in FSI…PDI because an attribute cannot carry elements.
+ */
+interface ThreadSummaryParts {
+  /** Catalog template holding the separators; null when only the count shows. */
+  template: MessageId | null;
+  /** Template values, by placeholder name. */
+  values: Record<string, string>;
+  count: string;
+  timestamp: string | null;
+}
+
+/** Template values that carry remote/user text and need their own direction. */
+const THREAD_SUMMARY_USER_TEXT_PLACEHOLDERS = new Set(["sender", "preview"]);
+
+/**
+ * Splits a catalog template such as `"{count} · {sender}: {preview}"` into its
+ * literal text and its `{placeholder}` tokens, in order. The template keeps
+ * owning the wording and its separators; the caller decides how each value is
+ * rendered.
+ */
+function catalogTemplateParts(template: string): Array<{ placeholder: string | null; text: string }> {
+  const parts: Array<{ placeholder: string | null; text: string }> = [];
+  let cursor = 0;
+  for (const match of template.matchAll(MESSAGE_PLACEHOLDER_PATTERN)) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      parts.push({ placeholder: null, text: template.slice(cursor, index) });
+    }
+    parts.push({ placeholder: match[1] ?? null, text: "" });
+    cursor = index + match[0].length;
+  }
+  if (cursor < template.length) {
+    parts.push({ placeholder: null, text: template.slice(cursor) });
+  }
+  return parts;
+}
+
+/** A catalog template with its user text isolated in `dir="auto"` elements. */
+function ThreadSummaryTemplateText({
+  template,
+  values
+}: {
+  template: MessageId;
+  values: Record<string, string>;
+}) {
+  return (
+    <>
+      {catalogTemplateParts(t(template)).map((part, index) => {
+        if (part.placeholder === null) {
+          return <Fragment key={index}>{part.text}</Fragment>;
+        }
+        const value = values[part.placeholder] ?? `{${part.placeholder}}`;
+        return THREAD_SUMMARY_USER_TEXT_PLACEHOLDERS.has(part.placeholder) ? (
+          <span dir="auto" key={index}>
+            {value}
+          </span>
+        ) : (
+          <Fragment key={index}>{value}</Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+/** The chip's plain text, for the accessible name (`aria-label` takes a string). */
+function formatThreadSummaryText(parts: ThreadSummaryParts): string {
+  const summary = parts.template
+    ? catalogTemplateParts(t(parts.template))
+        .map((part) =>
+          part.placeholder === null
+            ? part.text
+            : THREAD_SUMMARY_USER_TEXT_PLACEHOLDERS.has(part.placeholder)
+              ? `\u2068${parts.values[part.placeholder] ?? `{${part.placeholder}}`}\u2069`
+              : parts.values[part.placeholder] ?? `{${part.placeholder}}`
+        )
+        .join("")
+    : parts.count;
+  return parts.timestamp ? `${summary} · ${parts.timestamp}` : summary;
+}
+
 function formatThreadSummary(
   replyCount: number,
   latestSender: string | null,
   latestPreview: string | null,
   latestTimestampMs: number | null
-): string {
-  const countText = t(
+): ThreadSummaryParts {
+  const count = t(
     replyCount === 1 ? "timeline.threadReplyCountOne" : "timeline.threadReplyCountMany",
     { count: replyCount }
   );
-  let summary: string;
-  if (latestSender && latestPreview) {
-    summary = t("timeline.threadSummaryWithPreview", {
-      count: countText,
-      sender: latestSender,
-      preview: latestPreview
-    });
-  } else if (latestPreview) {
-    summary = t("timeline.threadSummaryWithBody", {
-      count: countText,
-      preview: latestPreview
-    });
-  } else if (latestSender) {
-    summary = t("timeline.threadSummaryWithSender", {
-      count: countText,
-      sender: latestSender
-    });
-  } else {
-    summary = countText;
-  }
   const timestamp = formatMessageTimestamp(latestTimestampMs);
-  return timestamp ? `${summary} · ${timestamp}` : summary;
+  if (latestSender && latestPreview) {
+    return {
+      template: "timeline.threadSummaryWithPreview",
+      values: { count, sender: latestSender, preview: latestPreview },
+      count,
+      timestamp
+    };
+  }
+  if (latestPreview) {
+    return {
+      template: "timeline.threadSummaryWithBody",
+      values: { count, preview: latestPreview },
+      count,
+      timestamp
+    };
+  }
+  if (latestSender) {
+    return {
+      template: "timeline.threadSummaryWithSender",
+      values: { count, sender: latestSender },
+      count,
+      timestamp
+    };
+  }
+  return { template: null, values: { count }, count, timestamp };
 }
 
 function recoveryStageText(
