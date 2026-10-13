@@ -167,6 +167,7 @@ pub(super) enum QaScenario {
     ReadStateConvergence,
     HiddenStateAcl,
     ThreadLateJoiner,
+    IdleSyncGapInspection,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -212,6 +213,7 @@ pub(super) enum QaStage {
     ReadStateConvergence,
     HiddenStateAcl,
     ThreadLateJoiner,
+    IdleSyncGapInspection,
 }
 
 /// Refuse to run against the OS keychain. Debug and qa-bin release builds both
@@ -293,6 +295,7 @@ impl QaScenario {
             "read_state_convergence" => Ok(Self::ReadStateConvergence),
             "hidden_state_acl" => Ok(Self::HiddenStateAcl),
             "thread_late_joiner" => Ok(Self::ThreadLateJoiner),
+            "idle_sync_gap_inspection" => Ok(Self::IdleSyncGapInspection),
             "avatar_demand" => Ok(Self::AvatarDemand),
             "account_notifications" => Ok(Self::AccountNotifications),
             "user_verification" => Ok(Self::UserVerification),
@@ -316,6 +319,7 @@ impl QaScenario {
                     | QaStage::AvatarDemand
                     | QaStage::AccountNotifications
                     | QaStage::UserVerification
+                    | QaStage::IdleSyncGapInspection
             ),
             Self::Safety => matches!(stage, QaStage::Safety),
             Self::UserVerification => matches!(
@@ -522,6 +526,9 @@ impl QaScenario {
             }
             Self::HiddenStateAcl => matches!(stage, QaStage::Safety | QaStage::HiddenStateAcl),
             Self::ThreadLateJoiner => matches!(stage, QaStage::Safety | QaStage::ThreadLateJoiner),
+            Self::IdleSyncGapInspection => {
+                matches!(stage, QaStage::Safety | QaStage::IdleSyncGapInspection)
+            }
             Self::SearchCrawlerCatchup => {
                 matches!(stage, QaStage::Safety | QaStage::SearchCrawlerCatchup)
             }
@@ -773,6 +780,7 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "thread_late_joiner=ok",
         ],
         QaStage::AvatarDemand => &["avatar_window_requests=ok"],
+        QaStage::IdleSyncGapInspection => &["idle_sync_gap_inspection=ok"],
         QaStage::AccountNotifications => &[
             "account_notifications_load=ok",
             "account_notifications_no_write_on_open=ok",
@@ -1080,6 +1088,7 @@ pub(super) fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
             vec![QaStage::Safety, QaStage::ReadStateConvergence]
         }
         QaScenario::HiddenStateAcl => vec![QaStage::Safety, QaStage::HiddenStateAcl],
+        QaScenario::IdleSyncGapInspection => vec![QaStage::Safety, QaStage::IdleSyncGapInspection],
         QaScenario::ThreadLateJoiner => vec![QaStage::Safety, QaStage::ThreadLateJoiner],
         QaScenario::SearchCrawlerCatchup => vec![QaStage::Safety, QaStage::SearchCrawlerCatchup],
         QaScenario::All => vec![
@@ -1174,7 +1183,8 @@ pub(super) fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static st
         | QaScenario::ReadStateConvergence
         | QaScenario::HiddenStateAcl
         | QaScenario::SearchCrawlerCatchup
-        | QaScenario::ThreadLateJoiner => stages_for_scenario(scenario)
+        | QaScenario::ThreadLateJoiner
+        | QaScenario::IdleSyncGapInspection => stages_for_scenario(scenario)
             .into_iter()
             .flat_map(|stage| tokens_for_stage(stage).iter().copied())
             .collect(),

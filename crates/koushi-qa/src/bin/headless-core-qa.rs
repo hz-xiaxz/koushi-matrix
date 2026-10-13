@@ -112,6 +112,8 @@ mod scenario_hidden_state_acl;
 mod scenario_history_export;
 #[path = "headless_core_qa/scenarios/identity.rs"]
 mod scenario_identity;
+#[path = "headless_core_qa/scenarios/idle_sync_gap_inspection.rs"]
+mod scenario_idle_sync_gap_inspection;
 #[path = "headless_core_qa/scenarios/read_state.rs"]
 mod scenario_read_state;
 #[path = "headless_core_qa/scenarios/rooms.rs"]

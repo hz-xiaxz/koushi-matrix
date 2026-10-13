@@ -35,9 +35,9 @@ use super::actor::{TimelineActor, TimelineActorControl, TimelineActorMessage};
 use super::diagnostics::{
     TimelineGapSelectionDiagnostic, record_live_catchup_gate, record_live_tail_cancellation,
     record_live_tail_commit, record_live_tail_queue, record_live_tail_reconciliation,
-    record_live_tail_refresh, record_live_tail_state, record_timeline_gap_projection,
-    record_timeline_gap_projection_boundary, record_timeline_gap_repair,
-    record_timeline_gap_selection,
+    record_live_tail_refresh, record_live_tail_state, record_timeline_gap_inspection_work,
+    record_timeline_gap_projection, record_timeline_gap_projection_boundary,
+    record_timeline_gap_repair, record_timeline_gap_selection,
 };
 use super::manager::{TimelineManagerActor, TimelineMessage};
 use super::read_state::ReadRetrySource;
@@ -1971,6 +1971,24 @@ impl TimelineActor {
             return;
         }
         self.gap_work_task = None;
+        // Record the completed inspection's content-free counters right after
+        // admission is confirmed, before the checkpoint-staleness gate below:
+        // the SDK inspection already ran and incurred its reads, and a
+        // superseded checkpoint must not hide that work from the counters.
+        if let Ok(inspection) = &result {
+            record_timeline_gap_inspection_work(
+                timeline_gap_repair_trigger_token(trigger),
+                serial,
+                match inspection.continuity {
+                    MatrixTimelineContinuity::Unknown => "unknown",
+                    MatrixTimelineContinuity::Gapped => "gapped",
+                    MatrixTimelineContinuity::Complete => "complete",
+                },
+                inspection.diagnostics.scanned_chunks,
+                inspection.diagnostics.event_bodies_decoded,
+                inspection.diagnostics.duration_ms,
+            );
+        }
         if matches!(trigger, TimelineGapRepairTrigger::LiveEdge)
             && committed_response.as_ref().is_some_and(|inspected| {
                 self.room_subscription_checkpoint

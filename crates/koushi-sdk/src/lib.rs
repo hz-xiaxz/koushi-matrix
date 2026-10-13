@@ -209,11 +209,12 @@ pub use timeline::{
     MatrixLiveTailRefreshDiagnostics, MatrixLiveTailRefreshOutcome, MatrixLiveTailRefreshResult,
     MatrixRoomSubscriptionCheckpoint, MatrixTimelineContinuity, MatrixTimelineError,
     MatrixTimelineGapError, MatrixTimelineGapHandle, MatrixTimelineGapInspection,
-    MatrixTimelineGapRepairBudget, MatrixTimelineGapRepairOutcome, MatrixTimelineGapRepairResult,
-    MatrixTimelineItem, MatrixTimelinePaginationHandle, MatrixTimelineSubscription,
-    MatrixTimelineUpdate, MatrixTimelineUpdateStream, edit_text_message, redact_message,
-    room_timeline_visible_items, room_timeline_visible_items_blocking, send_text_message,
-    subscribe_room_timeline, subscribe_room_timeline_blocking,
+    MatrixTimelineGapInspectionDiagnostics, MatrixTimelineGapRepairBudget,
+    MatrixTimelineGapRepairOutcome, MatrixTimelineGapRepairResult, MatrixTimelineItem,
+    MatrixTimelinePaginationHandle, MatrixTimelineSubscription, MatrixTimelineUpdate,
+    MatrixTimelineUpdateStream, edit_text_message, redact_message, room_timeline_visible_items,
+    room_timeline_visible_items_blocking, send_text_message, subscribe_room_timeline,
+    subscribe_room_timeline_blocking,
 };
 
 pub use sliding_sync_discovery::{

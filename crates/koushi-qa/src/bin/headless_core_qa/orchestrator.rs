@@ -125,6 +125,12 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
         run_thread_late_joiner_scenario(&config).await?;
         return Ok(scenario_report(&config.server_kind, scenario));
     }
+    if scenario == QaScenario::IdleSyncGapInspection {
+        println!("safety=ok");
+        super::scenario_idle_sync_gap_inspection::run_idle_sync_gap_inspection_scenario(&config)
+            .await?;
+        return Ok(scenario_report(&config.server_kind, scenario));
+    }
     if scenario == QaScenario::GateNoProof {
         println!("safety=ok");
         run_gate_no_proof_stage(&config).await?;
