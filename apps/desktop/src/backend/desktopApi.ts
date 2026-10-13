@@ -142,6 +142,8 @@ export interface DesktopApi {
   settlementSnapshot(accountTabId?: string): Promise<DesktopSnapshot>;
   resyncSnapshot(accountTabId?: string): Promise<DesktopSnapshot>;
   getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot>;
+  /** Native save dialog owned by the adapter; `null` when it was dismissed. */
+  saveDiagnosticsReport(report: string, dialogTitle: string): Promise<string | null>;
   observeViewportSync(observation: ViewportSyncObservation): Promise<ViewportSyncReceipt>;
   discoverLoginMethods(homeserver: string): Promise<CommandSettlement>;
   startOidcLogin(

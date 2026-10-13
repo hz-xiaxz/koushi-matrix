@@ -49,6 +49,22 @@ describe("TauriDesktopApi", () => {
     expect(invoke).toHaveBeenCalledWith("get_diagnostic_snapshot");
   });
 
+  test("saves the diagnostics report through the adapter-owned native dialog", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.mocked(invoke).mockResolvedValueOnce("/downloads/koushi-diagnostics.txt");
+
+    const api = new TauriDesktopApi();
+    const report = "Koushi diagnostics\nsync=running\n";
+
+    await expect(api.saveDiagnosticsReport(report, "Diagnostics")).resolves.toBe(
+      "/downloads/koushi-diagnostics.txt"
+    );
+    expect(invoke).toHaveBeenCalledWith("save_diagnostics_report", {
+      report,
+      dialogTitle: "Diagnostics"
+    });
+  });
+
   test("starts the desktop update download only after confirmation", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
