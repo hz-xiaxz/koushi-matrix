@@ -1476,10 +1476,14 @@ stateDiagram-v2
   what is visible. This also covers a reorder that pushes the open conversation
   past the bound.
 - Collapse and bound are independent dimensions with a defined rendering for
-  every combination: a collapsed section renders no rows and no control, an
-  expanded section renders every row, and otherwise the section renders
-  `visible_count` rows plus the control. The section toggle changes only
-  `collapsed`; the bound control changes only `expanded`.
+  every combination: a collapsed section renders no rows and no control; a
+  bounded section renders `visible_count` rows plus the end-of-list expand
+  control; an expanded section renders every row plus a fold control in the
+  section header, between the create and options buttons where the section has
+  them. Each bound action has
+  exactly one control, so the two never coexist, and the end-of-list control
+  only ever expands. The section toggle changes only `collapsed`; the bound
+  control changes only `expanded`.
 - `SidebarModel.space_unread_count` / `dm_unread_count` /
   `space_highlight_count` / `dm_highlight_count` and the section header count
   report the whole section. The header count is the pre-truncation list length

@@ -101,8 +101,8 @@ describe("withSectionBounds", () => {
     const bounded = withSectionBounds(snapshot);
 
     // The persisted bound wins, so every row shows and the open row is not the
-    // reason: the control stays (as "Show fewer") because the bound is the
-    // user's own choice.
+    // reason: the control stays (the header fold control, since #1387) because
+    // the bound is the user's own choice.
     expect(bounded.sidebar.section_bounds?.rooms).toMatchObject({
       expanded: true,
       visible_count: 8,

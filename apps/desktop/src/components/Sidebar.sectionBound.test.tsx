@@ -3,6 +3,7 @@
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import { Sidebar } from "./Shell";
+import { t } from "../i18n/messages";
 import { readyDesktopSnapshotFixture } from "../test/desktopApiFixture";
 import { sidebarSectionBoundsForFake } from "../test/sidebarSectionBoundsFixture";
 import type { DesktopSnapshot, RoomListItem } from "../domain/types";
@@ -149,18 +150,43 @@ describe("sidebar section bound", () => {
     });
   });
 
-  it("renders every row and offers to bound the section again when expanded", () => {
+  it("renders every row and folds the section again from its header when expanded", () => {
     const props = sidebarProps();
     render(<Sidebar snapshot={boundedSnapshot(8, { expanded: true })} {...props} />);
 
     expect(sectionRows("rooms")).toHaveLength(8);
-    const control = screen.getByRole("button", { name: "Show fewer in Rooms" });
-    expect(control).toHaveProperty("ariaExpanded", "true");
+    // #1387: one action keeps one control, so the end-of-list control is gone
+    // and the fold sits in the header.
+    expect(
+      document.querySelector('[data-room-section="rooms"] .room-section-bound')
+    ).toBeNull();
 
-    fireEvent.click(control);
+    const fold = screen.getByRole("button", { name: "Show fewer in Rooms" });
+    expect(fold).toHaveProperty("ariaExpanded", "true");
+    expect(fold.getAttribute("aria-controls")).toBe("rooms-room-list");
+    expect(document.getElementById(fold.getAttribute("aria-controls")!)).not.toBeNull();
+
+    fireEvent.click(fold);
+    expect(props.onUpdateSettings).toHaveBeenCalledTimes(1);
     expect(props.onUpdateSettings).toHaveBeenCalledWith({
       sidebar_section: { scope: "__home__", section: "rooms", expanded: false }
     });
+  });
+
+  it("places the header fold control between the create and options buttons", () => {
+    render(<Sidebar snapshot={boundedSnapshot(8, { expanded: true })} {...sidebarProps()} />);
+
+    const meta = document.querySelector('[data-room-section="rooms"] .section-title-meta');
+    const headerActions = Array.from(meta!.querySelectorAll("button")).map((button) =>
+      button.getAttribute("aria-label")
+    );
+    expect(headerActions).toEqual([
+      t("action.createRoom"),
+      t("roomList.showFewerInSection", { section: t("roomList.categoryRooms") }),
+      t("roomList.sectionOptions", { section: t("roomList.categoryRooms") })
+    ]);
+    // #1387: mounting the fold is not a focus handoff, so it must not steal it.
+    expect(document.activeElement).toBe(document.body);
   });
 
   it("shows no control for a section at or below the bound", () => {
@@ -168,6 +194,97 @@ describe("sidebar section bound", () => {
 
     expect(sectionRows("rooms")).toHaveLength(5);
     expect(screen.queryByRole("button", { name: /more in Rooms/u })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Show fewer in Rooms/u })).toBeNull();
+  });
+
+  it("offers no fold control for a bounded section that is not expanded", () => {
+    render(<Sidebar snapshot={boundedSnapshot(8)} {...sidebarProps()} />);
+
+    // The bounded state keeps the end-of-list expand control only.
+    expect(screen.getByRole("button", { name: "Show 3 more in Rooms" })).toHaveProperty(
+      "ariaExpanded",
+      "false"
+    );
+    expect(screen.queryByRole("button", { name: /Show fewer in Rooms/u })).toBeNull();
+  });
+
+  it("hands keyboard focus to the bound control that replaces the pressed one", () => {
+    const props = sidebarProps();
+    const { rerender } = render(<Sidebar snapshot={boundedSnapshot(8)} {...props} />);
+
+    const expand = screen.getByRole("button", { name: "Show 3 more in Rooms" });
+    expand.focus();
+    expect(document.activeElement).toBe(expand);
+    fireEvent.click(expand);
+    rerender(<Sidebar snapshot={boundedSnapshot(8, { expanded: true })} {...props} />);
+
+    // #1387: the pressed control unmounts, so the replacement takes the focus
+    // instead of leaving the document with no focused control at all.
+    const fold = screen.getByRole("button", { name: "Show fewer in Rooms" });
+    expect(document.activeElement).toBe(fold);
+
+    fireEvent.click(fold);
+    rerender(<Sidebar snapshot={boundedSnapshot(8)} {...props} />);
+    expect(document.activeElement).toBe(
+      screen.getByRole("button", { name: "Show 3 more in Rooms" })
+    );
+  });
+
+  it("never moves focus when the pressed control did not hold it", () => {
+    const props = sidebarProps();
+    const { rerender } = render(<Sidebar snapshot={boundedSnapshot(8)} {...props} />);
+
+    // A press from somewhere else (a pointer press in an engine that does not
+    // focus buttons) must not be answered with a focus jump.
+    fireEvent.click(screen.getByRole("button", { name: "Show 3 more in Rooms" }));
+    rerender(<Sidebar snapshot={boundedSnapshot(8, { expanded: true })} {...props} />);
+
+    expect(document.activeElement).toBe(document.body);
+  });
+
+  it("never hands off for a focus that belongs to another section", () => {
+    const props = sidebarProps();
+    const { rerender } = render(<Sidebar snapshot={boundedSnapshot(8)} {...props} />);
+
+    // Focus the DMs control, then press the Rooms one without focusing it. Only
+    // the activated control's own focus may be handed over.
+    screen.getByRole("button", { name: "Show 3 more in DMs" }).focus();
+    fireEvent.click(screen.getByRole("button", { name: "Show 3 more in Rooms" }));
+    rerender(<Sidebar snapshot={boundedSnapshot(8, { expanded: true })} {...props} />);
+
+    expect(document.activeElement?.getAttribute("aria-label")).toBe("Show 3 more in DMs");
+  });
+
+  it("drops the handoff when the user moves the focus before the snapshot settles", () => {
+    const props = sidebarProps();
+    const { rerender } = render(<Sidebar snapshot={boundedSnapshot(8)} {...props} />);
+
+    const expand = screen.getByRole("button", { name: "Show 3 more in Rooms" });
+    expand.focus();
+    fireEvent.click(expand);
+    // The requested snapshot has not arrived, and the user has already moved on.
+    const filter = screen.getByLabelText("Filter conversations");
+    filter.focus();
+    rerender(<Sidebar snapshot={boundedSnapshot(8, { expanded: true })} {...props} />);
+
+    expect(document.activeElement).toBe(filter);
+  });
+
+  it("drops the handoff when the bound state brings no replacement control", () => {
+    const props = sidebarProps();
+    const { rerender } = render(<Sidebar snapshot={boundedSnapshot(8)} {...props} />);
+
+    const expand = screen.getByRole("button", { name: "Show 3 more in Rooms" });
+    expand.focus();
+    fireEvent.click(expand);
+    // The bound leaves the controls behind first. The pending handoff must not
+    // survive to answer some later snapshot that happens to match it.
+    const collapsed = boundedSnapshot(8);
+    collapsed.sidebar.rooms_collapsed = true;
+    rerender(<Sidebar snapshot={collapsed} {...props} />);
+    rerender(<Sidebar snapshot={boundedSnapshot(8, { expanded: true })} {...props} />);
+
+    expect(document.activeElement).toBe(document.body);
   });
 
   it("applies the bound to DMs and Low priority independently", () => {
@@ -191,6 +308,21 @@ describe("sidebar section bound", () => {
     // bound rather than hiding a match behind the control.
     expect(sectionRows("rooms")).toHaveLength(8);
     expect(screen.queryByRole("button", { name: /more in Rooms/u })).toBeNull();
+    expect(screen.queryByRole("button", { name: /Show fewer in Rooms/u })).toBeNull();
+  });
+
+  it("offers no fold control while the filter is active in an expanded section", () => {
+    render(<Sidebar snapshot={boundedSnapshot(8, { expanded: true })} {...sidebarProps()} />);
+
+    fireEvent.change(screen.getByLabelText("Filter conversations"), {
+      target: { value: "room" }
+    });
+
+    expect(sectionRows("rooms")).toHaveLength(8);
+    expect(screen.queryByRole("button", { name: /Show fewer in Rooms/u })).toBeNull();
+    expect(
+      document.querySelector('[data-room-section="rooms"] .room-section-bound')
+    ).toBeNull();
   });
 
   it("ignores a bound that describes a different list", () => {
@@ -221,6 +353,7 @@ describe("sidebar section bound", () => {
 
       expect(sectionRows("rooms")).toHaveLength(0);
       expect(document.querySelector('[data-room-section="rooms"] .room-section-bound')).toBeNull();
+      expect(screen.queryByRole("button", { name: /Show fewer in Rooms/u })).toBeNull();
     }
   });
 
@@ -240,13 +373,11 @@ describe("sidebar section bound", () => {
     render(<Sidebar snapshot={snapshot} {...sidebarProps()} />);
 
     expect(sectionRows("rooms")).toHaveLength(2);
-    const control = document.querySelector<HTMLElement>(
-      '[data-room-section="rooms"] .room-section-bound'
-    );
-    expect(control).not.toBeNull();
-    // `aria-controls` must point at the section it bounds, not at a missing id.
-    expect(document.getElementById(control!.getAttribute("aria-controls")!)).not.toBeNull();
-    expect(control).toHaveProperty("ariaExpanded", "true");
+    // The fold control lives in the header, and its `aria-controls` must point
+    // at the section it bounds, not at a missing id.
+    const fold = screen.getByRole("button", { name: "Show fewer in Rooms" });
+    expect(fold).toHaveProperty("ariaExpanded", "true");
+    expect(document.getElementById(fold.getAttribute("aria-controls")!)).not.toBeNull();
   });
 
   it("renders every row without a control when the open conversation holds the section open", () => {
@@ -270,5 +401,6 @@ describe("sidebar section bound", () => {
     expect(
       document.querySelector('[data-room-section="rooms"] .room-section-bound')
     ).toBeNull();
+    expect(screen.queryByRole("button", { name: /Show fewer in Rooms/u })).toBeNull();
   });
 });
