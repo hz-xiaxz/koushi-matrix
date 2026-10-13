@@ -5698,6 +5698,10 @@ mark {
   border: 0;
   border-radius: 6px;
   background: transparent;
+  /* #1380: the picker shows emoji glyphs, so it follows the same emoji font as
+     the reaction pills. Without this the cells inherit the UI stack and paint
+     the system emoji font even while Twemoji is selected. */
+  font-family: var(--font-emoji);
   font-size: 22px;
   line-height: 1;
   cursor: pointer;

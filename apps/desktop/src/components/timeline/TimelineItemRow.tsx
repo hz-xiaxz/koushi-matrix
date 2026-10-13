@@ -1236,7 +1236,7 @@ export function TimelineItemRow({
                         key={pillKey}
                       >
                         <span className="reaction-pill-key" dir="auto">
-                          {reaction.key}
+                          {reactionKeyDisplayText(reaction.key)}
                         </span>
                         <span className="reaction-pill-count">{reaction.count}</span>
                         {reactionTooltip ? (
@@ -1271,7 +1271,7 @@ export function TimelineItemRow({
                       }}
                     >
                       <span className="reaction-pill-key" dir="auto">
-                        {reaction.key}
+                        {reactionKeyDisplayText(reaction.key)}
                       </span>
                       <span className="reaction-pill-count">{reaction.count}</span>
                       {reactionTooltip ? (
@@ -1569,6 +1569,36 @@ export function aliasTargetIsActive(target: TimelineAliasTarget): boolean {
   const displayLabel = target.displayLabel.trim();
   const originalDisplayLabel = target.originalDisplayLabel.trim();
   return Boolean(displayLabel && originalDisplayLabel && displayLabel !== originalDisplayLabel);
+}
+
+/** U+FE0F (emoji presentation) and U+FE0E (text presentation) selectors. */
+const EMOJI_VARIATION_SELECTORS = /[\uFE0E\uFE0F]/g;
+
+/**
+ * Bases the bundled Twemoji COLR font (#1380) carries only in their `*_fe0f`
+ * form: its cmap and `unicode-range` omit the bare U+00A9, U+00AE, U+2122 and
+ * U+24C2, so the bare code point falls back to the system emoji font.
+ */
+const TWEMOJI_FE0F_ONLY_BASES = new Set(["\u00A9", "\u00AE", "\u2122", "\u24C2"]);
+
+/**
+ * A reaction key as `--font-emoji` can paint it (#1380). Display only: the key
+ * stays verbatim for matching, sending, redacting and the accessible name,
+ * because Matrix treats `👍` (U+1F44D) and `👍️` (U+1F44D U+FE0F) as two
+ * different reactions.
+ *
+ * The bundled Twemoji build declares a cmap format-14 subtable for exactly four
+ * variation sequences (U+00A9, U+00AE, U+2122 and U+24C2 with U+FE0F). WebKit
+ * treats any other `base + U+FE0F` cluster as unsupported by that font and falls
+ * back to the next family in the stack for the whole cluster, so the thumb-up
+ * that Koushi's own emoji picker sends (517 of its 1,940 entries contain U+FE0F)
+ * painted the system artwork next to a bare `👍` pill that painted Twemoji.
+ * Dropping the selector selects the glyph the font does have; the four inverted
+ * bases get the selector they are missing.
+ */
+export function reactionKeyDisplayText(reactionKey: string): string {
+  const base = reactionKey.replace(EMOJI_VARIATION_SELECTORS, "");
+  return TWEMOJI_FE0F_ONLY_BASES.has(base) ? `${base}\uFE0F` : base;
 }
 
 function formatReactionTooltip(
