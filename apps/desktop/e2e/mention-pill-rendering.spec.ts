@@ -8,6 +8,7 @@
  */
 
 import { expect, test, type Page } from "@playwright/test";
+import { channelDelta, pillAppearance } from "./support/mentionAppearance";
 import { t } from "../src/i18n/messages";
 import { roomTimelineKey } from "../src/domain/coreEvents";
 
@@ -91,6 +92,22 @@ function realMentionItem(eventId: string): Record<string, unknown> {
   });
 }
 
+/**
+ * The same mention as Element writes it: the anchor text carries the label
+ * without `@`, and the `href` is not percent-encoded (#1328).
+ */
+function elementMentionItem(eventId: string): Record<string, unknown> {
+  const elementUrl = `https://matrix.to/#/${MENTIONED_USER_ID}`;
+  return itemWithBody(eventId, `${MENTION_LABEL} please take a look`, {
+    formatted: {
+      html: `<a href="${elementUrl}">${MENTION_LABEL}</a> please take a look`,
+      plain_text: `${MENTION_LABEL} please take a look`,
+      code_blocks: []
+    },
+    mentioned_user_ids: [MENTIONED_USER_ID]
+  });
+}
+
 test("a message that mentions a user renders that mention as a pill", async ({ page }) => {
   await gotoReadyShell(page);
   await seedTimelineItems(page, [
@@ -114,4 +131,29 @@ test("a message that mentions a user renders that mention as a pill", async ({ p
   const panel = page.getByRole("complementary", { name: t("panel.context") });
   await expect(panel.getByRole("heading", { name: t("panel.profile") })).toBeVisible();
   await expect(panel).toContainText(MENTIONED_USER_ID);
+});
+
+test("an Element-shaped mention reads as the composer's pill, not as a link", async ({ page }) => {
+  await gotoReadyShell(page);
+  await seedTimelineItems(page, [elementMentionItem("$element-mention:example.invalid")]);
+
+  const row = page.locator('[data-event-id="$element-mention:example.invalid"]');
+  const pill = row.locator("a.message-mention-pill");
+  await expect(pill).toHaveCount(1);
+  await expect(pill).toHaveAttribute("data-mention-user-id", MENTIONED_USER_ID);
+
+  // #1328: the anchor text has no `@`, so the pill spells the mention the way the
+  // composer's chip does. The event's own HTML and plain text are untouched: the
+  // row text still reads the sender's spelling.
+  const appearance = await pillAppearance(pill);
+  expect(appearance.text).toBe(`@${MENTION_LABEL}`);
+  await expect(row.locator(".message-body")).toContainText(`${MENTION_LABEL} please take a look`);
+
+  // #1328: in a formatted body the pill is an `<a>`, and the formatted-body link
+  // rule used to underline it, which is what made it read as an ordinary link.
+  expect(appearance.decoration).toBe("none");
+  expect(
+    channelDelta(appearance.backgroundChannels, appearance.surfaceChannels),
+    `pill ${appearance.background} on ${appearance.surface}`
+  ).toBeGreaterThanOrEqual(8);
 });

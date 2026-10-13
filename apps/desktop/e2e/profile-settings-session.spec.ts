@@ -814,6 +814,126 @@ test("typography profile applies bundled font and emoji tokens from Rust snapsho
   expect(typography.reactionFont).toContain("Twemoji");
 });
 
+/**
+ * #1380: the bundled Twemoji build declares a cmap format-14 subtable for
+ * exactly four variation sequences (U+00A9, U+00AE, U+2122, U+24C2 with U+FE0F),
+ * and WebKit treats every other `base + U+FE0F` cluster as unsupported by the
+ * font, painting the whole cluster from the next family in `--font-emoji`. The
+ * emoji picker emits the fully-qualified form for 517 of its 1,940 entries, so
+ * Koushi's own thumb-up painted the system artwork beside a bare `👍` pill.
+ *
+ * This pins both halves of the contract on the rendered DOM: the pill and the
+ * picker cell paint the display form the font can render, while the key stays
+ * verbatim for the accessible name and for `send_reaction`. The WebKit fallback
+ * itself is engine behaviour this check cannot observe portably, but the display
+ * transform it forced is fully pinned here.
+ */
+test("bundled emoji font paints picker cells and reaction keys in the form it carries", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => {
+    const base = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...base,
+      state: {
+        ...base.state,
+        domain: {
+          ...base.state.domain,
+          settings: {
+            ...base.state.domain.settings,
+            values: {
+              ...base.state.domain.settings.values,
+              typography: { font: "inter" as const, emoji: "twemojiColr" as const }
+            }
+          },
+          typography_profile: {
+            font: "inter",
+            emoji: "twemojiColr",
+            platform: "linux",
+            font_asset: "bundledPreferred",
+            emoji_asset: "bundledPreferred"
+          }
+        }
+      }
+    });
+    window.__harness.pushStateUpdate();
+  });
+  await expect
+    .poll(() => page.evaluate(() => document.documentElement.dataset.emojiFont))
+    .toBe("twemojiColr");
+
+  // The picker's own fully-qualified output, a bare base, a keycap whose
+  // selector the font does not carry, and one of the four inverted bases.
+  const keys = ["\u{1F44D}\uFE0F", "\u{1F44D}", "1\uFE0F\u20E3", "\u00A9\uFE0F"];
+  await seedTimelineItems(page, [
+    {
+      id: { Event: { event_id: "$emoji-font:example.invalid" } },
+      sender: "@remote-user:example.invalid",
+      sender_label: "Remote User",
+      body: "Reaction target",
+      timestamp_ms: 1_800_000_000_000,
+      in_reply_to_event_id: null,
+      thread_root: null,
+      thread_summary: null,
+      can_react: true,
+      is_redacted: false,
+      is_hidden: false,
+      can_redact: false,
+      is_edited: false,
+      can_edit: false,
+      reactions: keys.map((key, index) => ({
+        key,
+        count: index + 1,
+        reacted_by_me: false,
+        my_reaction_event_id: null,
+        sender_preview: []
+      }))
+    }
+  ]);
+
+  const pills = await page.evaluate(() =>
+    [...document.querySelectorAll<HTMLElement>(".reaction-pill")].map((pill) => ({
+      display: pill.querySelector(".reaction-pill-key")?.textContent ?? "",
+      label: pill.getAttribute("aria-label") ?? ""
+    }))
+  );
+
+  // The selector is dropped so the font paints the artwork it carries...
+  expect(pills.map((pill) => pill.display)).toEqual(["\u{1F44D}", "\u{1F44D}", "1\u20E3", "\u00A9\uFE0F"]);
+  // ...the readable name still names the exact key the event carries...
+  expect(pills.map((pill) => pill.label)).toEqual([
+    `Reaction \u{1F44D}\uFE0F, count 1`,
+    `Reaction \u{1F44D}, count 2`,
+    `Reaction 1\uFE0F\u20E3, count 3`,
+    `Reaction \u00A9\uFE0F, count 4`
+  ]);
+
+  // The picker cells paint from the same emoji stack as the pills.
+  const row = page.locator('[data-event-id="$emoji-font:example.invalid"]');
+  await row.hover();
+  await row.getByRole("button", { name: t("timeline.addReaction") }).click();
+  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  await picker.getByRole("searchbox").fill("thumbs up");
+  const cell = picker.locator('.emoji-picker-item[title="thumbs up"]');
+  await expect(cell).toBeVisible();
+  expect(await cell.evaluate((element) => getComputedStyle(element).fontFamily)).toContain("Twemoji");
+  const picked = await cell.textContent();
+  expect(picked).toBe("\u{1F44D}\uFE0F");
+
+  // Choosing it sends the picker's string verbatim: the display form above must
+  // not leak into `m.relates_to.key`.
+  await cell.click();
+  await expect.poll(() => invocationCount(page, "send_reaction")).toBeGreaterThanOrEqual(1);
+  expect(
+    await page.evaluate(() => window.__harness.invocationsOf("send_reaction").at(-1)?.args)
+  ).toEqual({
+    roomId: HARNESS_ROOM_ID,
+    eventId: "$emoji-font:example.invalid",
+    reactionKey: "\u{1F44D}\uFE0F"
+  });
+});
+
 test("typography settings dispatch Rust-owned update_settings patches", async ({
   page
 }) => {

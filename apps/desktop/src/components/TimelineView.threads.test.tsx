@@ -2324,7 +2324,13 @@ describe("TimelineView", () => {
     const chip = within(row!).getByRole("button", { name: /スレッドを開く/ });
     expect(chip.textContent).toContain("返信 1 件 · Bob: Latest reply");
     expect(chip.textContent).not.toContain("件件");
-    expect(chip.getAttribute("aria-label")).toContain("返信 1 件 · Bob: Latest reply");
+    // #1378: the visible text keeps the name and the preview in their own
+    // `dir="auto"` elements, and the accessible name isolates the same two values
+    // with FSI…PDI instead, so `aria-label` carries the invisible U+2068/U+2069.
+    expect(chip.querySelector('span[dir="auto"]')?.textContent).toBe("Bob");
+    expect(chip.getAttribute("aria-label")).toContain(
+      "返信 1 件 · \u2068Bob\u2069: \u2068Latest reply\u2069"
+    );
   });
 
   it("shows the SDK-confirmed per-root unread count even while the pane tracks a server notification", async () => {

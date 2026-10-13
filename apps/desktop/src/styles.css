@@ -2230,6 +2230,17 @@ button:disabled {
 }
 
 .main-pane {
+  /* #1385: the panels stacked between the timeline and the composer (the media
+     gallery and the scheduled-messages card) are content-sized flex children.
+     Their default `min-block-size: auto` let them take their whole content
+     height, so `.timeline-scroll` — whose flex basis is 0 — gave up all of its
+     space first and the composer was pushed past the pane's bottom edge, where
+     `.desktop { overflow: hidden }` clipped it with no scrollbar anywhere.
+     Each panel now owns a scroll box and can shrink, and the timeline keeps a
+     floor, so the composer stays reachable at the 620pt minimum window height
+     (`apps/desktop/src-tauri/tauri.conf.json` `minHeight`). */
+  --main-pane-timeline-min-block-size: 140px;
+  --main-pane-gallery-max-block-size: min(320px, 38vh);
   display: flex;
   flex-direction: column;
   min-width: 0;
@@ -2544,7 +2555,12 @@ button:disabled {
   flex: 1 1 0;
   display: grid;
   grid-template-rows: auto auto minmax(0, 1fr);
-  min-height: 0;
+  /* #1385: a zero basis alone cannot hold the timeline open. A bounded panel
+     above it shrinks against this floor instead of taking the whole pane, so
+     the timeline never collapses to nothing under a full gallery or a long
+     scheduled queue. The floor is 0 outside `.main-pane` (the upload staging
+     flow still sizes the timeline from its own content). */
+  min-height: var(--main-pane-timeline-min-block-size, 0);
   overflow: hidden;
   padding: 0 0 18px;
 }
@@ -3738,6 +3754,19 @@ button:disabled {
   overflow-y: auto;
 }
 
+/* #1385: the in-room card sits between the timeline and the composer, so it has
+   no pane row to shrink against. Let the column give it only the space the
+   timeline floor and the composer leave over, and scroll inside its own box;
+   otherwise a queue longer than the pane took the whole pane, collapsed the
+   timeline to zero, and pushed the composer off screen. The card keeps its
+   content height whenever the pane can afford it, so the in-place editor is
+   never squeezed below its own Save action. */
+.main-pane > .scheduled-messages {
+  flex: 0 1 auto;
+  min-block-size: 0;
+  overflow-y: auto;
+}
+
 .scheduled-messages-heading {
   display: flex;
   flex-wrap: wrap;
@@ -4274,6 +4303,11 @@ button:disabled {
   line-height: 1.3;
 }
 
+/* #1328: a mention must read as a pill everywhere it appears. The composer's
+   chip is tuned for the composer's own surface; on a message row and in the
+   thread pane a 12% brand fill is invisible, because the thread pane surface is
+   itself a 12% brand tint. The pill therefore takes a stronger tint, which stays
+   distinct from the white row, the thread pane and `--surface-hover`. */
 .message-mention-pill {
   display: inline-flex;
   align-items: center;
@@ -4281,14 +4315,22 @@ button:disabled {
   min-height: 20px;
   padding: 0 6px;
   overflow: hidden;
-  border: 1px solid var(--line);
+  border: 1px solid color-mix(in srgb, var(--brand) 45%, var(--line));
   border-radius: 999px;
   color: var(--brand);
-  background: var(--surface-hover);
+  background: color-mix(in srgb, var(--brand) 22%, var(--surface));
   font-weight: 650;
   text-overflow: ellipsis;
   vertical-align: baseline;
   white-space: nowrap;
+}
+
+/* #1328: in a formatted body the pill is the `<a>` itself, and
+   `.message-body.message-formatted-body a` (0,2,1) sets the link underline at a
+   higher specificity than the pill's own class (0,1,0), so the pill read as an
+   ordinary underlined link. Name the anchor here so the pill styling wins. */
+.message-body.message-formatted-body a.message-mention-pill {
+  text-decoration: none;
 }
 
 .reply-quote {
@@ -5669,6 +5711,10 @@ mark {
   border: 0;
   border-radius: 6px;
   background: transparent;
+  /* #1380: the picker shows emoji glyphs, so it follows the same emoji font as
+     the reaction pills. Without this the cells inherit the UI stack and paint
+     the system emoji font even while Twemoji is selected. */
+  font-family: var(--font-emoji);
   font-size: 22px;
   line-height: 1;
   cursor: pointer;
@@ -6179,6 +6225,16 @@ mark {
   padding: 10px 20px;
   border-bottom: 1px solid var(--line);
   background: var(--surface-hover);
+}
+
+/* #1385: the in-room gallery is a panel above the timeline, not a second
+   timeline. Bound it to part of the pane and scroll inside its own box so
+   media below the fold stays reachable and the composer stays on screen. */
+.main-pane > .room-media-gallery {
+  flex: 0 1 auto;
+  min-block-size: 0;
+  max-block-size: var(--main-pane-gallery-max-block-size);
+  overflow-y: auto;
 }
 
 .room-media-gallery-empty {
@@ -7856,7 +7912,11 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   gap: 6px;
 }
 
-.crawler-room-status-list {
+/* #1385: this list is a scroll box, but `.settings-detail-list` declares the
+   same single-class specificity for `overflow` and comes later, so its
+   `overflow: hidden` won and the list clipped its rows with no way to reach
+   them. Name both classes so the scroll rule wins regardless of order. */
+.settings-detail-list.crawler-room-status-list {
   max-block-size: 280px;
   overflow: auto;
 }

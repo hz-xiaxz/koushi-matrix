@@ -2165,7 +2165,7 @@ const en: Catalog = {
   "dialog.inviteHistory": "History visibility for invitees",
   "dialog.inviteHistoryCurrent": "Current room setting. Change it in Room Info before sending the invite.",
   "dialog.inviteHistoryCurrentBadge": "Current",
-  "dialog.inviteHistoryEncryptedShared": "Encrypted shared history may require sharing past room keys with invitees.",
+  "dialog.inviteHistoryEncryptedShared": "Past room keys may be shared with an invitee automatically. The share needs verification on both sides and may be skipped, so some or all earlier messages may stay unreadable.",
   "dialog.inviteHistoryNonRetroactive": "This is not retroactive, and already shared events or keys cannot be revoked.",
   "dialog.inviteHistoryRecovery": "Recovery is incomplete; the invite can still proceed, but encrypted history sharing may be limited.",
   "dialog.inviteHistoryWorldReadableWarning":
@@ -2503,7 +2503,7 @@ const en: Catalog = {
   "room.historyInvitedDescription": "People can see messages sent after they are invited.",
   "room.historyJoinedDescription": "People can see messages sent after they join.",
   "room.historySharedDescription": "People can see the room history that is shared with members.",
-  "room.historySharedEncryptedHint": "In an encrypted room, inviting can share past room keys so eligible invitees can decrypt the shared history.",
+  "room.historySharedEncryptedHint": "Past room keys may be shared with an invitee automatically so they can read the shared history. The share needs verification on both sides and may be skipped, leaving some or all earlier messages unreadable.",
   "room.historyNonRetroactive": "Changing this does not rewrite the past or revoke events and keys already shared.",
   "room.historyRecoveryRequired": "Device recovery is incomplete. Inviting can continue, but encrypted history sharing may be limited.",
   "room.historyWorldReadableDescription": "Anyone who can discover the room may read its history, including people who are not members.",
@@ -3979,7 +3979,7 @@ const ja: Catalog = {
   "dialog.inviteHistory": "招待先に見える履歴",
   "dialog.inviteHistoryCurrent": "現在のルーム設定です。招待を送る前にRoom Infoから変更できます。",
   "dialog.inviteHistoryCurrentBadge": "現在",
-  "dialog.inviteHistoryEncryptedShared": "暗号化された共有履歴では、招待先へ過去のルーム鍵を共有する必要がある場合があります。",
+  "dialog.inviteHistoryEncryptedShared": "過去のルーム鍵は招待者へ自動的に共有される場合があります。共有には双方の検証が必要で、共有されないこともあるため、それ以前のメッセージが読めないままになる場合があります。",
   "dialog.inviteHistoryNonRetroactive": "この設定は過去に遡らず、すでに共有されたイベントや鍵を取り消すこともできません。",
   "dialog.inviteHistoryRecovery": "復旧が完了していません。招待は続行できますが、暗号化履歴の共有が制限される場合があります。",
   "dialog.inviteHistoryWorldReadableWarning":
@@ -4317,7 +4317,7 @@ const ja: Catalog = {
   "room.historyInvitedDescription": "招待された後に送信されたメッセージを閲覧できます。",
   "room.historyJoinedDescription": "参加した後に送信されたメッセージを閲覧できます。",
   "room.historySharedDescription": "メンバーに共有されたルーム履歴を閲覧できます。",
-  "room.historySharedEncryptedHint": "暗号化ルームでは、共有履歴を復号できるよう、対象となる招待者へ過去のルーム鍵を共有する場合があります。",
+  "room.historySharedEncryptedHint": "過去のルーム鍵は、共有履歴を読めるよう招待者へ自動的に共有される場合があります。共有には双方の検証が必要で、共有されないこともあり、それ以前のメッセージが読めないままになる場合があります。",
   "room.historyNonRetroactive": "この設定を変更しても過去は書き換わらず、すでに共有されたイベントや鍵を取り消すこともできません。",
   "room.historyRecoveryRequired": "デバイスの復旧が完了していません。招待は続行できますが、暗号化履歴の共有が制限される場合があります。",
   "room.historyWorldReadableDescription": "ルームを発見できる人は、メンバーでなくても履歴を閲覧できます。",
@@ -5507,6 +5507,14 @@ export function tInvariant(id: MessageId): string {
   return en[id];
 }
 
+/**
+ * The `{name}` placeholder grammar of a catalog template. Owned here so a
+ * caller that has to render a template's parts itself (for example to give a
+ * remote-text value its own `dir="auto"` element) parses exactly what `t`
+ * interpolates.
+ */
+export const MESSAGE_PLACEHOLDER_PATTERN = /\{([a-zA-Z0-9_]+)\}/g;
+
 export function t(
   id: MessageId,
   values: MessageValues = {},
@@ -5518,7 +5526,7 @@ export function t(
     selectedLocale === "pseudo" && pseudoMode === "bidi"
       ? pseudoLocalize(catalogs.en[id], "bidi")
       : catalogs[selectedLocale][id] ?? catalogs.en[id];
-  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key: string) =>
+  return template.replace(MESSAGE_PLACEHOLDER_PATTERN, (_, key: string) =>
     String(values[key] ?? `{${key}}`)
   );
 }

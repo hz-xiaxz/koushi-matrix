@@ -422,6 +422,11 @@ type FormattedNode =
       children: FormattedNode[];
     };
 
+/** The visible text of a parsed node, for presentational decisions (#1328). */
+function formattedNodeText(node: FormattedNode): string {
+  return node.kind === "text" ? node.value : node.children.map(formattedNodeText).join("");
+}
+
 const FORMATTED_TAGS = new Set([
   "a",
   "b",
@@ -963,6 +968,13 @@ const formattedTagRenderers: Record<string, FormattedTagRenderer> = {
     // Issue #874: a real mention reads as the composer's pill, not as a link
     // that looks like any other URL.
     const mentionUserId = node.attrs["data-mention-user-id"];
+    // Issue #1328: Element writes the anchor text without `@` (`>Alice<`), while
+    // the composer's chip and the plain-body pill both read `@Alice`. Prefix the
+    // pill's own text so one mention looks the same everywhere; the event's HTML
+    // and the copied plain text keep the sender's spelling, and a label that
+    // already carries `@` is not doubled.
+    const mentionPrefix =
+      mentionUserId && !formattedNodeText(node).trimStart().startsWith("@") ? "@" : null;
     return (
       <a
         key={key}
@@ -976,6 +988,7 @@ const formattedTagRenderers: Record<string, FormattedTagRenderer> = {
           activateTimelineLink(href, onOpenMatrixTarget);
         }}
       >
+        {mentionPrefix}
         {children}
       </a>
     );

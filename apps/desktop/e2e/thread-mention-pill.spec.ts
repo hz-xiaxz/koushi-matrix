@@ -12,6 +12,7 @@ import { expect, test, type Page } from "@playwright/test";
 import { t } from "../src/i18n/messages";
 import { threadTimelineKey } from "../src/domain/coreEvents";
 import { gotoReadyShell } from "./support/basicOperations";
+import { channelDelta, pillAppearance } from "./support/mentionAppearance";
 
 const HARNESS_ACCOUNT_KEY = "@harness-user:example.invalid";
 const HARNESS_ROOM_ID = "!harness-room:example.invalid";
@@ -149,10 +150,47 @@ test("a thread reply that mentions a user renders the mention as a pill", async 
   const pill = mentionedRow.locator("a.message-mention-pill");
   await expect(pill).toHaveCount(1);
   await expect(pill).toHaveAttribute("data-mention-user-id", MENTIONED_USER_ID);
-  await expect(pill).toHaveText(MENTION_LABEL);
+  // #1328: the anchor text has no `@`, so the pill spells the mention the way the
+  // composer's chip does, while the row keeps the sender's own spelling.
+  await expect(pill).toHaveText(`@${MENTION_LABEL}`);
 
   const unmentionedRow = panel.locator('[data-event-id="$thread-unmentioned:example.invalid"]');
   await expect(unmentionedRow).toBeVisible();
   await expect(unmentionedRow.locator(".message-mention-pill")).toHaveCount(0);
   await expect(unmentionedRow).toContainText(MENTIONED_BODY);
+});
+
+test("the thread pane's pill reads as a pill against the pane, not as a link", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await openThreadPane(page);
+  await seedThreadItems(page, [
+    threadItem(ROOT_EVENT_ID, "thread root", { thread_root: null }),
+    threadItem("$thread-styled:example.invalid", MENTIONED_BODY, {
+      formatted: {
+        html: `<a href="${ELEMENT_MENTION_HREF}">${MENTION_LABEL}</a> please take a look`,
+        plain_text: MENTIONED_BODY,
+        code_blocks: []
+      },
+      mentioned_user_ids: [MENTIONED_USER_ID]
+    })
+  ]);
+
+  const panel = page.getByRole("complementary", { name: t("panel.context") });
+  const row = panel.locator('[data-event-id="$thread-styled:example.invalid"]');
+  const pill = row.locator("a.message-mention-pill");
+  await expect(pill).toHaveCount(1);
+
+  // #1328: the formatted-body link rule used to win over the pill class at a
+  // higher specificity, so the pill was underlined like any other link. The pane
+  // surface is the reference for the fill: the reporter's complaint is that the
+  // pill's old `--surface-hover` fill was indistinguishable there.
+  const appearance = await pillAppearance(pill);
+  expect(appearance.text).toBe(`@${MENTION_LABEL}`);
+  expect(appearance.decoration).toBe("none");
+  expect(
+    channelDelta(appearance.backgroundChannels, appearance.surfaceChannels),
+    `pill ${appearance.background} on ${appearance.surface}`
+  ).toBeGreaterThanOrEqual(8);
 });

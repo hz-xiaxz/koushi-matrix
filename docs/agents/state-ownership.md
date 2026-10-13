@@ -824,7 +824,10 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   visibility from React settings state, or repair switch state after dispatch.
 - Timeline mention pills are display-only rendering over Rust-owned timeline body
   text plus `ProfileState.users`; they must not become a React-owned source of
-  mention semantics.
+  mention semantics. Their spelling is presentational too: a formatted-body anchor
+  that lacks the composer's `@` gets one at render time, and the event's HTML, the
+  plain body, the copy path, and the `matrix.to` target keep the sender's own text
+  (#1328).
 
 ## Profiles and local aliases
 
@@ -1197,10 +1200,21 @@ normal QA-title mode and cannot change product title semantics.
   behavior per component.
 - Font assets: Inter and Twemoji COLR are bundled-preferred choices with system
   fallbacks, and any included font package must update `THIRD_PARTY_NOTICES.md`
-  with version, local path, license, and provenance. The current Twemoji COLR
-  package (`twemoji-colr-font@15.0.3`) is pinned but npm marks it deprecated; do
-  not upgrade or replace it without checking the rendered family name, license
-  stack (package/font/artwork), and browser COLR/CPAL behavior.
+  with version, local path, license, and provenance. The bundled Twemoji COLR is
+  `@sableclient/twemoji-font@1.0.4` (#1341, v0.22.0), which replaced the
+  deprecated `twemoji-colr-font@15.0.3`; do not change or upgrade it without
+  checking the rendered family name, the license stack (package/font/artwork),
+  and browser COLR/CPAL and cmap format-14 behavior — a variation-sequence gap
+  changes which code points the font can paint at all (#1380).
+- The bundled Twemoji build declares a cmap format-14 subtable for exactly four
+  variation sequences (U+00A9, U+00AE, U+2122, U+24C2 with U+FE0F) and carries no
+  bare U+00A9/U+00AE/U+2122/U+24C2 glyph. Reaction keys therefore paint a display
+  form (`reactionKeyDisplayText`) that drops U+FE0F and U+FE0E except on those
+  four bases, and emoji picker cells paint from `--font-emoji` like the pills do.
+  The transform is display-only: the key stays verbatim for `m.relates_to.key`
+  matching, `send_reaction`, `redact_reaction`, the reaction tooltip and the
+  accessible name, because Matrix treats `👍` (U+1F44D) and `👍️` (U+1F44D U+FE0F)
+  as two different reactions.
 - Keep the root font stack as a single resolved custom property, e.g.
   `font-family: var(--font-ui)`. A 2026-06-15 attempt used `font-family:
   var(--font-ui), var(--font-emoji)` with list-valued variables; headless Chromium

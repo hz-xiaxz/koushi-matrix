@@ -512,9 +512,18 @@ describe("ContextualRightPanel", () => {
 
     expect(markup).toContain('class="thread-summary-chip"');
     expect(markup).toContain("3 replies");
-    expect(markup).toContain("Unknown user: Latest thread reply");
+    // #1378: the sender and the preview are remote text, so each renders in its
+    // own dir="auto" element instead of inside one interpolated string, where an
+    // RTL value's trailing neutral would resolve against the template.
+    expect(markup).toContain(
+      '3 replies · <span dir="auto">Unknown user</span>: <span dir="auto">Latest thread reply</span>'
+    );
     expect(markup).not.toContain("@bob:example.invalid: Latest thread reply");
     expect(markup).toContain('aria-label="Open thread, 3 replies');
+    // The accessible name cannot carry elements, so it isolates the same two
+    // values with FSI…PDI instead.
+    expect(markup).toContain("\u2068Unknown user\u2069: \u2068Latest thread reply\u2069");
+    expect(markup).not.toContain('aria-label="Open thread, 3 replies · Unknown user');
   });
 
   test("TimelineItemRow renders add reaction affordance only for reactable events", () => {
