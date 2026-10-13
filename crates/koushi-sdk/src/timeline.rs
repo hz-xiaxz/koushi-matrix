@@ -317,10 +317,26 @@ impl MatrixTimelineGapHandle {
     }
 }
 
+/// Content-free counters for one room-timeline gap inspection.
+///
+/// Aggregate counts only: never contains room or event identifiers,
+/// pagination tokens, message content, or local paths.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct MatrixTimelineGapInspectionDiagnostics {
+    /// Number of persisted chunks whose metadata was scanned.
+    pub scanned_chunks: usize,
+    /// Number of event bodies decoded while resolving gap boundaries.
+    pub event_bodies_decoded: usize,
+    /// Wall-clock duration of the inspection, in milliseconds.
+    pub duration_ms: u64,
+}
+
 #[derive(Clone)]
 pub struct MatrixTimelineGapInspection {
     pub continuity: MatrixTimelineContinuity,
     pub gaps: Vec<MatrixTimelineGapHandle>,
+    /// Content-free counters for this inspection.
+    pub diagnostics: MatrixTimelineGapInspectionDiagnostics,
 }
 
 impl std::fmt::Debug for MatrixTimelineGapInspection {
@@ -329,6 +345,12 @@ impl std::fmt::Debug for MatrixTimelineGapInspection {
             .debug_struct("MatrixTimelineGapInspection")
             .field("continuity", &self.continuity)
             .field("gap_count", &self.gaps.len())
+            .field("scanned_chunks", &self.diagnostics.scanned_chunks)
+            .field(
+                "event_bodies_decoded",
+                &self.diagnostics.event_bodies_decoded,
+            )
+            .field("duration_ms", &self.diagnostics.duration_ms)
             .finish()
     }
 }
@@ -591,7 +613,15 @@ impl MatrixClientSession {
                 descriptor,
             })
             .collect();
-        Ok(MatrixTimelineGapInspection { continuity, gaps })
+        Ok(MatrixTimelineGapInspection {
+            continuity,
+            gaps,
+            diagnostics: MatrixTimelineGapInspectionDiagnostics {
+                scanned_chunks: inspection.diagnostics.scanned_chunks,
+                event_bodies_decoded: inspection.diagnostics.event_bodies_decoded,
+                duration_ms: inspection.diagnostics.duration_ms,
+            },
+        })
     }
     pub async fn repair_room_timeline_gap(
         &self,
