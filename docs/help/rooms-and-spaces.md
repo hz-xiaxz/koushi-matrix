@@ -137,16 +137,18 @@ stays on the Rust-reported total for the whole view, so filtering the list or
 collapsing the section does not change it.
 
 Long sections show their first five conversations, followed by a **Show N more**
-control at the end of the section that switches to **Show fewer** once the
-section is expanded. The choice is remembered per Home or Space and per section,
-and it is separate from collapsing: a collapsed section hides every row and the
-control, and the control never changes whether the section is collapsed. While
-the filter box has text, every matching conversation is shown and the control
-disappears until you clear the filter. If the conversation you have open is past
-the first five, its section stays expanded so its row is always visible, and a
-conversation opened from a notification shows its section even when you had
-collapsed it, until you collapse that section yourself (changing the five-row
-bound does not re-collapse it).
+control at the end of the section. That control only expands the section; to
+bound it again, use the fold button in the section heading, which Rooms and DMs
+place between the create (+) and section options (⋯) buttons. The choice is
+remembered per Home or Space and per section, and it is separate from collapsing:
+a collapsed section hides every row and both controls, and neither control
+changes whether the section is collapsed. While the filter box has text, every
+matching conversation is shown and the controls disappear until you clear the
+filter. An open conversation past the first five keeps its section expanded so
+its row is always visible; while that is what holds the section open it offers
+no fold control. A conversation opened from a notification shows its section
+even when you had collapsed it, until you collapse that section yourself
+(changing the five-row bound does not re-collapse it).
 
 A conversation's own unread badge counts unread replies in its threads as well as
 messages in the main timeline, so a room can show unread while the main timeline
