@@ -1052,3 +1052,39 @@ fn initial_thread_backfill_stage_tokens_remain_distinct_and_closed() {
     }
     assert_eq!(super::timeline_stage_token("untrusted detail"), "other");
 }
+
+#[test]
+fn residency_diagnostics_partitions_actors_and_sums_canonical_depth() {
+    use crate::timeline::manager::fold_residency_actors;
+    use koushi_protocol::ids::TimelineKind;
+
+    let room = TimelineKind::Room {
+        room_id: "!room:synthetic.invalid".to_owned(),
+    };
+    let thread = TimelineKind::Thread {
+        room_id: "!room:synthetic.invalid".to_owned(),
+        root_event_id: "$root:synthetic.invalid".to_owned(),
+    };
+    let focused = TimelineKind::Focused {
+        room_id: "!room:synthetic.invalid".to_owned(),
+        event_id: "$event:synthetic.invalid".to_owned(),
+    };
+    let diagnostics = fold_residency_actors(
+        9,
+        7,
+        [
+            (&room, Some(120)),
+            (&room, None),
+            (&thread, Some(30)),
+            (&focused, Some(4)),
+        ],
+    );
+    assert_eq!(diagnostics.session_resident_rooms, 9);
+    assert_eq!(diagnostics.actual_room_subscriptions, 7);
+    assert_eq!(diagnostics.resident_actors, 4);
+    assert_eq!(diagnostics.resident_room_actors, 2);
+    assert_eq!(diagnostics.resident_thread_actors, 1);
+    assert_eq!(diagnostics.resident_focused_actors, 1);
+    assert_eq!(diagnostics.resident_event_items, 154);
+    assert_eq!(diagnostics.deepest_actor_event_items, 120);
+}

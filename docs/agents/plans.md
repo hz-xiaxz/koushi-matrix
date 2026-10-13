@@ -19,6 +19,12 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
+[#1394 resident timeline-set diagnostics](../plans/2026-10-13-issue1394-resident-timeline-diagnostics.md)
+lands the export-time counters the memory measurement record asked for before any
+retention bound: resident Room/actor counts and a canonical-depth proxy, as
+`core.timeline_residency` rows next to `core.search_retention`. Observation only;
+the unbounded timeline-actor map and the depth axis stay as recorded.
+
 [#1392 topology-first gap inspection](../superpowers/plans/2026-10-13-issue1392-gap-inspection-topology.md)
 describes the SDK-fork store path (`EventCacheStore::load_chunk_topology`) that
 removes full-history decryption from healthy room gap inspection, the koushi

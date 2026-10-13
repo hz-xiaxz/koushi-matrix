@@ -289,6 +289,11 @@ pub(crate) enum AccountMessage {
     SearchRetentionDiagnostics {
         response: oneshot::Sender<Option<crate::search::AccountRetentionDiagnostics>>,
     },
+    /// Export-time resident-set sample (#1394): forwarded to the timeline
+    /// manager, which answers from its own handles without awaiting an actor.
+    TimelineResidencyDiagnostics {
+        response: oneshot::Sender<Option<crate::timeline::TimelineResidencyDiagnostics>>,
+    },
     /// A Search or Files request with the account's content policy at submission,
     /// instead of waiting for a crawler notification behind a busy mailbox.
     SearchWithPolicy {
@@ -1963,6 +1968,11 @@ impl AccountActor {
                             let _ = response.send(None);
                         }
                     }
+                }
+                AccountMessage::TimelineResidencyDiagnostics { response } => {
+                    // Forwarded; a closed manager drops the reply channel and the
+                    // caller's bounded wait settles as unavailable.
+                    self.timeline_manager.residency_diagnostics(response);
                 }
                 AccountMessage::NotifySearchCrawlerRoomsAvailable {
                     room_ids,

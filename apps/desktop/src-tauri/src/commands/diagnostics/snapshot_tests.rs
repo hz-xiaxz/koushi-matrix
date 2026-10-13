@@ -161,6 +161,7 @@ fn diagnostic_snapshot_exports_current_media_memory_summaries() {
         },
         &memory_audit_fixture(),
         &[],
+        &[],
         koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
     );
     let thumbnail = exported
@@ -220,6 +221,7 @@ fn diagnostic_snapshot_exports_the_process_memory_audit() {
         koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats::default(),
         koushi_core::media_preparation::MediaPreparationStats::default(),
         &memory_audit_fixture(),
+        &[],
         &[],
         koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
     );
@@ -281,6 +283,7 @@ fn diagnostic_snapshot_exports_the_search_retention_summary() {
         koushi_core::media_preparation::MediaPreparationStats::default(),
         &memory_audit_fixture(),
         rows,
+        &[],
         koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
     );
     let aggregates = exported
@@ -314,6 +317,74 @@ fn diagnostic_snapshot_exports_the_search_retention_summary() {
         account_row
             .message
             .contains("search_scope=decrypted_index_allocations")
+    );
+    let serialized = serde_json::to_string(&exported).unwrap();
+    for forbidden in [
+        "!room:synthetic.invalid",
+        "@user:synthetic.invalid",
+        "$event:synthetic.invalid",
+        "/Users/alice/private",
+        "secret message",
+    ] {
+        assert!(!serialized.contains(forbidden));
+    }
+}
+
+#[test]
+fn diagnostic_snapshot_exports_the_timeline_residency_summary() {
+    let _guard = koushi_diagnostics::test_support::lock();
+    let fixture = koushi_core::timeline::TimelineResidencyDiagnostics {
+        session_resident_rooms: 152,
+        actual_room_subscriptions: 152,
+        resident_actors: 152,
+        resident_room_actors: 150,
+        resident_thread_actors: 1,
+        resident_focused_actors: 1,
+        resident_event_items: 19_200,
+        deepest_actor_event_items: 512,
+    };
+    let rows: &[(
+        usize,
+        Option<koushi_core::timeline::TimelineResidencyDiagnostics>,
+    )] = &[(0, Some(fixture)), (1, None)];
+    let exported = snapshot_with_media_memory_summaries(
+        koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats::default(),
+        koushi_core::media_preparation::MediaPreparationStats::default(),
+        &memory_audit_fixture(),
+        &[],
+        rows,
+        koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
+    );
+    let aggregates = exported
+        .entries
+        .iter()
+        .filter(|entry| entry.source == "core.timeline_residency")
+        .map(|entry| entry.message.as_str())
+        .collect::<Vec<_>>();
+    assert!(
+        aggregates.contains(&"stage=summary account_total=2 account_available=1"),
+        "aggregate record missing: {aggregates:?}"
+    );
+    let account_row = exported
+        .entries
+        .iter()
+        .find(|entry| entry.message.contains("session_resident_rooms=152"))
+        .expect("resident timeline row must be exported");
+    assert!(account_row.message.contains("account_index=0"));
+    assert!(
+        account_row
+            .message
+            .contains("actual_room_subscriptions=152")
+    );
+    assert!(account_row.message.contains("resident_actors=152"));
+    assert!(account_row.message.contains("resident_room_actors=150"));
+    assert!(account_row.message.contains("resident_thread_actors=1"));
+    assert!(account_row.message.contains("resident_focused_actors=1"));
+    assert!(account_row.message.contains("resident_event_items=19200"));
+    assert!(
+        account_row
+            .message
+            .contains("deepest_actor_event_items=512")
     );
     let serialized = serde_json::to_string(&exported).unwrap();
     for forbidden in [
