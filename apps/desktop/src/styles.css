@@ -2120,15 +2120,16 @@ button:disabled {
   background: var(--surface-hover);
 }
 
-.section-menu-wrap {
-  position: relative;
-}
-
 .section-menu {
-  position: absolute;
-  z-index: 20;
-  inset-inline-end: 0;
-  inset-block-start: calc(100% + 4px);
+  /* #1369: the shared floating layer owns the position. An `absolute` menu was
+     clipped by the scrolling sidebar and extended its scroll extent. */
+  position: fixed;
+  z-index: 30;
+  /* Portaled out of `.section-title`, so the header's inherited typography has
+     to be stated here instead of being taken from the sidebar. */
+  font-size: 13px;
+  font-weight: 800;
+  /* The natural width the floating layer measures and places. */
   min-inline-size: 180px;
   padding: 6px;
   border: 1px solid var(--line);

@@ -191,6 +191,14 @@ function viewportRectOf(element: Element | null): FloatingRect | null {
 export interface FloatingPlacementOptions {
   anchorRef?: RefObject<Element | null>;
   /**
+   * `contentRef` measures the panel element, or null (the default). Sizing from
+   * the panel's own layout is what a content-sized menu needs: its rows decide
+   * its height, so the height cannot be a caller constant. The measurement
+   * happens before the panel is sized, because `floatingPlacementStyle(null)`
+   * only hides the panel — the first pass still has its natural rectangle.
+   */
+  contentRef?: RefObject<HTMLElement | null>;
+  /**
    * Resolves an extra container the panel must stay inside. Layout knowledge
    * stays with the caller; the panel re-resolves it on every measurement so a
    * resize or scroll cannot leave a stale boundary behind.
@@ -198,8 +206,13 @@ export interface FloatingPlacementOptions {
   resolveBoundaryElement?: (anchor: Element) => Element | null;
   placement: "above" | "below";
   align: "start" | "end";
-  inlineSize: number;
-  blockSize: number;
+  /**
+   * Panel size; omit both when `contentRef` measures the panel. A panel without
+   * a measurable rectangle falls back to them, so an unlaid-out or empty panel
+   * is still placed instead of staying hidden forever.
+   */
+  inlineSize?: number;
+  blockSize?: number;
   comfortableBlockSize?: number;
 }
 
@@ -216,6 +229,7 @@ export function useFloatingPlacement(
 ): FloatingPlacementResult | null {
   const {
     anchorRef,
+    contentRef,
     resolveBoundaryElement,
     placement,
     align,
@@ -231,16 +245,27 @@ export function useFloatingPlacement(
       anchorElement && resolveBoundaryElement
         ? resolveBoundaryElement(anchorElement)
         : null;
+    // A content-measured panel reports its own rectangle. An unmounted panel has
+    // nothing to place, which is also the closed-menu path: it must not touch the
+    // document on every render of a closed section header. An empty rectangle is
+    // a different case — a panel that laid out at zero size still gets placed.
+    const contentElement = contentRef?.current ?? null;
+    const content = viewportRectOf(contentElement);
+    const contentSize = content && isUsableRect(content) ? content : null;
+    if (contentRef && !contentElement) {
+      setResolved(null);
+      return;
+    }
     const next = resolveFloatingPlacement({
       safeTop: nativeTitlebarSafeTop(),
       align,
       anchor: viewportRectOf(anchorElement),
-      blockSize,
+      blockSize: contentSize ? contentSize.bottom - contentSize.top : blockSize ?? 0,
       boundary: viewportRectOf(boundaryElement),
       comfortableBlockSize,
       // Root `dir` is Rust-owned locale profile output; the panel only reads it.
       direction: document.documentElement.dir === "rtl" ? "rtl" : "ltr",
-      inlineSize,
+      inlineSize: contentSize ? contentSize.right - contentSize.left : inlineSize ?? 0,
       placement,
       viewport: { height: window.innerHeight, width: window.innerWidth },
     });
@@ -250,6 +275,7 @@ export function useFloatingPlacement(
     anchorRef,
     blockSize,
     comfortableBlockSize,
+    contentRef,
     inlineSize,
     placement,
     resolveBoundaryElement,
@@ -274,18 +300,31 @@ export function useFloatingPlacement(
   return resolved;
 }
 
-/** Inline style that positions a panel at a resolved placement. */
+/**
+ * Inline style that positions a panel at a resolved placement.
+ *
+ * `sizedByLayer` (the default) also writes the resolved inline and block size
+ * onto the panel, so its box is exactly the rectangle the resolver worked with.
+ * A panel measured from its own content passes `false`: writing the clamped size
+ * back would make the next measurement read the clamped box rather than the
+ * content, so a menu squeezed once would never regain its natural height. Its
+ * CSS keeps the box, and the layer only owns the position.
+ */
 export function floatingPlacementStyle(
   resolved: FloatingPlacementResult | null,
+  sizedByLayer = true,
 ): CSSProperties {
-  return resolved
+  if (!resolved) {
+    return { visibility: "hidden" };
+  }
+  return sizedByLayer
     ? {
         blockSize: `${resolved.blockSize}px`,
         inlineSize: `${resolved.inlineSize}px`,
         left: `${resolved.left}px`,
         top: `${resolved.top}px`,
       }
-    : { visibility: "hidden" };
+    : { left: `${resolved.left}px`, top: `${resolved.top}px` };
 }
 
 /** Read the shared CSS length in CSS pixels (custom properties may be calc()). */
