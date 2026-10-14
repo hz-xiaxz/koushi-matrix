@@ -232,9 +232,13 @@ the last outcome per sink, and a watch list of rooms and spaces picked from the 
 list. A watched room is delivered even when its category is off, and a watched space
 covers every joined room that is a child of it, resolved when the candidate set is
 built so a room added later is covered. The list stores ids and the room list supplies
-the label, so no room name is copied into settings. The server-owned section stays
-where it is, labelled as
-the server's, so the two are not read as one control. React renders the DTO and
+the label, so no room name is copied into settings. The server-owned group moves
+behind a second tab in the same category, so which party sends a notification is
+chosen by switching tabs rather than by reading a note about who owns what: the tab
+labels name the sender, each tab carries one line saying what it controls, and a note
+saying "everything below is sent by your homeserver" is not needed. The device tab is
+selected first, and where there is no account the server tab is absent rather than
+empty. React renders the DTO and
 dispatches typed commands; every string is a catalog entry in English and Japanese.
 
 ## Phases
