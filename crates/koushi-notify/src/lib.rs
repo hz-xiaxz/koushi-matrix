@@ -20,6 +20,8 @@ mod presets;
 mod resend;
 mod smtp;
 
+use std::fmt;
+
 #[cfg(test)]
 mod smtp_tests;
 
@@ -35,7 +37,7 @@ pub use smtp::{SmtpSettings, SmtpSink, SmtpTls};
 /// `subject` and `body` are built by the core from the attention projection: a safe
 /// room label, the kind and the counts, and message text only when the user turned the
 /// plaintext prefix on with a stored consent. A sink never adds content of its own.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct NotificationDeliveryRequest {
     pub subject: String,
     pub body: String,
@@ -45,6 +47,28 @@ pub struct NotificationDeliveryRequest {
     pub sender_name: String,
     /// Stable per-attempt id, so a retry of the same delivery cannot send twice.
     pub idempotency_key: String,
+}
+
+/// `Debug` redacts the subject, the body, and both addresses.
+///
+/// This is the same payload `koushi_core::notification_delivery::NotificationDeliveryIntent`
+/// carries one layer up, and it earns the same treatment for the same reason: the body may
+/// hold message text under a prefix consent, and the addresses are personal identifiers, so
+/// a struct dump must not become a log line or a diagnostics entry. The idempotency key
+/// stays visible because it names no person and no message, and it is what a retry is
+/// correlated by.
+impl fmt::Debug for NotificationDeliveryRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NotificationDeliveryRequest")
+            .field("subject", &"Subject(..)")
+            .field("body", &"Body(..)")
+            .field("destination", &"Destination(..)")
+            .field("from_address", &"FromAddress(..)")
+            .field("sender_name", &"SenderName(..)")
+            .field("idempotency_key", &self.idempotency_key)
+            .finish()
+    }
 }
 
 /// Why one delivery attempt did not succeed.

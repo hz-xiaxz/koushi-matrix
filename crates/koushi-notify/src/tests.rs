@@ -158,3 +158,35 @@ fn an_unusable_key_never_becomes_a_delivery() {
     );
     assert!(crate::resend::authorization_value("re_live_key").is_ok());
 }
+
+#[test]
+fn a_request_keeps_its_message_text_out_of_a_struct_dump() {
+    // The body may carry message text when the user turned the plaintext prefix on, and
+    // the addresses are personal identifiers, so the one type that reaches a sink is the
+    // one type that must not print them. The key stays, because a retry is correlated by
+    // it and it names no person and no message.
+    let request = NotificationDeliveryRequest {
+        subject: "Subject with words".to_owned(),
+        body: "Rina: the roof is leaking".to_owned(),
+        destination: "me@example.com".to_owned(),
+        from_address: "sender@example.com".to_owned(),
+        sender_name: "Sender Name".to_owned(),
+        idempotency_key: "delivery-1".to_owned(),
+    };
+
+    let printed = format!("{request:?}");
+
+    for private in [
+        "Subject with words",
+        "the roof is leaking",
+        "me@example.com",
+        "sender@example.com",
+        "Sender Name",
+    ] {
+        assert!(
+            !printed.contains(private),
+            "{private} must not be printed: {printed}"
+        );
+    }
+    assert!(printed.contains("delivery-1"), "{printed}");
+}
