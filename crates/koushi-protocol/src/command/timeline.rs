@@ -351,12 +351,6 @@ pub enum TimelineCommand {
         key: TimelineKey,
         event_id: String,
     },
-    ToggleReaction {
-        request_id: RequestId,
-        key: TimelineKey,
-        event_id: String,
-        reaction_key: String,
-    },
     SendReaction {
         request_id: RequestId,
         key: TimelineKey,
@@ -616,15 +610,6 @@ impl fmt::Debug for TimelineCommand {
                 .field("request_id", request_id)
                 .field("key", key)
                 .field("event_id", &"EventId(..)")
-                .finish(),
-            Self::ToggleReaction {
-                request_id, key, ..
-            } => formatter
-                .debug_struct("ToggleReaction")
-                .field("request_id", request_id)
-                .field("key", key)
-                .field("event_id", &"EventId(..)")
-                .field("reaction_key", &"ReactionKey(..)")
                 .finish(),
             Self::SendReaction {
                 request_id, key, ..

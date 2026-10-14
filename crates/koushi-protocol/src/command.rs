@@ -171,7 +171,6 @@ impl CoreCommand {
                 | RoomCommand::RemoveTag { request_id, .. }
                 | RoomCommand::PinEvent { request_id, .. }
                 | RoomCommand::UnpinEvent { request_id, .. }
-                | RoomCommand::RefreshPinnedEvents { request_id, .. }
                 | RoomCommand::QueryDirectory { request_id, .. }
                 | RoomCommand::PreviewJoinTarget { request_id, .. }
                 | RoomCommand::DismissDirectoryPreview { request_id }
@@ -222,7 +221,6 @@ impl CoreCommand {
                 | TimelineCommand::SendReadReceipt { request_id, .. }
                 | TimelineCommand::SetFullyRead { request_id, .. }
                 | TimelineCommand::SetTyping { request_id, .. }
-                | TimelineCommand::ToggleReaction { request_id, .. }
                 | TimelineCommand::LoadLinkPreviews { request_id, .. }
                 | TimelineCommand::HideLinkPreview { request_id, .. } => *request_id,
                 TimelineCommand::BroadcastLinkPreviewPolicy { .. } => RequestId {
