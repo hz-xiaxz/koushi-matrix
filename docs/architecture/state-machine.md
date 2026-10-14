@@ -6166,6 +6166,17 @@ one country's infrastructure:
   only on explicit user action; the SDK evaluates them into the highlight
   counter, so a hit ranks as a mention-kind candidate and raises the badge exactly
   as it does in Element. Opening the settings screen writes nothing.
+- **Keyword rules.** The keyword list is the account's own `content` rules, read back
+  from the homeserver as the authority rather than mirrored into local settings, so a
+  rule another client wrote shows up here too. Adding a keyword writes one `content`
+  rule whose action both notifies and sets the highlight tweak, because that tweak is
+  what makes the hit reach the mention-kind authority above; removing a keyword deletes
+  that rule. Matching therefore stays exactly Matrix's: a whole-word, case-insensitive
+  match on the message body, evaluated in the `content` position of the rule order
+  (`override > content > room > sender > underride`), so a keyword wins over a room rule
+  while a mute, which is an override, still wins over the keyword. The list is bounded,
+  a pattern is bounded and trimmed, a duplicate is refused rather than written twice,
+  and a failed write is reported as a failure instead of being shown as saved.
 - **Watch list.** The user can name rooms and spaces that are delivered regardless
   of the three categories, so a busy space can be watched without turning on every
   group message. A watched space covers every joined room that is a child of it,

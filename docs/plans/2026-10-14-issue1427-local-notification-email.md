@@ -238,7 +238,13 @@ chosen by switching tabs rather than by reading a note about who owns what: the 
 labels name the sender, each tab carries one line saying what it controls, and a note
 saying "everything below is sent by your homeserver" is not needed. The device tab is
 selected first, and where there is no account the server tab is absent rather than
-empty. React renders the DTO and
+empty. The keyword list is edited in the device tab next to the switch that delivers
+for it, and it is the account's own `content` rules read back from the homeserver
+rather than a list copied into local settings, so a rule another client wrote is shown
+and a failed write is reported instead of appearing saved; the copy says the keyword
+itself is stored on the homeserver, which is what lets the app and the other devices
+highlight it too, while the switch decides what this device mails about. React renders
+the DTO and
 dispatches typed commands; every string is a catalog entry in English and Japanese.
 
 ## Phases
