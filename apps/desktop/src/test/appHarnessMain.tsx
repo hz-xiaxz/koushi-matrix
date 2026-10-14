@@ -390,6 +390,7 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         min_interval_secs: 900,
         prefix_chars: 80,
         prefix_consent: null,
+        watched: [],
         sinks: []
       },
       display: {

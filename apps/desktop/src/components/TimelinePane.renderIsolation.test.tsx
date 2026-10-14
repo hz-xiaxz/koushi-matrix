@@ -489,6 +489,7 @@ function makeSnapshot(): DesktopSnapshot {
               min_interval_secs: 900,
               prefix_chars: 80,
               prefix_consent: null,
+              watched: [],
               sinks: []
             },
             display: {

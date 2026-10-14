@@ -6166,6 +6166,14 @@ one country's infrastructure:
   only on explicit user action; the SDK evaluates them into the highlight
   counter, so a hit ranks as a mention-kind candidate and raises the badge exactly
   as it does in Element. Opening the settings screen writes nothing.
+- **Watch list.** The user can name rooms and spaces that are delivered regardless
+  of the three categories, so a busy space can be watched without turning on every
+  group message. A watched space covers every joined room that is a child of it,
+  resolved from the room list when the candidate set is built, so a room added to
+  the space later is covered without editing the list. The list holds ids only, never
+  a label: the label is the same safe room label the badge uses, read at send time.
+  Reading the room, muting it, or the dwell still win, and an unfocused device is
+  still required under the focus option.
 - **Dwell.** A room becomes deliverable only when its qualifying attention state
   persists for the configured dwell. The timer is anchored on the transition into
   that state, so a room that keeps receiving messages still comes due, while a room

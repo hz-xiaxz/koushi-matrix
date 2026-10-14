@@ -227,8 +227,13 @@ read-only rather than pretending to save.
 Settings -> Notifications gains a "Notify me from this device" section: the sink
 list, each with its own fields (from and to addresses for mail, the webhook URL
 for the WeChat relay), a write-only secret field that only ever reports configured
-or not, a test send, the interval, the prefix option behind the consent dialog, and
-the last outcome per sink. The server-owned section stays where it is, labelled as
+or not, a test send, the interval, the prefix option behind the consent dialog,
+the last outcome per sink, and a watch list of rooms and spaces picked from the room
+list. A watched room is delivered even when its category is off, and a watched space
+covers every joined room that is a child of it, resolved when the candidate set is
+built so a room added later is covered. The list stores ids and the room list supplies
+the label, so no room name is copied into settings. The server-owned section stays
+where it is, labelled as
 the server's, so the two are not read as one control. React renders the DTO and
 dispatches typed commands; every string is a catalog entry in English and Japanese.
 
@@ -286,7 +291,9 @@ rather than a mailbox reminder.
   mention and a keyword hit each queue exactly one delivery once the configured
   dwell has elapsed, while a room read (or focused) inside the dwell, a muted room,
   a channel with the prefix off, and an own message queue none, and a second
-  delivery inside the minimum interval is held.
+  delivery inside the minimum interval is held. A watched room with its category
+  off queues one, and a room that joins a watched space after the list was written
+  queues one.
 - Dwell: unit tests on a paused tokio clock prove the timer anchors on the
   transition into the qualifying state, survives further messages in the same room,
   and re-arms after it is cancelled.

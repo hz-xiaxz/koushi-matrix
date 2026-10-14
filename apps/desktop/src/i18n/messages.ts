@@ -962,6 +962,11 @@ export type MessageId =
   | "settings.notificationDeliveryInterval"
   | "settings.notificationDeliveryIntervalDescription"
   | "settings.notificationDeliveryOnlyUnfocused"
+  | "settings.notificationDeliveryWatched"
+  | "settings.notificationDeliveryWatchedDescription"
+  | "settings.notificationDeliveryWatchedAdd"
+  | "settings.notificationDeliveryWatchedEmpty"
+  | "settings.notificationDeliveryWatchedRemove"
   | "settings.notificationDeliverySinks"
   | "settings.notificationDeliveryAddSink"
   | "settings.notificationDeliverySinkProvider"
@@ -2946,6 +2951,12 @@ const en: Catalog = {
   "settings.notificationDeliveryIntervalDescription":
     "Further notifications wait this long, so a busy room cannot fill your mailbox.",
   "settings.notificationDeliveryOnlyUnfocused": "Only while Koushi is not focused",
+  "settings.notificationDeliveryWatched": "Also send for these rooms and spaces",
+  "settings.notificationDeliveryWatchedDescription":
+    "A chosen room is sent even when its kind is off above. Choosing a space covers every room in it, including rooms added later. A room you read or mute is still skipped.",
+  "settings.notificationDeliveryWatchedAdd": "Add a room or space",
+  "settings.notificationDeliveryWatchedEmpty": "No rooms or spaces chosen",
+  "settings.notificationDeliveryWatchedRemove": "Remove {room}",
   "settings.notificationDeliverySinks": "Send through",
   "settings.notificationDeliveryAddSink": "Add a service",
   "settings.notificationDeliverySinkProvider": "Service",
@@ -4832,6 +4843,12 @@ const ja: Catalog = {
   "settings.notificationDeliveryIntervalDescription":
     "続けて通知があるときは、この間隔が過ぎるまでまとめて待ちます。にぎやかなルームでメールボックスがあふれるのを防ぎます。",
   "settings.notificationDeliveryOnlyUnfocused": "Koushiが非アクティブのときだけ",
+  "settings.notificationDeliveryWatched": "これらのルーム・スペースも送信する",
+  "settings.notificationDeliveryWatchedDescription":
+    "選んだルームは、上の種類がオフでも送信します。スペースを選ぶと、その中のすべてのルーム（後から追加されたルームも）が対象になります。既読にしたルームやミュートしたルームは送信しません。",
+  "settings.notificationDeliveryWatchedAdd": "ルーム・スペースを追加",
+  "settings.notificationDeliveryWatchedEmpty": "選択されたルーム・スペースはありません",
+  "settings.notificationDeliveryWatchedRemove": "{room}を削除",
   "settings.notificationDeliverySinks": "送信方法",
   "settings.notificationDeliveryAddSink": "サービスを追加",
   "settings.notificationDeliverySinkProvider": "サービス",

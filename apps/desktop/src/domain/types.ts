@@ -382,8 +382,19 @@ export interface NotificationDeliverySettings {
   min_interval_secs: number;
   prefix_chars: number;
   prefix_consent?: NotificationDeliveryPrefixConsent | null;
+  /**
+   * Rooms and spaces delivered whatever the triggers say. A watched space covers every
+   * joined room that is a child of it, resolved from the room list, so a room added
+   * later is covered. Only ids are stored; the room list supplies the label.
+   */
+  watched: NotificationDeliveryTarget[];
   sinks: NotificationSinkSettings[];
 }
+
+// Rust NotificationDeliveryTarget is #[serde(tag = "kind", rename_all = "camelCase")].
+export type NotificationDeliveryTarget =
+  | { kind: "room"; room_id: string }
+  | { kind: "space"; space_id: string };
 
 export interface NotificationSinkSettings {
   id: string;

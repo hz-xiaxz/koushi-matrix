@@ -28,6 +28,9 @@ pub const DEFAULT_NOTIFICATION_DELIVERY_PREFIX_CHARS: u32 = 80;
 /// Sinks are a short list the user configures by hand; the cap keeps a corrupted or
 /// hostile settings file from turning one settings load into unbounded work.
 pub const MAX_NOTIFICATION_DELIVERY_SINKS: usize = 8;
+/// The watch list is capped as well: a candidate set is built on every attention
+/// update, so the membership lookup has to stay bounded.
+pub const MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS: usize = 64;
 pub const MAX_NOTIFICATION_DELIVERY_FIELD_CHARS: usize = 320;
 const MAX_NOTIFICATION_SINK_ID_BYTES: usize = 64;
 
@@ -62,6 +65,11 @@ pub struct NotificationDeliverySettings {
     /// when `prefix_consent` matches the sink it would be sent through.
     pub prefix_chars: u32,
     pub prefix_consent: Option<NotificationDeliveryPrefixConsent>,
+    /// Rooms and spaces the user named, delivered whatever the three categories above
+    /// say. A watched space covers every joined room that is a child of it, resolved
+    /// from the room list when the candidate set is built, so a room added to the space
+    /// later is covered without editing this list.
+    pub watched: Vec<NotificationDeliveryTarget>,
     pub sinks: Vec<NotificationSinkSettings>,
 }
 
@@ -77,6 +85,7 @@ impl Default for NotificationDeliverySettings {
             min_interval_secs: DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
             prefix_chars: DEFAULT_NOTIFICATION_DELIVERY_PREFIX_CHARS,
             prefix_consent: None,
+            watched: Vec::new(),
             sinks: Vec::new(),
         }
     }
@@ -112,9 +121,24 @@ impl NotificationDeliverySettings {
             })
     }
 
+    /// Whether this exact room is named in the watch list. A watched space is resolved
+    /// by the caller, which knows the space's children.
+    pub fn watches_room(&self, room_id: &str) -> bool {
+        self.watched
+            .iter()
+            .any(|target| matches!(target, NotificationDeliveryTarget::Room { room_id: watched } if watched == room_id))
+    }
+
+    /// Whether this space is named in the watch list.
+    pub fn watches_space(&self, space_id: &str) -> bool {
+        self.watched
+            .iter()
+            .any(|target| matches!(target, NotificationDeliveryTarget::Space { space_id: watched } if watched == space_id))
+    }
+
     /// Apply what this device must never depend on a well-formed settings file for:
-    /// bounded numbers, bounded strings, unique sink ids, and a consent that still
-    /// matches a sink. Called on every load and every patch.
+    /// bounded numbers, bounded strings, unique sink ids and watch targets, and a
+    /// consent that still matches a sink. Called on every load and every patch.
     pub fn canonicalize(&mut self) {
         self.dwell_secs = self.dwell_secs.min(MAX_NOTIFICATION_DELIVERY_DWELL_SECS);
         self.min_interval_secs = self
@@ -136,6 +160,23 @@ impl NotificationDeliverySettings {
             }
         }
         self.sinks = canonical;
+
+        let mut watched: Vec<NotificationDeliveryTarget> = Vec::new();
+        for mut target in std::mem::take(&mut self.watched) {
+            target.canonicalize();
+            if !target.is_usable()
+                || watched
+                    .iter()
+                    .any(|existing| existing.kind_and_id() == target.kind_and_id())
+            {
+                continue;
+            }
+            watched.push(target);
+            if watched.len() == MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS {
+                break;
+            }
+        }
+        self.watched = watched;
 
         let consent_still_matches = self.prefix_consent.as_ref().is_some_and(|consent| {
             self.sinks.iter().any(|sink| {
@@ -162,6 +203,52 @@ where
     let mut settings = NotificationDeliverySettings::deserialize(deserializer)?;
     settings.canonicalize();
     Ok(settings)
+}
+
+/// A room or a space the user named, delivered whatever the trigger categories say.
+///
+/// Only the id is stored. A label would be a copy of a name the room list already owns,
+/// and it would go stale the moment the room is renamed.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NotificationDeliveryTarget {
+    Room { room_id: String },
+    Space { space_id: String },
+}
+
+impl NotificationDeliveryTarget {
+    /// The Matrix id this target names.
+    pub fn id(&self) -> &str {
+        match self {
+            Self::Room { room_id } => room_id,
+            Self::Space { space_id } => space_id,
+        }
+    }
+
+    fn kind_and_id(&self) -> (&'static str, &str) {
+        match self {
+            Self::Room { room_id } => ("room", room_id),
+            Self::Space { space_id } => ("space", space_id),
+        }
+    }
+
+    fn canonicalize(&mut self) {
+        let id = trimmed_field(self.id());
+        match self {
+            Self::Room { room_id } => *room_id = id,
+            Self::Space { space_id } => *space_id = id,
+        }
+    }
+
+    /// A target has to name a room or space id (`!`) or an alias (`#`), bounded, and free
+    /// of control characters. Anything else is dropped here rather than resolved later.
+    fn is_usable(&self) -> bool {
+        let id = self.id();
+        matches!(id.chars().next(), Some('!' | '#'))
+            && id.chars().count() > 1
+            && id.len() <= MAX_NOTIFICATION_DELIVERY_FIELD_CHARS
+            && !id.chars().any(char::is_control)
+    }
 }
 
 /// One configured way out of the device.
@@ -359,6 +446,7 @@ mod tests {
         let settings = NotificationDeliverySettings::default();
         assert!(!settings.enabled);
         assert!(settings.sinks.is_empty());
+        assert!(settings.watched.is_empty());
         assert_eq!(settings.prefix_consent, None);
         assert!(settings.prefix_chars > 0);
         assert!(
@@ -452,6 +540,63 @@ mod tests {
         settings.sinks.clear();
         settings.canonicalize();
         assert_eq!(settings.prefix_consent, None);
+    }
+
+    #[test]
+    fn the_watch_list_keeps_unique_targets_and_drops_what_is_not_an_id() {
+        let mut settings = NotificationDeliverySettings {
+            watched: vec![
+                NotificationDeliveryTarget::Room {
+                    room_id: " !a:example.org ".to_owned(),
+                },
+                NotificationDeliveryTarget::Room {
+                    room_id: "!a:example.org".to_owned(),
+                },
+                NotificationDeliveryTarget::Space {
+                    space_id: "!a:example.org".to_owned(),
+                },
+                NotificationDeliveryTarget::Room {
+                    room_id: "a:example.org".to_owned(),
+                },
+                NotificationDeliveryTarget::Space {
+                    space_id: "#alias:example.org".to_owned(),
+                },
+                NotificationDeliveryTarget::Room {
+                    room_id: "!".to_owned(),
+                },
+            ],
+            ..NotificationDeliverySettings::default()
+        };
+        settings.canonicalize();
+
+        assert_eq!(settings.watched.len(), 3);
+        assert_eq!(settings.watched[0].id(), "!a:example.org");
+        assert!(settings.watches_room("!a:example.org"));
+        // The same id as a space is a different target, so the space survives.
+        assert!(settings.watches_space("!a:example.org"));
+        assert!(settings.watches_space("#alias:example.org"));
+        assert!(!settings.watches_room("#alias:example.org"));
+        assert!(!settings.watches_room("a:example.org"));
+        assert!(!settings.watches_room("!"));
+    }
+
+    #[test]
+    fn the_watch_list_is_capped() {
+        let mut settings = NotificationDeliverySettings {
+            watched: (0..MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS + 5)
+                .map(|index| NotificationDeliveryTarget::Room {
+                    room_id: format!("!room{index}:example.org"),
+                })
+                .collect(),
+            ..NotificationDeliverySettings::default()
+        };
+        settings.canonicalize();
+        assert_eq!(
+            settings.watched.len(),
+            MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS
+        );
+        assert!(settings.watches_room("!room0:example.org"));
+        assert!(!settings.watches_room("!room64:example.org"));
     }
 
     #[test]

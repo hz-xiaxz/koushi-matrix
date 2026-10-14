@@ -130,7 +130,9 @@ pub use settings::{
 
 // ── Re-exports: notification delivery ───────────────────────────────────────
 pub use notification_delivery::{
-    NotificationDeliveryPrefixConsent, NotificationDeliverySettings, NotificationSinkConfig,
+    MAX_NOTIFICATION_DELIVERY_DWELL_SECS, MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
+    MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS, NotificationDeliveryPrefixConsent,
+    NotificationDeliverySettings, NotificationDeliveryTarget, NotificationSinkConfig,
     NotificationSinkSettings, SmtpTls,
 };
 
