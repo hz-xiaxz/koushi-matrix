@@ -89,7 +89,7 @@ Rules:
    display label, the kind, and the counts, and no room, event, sender, or
    transaction identifiers. Message text
    may be added only through a separate default-off option whose stored consent
-   matches the configured sink and destination. The transport is not
+   matches the configured sink, destination, and endpoint. The transport is not
    end-to-end encrypted, and whether the service stores the text depends on its
    own terms, which the consent copy tells the user to check; the app asserts no
    provider-specific retention as fact.
