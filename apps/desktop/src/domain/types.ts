@@ -198,6 +198,7 @@ export interface SettingsValues {
   keyboard: KeyboardSettings;
   composer: ComposerSettings;
   notifications: NotificationSettings;
+  delivery: NotificationDeliverySettings;
   display: DisplaySettings;
   window: WindowSettings;
   updates: UpdatesSettings;
@@ -218,6 +219,7 @@ export interface SettingsPatch {
   keyboard?: KeyboardSettings;
   composer?: ComposerSettings;
   notifications?: NotificationSettings;
+  delivery?: NotificationDeliverySettings;
   display?: DisplaySettings;
   window?: WindowSettings;
   updates?: UpdatesSettings;
@@ -363,6 +365,59 @@ export interface DisplaySettings {
   hide_redacted: boolean;
   url_previews_enabled: boolean;
   encrypted_url_previews_enabled: boolean;
+}
+
+/**
+ * #1427: this device's own notification delivery. App scope, so the Matrix account is
+ * never asked for a destination, and a sink's credential never crosses this boundary:
+ * the settings carry the id the credential store is keyed by and nothing else.
+ */
+export interface NotificationDeliverySettings {
+  enabled: boolean;
+  direct_messages: boolean;
+  mentions: boolean;
+  keywords: boolean;
+  only_when_unfocused: boolean;
+  dwell_secs: number;
+  min_interval_secs: number;
+  prefix_chars: number;
+  prefix_consent?: NotificationDeliveryPrefixConsent | null;
+  sinks: NotificationSinkSettings[];
+}
+
+export interface NotificationSinkSettings {
+  id: string;
+  enabled: boolean;
+  destination: string;
+  from_address: string;
+  sender_name: string;
+  config: NotificationSinkConfig;
+}
+
+// Rust NotificationSinkConfig is #[serde(tag = "kind", rename_all = "camelCase")].
+export type NotificationSinkConfig =
+  | { kind: "resend"; endpoint: string }
+  | {
+      kind: "smtp";
+      preset?: string | null;
+      host: string;
+      port: number;
+      tls: SmtpTls;
+      username: string;
+    };
+
+export type SmtpTls = "implicit" | "startTls";
+
+/**
+ * The user's acceptance of sending message text off the device unencrypted, for one
+ * sink and one destination. Rust drops it when the sink, its endpoint, or the
+ * destination changes, so the option turns itself off rather than following the text.
+ */
+export interface NotificationDeliveryPrefixConsent {
+  sink_id: string;
+  destination: string;
+  endpoint: string;
+  accepted_at_ms: number;
 }
 
 export interface WindowSettings {

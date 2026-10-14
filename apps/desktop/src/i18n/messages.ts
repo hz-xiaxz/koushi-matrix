@@ -951,6 +951,47 @@ export type MessageId =
   | "settings.notificationMessagePreviews"
   | "settings.notificationMessagePreviewsDescription"
   | "settings.notificationSound"
+  | "settings.notificationDelivery"
+  | "settings.notificationDeliveryDescription"
+  | "settings.notificationDeliveryTriggers"
+  | "settings.notificationDeliveryDirectMessages"
+  | "settings.notificationDeliveryMentions"
+  | "settings.notificationDeliveryKeywords"
+  | "settings.notificationDeliveryDwell"
+  | "settings.notificationDeliveryDwellDescription"
+  | "settings.notificationDeliveryInterval"
+  | "settings.notificationDeliveryIntervalDescription"
+  | "settings.notificationDeliveryOnlyUnfocused"
+  | "settings.notificationDeliverySinks"
+  | "settings.notificationDeliveryAddSink"
+  | "settings.notificationDeliverySinkProvider"
+  | "settings.notificationDeliverySinkName"
+  | "settings.notificationDeliverySinkFrom"
+  | "settings.notificationDeliverySinkTo"
+  | "settings.notificationDeliverySinkHost"
+  | "settings.notificationDeliverySinkPort"
+  | "settings.notificationDeliverySinkUsername"
+  | "settings.notificationDeliverySinkSecret"
+  | "settings.notificationDeliverySinkSecretSet"
+  | "settings.notificationDeliverySinkSecretMissing"
+  | "settings.notificationDeliverySinkTest"
+  | "settings.notificationDeliverySinkTestSending"
+  | "settings.notificationDeliverySinkRemove"
+  | "settings.notificationDeliveryLastResult"
+  | "settings.notificationDeliveryNeverSent"
+  | "settings.notificationDeliveryResultDelivered"
+  | "settings.notificationDeliveryResultInvalidSecret"
+  | "settings.notificationDeliveryResultNotPermitted"
+  | "settings.notificationDeliveryResultRejected"
+  | "settings.notificationDeliveryResultRateLimited"
+  | "settings.notificationDeliveryResultTransport"
+  | "settings.notificationDeliveryPrefix"
+  | "settings.notificationDeliveryPrefixDescription"
+  | "settings.notificationDeliveryPrefixChars"
+  | "settings.notificationDeliveryPrefixConsentTitle"
+  | "settings.notificationDeliveryPrefixConsentBody"
+  | "settings.notificationDeliveryPrefixConsentAccept"
+  | "settings.notificationDeliveryPrefixConsentLink"
   | "settings.sendReadReceipts"
   | "settings.sendTypingNotifications"
   | "settings.notifications"
@@ -2891,6 +2932,55 @@ const en: Catalog = {
   "settings.notificationMessagePreviewsDescription":
     "Message text will appear in banners and in your operating system's notification centre. This is a device-local setting.",
   "settings.notificationSound": "Sound",
+  "settings.notificationDelivery": "Notify me from this device",
+  "settings.notificationDeliveryDescription":
+    "Koushi sends this itself, through a service you configure, so it works on a homeserver that has no email support. A room is sent only while it is still unread.",
+  "settings.notificationDeliveryTriggers": "Send for",
+  "settings.notificationDeliveryDirectMessages": "Direct messages",
+  "settings.notificationDeliveryMentions": "Mentions and replies",
+  "settings.notificationDeliveryKeywords": "Your keywords",
+  "settings.notificationDeliveryDwell": "Wait before sending",
+  "settings.notificationDeliveryDwellDescription":
+    "A room is included only if it is still unread after this long, so a conversation you are reading is never sent.",
+  "settings.notificationDeliveryInterval": "Shortest gap between sends",
+  "settings.notificationDeliveryIntervalDescription":
+    "Further notifications wait this long, so a busy room cannot fill your mailbox.",
+  "settings.notificationDeliveryOnlyUnfocused": "Only while Koushi is not focused",
+  "settings.notificationDeliverySinks": "Send through",
+  "settings.notificationDeliveryAddSink": "Add a service",
+  "settings.notificationDeliverySinkProvider": "Service",
+  "settings.notificationDeliverySinkName": "Name",
+  "settings.notificationDeliverySinkFrom": "From address",
+  "settings.notificationDeliverySinkTo": "Send to",
+  "settings.notificationDeliverySinkHost": "Server",
+  "settings.notificationDeliverySinkPort": "Port",
+  "settings.notificationDeliverySinkUsername": "Username",
+  "settings.notificationDeliverySinkSecret": "App password or API key",
+  "settings.notificationDeliverySinkSecretSet": "Saved. Enter a new value to replace it.",
+  "settings.notificationDeliverySinkSecretMissing": "Not set",
+  "settings.notificationDeliverySinkTest": "Send a test",
+  "settings.notificationDeliverySinkTestSending": "Sending…",
+  "settings.notificationDeliverySinkRemove": "Remove",
+  "settings.notificationDeliveryLastResult": "Last send",
+  "settings.notificationDeliveryNeverSent": "Not sent yet",
+  "settings.notificationDeliveryResultDelivered": "Delivered",
+  "settings.notificationDeliveryResultInvalidSecret":
+    "The service rejected the key. Enter it again.",
+  "settings.notificationDeliveryResultNotPermitted":
+    "The service refused this sender or this account. Check the from address and the account status.",
+  "settings.notificationDeliveryResultRejected": "The service refused the message.",
+  "settings.notificationDeliveryResultRateLimited":
+    "The service is limiting how often it accepts messages. Koushi will try again later.",
+  "settings.notificationDeliveryResultTransport": "Could not reach the service.",
+  "settings.notificationDeliveryPrefix": "Include the start of the message",
+  "settings.notificationDeliveryPrefixDescription":
+    "Off by default. The first characters of the message are added as plain text, so anyone who can read the message can read them.",
+  "settings.notificationDeliveryPrefixChars": "Characters",
+  "settings.notificationDeliveryPrefixConsentTitle": "Send message text unencrypted?",
+  "settings.notificationDeliveryPrefixConsentBody":
+    "The start of the message leaves this device as plain text and passes through {service} to {destination} without end-to-end encryption. Whether, and for how long, that service keeps it depends on that service's own terms, so read them before turning this on. Room names and counts are sent either way.",
+  "settings.notificationDeliveryPrefixConsentAccept": "Turn on and accept",
+  "settings.notificationDeliveryPrefixConsentLink": "Read the service's terms",
   "settings.sendReadReceipts": "Send read receipts",
   "settings.sendTypingNotifications": "Send typing notifications",
   "settings.notifications": "Notifications",
@@ -4728,6 +4818,57 @@ const ja: Catalog = {
   "settings.notificationMessagePreviewsDescription":
     "バナーとOSの通知センターにメッセージ本文が表示されます。この設定はこの端末だけに保存されます。",
   "settings.notificationSound": "サウンド",
+  "settings.notificationDelivery": "この端末から通知する",
+  "settings.notificationDeliveryDescription":
+    "メール送信サービスを設定すると、Koushiがこの端末から直接送信します。メール通知に対応していないホームサーバーでも使えます。送信するのは、未読のままのルームだけです。",
+  "settings.notificationDeliveryTriggers": "送信する対象",
+  "settings.notificationDeliveryDirectMessages": "ダイレクトメッセージ",
+  "settings.notificationDeliveryMentions": "メンション・返信",
+  "settings.notificationDeliveryKeywords": "設定したキーワード",
+  "settings.notificationDeliveryDwell": "送信までの待ち時間",
+  "settings.notificationDeliveryDwellDescription":
+    "この時間が過ぎても未読のままのルームだけを送信します。読んでいる途中の会話は送信されません。",
+  "settings.notificationDeliveryInterval": "送信の最短間隔",
+  "settings.notificationDeliveryIntervalDescription":
+    "続けて通知があるときは、この間隔が過ぎるまでまとめて待ちます。にぎやかなルームでメールボックスがあふれるのを防ぎます。",
+  "settings.notificationDeliveryOnlyUnfocused": "Koushiが非アクティブのときだけ",
+  "settings.notificationDeliverySinks": "送信方法",
+  "settings.notificationDeliveryAddSink": "サービスを追加",
+  "settings.notificationDeliverySinkProvider": "サービス",
+  "settings.notificationDeliverySinkName": "名前",
+  "settings.notificationDeliverySinkFrom": "差出人アドレス",
+  "settings.notificationDeliverySinkTo": "送信先",
+  "settings.notificationDeliverySinkHost": "サーバー",
+  "settings.notificationDeliverySinkPort": "ポート",
+  "settings.notificationDeliverySinkUsername": "ユーザー名",
+  "settings.notificationDeliverySinkSecret": "アプリパスワードまたはAPIキー",
+  "settings.notificationDeliverySinkSecretSet":
+    "保存済みです。変更するには新しい値を入力してください。",
+  "settings.notificationDeliverySinkSecretMissing": "未設定",
+  "settings.notificationDeliverySinkTest": "テスト送信",
+  "settings.notificationDeliverySinkTestSending": "送信中…",
+  "settings.notificationDeliverySinkRemove": "削除",
+  "settings.notificationDeliveryLastResult": "前回の送信",
+  "settings.notificationDeliveryNeverSent": "まだ送信していません",
+  "settings.notificationDeliveryResultDelivered": "送信しました",
+  "settings.notificationDeliveryResultInvalidSecret":
+    "サービスがキーを受け付けませんでした。もう一度入力してください。",
+  "settings.notificationDeliveryResultNotPermitted":
+    "サービスがこの差出人またはアカウントを受け付けませんでした。差出人アドレスとアカウントの状態を確認してください。",
+  "settings.notificationDeliveryResultRejected": "サービスがメッセージを拒否しました。",
+  "settings.notificationDeliveryResultRateLimited":
+    "送信回数が制限されています。しばらくしてから再試行します。",
+  "settings.notificationDeliveryResultTransport": "サービスに接続できませんでした。",
+  "settings.notificationDeliveryPrefix": "メッセージの冒頭を含める",
+  "settings.notificationDeliveryPrefixDescription":
+    "初期設定ではオフです。メッセージの冒頭が平文で追加されるため、メッセージを読める人には読まれます。",
+  "settings.notificationDeliveryPrefixChars": "文字数",
+  "settings.notificationDeliveryPrefixConsentTitle":
+    "メッセージ本文を暗号化せずに送信しますか？",
+  "settings.notificationDeliveryPrefixConsentBody":
+    "メッセージの冒頭は平文でこの端末を離れ、エンドツーエンド暗号化なしで{service}から{destination}へ送られます。そのサービスが本文を保持するかどうか、また保持期間は、そのサービスの規約によります。オンにする前に規約を確認してください。ルーム名と件数はどちらでも送信されます。",
+  "settings.notificationDeliveryPrefixConsentAccept": "オンにして同意する",
+  "settings.notificationDeliveryPrefixConsentLink": "サービスの規約を読む",
   "settings.sendReadReceipts": "既読を送信",
   "settings.sendTypingNotifications": "入力通知を送信",
   "settings.notifications": "通知",

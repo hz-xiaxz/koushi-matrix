@@ -380,6 +380,18 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         send_read_receipts: true,
         send_typing_notifications: true
       },
+      delivery: {
+        enabled: false,
+        direct_messages: true,
+        mentions: true,
+        keywords: true,
+        only_when_unfocused: true,
+        dwell_secs: 300,
+        min_interval_secs: 900,
+        prefix_chars: 80,
+        prefix_consent: null,
+        sinks: []
+      },
       display: {
         code_block_wrap: true,
         hide_redacted: true,
@@ -543,6 +555,7 @@ function applySettingsPatch(
     keyboard: patch.keyboard ?? values.keyboard,
     composer: patch.composer ?? values.composer,
     notifications: patch.notifications ?? values.notifications,
+    delivery: patch.delivery ?? values.delivery,
     display: patch.display ?? values.display,
     window: patch.window ?? values.window,
     updates: patch.updates ?? values.updates,

@@ -7,6 +7,7 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 import { UserSettingsPanel } from "./UserSettingsPanel";
 import type {
   E2eeTrustState,
+  NotificationDeliverySettings,
   ProfileState,
   RoomSummary,
   SecureBackupGateState
@@ -14,6 +15,20 @@ import type {
 import { t } from "../i18n/messages";
 
 describe("UserSettingsPanel", () => {
+  // Mirrors the Rust default for the required `SettingsValues.delivery` field. Declared
+  // separately so the readonly `as const` fixture below does not freeze `sinks`.
+  const defaultDelivery: NotificationDeliverySettings = {
+    enabled: false,
+    direct_messages: true,
+    mentions: true,
+    keywords: true,
+    only_when_unfocused: true,
+    dwell_secs: 300,
+    min_interval_secs: 900,
+    prefix_chars: 80,
+    prefix_consent: null,
+    sinks: []
+  };
   const settings = {
     values: {
       locale: { language_tag: null, text_direction: "auto" },
@@ -29,6 +44,7 @@ describe("UserSettingsPanel", () => {
         send_read_receipts: true,
         send_typing_notifications: true
       },
+      delivery: defaultDelivery,
       display: {
         code_block_wrap: true,
         hide_redacted: false,
