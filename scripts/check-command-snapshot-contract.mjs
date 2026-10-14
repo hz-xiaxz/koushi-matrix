@@ -7,6 +7,9 @@ const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const commands = join(root, "apps/desktop/src-tauri/src/commands");
 const forbidden = /\b(?:FrontendDesktopSnapshot|current_snapshot)\b/;
 const allowed = new Set(["get_snapshot", "settlement_snapshot", "resync_snapshot"]);
+// The renderer's command names are a frozen half of this contract, so the check below
+// refuses to pass vacuously if the file that names them moves or stops matching.
+const MIN_RENDERER_COMMANDS = 100;
 const violations = [];
 const removedAcknowledgement = /(?:AcknowledgeTimeline(?:Projection|BatchRendered)|acknowledge_timeline_(?:projection|batch_rendered)|acknowledgeTimeline(?:Projection|BatchRendered)|timelineAcknowledgementDelivery)/;
 
@@ -85,6 +88,38 @@ const versions = versionSources.map(([name, pattern]) => {
 if (versions.every(([, version]) => version !== null)) {
   const [[rustName, rust], [tsName, ts]] = versions;
   if (rust !== ts) violations.push(`${rustName} says ${rust} while ${tsName} says ${ts}`);
+}
+
+// A Tauri command name is a contract in two languages: the renderer invokes a string and
+// Rust declares a function and registers it. Getting either half wrong is not a compile
+// error anywhere, it is a command that fails at the moment a user clicks it. So every name
+// the renderer invokes must exist as a command function and be registered in the handler.
+const rendererSources = sourceFiles(join(root, "apps/desktop/src/backend"));
+const invoked = new Set();
+for (const path of rendererSources) {
+  const source = readFileSync(path, "utf8");
+  for (const match of source.matchAll(/invokeCommand(?:<[^>]*>)?\(\s*"([a-z0-9_]+)"/g)) {
+    invoked.add(match[1]);
+  }
+}
+if (invoked.size < MIN_RENDERER_COMMANDS) {
+  violations.push(
+    `only ${invoked.size} renderer commands were found; the invocation scan expects at least ${MIN_RENDERER_COMMANDS}`
+  );
+}
+const declared = new Set();
+for (const path of sourceFiles(join(root, "apps/desktop/src-tauri/src"))) {
+  if (!path.endsWith(".rs")) continue;
+  const source = readFileSync(path, "utf8");
+  for (const match of source.matchAll(/pub (?:async )?fn ([a-z0-9_]+)\s*\(/g)) declared.add(match[1]);
+}
+const handler = readFileSync(join(root, "apps/desktop/src-tauri/src/lib.rs"), "utf8");
+const registered = new Set(
+  [...handler.matchAll(/commands::([a-z0-9_:]+)/g)].map((match) => match[1].split(":").pop())
+);
+for (const name of invoked) {
+  if (!declared.has(name)) violations.push(`renderer invokes ${name}, which no Rust command declares`);
+  if (!registered.has(name)) violations.push(`renderer invokes ${name}, which the invoke handler does not register`);
 }
 
 if (violations.length) {
