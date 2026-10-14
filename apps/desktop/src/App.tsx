@@ -1674,13 +1674,6 @@ function AccountContent({
       snapshot?.state.ui.navigation.active_space_id
     ]
   );
-  const createRoomAccessPreview = useCreateRoomAccessPreview(
-    api,
-    createRoomAccessScope,
-    createRoomAccessInput,
-    snapshot?.state_generation,
-    createDialog === "room"
-  );
   // #1177: only this open dialog's own create session may show or consume its
   // draft; a stale draft from a previous lifetime is never rendered.
   const createRoomAccessDraft = useMemo(() => {
@@ -1689,6 +1682,16 @@ function AccountContent({
       ? draft
       : null;
   }, [snapshot?.state.domain.room_management.draft, createAccessSessionId]);
+  // #1417: the draft revision is the create preview's selection key, so an
+  // unrelated snapshot advance never blanks the shown details.
+  const createRoomAccessPreview = useCreateRoomAccessPreview(
+    api,
+    createRoomAccessScope,
+    createRoomAccessInput,
+    `draft:${createRoomAccessDraft?.revision ?? "none"}`,
+    snapshot?.state_generation,
+    createDialog === "room"
+  );
   const createRoomJoinedSpaces = useMemo(
     () => (snapshot?.state.domain.spaces ?? []).map((space) => ({
       id: space.space_id,
@@ -2917,9 +2920,11 @@ function AccountContent({
 
   // #1177: the Room Info access/history editor reads the Rust-owned draft and a
   // stateless Rust preview for the current scope. The preview re-requests on
-  // every published generation (a draft mutation, a confirmed-property
-  // advance, an encryption toggle or a session reset) and drops any older
-  // response, so an out-of-order result never replaces newer details.
+  // every published generation and drops any older response, so an
+  // out-of-order result never replaces newer details. #1417: only a change of
+  // the selection key (the draft revision and the confirmed values the panel
+  // shows) hides the shown details; an unrelated snapshot advance keeps them
+  // on screen while the newer preview is fetched.
   const roomAccessScope = useMemo<RoomAccessDraftScope | null>(
     () =>
       rightPanelMode === "roomInfo" && snapshot?.state.ui.navigation.active_room_id
@@ -2927,10 +2932,29 @@ function AccountContent({
         : null,
     [rightPanelMode, snapshot?.state.ui.navigation.active_room_id]
   );
+  const roomAccessSelectionKey = useMemo(() => {
+    const roomId = roomAccessScope?.kind === "room" ? roomAccessScope.roomId : null;
+    const roomManagement = snapshot?.state.domain.room_management;
+    const draft = roomManagement?.draft;
+    const settings = roomManagement?.settings;
+    return JSON.stringify([
+      draft?.scope.kind === "room" && draft.scope.roomId === roomId ? draft.revision : null,
+      settings && settings.room_id === roomId
+        ? [settings.join_rule, settings.history_visibility]
+        : null,
+      snapshot?.state.domain.rooms.find((room) => room.room_id === roomId)?.is_encrypted ?? null
+    ]);
+  }, [
+    roomAccessScope,
+    snapshot?.state.domain.room_management.draft,
+    snapshot?.state.domain.room_management.settings,
+    snapshot?.state.domain.rooms
+  ]);
   const roomAccessPreview = useRoomAccessPreview(
     api,
     roomAccessScope,
     "access",
+    roomAccessSelectionKey,
     snapshot?.state_generation,
     true
   );
@@ -2938,6 +2962,7 @@ function AccountContent({
     api,
     roomAccessScope,
     "history",
+    roomAccessSelectionKey,
     snapshot?.state_generation,
     true
   );
