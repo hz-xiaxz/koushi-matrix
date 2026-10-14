@@ -1482,6 +1482,8 @@ fn composer_draft_has_content(
 }
 
 #[cfg(test)]
+mod direct_message_tests;
+#[cfg(test)]
 mod event_navigation_tests;
 #[cfg(test)]
 mod tests;
