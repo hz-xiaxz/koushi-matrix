@@ -8,13 +8,15 @@ use koushi_protocol::ids::AccountKey;
 use koushi_state::{AppState, RoomSummary, RoomTags, SessionInfo, SessionState};
 
 fn existing_dm_snapshot(generation: u64) -> VersionedAppStateSnapshot {
-    let mut state = AppState::default();
-    state.session = SessionState::Ready(SessionInfo {
-        homeserver: "https://example.invalid".to_owned(),
-        user_id: "@me:example.invalid".to_owned(),
-        device_id: "DEVICE".to_owned(),
-        authentication_method: Default::default(),
-    });
+    let mut state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: "@me:example.invalid".to_owned(),
+            device_id: "DEVICE".to_owned(),
+            authentication_method: Default::default(),
+        }),
+        ..Default::default()
+    };
     state.rooms.push(RoomSummary {
         room_id: "!dm:example.invalid".to_owned(),
         display_name: "Synthetic DM".to_owned(),
