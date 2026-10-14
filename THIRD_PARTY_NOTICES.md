@@ -23,7 +23,7 @@ Notes:
 
 Project: matrix-rust-sdk
 Repository: https://github.com/matrix-org/matrix-rust-sdk
-Upstream commit: `a8c2b7cc7d0e39ba99308f809e4e4fb33f394626` (vendored submodule; the Koushi fork `main`, which merges fork PR #22 (#1344 operation-scoped search readers) on top of `7572e53c93d08b5ced009da7fd6257853d4a7642`, which merges upstream `matrix-sdk-0.19.1` via the `chore/upstream-0.19.1` branch plus fork PR #21 (#1344 owner-side retention counters); bump this and the parent gitlink together when the fork commit changes)
+Upstream commit: `d315a2fa4fb489f479c7bc85ebea459b408f12ac` (vendored submodule; the Koushi fork `main`, which merges fork PR #24 (#1395 removal of the unused cache-only deep-history restore surface) on top of `e94cddf500064d444e0ac9afd4b3e50c8e3e7c4d` (fork PR #23, #1392 topology-first gap inspection) on top of `a8c2b7cc7d0e39ba99308f809e4e4fb33f394626` (fork PR #22, #1344 operation-scoped search readers) on top of `7572e53c93d08b5ced009da7fd6257853d4a7642`, which merges upstream `matrix-sdk-0.19.1` via the `chore/upstream-0.19.1` branch plus fork PR #21 (#1344 owner-side retention counters); bump this and the parent gitlink together when the fork commit changes)
 Source path: `crates/` in the upstream repository
 Local path: `vendor/matrix-rust-sdk`
 License: Apache-2.0

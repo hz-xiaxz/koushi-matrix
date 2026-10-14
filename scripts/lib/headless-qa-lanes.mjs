@@ -43,7 +43,6 @@ export const NIGHTLY_SCENARIOS = Object.freeze([
   "gate_restore",
   "device_cleanup",
   "e2ee_login_store",
-  "cache_restore",
   "timeline_reconnect",
   "timeline_stress",
   "avatar_demand",

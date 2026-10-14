@@ -268,14 +268,13 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
             LocalEncryptionEvent, NativeAttentionEvent, PaginationDirection, PaginationState,
             ReactionGroup, RoomEvent, RoomKeyRequestStage, RoomKeyRequestStateDto,
             RoomKeyRequestWithheldCode, SearchEvent, SyncEvent, ThreadSummaryDto, ThreadsListEvent,
-            TimelineAnchorRestoreStatus, TimelineCodeBlock, TimelineDisplayKind,
-            TimelineDisplayLabelUpdate, TimelineDisplayMetadata, TimelineEvent,
-            TimelineFormattedBody, TimelineGapId, TimelineGapPosition, TimelineItem,
-            TimelineItemId, TimelineMedia, TimelineMediaKind, TimelineMediaSource,
-            TimelineMediaThumbnail, TimelineMegolmSessionReason, TimelineMessageActions,
-            TimelineMessageKind, TimelineMessageSource, TimelineNavigationSnapshot,
-            TimelineResyncReason, TimelineSendFailureReason, TimelineSendState,
-            TimelineSpoilerSpan, TimelineUnreadPosition,
+            TimelineCodeBlock, TimelineDisplayKind, TimelineDisplayLabelUpdate,
+            TimelineDisplayMetadata, TimelineEvent, TimelineFormattedBody, TimelineGapId,
+            TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMedia, TimelineMediaKind,
+            TimelineMediaSource, TimelineMediaThumbnail, TimelineMegolmSessionReason,
+            TimelineMessageActions, TimelineMessageKind, TimelineMessageSource,
+            TimelineNavigationSnapshot, TimelineResyncReason, TimelineSendFailureReason,
+            TimelineSendState, TimelineSpoilerSpan, TimelineUnreadPosition,
         },
         failure::{CoreFailure, TimelineFailureKind},
         ids::{RequestId, RuntimeConnectionId, TimelineBatchId, TimelineGeneration},
@@ -1006,18 +1005,6 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
     assert_eq!(pagination["direction"], json!("Backward"));
     assert_eq!(pagination["state"], json!("EndReached"));
     assert_eq!(pagination["prepend_expected"], json!(false));
-
-    let anchor_restore_finished =
-        serialize_core_event(&CoreEvent::Timeline(TimelineEvent::AnchorRestoreFinished {
-            request_id,
-            key: key.clone(),
-            status: TimelineAnchorRestoreStatus::BudgetExhausted,
-        }))
-        .expect("serialize anchor restore finished");
-    assert_eq!(
-        anchor_restore_finished["event"]["AnchorRestoreFinished"]["status"],
-        json!("BudgetExhausted")
-    );
 
     // ResyncRequired reason is a string
     let resync = serialize_core_event(&CoreEvent::Timeline(TimelineEvent::ResyncRequired {
@@ -1773,7 +1760,6 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
             "timelineNavigationUpdated": navigation_updated,
             "timelineGapPositionsUpdated": gap_positions_updated,
             "timelineGapRepairReleased": gap_repair_released,
-            "timelineAnchorRestoreFinished": anchor_restore_finished,
             "timelinePaginationEndReached": serialize_core_event(&CoreEvent::Timeline(
             TimelineEvent::PaginationStateChanged {
                 request_id: None,
@@ -1933,7 +1919,6 @@ fn core_event_contract_artifact_key_set_does_not_shrink() {
         "timelineMediaSendQueued",
         "timelineMessageForwarded",
         "timelineMessageSourceLoaded",
-        "timelineAnchorRestoreFinished",
         "timelineNavigationUpdated",
         "timelineGapPositionsUpdated",
         "timelineGapRepairReleased",

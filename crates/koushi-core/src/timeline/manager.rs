@@ -29,7 +29,7 @@ use crate::threads_list::{
     ThreadRootProjectionService,
 };
 use koushi_protocol::command::{InitialBackfillPolicy, TimelineCommand};
-use koushi_protocol::event::{CoreEvent, TimelineAnchorRestoreStatus, TimelineEvent, TimelineItem};
+use koushi_protocol::event::{CoreEvent, TimelineEvent, TimelineItem};
 use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 use koushi_protocol::ids::{RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
 
@@ -1316,35 +1316,6 @@ impl TimelineManagerActor {
                     let _ = handle
                         .send(TimelineActorMessage::CancelLinkPreviews { request_id })
                         .await;
-                }
-            }
-            TimelineCommand::RestoreTimelineAnchor {
-                request_id,
-                key,
-                event_id,
-                max_batches,
-                event_count,
-            } => {
-                if matches!(&key.kind, TimelineKind::Room { .. }) {
-                    self.route_to_actor_or_fail(
-                        request_id,
-                        &key,
-                        TimelineActorMessage::RestoreTimelineAnchor {
-                            request_id,
-                            event_id,
-                            max_batches,
-                            event_count,
-                        },
-                    )
-                    .await;
-                } else {
-                    self.emit(CoreEvent::Timeline(TimelineEvent::AnchorRestoreFinished {
-                        request_id,
-                        key,
-                        status: TimelineAnchorRestoreStatus::Failed {
-                            kind: TimelineFailureKind::NotSubscribed,
-                        },
-                    }));
                 }
             }
             TimelineCommand::ObserveViewport {

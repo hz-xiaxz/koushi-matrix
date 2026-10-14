@@ -1,8 +1,6 @@
 use super::*;
 
 pub(super) const TIMELINE_BACKWARDS_PAGE_EVENT_COUNT: u16 = 100;
-#[cfg(test)]
-pub(super) const TIMELINE_RESTORE_ANCHOR_MAX_BATCHES: u16 = 6;
 
 pub(super) fn trace_tauri_timeline_command(
     stage: &'static str,
@@ -115,26 +113,6 @@ pub(super) fn build_paginate_thread_timeline_backwards_command(
         },
         direction: PaginationDirection::Backward,
         event_count: TIMELINE_BACKWARDS_PAGE_EVENT_COUNT,
-    })
-}
-
-pub(super) fn build_restore_timeline_anchor_command(
-    request_id: koushi_protocol::RequestId,
-    account_key: AccountKey,
-    timeline_key: TimelineKey,
-    event_id: String,
-    max_batches: u16,
-    event_count: u16,
-) -> CoreCommand {
-    CoreCommand::Timeline(TimelineCommand::RestoreTimelineAnchor {
-        request_id,
-        key: TimelineKey {
-            account_key,
-            kind: timeline_key.kind,
-        },
-        event_id,
-        max_batches,
-        event_count,
     })
 }
 
@@ -878,34 +856,6 @@ pub async fn paginate_timeline_backwards(
     let admission = submit_core_command_with_admission(
         state.inner(),
         build_paginate_timeline_backwards_command(request_id, account_key, room_id),
-    )
-    .await?;
-    update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(admission)
-}
-
-#[tauri::command]
-pub async fn restore_timeline_anchor(
-    account_tab_id: Option<String>,
-    timeline_key: TimelineKey,
-    event_id: String,
-    max_batches: u16,
-    event_count: u16,
-    app: AppHandle,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendCommandAdmission, String> {
-    let account_key = account_key_from_snapshot(state.inner(), account_tab_id.as_deref()).await?;
-    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
-    let admission = submit_core_command_with_admission(
-        state.inner(),
-        build_restore_timeline_anchor_command(
-            request_id,
-            account_key,
-            timeline_key,
-            event_id,
-            max_batches,
-            event_count,
-        ),
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;

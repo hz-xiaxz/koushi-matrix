@@ -797,10 +797,8 @@ impl DisplayProjectionContext {
     pub(super) fn for_timeline(
         kind: &TimelineKind,
         observation: &TimelineViewportObservation,
-        restoring_anchor: bool,
     ) -> Self {
-        let bounded_live_edge =
-            matches!(kind, TimelineKind::Room { .. }) && observation.at_bottom && !restoring_anchor;
+        let bounded_live_edge = matches!(kind, TimelineKind::Room { .. }) && observation.at_bottom;
         Self {
             max_live_edge_items: bounded_live_edge.then_some(ROOM_REPLAY_INITIAL_ITEMS_MAX),
             include_prepend: !bounded_live_edge,
@@ -1843,19 +1841,6 @@ fn timeline_item_render_id(item: &TimelineItem) -> String {
         TimelineItemId::Transaction { transaction_id } => format!("txn:{transaction_id}"),
         TimelineItemId::Synthetic { synthetic_id } => format!("syn:{synthetic_id}"),
     }
-}
-
-pub(super) fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
-    diffs.iter().any(|diff| match diff {
-        TimelineDiff::PushFront { .. } => true,
-        TimelineDiff::Insert { index, .. } => *index == 0,
-        TimelineDiff::Reset { .. } => true,
-        TimelineDiff::PushBack { .. }
-        | TimelineDiff::Set { .. }
-        | TimelineDiff::Remove { .. }
-        | TimelineDiff::Truncate { .. }
-        | TimelineDiff::Clear => false,
-    })
 }
 
 #[cfg(test)]

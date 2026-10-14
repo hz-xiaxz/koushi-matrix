@@ -17,10 +17,9 @@ use crate::executor;
 use crate::search::SearchIndexMessage;
 use crate::threads_list::ThreadRootProjectionService;
 use koushi_protocol::event::{
-    CoreEvent, TimelineAnchorRestoreStatus, TimelineDiff, TimelineEvent, TimelineItem,
-    TimelineResyncReason, TimelineViewportObservation,
+    CoreEvent, TimelineDiff, TimelineEvent, TimelineItem, TimelineResyncReason,
+    TimelineViewportObservation,
 };
-use koushi_protocol::failure::TimelineFailureKind;
 use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 
 // BEGIN GENERATED SIBLING IMPORTS
@@ -34,7 +33,7 @@ use super::diagnostics::{
 };
 use super::display_projection::{
     DisplayProjectionContext, DisplayProjectionState, apply_timeline_diffs_to_items,
-    commit_sdk_batch_for_generation, timeline_diffs_include_prepend,
+    commit_sdk_batch_for_generation,
 };
 use super::gap_repair::{
     TimelineGapRepairTrigger, observe_causal_projection, post_diff_gap_inspection_trigger,
@@ -517,8 +516,6 @@ impl TimelineActor {
             .iter()
             .flat_map(|diff| self.search_index_messages_for_diff(diff))
             .collect::<Vec<_>>();
-        let restore_diff_is_relevant = timeline_diffs_include_prepend(&core_diffs);
-        let restore_active = self.restore_anchor.is_some();
         let previous_navigation_items = self.navigation_items.clone();
         // Reserve the sole canonical Activity replacement before entering the
         // generation commit. The permit and lease remain live through the
@@ -557,18 +554,15 @@ impl TimelineActor {
         for diff in &mut core_diffs {
             overlay_thread_summary_diff(&self.thread_root_projection_service, &self.key, diff);
         }
-        let display_context = DisplayProjectionContext::for_timeline(
-            &self.key.kind,
-            &self.viewport_observation,
-            restore_active,
-        )
-        .with_thread_roots(
-            self.thread_root_order,
-            self.thread_root_projection_service
-                .lock()
-                .expect("thread-root projection service lock must not be poisoned")
-                .display_data_for_room(self.key.room_id()),
-        );
+        let display_context =
+            DisplayProjectionContext::for_timeline(&self.key.kind, &self.viewport_observation)
+                .with_thread_roots(
+                    self.thread_root_order,
+                    self.thread_root_projection_service
+                        .lock()
+                        .expect("thread-root projection service lock must not be poisoned")
+                        .display_data_for_room(self.key.room_id()),
+                );
         trace_timeline_diffs("diff_batch", &self.key, &core_diffs);
 
         let Some((emitted, emitted_batch_id)) = commit_sdk_batch_for_generation(
@@ -604,24 +598,18 @@ impl TimelineActor {
                     display_projection.display_items().len(),
                 );
                 let display_diffs = projected_batch.display_diffs;
-                let emitted = if restore_active {
-                    self.next_batch_id = TimelineBatchId(self.next_batch_id.0 + 1);
-                    self.restore_emit_buffer.extend(display_diffs);
-                    false
-                } else {
-                    super::navigation::emit_timeline_events_with_lease(
-                        &self.event_tx,
-                        projection_lease,
-                        vec![TimelineEvent::ItemsUpdated {
-                            key: self.key.clone(),
-                            generation: self.generation,
-                            batch_id: emitted_batch_id,
-                            diffs: display_diffs,
-                        }],
-                    );
-                    self.next_batch_id = TimelineBatchId(emitted_batch_id.0 + 1);
-                    true
-                };
+                super::navigation::emit_timeline_events_with_lease(
+                    &self.event_tx,
+                    projection_lease,
+                    vec![TimelineEvent::ItemsUpdated {
+                        key: self.key.clone(),
+                        generation: self.generation,
+                        batch_id: emitted_batch_id,
+                        diffs: display_diffs,
+                    }],
+                );
+                self.next_batch_id = TimelineBatchId(emitted_batch_id.0 + 1);
+                let emitted = true;
                 (emitted, emitted_batch_id)
             },
         ) else {
@@ -880,138 +868,86 @@ impl TimelineActor {
 
         let mut live_tail_completion_published = false;
 
-        if restore_active {
-            // While a restore walk is in-flight, buffer this batch's diffs
-            // instead of emitting ItemsUpdated per chunk. React receives ONE
-            // settled update when the restore terminates. The batch_id counter
-            // is still advanced so later non-restore emits remain monotonic.
-            for projection in &gap_repair_projections {
+        self.emit_navigation_if_changed();
+        if emitted {
+            let mut ready_gap_projection_batch = None;
+            let mut live_tail_projection_ready = false;
+            for projection in gap_repair_projections {
+                let correlation = match projection.operation.domain {
+                    CausalProjectionDomain::HistoricalGap => &self.gap_projection_correlation,
+                    CausalProjectionDomain::LiveTail => &self.live_tail_projection_correlation,
+                };
+                let accepts = correlation.accepts(projection);
+                let expected_projection_batch = correlation.expected_last_projection_batch;
+                let observed_projection_count = correlation.observed_batches.len();
+                record_timeline_gap_projection_boundary(
+                    "actor_received",
+                    if accepts {
+                        "accepted"
+                    } else {
+                        "rejected_operation"
+                    },
+                    projection.actor_generation,
+                    self.generation,
+                    projection.operation,
+                    Some(projection.projection_batch),
+                    Some(emitted_batch_id),
+                    expected_projection_batch,
+                    observed_projection_count,
+                );
+                let observation = observe_causal_projection(
+                    &mut self.gap_projection_correlation,
+                    &mut self.live_tail_projection_correlation,
+                    projection,
+                    emitted_batch_id,
+                );
+                if observation.live_tail_batch_id.is_some() {
+                    live_tail_projection_ready = true;
+                }
+                if ready_gap_projection_batch.is_none() {
+                    ready_gap_projection_batch = observation.historical_gap_batch_id;
+                }
+            }
+            drop(post_media_lease.take());
+            if let Some(batch_id) = ready_gap_projection_batch {
+                self.finish_pending_gap_projection(batch_id).await;
+                if self
+                    .timeline_actor_generations
+                    .try_acquire(&self.key, self.actor_generation)
+                    .is_none()
+                {
+                    return;
+                }
+            }
+            if live_tail_projection_ready {
+                live_tail_completion_published = self.finish_pending_live_tail_projection().await;
+                if self
+                    .timeline_actor_generations
+                    .try_acquire(&self.key, self.actor_generation)
+                    .is_none()
+                {
+                    return;
+                }
+            }
+            self.maybe_hydrate_missing_thread_roots(Some(thread_summary_affected_roots))
+                .await;
+        } else {
+            for projection in gap_repair_projections {
                 let correlation = match projection.operation.domain {
                     CausalProjectionDomain::HistoricalGap => &self.gap_projection_correlation,
                     CausalProjectionDomain::LiveTail => &self.live_tail_projection_correlation,
                 };
                 record_timeline_gap_projection_boundary(
                     "actor_received",
-                    "buffered_restore",
+                    "display_emit_rejected",
                     projection.actor_generation,
                     self.generation,
                     projection.operation,
                     Some(projection.projection_batch),
-                    None,
+                    Some(emitted_batch_id),
                     correlation.expected_last_projection_batch,
                     correlation.observed_batches.len(),
                 );
-            }
-            self.restore_causal_projections
-                .buffer_batch(gap_repair_projections);
-            // Hydration Pending must be emitted only after this buffer's final
-            // canonical ItemsUpdated group, otherwise the desktop store prunes
-            // it before the reply item which keeps it active is present.
-            self.hydrate_after_restore_flush = true;
-            // Navigation is also suppressed until the flush at restore end.
-
-            if restore_diff_is_relevant {
-                let restore_event_id = self
-                    .restore_anchor
-                    .as_ref()
-                    .map(|restore| restore.event_id.clone());
-                if let Some(event_id) = restore_event_id {
-                    if self.timeline_contains_event_id(&event_id) {
-                        if let Some(restore) = self.restore_anchor.take() {
-                            self.finish_anchor_restore(
-                                restore.request_id,
-                                TimelineAnchorRestoreStatus::Found,
-                            );
-                        }
-                    } else {
-                        drop(post_media_lease.take());
-                        self.maybe_continue_restore_anchor_after_diff().await;
-                    }
-                }
-            }
-        } else {
-            self.emit_navigation_if_changed();
-            if emitted {
-                let mut ready_gap_projection_batch = None;
-                let mut live_tail_projection_ready = false;
-                for projection in gap_repair_projections {
-                    let correlation = match projection.operation.domain {
-                        CausalProjectionDomain::HistoricalGap => &self.gap_projection_correlation,
-                        CausalProjectionDomain::LiveTail => &self.live_tail_projection_correlation,
-                    };
-                    let accepts = correlation.accepts(projection);
-                    let expected_projection_batch = correlation.expected_last_projection_batch;
-                    let observed_projection_count = correlation.observed_batches.len();
-                    record_timeline_gap_projection_boundary(
-                        "actor_received",
-                        if accepts {
-                            "accepted"
-                        } else {
-                            "rejected_operation"
-                        },
-                        projection.actor_generation,
-                        self.generation,
-                        projection.operation,
-                        Some(projection.projection_batch),
-                        Some(emitted_batch_id),
-                        expected_projection_batch,
-                        observed_projection_count,
-                    );
-                    let observation = observe_causal_projection(
-                        &mut self.gap_projection_correlation,
-                        &mut self.live_tail_projection_correlation,
-                        projection,
-                        emitted_batch_id,
-                    );
-                    if observation.live_tail_batch_id.is_some() {
-                        live_tail_projection_ready = true;
-                    }
-                    if ready_gap_projection_batch.is_none() {
-                        ready_gap_projection_batch = observation.historical_gap_batch_id;
-                    }
-                }
-                drop(post_media_lease.take());
-                if let Some(batch_id) = ready_gap_projection_batch {
-                    self.finish_pending_gap_projection(batch_id).await;
-                    if self
-                        .timeline_actor_generations
-                        .try_acquire(&self.key, self.actor_generation)
-                        .is_none()
-                    {
-                        return;
-                    }
-                }
-                if live_tail_projection_ready {
-                    live_tail_completion_published =
-                        self.finish_pending_live_tail_projection().await;
-                    if self
-                        .timeline_actor_generations
-                        .try_acquire(&self.key, self.actor_generation)
-                        .is_none()
-                    {
-                        return;
-                    }
-                }
-                self.maybe_hydrate_missing_thread_roots(Some(thread_summary_affected_roots))
-                    .await;
-            } else {
-                for projection in gap_repair_projections {
-                    let correlation = match projection.operation.domain {
-                        CausalProjectionDomain::HistoricalGap => &self.gap_projection_correlation,
-                        CausalProjectionDomain::LiveTail => &self.live_tail_projection_correlation,
-                    };
-                    record_timeline_gap_projection_boundary(
-                        "actor_received",
-                        "display_emit_rejected",
-                        projection.actor_generation,
-                        self.generation,
-                        projection.operation,
-                        Some(projection.projection_batch),
-                        Some(emitted_batch_id),
-                        correlation.expected_last_projection_batch,
-                        correlation.observed_batches.len(),
-                    );
-                }
             }
         }
         drop(post_media_lease.take());
@@ -1337,16 +1273,7 @@ impl TimelineActor {
             diff_stream,
             initial_items,
         )));
-        let restore = self.restore_anchor.take();
         drop(finalize_lease);
-        if let Some(restore) = restore {
-            self.finish_anchor_restore(
-                restore.request_id,
-                TimelineAnchorRestoreStatus::Failed {
-                    kind: TimelineFailureKind::QueueOverflow,
-                },
-            );
-        }
     }
 }
 
@@ -1547,18 +1474,15 @@ where
         &authoritative_items,
         0..authoritative_items.len(),
     );
-    let context = DisplayProjectionContext::for_timeline(
-        &key.kind,
-        &TimelineViewportObservation::default(),
-        false,
-    )
-    .with_thread_roots(
-        thread_root_order,
-        thread_root_projection_service
-            .lock()
-            .expect("thread-root projection service lock must not be poisoned")
-            .display_data_for_room(key.room_id()),
-    );
+    let context =
+        DisplayProjectionContext::for_timeline(&key.kind, &TimelineViewportObservation::default())
+            .with_thread_roots(
+                thread_root_order,
+                thread_root_projection_service
+                    .lock()
+                    .expect("thread-root projection service lock must not be poisoned")
+                    .display_data_for_room(key.room_id()),
+            );
     candidate_display.reproject(&context);
     let emitted_items = candidate_display.display_items().to_vec();
     let Some(lease) = timeline_actor_generations.try_acquire(key, actor_generation) else {

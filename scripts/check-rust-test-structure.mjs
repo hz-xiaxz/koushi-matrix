@@ -2451,64 +2451,6 @@ export function checkCoreTimelinePaginationTerminalRelease() {
     : [sourceContractFailure(rule, "pagination terminal is emitted before active-task release")];
 }
 
-export function checkCoreTimelineRestoreRoomBounded() {
-  const rule = "core.timeline.restore_room_bounded";
-  const handler = timelineSection("navigation.rs", "async fn handle_restore_timeline_anchor(", "async fn handle_restore_timeline_anchor_continue");
-  const continuation = timelineSection("navigation.rs", "async fn handle_restore_timeline_anchor_continue", "async fn schedule_restore_anchor_continue");
-  const failures = [];
-  if (!handler?.includes("TimelineKind::Room")) failures.push(sourceContractFailure(rule, "restore anchor is not room-only"));
-  if (!continuation?.includes("PaginationDirection::Backward")) failures.push(sourceContractFailure(rule, "restore anchor does not paginate backward"));
-  for (const marker of ["max_batches", "event_count"]) if (!handler?.includes(marker)) failures.push(sourceContractFailure(rule, `restore anchor lacks ${marker}`));
-  if (handler?.includes("TimelineKind::Focused")) failures.push(sourceContractFailure(rule, "restore anchor uses focused timeline path"));
-  return failures;
-}
-
-export function checkCoreTimelineRestoreBudget() {
-  const rule = "core.timeline.restore_budget";
-  const production = timelineSource("navigation.rs");
-  const construct = production.split("let restore = RestoreTimelineAnchorState {").at(1);
-  const existing = production.split("if existing.event_id == event_id {").at(1);
-  const failures = [];
-  if (!construct?.includes("max_batches_remaining: max_batches,")) failures.push(sourceContractFailure(rule, "restore initialization ignores the frontend budget"));
-  if (!existing?.includes(".max(max_batches);")) failures.push(sourceContractFailure(rule, "restore replacement inflates the in-flight budget"));
-  return failures;
-}
-
-export function checkCoreTimelineRestoreCoalescing() {
-  const rule = "core.timeline.restore_coalescing";
-  const actor = timelineItemBody("actor.rs", "pub(super) struct TimelineActor {");
-  const diff = timelineItemBody("relay.rs", "async fn handle_diff_batch");
-  const navigation = timelineSource("navigation.rs");
-  const finish = timelineItemBody("navigation.rs", "fn finish_anchor_restore");
-  const settlement = timelineItemBody("navigation.rs", "pub(super) fn publish_restore_settlement_for_generation(");
-  const handler = timelineItemBody("navigation.rs", "async fn handle_restore_timeline_anchor(");
-  const continuation = timelineItemBody("navigation.rs", "async fn handle_restore_timeline_anchor_continue(");
-  const failures = [];
-  for (const marker of ["restore_emit_buffer: Vec<TimelineDiff>"]) if (!actor?.includes(marker)) failures.push(sourceContractFailure(rule, `restore actor lacks ${marker}`));
-  for (const marker of ["restore_anchor.is_some()", "restore_emit_buffer", "ItemsUpdated"]) if (!diff?.includes(marker)) failures.push(sourceContractFailure(rule, `restore diff relay lacks ${marker}`));
-  if (!finish?.includes("publish_restore_settlement(Some((request_id, status)))")) failures.push(sourceContractFailure(rule, "restore finish bypasses atomic settlement"));
-  for (const marker of ["std::mem::take", "TimelineEvent::NavigationUpdated", "TimelineEvent::AnchorRestoreFinished"]) if (!settlement?.includes(marker)) failures.push(sourceContractFailure(rule, `restore settlement lacks ${marker}`));
-  if (finish?.includes("emit_anchor_restore_finished")) failures.push(sourceContractFailure(rule, "restore finish emits a second raw terminal"));
-  if ((handler?.match(/self\.emit_anchor_restore_finished\(/gu) ?? []).length > 1) failures.push(sourceContractFailure(rule, "restore handler emits too many raw terminals"));
-  if (continuation?.includes("self.emit_anchor_restore_finished(")) failures.push(sourceContractFailure(rule, "restore continuation bypasses finish_anchor_restore"));
-  if (!navigation.includes("publish_restore_settlement_for_generation")) failures.push(sourceContractFailure(rule, "restore settlement helper is missing"));
-  return failures;
-}
-
-export function checkCoreTimelineRestoreTerminal() {
-  const rule = "core.timeline.restore_terminal";
-  const production = timelineSource("navigation.rs");
-  const state = production.split("struct RestoreTimelineAnchorState {").at(1)?.split("}").at(0);
-  const continuation = timelineSection("navigation.rs", "async fn handle_restore_timeline_anchor_continue(", "async fn maybe_continue_restore_anchor_after_diff");
-  const handler = timelineSection("navigation.rs", "async fn handle_restore_timeline_anchor(", "async fn handle_restore_timeline_anchor_continue");
-  const failures = [];
-  if (!state?.includes("anchor_relay_wait")) failures.push(sourceContractFailure(rule, "restore state lacks relay wait"));
-  for (const marker of ["anchor_relay_wait", "outcome.anchor_present", "outcome.reached_start"]) if (!continuation?.includes(marker)) failures.push(sourceContractFailure(rule, `restore continuation lacks ${marker}`));
-  for (const marker of ["settle_last_seen_seq", "settle_awaiting_first_diff", "RESTORE_ANCHOR_SETTLE_TICK_DELAY_MS", "schedule_restore_anchor_settle_tick"]) if (production.includes(marker)) failures.push(sourceContractFailure(rule, `restore retains timing heuristic ${marker}`));
-  if (!handler?.includes("emit_anchor_restore_finished")) failures.push(sourceContractFailure(rule, "invalid restore requests do not emit their terminal"));
-  return failures;
-}
-
 export function checkCoreTimelineSendAdmissionGuard() {
   const rule = "core.timeline.send_admission_guard";
   const source = timelineSource("outbound_send.rs");
@@ -3462,13 +3404,12 @@ export function checkCoreQaRuntimeReopenOrder() {
   const source = coreQaProductionSource();
   const cases = [
     ["cleanup_after_full_flow", "drop(conn_a)", "runtime_a.shutdown().await", "CoreRuntime::start_with_data_dir(data_dir_a)"],
-    ["run_async All restore", "drop(conn_a)", "runtime_a.shutdown().await", "CoreRuntime::start_with_data_dir(data_dir_a)"],
-    ["cache restore", "drop(conn)", "runtime.shutdown().await", "CoreRuntime::start_with_data_dir(data_dir)"]
+    ["run_async All restore", "drop(conn_a)", "runtime_a.shutdown().await", "CoreRuntime::start_with_data_dir(data_dir_a)"]
   ];
   const failures = [];
   for (const [label, dropConnection, shutdown, reopen] of cases) {
-    const start = label === "cleanup_after_full_flow" ? "async fn cleanup_after_full_flow" : label === "cache restore" ? "async fn run_cache_restore_scenario" : "// --- Sync stop A + store-backed restore A + logout A ---";
-    const end = label === "cache restore" ? "let mut conn2 = runtime2.attach();" : "let mut conn_a2 = runtime_a2.attach();";
+    const start = label === "cleanup_after_full_flow" ? "async fn cleanup_after_full_flow" : "// --- Sync stop A + store-backed restore A + logout A ---";
+    const end = "let mut conn_a2 = runtime_a2.attach();";
     const slice = source.split(start).at(1)?.split(end).at(0) ?? "";
     const positions = [dropConnection, shutdown, reopen].map((marker) => slice.indexOf(marker));
     if (positions.some((position) => position < 0) || !(positions[0] < positions[1] && positions[1] < positions[2])) failures.push(sourceContractFailure(rule, `${label} does not drop, shutdown, and reopen in order`));
@@ -3786,10 +3727,6 @@ export function runSourceContractRules() {
     checkCoreTimelinePaginationScheduler(),
     checkCoreTimelinePaginationCancellation(),
     checkCoreTimelinePaginationTerminalRelease(),
-    checkCoreTimelineRestoreRoomBounded(),
-    checkCoreTimelineRestoreBudget(),
-    checkCoreTimelineRestoreCoalescing(),
-    checkCoreTimelineRestoreTerminal(),
     checkCoreTimelineSendAdmissionGuard(),
     checkCoreTimelineSendCompletionGuard(),
     checkCoreTimelineSendSubmissionRoute(),

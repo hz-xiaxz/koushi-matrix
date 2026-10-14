@@ -45,13 +45,12 @@ use super::scenario_search::{
 use super::scenario_thread_late_joiner::run_thread_late_joiner_scenario;
 use super::scenario_timeline::{
     assert_thread_reply_relation, observe_reply_quote_lifecycle, run_activity_stage,
-    run_cache_restore_scenario, run_composer_stage, run_focused_send_queue_scenario,
-    run_link_preview_stage, run_live_signals_stage, run_media_stage, run_scheduled_send_stage,
-    run_send_queue_stage, run_timeline_reconnect_scenario, run_timeline_stress_replay_stage,
-    run_timeline_stress_stage, thread_initial_items_need_paginate_backfill, wait_for_edit_diff,
-    wait_for_redact_diff, wait_for_room_timeline_thread_summary,
-    wait_for_thread_panel_and_room_summary, wait_for_thread_reply_item,
-    wait_for_timeline_navigation,
+    run_composer_stage, run_focused_send_queue_scenario, run_link_preview_stage,
+    run_live_signals_stage, run_media_stage, run_scheduled_send_stage, run_send_queue_stage,
+    run_timeline_reconnect_scenario, run_timeline_stress_replay_stage, run_timeline_stress_stage,
+    thread_initial_items_need_paginate_backfill, wait_for_edit_diff, wait_for_redact_diff,
+    wait_for_room_timeline_thread_summary, wait_for_thread_panel_and_room_summary,
+    wait_for_thread_reply_item, wait_for_timeline_navigation,
 };
 use super::scenario_user_verification::run_user_verification_stage;
 use super::{
@@ -86,12 +85,6 @@ async fn wait_for_redact_edit_snapshot(
 pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, String> {
     if scenario == QaScenario::Safety {
         println!("safety=ok");
-        return Ok(scenario_report(&config.server_kind, scenario));
-    }
-
-    if scenario == QaScenario::CacheRestore {
-        println!("safety=ok");
-        run_cache_restore_scenario(&config).await?;
         return Ok(scenario_report(&config.server_kind, scenario));
     }
 

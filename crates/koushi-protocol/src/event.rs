@@ -22,16 +22,15 @@ pub use search::{SearchEvent, SearchResultItem};
 pub use timeline::{
     CjkTextPolicyEvent, LinkPreview, LinkPreviewImage, LinkPreviewState, PaginationDirection,
     PaginationState, ReactionGroup, ReactionSender, RoomKeyRequestStage, RoomKeyRequestStateDto,
-    RoomKeyRequestWithheldCode, ThreadSummaryDto, ThreadsListEvent, TimelineAnchorRestoreStatus,
-    TimelineBottomArrival, TimelineCodeBlock, TimelineDiff, TimelineDisplayKind,
-    TimelineDisplayLabelUpdate, TimelineDisplayMetadata, TimelineEvent, TimelineFormattedBody,
-    TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId, TimelineLinkRange,
-    TimelineMedia, TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail,
-    TimelineMegolmSessionReason, TimelineMessageActions, TimelineMessageKind,
-    TimelineMessageSource, TimelineNavigationSnapshot, TimelineNoticeI18n, TimelineNoticeI18nKey,
-    TimelineReadStateSync, TimelineResyncReason, TimelineSendFailureReason, TimelineSendState,
-    TimelineSpoilerSpan, TimelineUnableToDecrypt, TimelineUnableToDecryptReason,
-    TimelineUnreadPosition, TimelineViewportObservation,
+    RoomKeyRequestWithheldCode, ThreadSummaryDto, ThreadsListEvent, TimelineBottomArrival,
+    TimelineCodeBlock, TimelineDiff, TimelineDisplayKind, TimelineDisplayLabelUpdate,
+    TimelineDisplayMetadata, TimelineEvent, TimelineFormattedBody, TimelineGapId,
+    TimelineGapPosition, TimelineItem, TimelineItemId, TimelineLinkRange, TimelineMedia,
+    TimelineMediaKind, TimelineMediaSource, TimelineMediaThumbnail, TimelineMegolmSessionReason,
+    TimelineMessageActions, TimelineMessageKind, TimelineMessageSource, TimelineNavigationSnapshot,
+    TimelineNoticeI18n, TimelineNoticeI18nKey, TimelineReadStateSync, TimelineResyncReason,
+    TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan, TimelineUnableToDecrypt,
+    TimelineUnableToDecryptReason, TimelineUnreadPosition, TimelineViewportObservation,
 };
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

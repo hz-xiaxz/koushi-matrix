@@ -24,31 +24,28 @@ fn project_root_slot(pending: bool, failure_kind: Option<OperationFailureKind>) 
     reply.thread_root = Some("$root:example.invalid".to_owned());
     let canonical = vec![reply];
     let mut state = DisplayProjectionState::from_canonical_window(&canonical, 0..1);
-    let context = DisplayProjectionContext::for_timeline(
-        &key.kind,
-        &TimelineViewportObservation::default(),
-        false,
-    )
-    .with_thread_roots(
-        TimelineThreadRootOrder::LatestReply,
-        vec![crate::threads_list::ThreadRootDisplayData {
-            root_event_id: "$root:example.invalid".to_owned(),
-            unread: 0,
-            activity_event_id: "$reply:example.invalid".to_owned(),
-            activity_timestamp_ms: Some(1),
-            item: None,
-            aggregate: crate::threads_list::AuthoritativeThreadAggregate {
-                reply_count: 1,
-                latest_event_id: Some("$reply:example.invalid".to_owned()),
-                latest_sender: Some("@member:example.invalid".to_owned()),
-                latest_sender_label: None,
-                latest_body_preview: Some("Synthetic reply".to_owned()),
-                latest_timestamp_ms: Some(1),
-            },
-            pending,
-            failure_kind,
-        }],
-    );
+    let context =
+        DisplayProjectionContext::for_timeline(&key.kind, &TimelineViewportObservation::default())
+            .with_thread_roots(
+                TimelineThreadRootOrder::LatestReply,
+                vec![crate::threads_list::ThreadRootDisplayData {
+                    root_event_id: "$root:example.invalid".to_owned(),
+                    unread: 0,
+                    activity_event_id: "$reply:example.invalid".to_owned(),
+                    activity_timestamp_ms: Some(1),
+                    item: None,
+                    aggregate: crate::threads_list::AuthoritativeThreadAggregate {
+                        reply_count: 1,
+                        latest_event_id: Some("$reply:example.invalid".to_owned()),
+                        latest_sender: Some("@member:example.invalid".to_owned()),
+                        latest_sender_label: None,
+                        latest_body_preview: Some("Synthetic reply".to_owned()),
+                        latest_timestamp_ms: Some(1),
+                    },
+                    pending,
+                    failure_kind,
+                }],
+            );
     state.reproject(&context);
     let [root_slot] = state.display_items() else {
         panic!("the reply is folded into exactly one root slot");
