@@ -1572,8 +1572,13 @@ has caused a real visible bug.
 - GUI-only tooltips are presentation state only when their displayed text already
   comes from Rust-owned snapshots, such as `space.display_name`. Prefer the
   reusable `Tooltip` component over native `title=` for styled, testable
-  tooltips: it must expose `role="tooltip"`, add `aria-describedby` only while
-  open, open on hover/focus, and dismiss on mouse-leave/blur/Escape.
+  tooltips: it exposes `role="tooltip"`, adds `aria-describedby` only while
+  open, and is pointer-owned — it opens on hover only, a press dismisses it and
+  keeps it dismissed while the pointer rests on the control, Escape closes it,
+  and keyboard or programmatic focus never opens it, because a control that
+  returns focus to itself after a selection must not leave an explanation on
+  screen (#1388). A fact stated only in a hover bubble also needs a
+  keyboard-reachable statement on the wrapped control.
 - Do not add ad hoc `px` literals in TSX for fixed GUI geometry. Repeated or
   semantic dimensions for rails, icon buttons, badges, avatars, counters, and
   tooltip placement belong in named CSS custom properties. Keeping `px` behind a

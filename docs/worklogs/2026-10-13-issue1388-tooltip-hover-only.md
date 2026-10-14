@@ -78,6 +78,10 @@ access sentence) were left alone: they never depended on the bubble.
 - `docs/policies/engineering-rules.md` ("Popup Dismissal And Floating Surfaces"),
   `docs/help/rooms-and-spaces.md`.
 
+This worklog omitted the durable ownership document. #1399 synced the tooltip
+bullet in `docs/agents/state-ownership.md` ("GUI presentation contracts") to the
+hover-only contract above.
+
 ## Gates
 
 - `npx vitest run` in `apps/desktop`: the tooltip-related files are green. Eight
