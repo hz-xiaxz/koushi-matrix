@@ -4,7 +4,8 @@ use image::{DynamicImage, GenericImageView, ImageFormat, Rgba, RgbaImage};
 use koushi_media::{
     DecodeLimits, DecodedRgbaImage, ImageOutputFormat, ImageOutputRequest, ImagePreparationError,
     ImagePreparationPolicy, ImageResizeScale, PreparedImageFormat, prepare_decoded_image_output,
-    prepare_image_output, prepare_image_variants,
+    prepare_image_output, prepare_image_output_fitted, prepare_image_variants,
+    probe_image_dimensions,
 };
 
 fn synthetic_png(width: u32, height: u32) -> Vec<u8> {
@@ -556,4 +557,78 @@ fn decoded_pixels_keep_straight_alpha_and_reject_keep() {
         ),
         Err(ImagePreparationError::Encode)
     );
+}
+
+#[test]
+fn fitted_output_resizes_to_the_long_edge_budget_without_upscaling() {
+    let policy = ImagePreparationPolicy::default();
+
+    let landscape = prepare_image_output_fitted(
+        &synthetic_png(400, 200),
+        "avatar.png",
+        120,
+        ImageOutputFormat::WebP,
+        &policy,
+    )
+    .expect("landscape avatar fits the budget");
+    assert_eq!(landscape.dimensions, (120, 60));
+    assert_eq!(landscape.format, PreparedImageFormat::WebP);
+    assert_eq!(landscape.mime_type, "image/webp");
+    assert_eq!(landscape.id, "fit-120-webp");
+
+    let portrait = prepare_image_output_fitted(
+        &synthetic_jpeg(60, 300),
+        "avatar.jpg",
+        120,
+        ImageOutputFormat::Jpeg,
+        &policy,
+    )
+    .expect("portrait avatar fits the budget");
+    assert_eq!(portrait.dimensions, (24, 120));
+
+    // Already within the target: dimensions are preserved, never upscaled.
+    let small = prepare_image_output_fitted(
+        &synthetic_png(64, 32),
+        "avatar.png",
+        120,
+        ImageOutputFormat::WebP,
+        &policy,
+    )
+    .expect("small avatar stays at its own size");
+    assert_eq!(small.dimensions, (64, 32));
+}
+
+#[test]
+fn fitted_output_reports_non_decodable_content_instead_of_retaining_it() {
+    let policy = ImagePreparationPolicy::default();
+    assert_eq!(
+        prepare_image_output_fitted(
+            &synthetic_apng(),
+            "animated.png",
+            120,
+            ImageOutputFormat::WebP,
+            &policy,
+        ),
+        Err(ImagePreparationError::UnsupportedFormat)
+    );
+    assert_eq!(
+        prepare_image_output_fitted(
+            b"binaryjpegfullimagedata",
+            "avatar.jpg",
+            120,
+            ImageOutputFormat::WebP,
+            &policy,
+        ),
+        Err(ImagePreparationError::UnsupportedFormat)
+    );
+}
+
+#[test]
+fn dimension_probe_reads_headers_for_content_kept_verbatim() {
+    assert_eq!(
+        probe_image_dimensions(&synthetic_png(80, 40)),
+        Some((80, 40))
+    );
+    assert_eq!(probe_image_dimensions(b"binaryjpegfullimagedata"), None);
+    assert_eq!(probe_image_dimensions(&[]), None);
 }

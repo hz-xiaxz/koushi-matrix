@@ -140,11 +140,17 @@ fn diagnostic_snapshot_exports_current_media_memory_summaries() {
         koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats {
             entry_count: 3,
             retained_bytes: 300,
+            avatar_entry_count: 2,
+            avatar_retained_bytes: 200,
+            link_preview_entry_count: 1,
+            link_preview_retained_bytes: 100,
             lease_charged_bytes: 120,
             high_water_entry_count: 5,
             high_water_bytes: 500,
             eviction_count: 2,
             clear_count: 1,
+            retirement_count: 1,
+            retired_bytes: 64,
             oversize_rejection_count: 4,
         },
         koushi_core::media_preparation::MediaPreparationStats {
@@ -173,7 +179,15 @@ fn diagnostic_snapshot_exports_current_media_memory_summaries() {
     assert!(thumbnail.message.contains("stage=summary"));
     assert!(thumbnail.message.contains("entry_count=3"));
     assert!(thumbnail.message.contains("max_entry_count=256"));
-    assert!(thumbnail.message.contains("max_bytes=33554432"));
+    assert!(thumbnail.message.contains("max_avatar_bytes=8388608"));
+    assert!(thumbnail.message.contains("avatar_entry_count=2"));
+    assert!(thumbnail.message.contains("avatar_retained_bytes=200"));
+    assert!(thumbnail.message.contains("link_preview_entry_count=1"));
+    assert!(
+        thumbnail
+            .message
+            .contains("link_preview_retained_bytes=100")
+    );
     assert!(thumbnail.message.contains("lease_charged_bytes=120"));
     assert!(thumbnail.message.contains("max_lease_bytes=100663296"));
     assert!(thumbnail.message.contains("cache_scope=named_caches_only"));

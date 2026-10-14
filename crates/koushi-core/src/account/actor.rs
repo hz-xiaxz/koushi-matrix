@@ -278,6 +278,13 @@ pub(crate) enum AccountMessage {
         handle: Option<SearchActorHandle>,
         acknowledged: oneshot::Sender<()>,
     },
+    /// Publish an own-profile avatar source without an SDK round trip, so the
+    /// superseded-entry retirement can be tested (#1396).
+    #[cfg(test)]
+    NoteOwnAvatarSourceForTesting {
+        mxc_uri: Option<String>,
+        acknowledged: oneshot::Sender<()>,
+    },
     RepairRoomTimeline {
         request_id: RequestId,
         account_key: AccountKey,
@@ -823,6 +830,21 @@ impl AccountActorHandle {
         acknowledged.await.is_ok()
     }
 
+    #[cfg(test)]
+    pub(crate) async fn note_own_avatar_source_for_testing(&self, mxc_uri: Option<String>) {
+        let (acknowledged, done) = oneshot::channel();
+        if !self
+            .send(AccountMessage::NoteOwnAvatarSourceForTesting {
+                mxc_uri,
+                acknowledged,
+            })
+            .await
+        {
+            return;
+        }
+        let _ = done.await;
+    }
+
     #[cfg(any(test, feature = "test-hooks"))]
     pub async fn install_residency_test_session(&self, session: Arc<MatrixClientSession>) -> bool {
         let (completed, acknowledged) = oneshot::channel();
@@ -1262,6 +1284,13 @@ pub struct AccountActor {
     pub(super) avatar_demand_rx:
         tokio::sync::watch::Receiver<Option<Arc<crate::view_scope_lifecycle::ChargedAvatarDemand>>>,
     pub(super) avatar_demand: Option<Arc<crate::view_scope_lifecycle::ChargedAvatarDemand>>,
+    /// Avatar sources observed in scoped demand this session (#1396). A source
+    /// that leaves the demand retires its retained bytes instead of waiting for
+    /// LRU pressure.
+    pub(super) demanded_avatar_sources: BTreeSet<String>,
+    /// The own profile's current avatar source, so a change retires the
+    /// superseded bytes (#1396).
+    pub(super) own_avatar_mxc_uri: Option<String>,
 }
 
 impl AccountActor {
@@ -1498,6 +1527,8 @@ impl AccountActor {
             avatar_session_generation: avatar_session_generation.clone(),
             avatar_demand_rx,
             avatar_demand: None,
+            demanded_avatar_sources: BTreeSet::new(),
+            own_avatar_mxc_uri: None,
         };
         crate::executor::spawn(actor.run());
         AccountActorHandle {
@@ -1903,6 +1934,14 @@ impl AccountActor {
                 #[cfg(test)]
                 AccountMessage::ConfigureEventCacheFetchForTesting { fetch } => {
                     self.event_cache_fetch_override = Some(fetch);
+                }
+                #[cfg(test)]
+                AccountMessage::NoteOwnAvatarSourceForTesting {
+                    mxc_uri,
+                    acknowledged,
+                } => {
+                    self.note_own_avatar_source(mxc_uri);
+                    let _ = acknowledged.send(());
                 }
                 #[cfg(test)]
                 AccountMessage::ConfigureSearchActorForTesting {

@@ -1008,6 +1008,9 @@ fn image_preparation_failure_kind(error: ImagePreparationError) -> MediaPreparat
         ImagePreparationError::Empty => MediaPreparationFailureKind::Empty,
         ImagePreparationError::Decode => MediaPreparationFailureKind::Decode,
         ImagePreparationError::Encode => MediaPreparationFailureKind::Encode,
+        // `prepare_image_output` never returns this; only the fitted avatar path
+        // does, and it maps its own outcome (#1396).
+        ImagePreparationError::UnsupportedFormat => MediaPreparationFailureKind::Decode,
     }
 }
 
