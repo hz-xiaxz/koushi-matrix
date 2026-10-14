@@ -202,6 +202,13 @@ export interface DesktopApi {
   cancelNotificationEmail(): Promise<CommandAdmission>;
   enableEmailNotifications(address: string, lang: string): Promise<CommandAdmission>;
   disableEmailNotifications(): Promise<CommandAdmission>;
+  /**
+   * Device-local notification delivery (#1427). The secret is written straight to the OS
+   * credential store; the value is never echoed back in a snapshot, an event, or a receipt.
+   */
+  setNotificationDeliverySecret(sinkId: string, secret: string): Promise<CommandAdmission>;
+  clearNotificationDeliverySecret(sinkId: string): Promise<CommandAdmission>;
+  testNotificationDelivery(sinkId: string): Promise<CommandAdmission>;
   changePassword(newPassword: string): Promise<CommandAdmission>;
   deactivateAccount(eraseData: boolean): Promise<CommandAdmission>;
   probeLocalEncryptionHealth(): Promise<CommandAdmission>;

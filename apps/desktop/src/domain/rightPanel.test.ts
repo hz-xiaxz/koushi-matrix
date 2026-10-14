@@ -306,6 +306,7 @@ function snapshotForPanelMode(
           pending_email: null,
           operation: { kind: "idle" }
         },
+        notification_delivery: { sinks: [], presets: [] },
         contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
         account_management_capabilities: { change_password: { kind: "unknown" } },
         soft_logout_reauth: { kind: "idle" },

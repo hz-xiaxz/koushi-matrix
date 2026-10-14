@@ -1744,4 +1744,61 @@ describe("UserSettingsPanel", () => {
     expect(setCategory).not.toHaveBeenCalled();
     expect(screen.getAllByText("Loading notification settings…")).toHaveLength(1);
   });
+
+  // #1427: this device's delivery sits on the same page as the server-owned pusher surface,
+  // so the page has to read as two owners rather than one control.
+  test("keeps this device's delivery visibly apart from the server-owned notifications", () => {
+    render(
+      <UserSettingsPanel
+        currentSession={{
+          homeserver: "https://matrix.org",
+          user_id: "@demo-user:example.invalid",
+          device_id: "FAKEDEVICE"
+        }}
+        e2eeTrust={idleE2eeTrust}
+        localEncryption={{ kind: "healthy" }}
+        platform="linux"
+        accountManagement={idleAccountManagement}
+        accountManagementCapabilities={idleAccountManagementCapabilities}
+        savedSessions={[]}
+        profile={profile}
+        settings={settings}
+        notificationDelivery={{ sinks: [], presets: [] }}
+        {...handlers}
+      />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+
+    const delivery = screen.getByTestId("notification-delivery");
+    expect(within(delivery).getByRole("switch", { name: "Send notifications from this device" })).toBeTruthy();
+    expect(
+      within(delivery).getByRole("switch", { name: "Only while Koushi is not focused" })
+    ).toBeTruthy();
+    // The server-owned note names the other owner and does not live inside this device's
+    // section, so the two headings cannot be read as one switch.
+    expect(within(delivery).queryByTestId("notification-delivery-server-owner-note")).toBeNull();
+    expect(screen.getByTestId("notification-delivery-server-owner-note")).toBeTruthy();
+  });
+
+  test("renders this device's delivery in the app settings scope too, without the server note", () => {
+    render(
+      <UserSettingsPanel
+        currentSession={null}
+        settingsScope="app"
+        e2eeTrust={idleE2eeTrust}
+        localEncryption={{ kind: "healthy" }}
+        platform="linux"
+        accountManagement={idleAccountManagement}
+        accountManagementCapabilities={idleAccountManagementCapabilities}
+        savedSessions={[]}
+        profile={profile}
+        settings={settings}
+        notificationDelivery={{ sinks: [], presets: [] }}
+        {...handlers}
+      />
+    );
+    fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
+    expect(screen.getByTestId("notification-delivery")).toBeTruthy();
+    expect(screen.queryByTestId("notification-delivery-server-owner-note")).toBeNull();
+  });
 });

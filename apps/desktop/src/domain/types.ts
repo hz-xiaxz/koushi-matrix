@@ -124,6 +124,12 @@ export interface AppDomainState {
   account_management: AccountManagementState;
   account_management_capabilities: AccountManagementCapabilities;
   account_notifications: AccountNotificationsState;
+  /**
+   * #1427: the app-scoped runtime half of this device's own notification delivery. The
+   * settings half is `settings.values.delivery`; a sink's credential is never here, only
+   * whether one is configured. App state, never part of the settings file.
+   */
+  notification_delivery: NotificationDeliveryState;
   contact_security: ContactSecurityState;
   soft_logout_reauth: SoftLogoutReauthState;
   qr_login: QrLoginState;
@@ -403,6 +409,44 @@ export interface NotificationSinkSettings {
   from_address: string;
   sender_name: string;
   config: NotificationSinkConfig;
+}
+
+/**
+ * #1427: app state for this device's own notification delivery. The settings file holds
+ * the policy; this holds what only the running app knows - whether a sink's credential is
+ * in the credential store, and what its last send did. Rust owns every field.
+ */
+export interface NotificationDeliveryState {
+  sinks: NotificationDeliverySinkState[];
+  /** Mailbox presets Rust ships; `secret_hint` is a catalog key, resolved through `t`. */
+  presets: NotificationDeliveryPresetState[];
+}
+
+export interface NotificationDeliverySinkState {
+  sink_id: string;
+  /** A credential exists in the OS credential store; the value itself never crosses IPC. */
+  secret_configured: boolean;
+  last_outcome: NotificationDeliveryOutcomeState | null;
+}
+
+export type NotificationDeliveryOutcomeState =
+  | { kind: "delivered"; at_ms: number }
+  | { kind: "invalidSecret"; at_ms: number }
+  | { kind: "notPermitted"; at_ms: number }
+  | { kind: "rejected"; at_ms: number }
+  | { kind: "rateLimited"; at_ms: number; retry_after_secs: number | null }
+  | { kind: "transport"; at_ms: number };
+
+export interface NotificationDeliveryPresetState {
+  id: string;
+  /** The vendor's own proper name, deliberately not localized. */
+  label: string;
+  host: string;
+  port: number;
+  tls: SmtpTls;
+  username_is_full_address: boolean;
+  /** A catalog key; resolve it through the catalog, never render it directly. */
+  secret_hint: MessageId;
 }
 
 // Rust NotificationSinkConfig is #[serde(tag = "kind", rename_all = "camelCase")].

@@ -966,9 +966,11 @@ export type MessageId =
   | "settings.notificationDeliveryWatchedDescription"
   | "settings.notificationDeliveryWatchedAdd"
   | "settings.notificationDeliveryWatchedEmpty"
+  | "settings.notificationDeliveryWatchedLimit"
   | "settings.notificationDeliveryWatchedRemove"
   | "settings.notificationDeliverySinks"
   | "settings.notificationDeliveryAddSink"
+  | "settings.notificationDeliverySinkLimit"
   | "settings.notificationDeliverySinkProvider"
   | "settings.notificationDeliverySinkName"
   | "settings.notificationDeliverySinkFrom"
@@ -997,6 +999,35 @@ export type MessageId =
   | "settings.notificationDeliveryPrefixConsentBody"
   | "settings.notificationDeliveryPrefixConsentAccept"
   | "settings.notificationDeliveryPrefixConsentLink"
+  | "settings.notificationDeliveryEnable"
+  | "settings.notificationDeliveryKeywordsHint"
+  | "settings.notificationDeliveryServerOwnerNote"
+  | "settings.notificationDeliveryWatchedPick"
+  | "settings.notificationDeliveryWatchedRooms"
+  | "settings.notificationDeliveryWatchedSpaces"
+  | "settings.notificationDeliveryWatchedUnknown"
+  | "settings.notificationDeliverySinkEnabled"
+  | "settings.notificationDeliverySinkKindResend"
+  | "settings.notificationDeliverySinkKindSmtp"
+  | "settings.notificationDeliverySinkEndpoint"
+  | "settings.notificationDeliverySinkEndpointDefault"
+  | "settings.notificationDeliverySinkPreset"
+  | "settings.notificationDeliverySinkPresetCustom"
+  | "settings.notificationDeliverySinkPresetHint"
+  | "settings.notificationDeliverySinkTls"
+  | "settings.notificationDeliverySinkTlsImplicit"
+  | "settings.notificationDeliverySinkTlsStartTls"
+  | "settings.notificationDeliverySinkUsernameFullAddress"
+  | "settings.notificationDeliverySinkSaveSecret"
+  | "settings.notificationDeliverySinkClearSecret"
+  | "settings.notificationDeliverySinkEmpty"
+  | "settings.notificationDeliverySinkFailed"
+  | "settings.notificationDeliveryResultRateLimitedAfter"
+  | "settings.notificationDeliveryPrefixConsentAcknowledge"
+  | "settings.notificationDeliveryPrefixConsentRequired"
+  | "settings.notificationDeliverySecretHint.qqMail"
+  | "settings.notificationDeliverySecretHint.gmail"
+  | "settings.notificationDeliverySecretHint.icloud"
   | "settings.sendReadReceipts"
   | "settings.sendTypingNotifications"
   | "settings.notifications"
@@ -2956,9 +2987,15 @@ const en: Catalog = {
     "A chosen room is sent even when its kind is off above. Choosing a space covers every room in it, including rooms added later. A room you read or mute is still skipped.",
   "settings.notificationDeliveryWatchedAdd": "Add a room or space",
   "settings.notificationDeliveryWatchedEmpty": "No rooms or spaces chosen",
+  // The watch list is capped in Rust; the form says so instead of letting a choice
+  // disappear in canonicalization.
+  "settings.notificationDeliveryWatchedLimit":
+    "The watch list holds up to {count} rooms and spaces. Remove one to add another.",
   "settings.notificationDeliveryWatchedRemove": "Remove {room}",
   "settings.notificationDeliverySinks": "Send through",
   "settings.notificationDeliveryAddSink": "Add a service",
+  "settings.notificationDeliverySinkLimit":
+    "Up to {count} sending services. Remove one to add another.",
   "settings.notificationDeliverySinkProvider": "Service",
   "settings.notificationDeliverySinkName": "Name",
   "settings.notificationDeliverySinkFrom": "From address",
@@ -2992,6 +3029,48 @@ const en: Catalog = {
     "The start of the message leaves this device as plain text and passes through {service} to {destination} without end-to-end encryption. Whether, and for how long, that service keeps it depends on that service's own terms, so read them before turning this on. Room names and counts are sent either way.",
   "settings.notificationDeliveryPrefixConsentAccept": "Turn on and accept",
   "settings.notificationDeliveryPrefixConsentLink": "Read the service's terms",
+  "settings.notificationDeliveryEnable": "Send notifications from this device",
+  "settings.notificationDeliveryKeywordsHint":
+    "A message that matches one of your keywords arrives as a mention, so either this switch or Mentions and replies sends it.",
+  "settings.notificationDeliveryServerOwnerNote":
+    "Everything below is sent by your homeserver, not by this device. Turning it off does not affect the setting above.",
+  "settings.notificationDeliveryWatchedPick": "Choose a room or space",
+  "settings.notificationDeliveryWatchedRooms": "Rooms",
+  "settings.notificationDeliveryWatchedSpaces": "Spaces",
+  "settings.notificationDeliveryWatchedUnknown": "Not in the room list right now",
+  "settings.notificationDeliverySinkEnabled": "Send through this service",
+  "settings.notificationDeliverySinkKindResend": "Resend (email API)",
+  "settings.notificationDeliverySinkKindSmtp": "SMTP relay",
+  "settings.notificationDeliverySinkEndpoint": "Endpoint",
+  // Rust fills `DEFAULT_RESEND_ENDPOINT` when this is left empty; the form says so
+  // rather than repeating the URL, which Rust owns.
+  "settings.notificationDeliverySinkEndpointDefault":
+    "Leave this blank to use the endpoint this service documents for its email API.",
+  "settings.notificationDeliverySinkPreset": "Mailbox preset",
+  "settings.notificationDeliverySinkPresetCustom": "Other server",
+  "settings.notificationDeliverySinkPresetHint":
+    "A preset fills in the relay the provider documents. Check it against the provider's own documentation; Koushi does not keep it up to date for you.",
+  "settings.notificationDeliverySinkTls": "Connection security",
+  "settings.notificationDeliverySinkTlsImplicit": "TLS from the first byte (usually port 465)",
+  "settings.notificationDeliverySinkTlsStartTls": "STARTTLS after connecting (usually port 587)",
+  "settings.notificationDeliverySinkUsernameFullAddress":
+    "The mailbox's full address",
+  "settings.notificationDeliverySinkSaveSecret": "Save",
+  "settings.notificationDeliverySinkClearSecret": "Clear",
+  "settings.notificationDeliverySinkEmpty":
+    "No service is configured yet. Nothing leaves this device until one is added and turned on.",
+  "settings.notificationDeliverySinkFailed": "This service is not sending",
+  "settings.notificationDeliveryResultRateLimitedAfter":
+    "The service is limiting how often it accepts messages. The next attempt waits about {seconds} seconds.",
+  "settings.notificationDeliveryPrefixConsentAcknowledge": "I have read those terms",
+  "settings.notificationDeliveryPrefixConsentRequired":
+    "Confirm that you have read the terms to turn this on.",
+  "settings.notificationDeliverySecretHint.qqMail":
+    "QQ Mail expects the authorization code from its own settings, not the account password.",
+  "settings.notificationDeliverySecretHint.gmail":
+    "Gmail expects a Google app password, which Google only issues while 2-Step Verification is on.",
+  "settings.notificationDeliverySecretHint.icloud":
+    "iCloud Mail expects an app-specific password created for this app in your Apple Account.",
   "settings.sendReadReceipts": "Send read receipts",
   "settings.sendTypingNotifications": "Send typing notifications",
   "settings.notifications": "Notifications",
@@ -4848,9 +4927,13 @@ const ja: Catalog = {
     "選んだルームは、上の種類がオフでも送信します。スペースを選ぶと、その中のすべてのルーム（後から追加されたルームも）が対象になります。既読にしたルームやミュートしたルームは送信しません。",
   "settings.notificationDeliveryWatchedAdd": "ルーム・スペースを追加",
   "settings.notificationDeliveryWatchedEmpty": "選択されたルーム・スペースはありません",
+  "settings.notificationDeliveryWatchedLimit":
+    "ウォッチリストに登録できるルーム・スペースは{count}件までです。追加するには1件削除してください。",
   "settings.notificationDeliveryWatchedRemove": "{room}を削除",
   "settings.notificationDeliverySinks": "送信方法",
   "settings.notificationDeliveryAddSink": "サービスを追加",
+  "settings.notificationDeliverySinkLimit":
+    "送信方法は{count}件までです。追加するには1件削除してください。",
   "settings.notificationDeliverySinkProvider": "サービス",
   "settings.notificationDeliverySinkName": "名前",
   "settings.notificationDeliverySinkFrom": "差出人アドレス",
@@ -4886,6 +4969,45 @@ const ja: Catalog = {
     "メッセージの冒頭は平文でこの端末を離れ、エンドツーエンド暗号化なしで{service}から{destination}へ送られます。そのサービスが本文を保持するかどうか、また保持期間は、そのサービスの規約によります。オンにする前に規約を確認してください。ルーム名と件数はどちらでも送信されます。",
   "settings.notificationDeliveryPrefixConsentAccept": "オンにして同意する",
   "settings.notificationDeliveryPrefixConsentLink": "サービスの規約を読む",
+  "settings.notificationDeliveryEnable": "この端末から通知を送信する",
+  "settings.notificationDeliveryKeywordsHint":
+    "キーワードに一致したメッセージはメンションとして届くため、「設定したキーワード」と「メンション・返信」のどちらをオンにしても送信されます。",
+  "settings.notificationDeliveryServerOwnerNote":
+    "ここから下は、この端末ではなくホームサーバーが送信します。オフにしても上の設定は変わりません。",
+  "settings.notificationDeliveryWatchedPick": "ルームまたはスペースを選択",
+  "settings.notificationDeliveryWatchedRooms": "ルーム",
+  "settings.notificationDeliveryWatchedSpaces": "スペース",
+  "settings.notificationDeliveryWatchedUnknown": "現在のルーム一覧にありません",
+  "settings.notificationDeliverySinkEnabled": "このサービスで送信する",
+  "settings.notificationDeliverySinkKindResend": "Resend（メールAPI）",
+  "settings.notificationDeliverySinkKindSmtp": "SMTPリレー",
+  "settings.notificationDeliverySinkEndpoint": "エンドポイント",
+  "settings.notificationDeliverySinkEndpointDefault":
+    "空欄のままにすると、このサービスがメールAPI用に案内しているエンドポイントを使用します。",
+  "settings.notificationDeliverySinkPreset": "メールボックスのプリセット",
+  "settings.notificationDeliverySinkPresetCustom": "その他のサーバー",
+  "settings.notificationDeliverySinkPresetHint":
+    "プリセットは、提供元が公開しているリレー情報を入力します。最新かどうかは提供元の資料で確認してください。Koushiが代わりに更新することはありません。",
+  "settings.notificationDeliverySinkTls": "接続の保護",
+  "settings.notificationDeliverySinkTlsImplicit": "最初からTLSで接続（通常はポート465）",
+  "settings.notificationDeliverySinkTlsStartTls": "接続後にSTARTTLS（通常はポート587）",
+  "settings.notificationDeliverySinkUsernameFullAddress": "メールアドレス全体",
+  "settings.notificationDeliverySinkSaveSecret": "保存",
+  "settings.notificationDeliverySinkClearSecret": "消去",
+  "settings.notificationDeliverySinkEmpty":
+    "送信方法がまだ設定されていません。追加してオンにするまで、この端末から何も送信されません。",
+  "settings.notificationDeliverySinkFailed": "このサービスは送信できていません",
+  "settings.notificationDeliveryResultRateLimitedAfter":
+    "送信回数が制限されています。次は約{seconds}秒後に試します。",
+  "settings.notificationDeliveryPrefixConsentAcknowledge": "上記の規約を確認しました",
+  "settings.notificationDeliveryPrefixConsentRequired":
+    "規約を確認して同意するとオンにできます。",
+  "settings.notificationDeliverySecretHint.qqMail":
+    "QQ Mail では、アカウントのパスワードではなく、メール設定で発行する認証コードを入力します。",
+  "settings.notificationDeliverySecretHint.gmail":
+    "Gmail では Google のアプリパスワードを使用します。2段階認証を有効にしている場合のみ発行できます。",
+  "settings.notificationDeliverySecretHint.icloud":
+    "iCloud Mail では、Apple Account でこのアプリ用に発行したアプリ用パスワードを使用します。",
   "settings.sendReadReceipts": "既読を送信",
   "settings.sendTypingNotifications": "入力通知を送信",
   "settings.notifications": "通知",

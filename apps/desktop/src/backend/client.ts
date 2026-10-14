@@ -414,6 +414,29 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandAdmission>("disable_email_notifications");
   }
 
+  /**
+   * Device-local notification delivery (#1427). `secret` is a write-only value: the command
+   * stores it in the OS credential store and the answer carries only an admission. It is
+   * never put in a URL, a log, or a snapshot, and it is never read back to the renderer.
+   */
+  async setNotificationDeliverySecret(
+    sinkId: string,
+    secret: string
+  ): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("set_notification_delivery_secret", {
+      sinkId,
+      secret
+    });
+  }
+
+  async clearNotificationDeliverySecret(sinkId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("clear_notification_delivery_secret", { sinkId });
+  }
+
+  async testNotificationDelivery(sinkId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("test_notification_delivery", { sinkId });
+  }
+
   async loadAccountManagementCapabilities(): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("load_account_management_capabilities");
   }

@@ -52,6 +52,7 @@ import {
   type LocaleDisplayProfile,
   type LocaleSettings,
   type NavigationPreferenceUpdate,
+  type NotificationDeliverySinkState,
   type RoomNotificationMode,
   type RoomNotificationSettings,
   type StageUploadBytesRequestItem,
@@ -318,6 +319,7 @@ function readySnapshot(
             pending_email: null,
             operation: { kind: "idle" }
           },
+          notification_delivery: { sinks: [], presets: defaultNotificationDeliveryPresets() },
           contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
           account_management_capabilities: { change_password: { kind: "unknown" } },
           soft_logout_reauth: { kind: "idle" }, qr_login: { kind: "idle" },
@@ -572,6 +574,33 @@ function applySettingsPatch(
 
 function defaultLocaleDisplayProfile(): LocaleDisplayProfile {
   return resolveLocaleDisplayProfile({ language_tag: null, text_direction: "auto" });
+}
+
+/**
+ * #1427: mirrors the relay presets Rust ships. The hosts are reserved names, not any real
+ * provider's, because a fixture is not a place to advertise a live relay.
+ */
+function defaultNotificationDeliveryPresets(): DesktopSnapshot["state"]["domain"]["notification_delivery"]["presets"] {
+  return [
+    {
+      id: "harness-implicit",
+      label: "Harness Implicit",
+      host: "smtp.example.invalid",
+      port: 465,
+      tls: "implicit",
+      username_is_full_address: true,
+      secret_hint: "settings.notificationDeliverySecretHint.gmail"
+    },
+    {
+      id: "harness-starttls",
+      label: "Harness STARTTLS",
+      host: "relay.example.invalid",
+      port: 587,
+      tls: "startTls",
+      username_is_full_address: false,
+      secret_hint: "settings.notificationDeliverySecretHint.icloud"
+    }
+  ];
 }
 
 function defaultTypographyDisplayProfile(): DesktopSnapshot["state"]["domain"]["typography_profile"] {
@@ -1226,8 +1255,47 @@ function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
   return currentSnapshot;
 }
 
-function sidebarForSelection(activeSpaceId: string | null): DesktopSnapshot["sidebar"] {
-  return {
+/**
+ * #1427: the runtime half of one sink — whether a credential exists, and how the last send
+ * went. The harness only ever mirrors a Rust answer; it never invents a stored secret.
+ */
+function setNotificationDeliverySinkState(
+  sinkId: string,
+  change: {
+    secret_configured?: boolean;
+    last_outcome?: NotificationDeliverySinkState["last_outcome"];
+  }
+): DesktopSnapshot {
+  const existing = currentSnapshot.state.domain.notification_delivery.sinks.find(
+    (sink) => sink.sink_id === sinkId
+  );
+  const next: NotificationDeliverySinkState = {
+    sink_id: sinkId,
+    secret_configured: existing?.secret_configured ?? false,
+    last_outcome: existing?.last_outcome ?? null,
+    ...change
+  };
+  return setCurrentSnapshot({
+    ...currentSnapshot,
+    state: {
+      ...currentSnapshot.state,
+      domain: {
+        ...currentSnapshot.state.domain,
+        notification_delivery: {
+          ...currentSnapshot.state.domain.notification_delivery,
+          sinks: [
+            ...currentSnapshot.state.domain.notification_delivery.sinks.filter(
+              (sink) => sink.sink_id !== sinkId
+            ),
+            next
+          ]
+        }
+      }
+    }
+  });
+}
+
+function sidebarForSelection(activeSpaceId: string | null): DesktopSnapshot["sidebar"] {  return {
     ...currentSnapshot.sidebar,
     active_space_id: activeSpaceId,
     account_home: {
@@ -2176,6 +2244,28 @@ mock.setCommandResponse("load_account_notifications", () =>
       }
     }
   })
+);
+/**
+ * #1427: the harness answers the three write-only sink commands the way they are meant to be
+ * answered — with the secret reported as configured, and the secret itself dropped on the
+ * floor. Nothing in the harness, in a log, or in a snapshot ever holds the value.
+ */
+mock.setCommandResponse(
+  "set_notification_delivery_secret",
+  ({ sinkId, secret }: { sinkId: string; secret: string }) => {
+    void secret;
+    return setNotificationDeliverySinkState(sinkId, { secret_configured: true });
+  }
+);
+mock.setCommandResponse(
+  "clear_notification_delivery_secret",
+  ({ sinkId }: { sinkId: string }) =>
+    setNotificationDeliverySinkState(sinkId, { secret_configured: false, last_outcome: null })
+);
+mock.setCommandResponse(
+  "test_notification_delivery",
+  ({ sinkId }: { sinkId: string }) =>
+    setNotificationDeliverySinkState(sinkId, { last_outcome: { kind: "delivered", at_ms: 1 } })
 );
 mock.setCommandResponse(
   "change_password",

@@ -27,6 +27,11 @@ import {
   noopAccountNotificationActions
 } from "./user-settings/AccountNotificationsSections";
 import { SecuritySection } from "./user-settings/SecuritySection";
+import {
+  type NotificationDeliveryActions,
+  NotificationDeliverySection,
+  noopNotificationDeliveryActions
+} from "./user-settings/NotificationDeliverySection";
 import { TrustSection } from "./user-settings/TrustSection";
 import { AppearanceControls, LanguageControls } from "./user-settings/AppearanceControls";
 import { DetailRow } from "./user-settings/SettingsStatusPrimitives";
@@ -49,6 +54,7 @@ import type {
   DisplayPlatform,
   LocalEncryptionState,
   NotificationSettings,
+  NotificationDeliveryState,
   RoomSummary,
   SavedSessionInfo,
   SearchCrawlerState,
@@ -57,6 +63,7 @@ import type {
   SessionStatusRefreshCommandTrigger,
   SecureBackupGateState,
   SecureBackupSetupIntent,
+  SpaceSummary,
   ProfileState,
   TimelineSettings,
   WindowSettings
@@ -123,7 +130,10 @@ export function UserSettingsPanel({
   onManageAccount = () => undefined,
   accountNotifications = defaultAccountNotificationsState,
   accountNotificationActions = noopAccountNotificationActions,
-  rooms
+  notificationDelivery = defaultNotificationDeliveryState,
+  notificationDeliveryActions = noopNotificationDeliveryActions,
+  rooms,
+  spaces
 }: {
   initialCategory?: SettingsCategoryId;
   settingsScope?: "account" | "app";
@@ -195,7 +205,11 @@ export function UserSettingsPanel({
   onManageAccount?: () => void;
   accountNotifications?: AccountNotificationsState;
   accountNotificationActions?: AccountNotificationActions;
+  /** #1427: the app-scoped runtime half of this device's own notification delivery. */
+  notificationDelivery?: NotificationDeliveryState;
+  notificationDeliveryActions?: NotificationDeliveryActions;
   rooms?: RoomSummary[];
+  spaces?: SpaceSummary[];
 }) {
   const sessionStatusRefreshOwnerRef = useRef<string | null>(null);
   useEffect(() => {
@@ -586,8 +600,26 @@ export function UserSettingsPanel({
               ) : null}
             </div>
           </section>
+          {/*
+            #1427: this device's own delivery. It is app-scoped and names its own scope on
+            every patch, so it reads the same from either tab; the server-owned pusher
+            surface below keeps its own heading and is labelled as the server's.
+          */}
+          <NotificationDeliverySection
+            delivery={settings.values.delivery}
+            state={notificationDelivery}
+            rooms={rooms}
+            spaces={spaces}
+            actions={notificationDeliveryActions}
+          />
           {settingsScope !== "app" && currentSession ? (
             <>
+              <p
+                className="profile-settings-hint"
+                data-testid="notification-delivery-server-owner-note"
+              >
+                {t("settings.notificationDeliveryServerOwnerNote")}
+              </p>
               <AccountNotificationsLoadStatus
                 state={accountNotifications}
                 onRetry={accountNotificationActions.load}
@@ -790,10 +822,12 @@ export function UserSettingsPanel({
 export function AppSettingsDialog({
   snapshot,
   onUpdateSettings,
+  notificationDeliveryActions = noopNotificationDeliveryActions,
   onClose
 }: {
   snapshot: DesktopSnapshot;
   onUpdateSettings: (patch: SettingsPatch) => void;
+  notificationDeliveryActions?: NotificationDeliveryActions;
   onClose: () => void;
 }) {
   const domain = snapshot.state.domain;
@@ -823,6 +857,10 @@ export function AppSettingsDialog({
         catalogLocale={domain.locale_profile.catalog_locale}
         accountManagement={domain.account_management}
         accountManagementCapabilities={domain.account_management_capabilities}
+        notificationDelivery={domain.notification_delivery}
+        notificationDeliveryActions={notificationDeliveryActions}
+        rooms={domain.rooms}
+        spaces={domain.spaces}
         onUpdateSettings={onUpdateSettings}
         onSetDisplayName={noop}
         onSetAvatar={noop}
@@ -1186,4 +1224,10 @@ const defaultAccountNotificationsState: AccountNotificationsState = {
   snapshot: null,
   pending_email: null,
   operation: { kind: "idle" }
+};
+
+/** An unconfigured app: no sink has a credential, and no preset list has arrived yet. */
+const defaultNotificationDeliveryState: NotificationDeliveryState = {
+  sinks: [],
+  presets: []
 };
