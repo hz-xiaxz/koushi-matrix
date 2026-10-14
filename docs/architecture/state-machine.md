@@ -6182,7 +6182,11 @@ one country's infrastructure:
   core executor's clock, and it restarts after a restart rather than being persisted.
 - **Delivery.** At send time the body is recomputed from the current projection, so
   the message matches the badge at that moment: a digest of the rooms that came due,
-  with each room's safe display label, kind, and counts, and nothing else. A
+  with each room's safe display label, kind, and counts, and nothing else. The subject
+  and body are notification payload text and follow the OS notification wording that
+  Core already owns, not the React message catalog: they never render inside the app,
+  they are counts-only, and localizing them is a separate decision that has not been
+  made. A
   channel-level minimum interval coalesces further mail, the queue is in-memory and
   bounded and is discarded on exit, and there is no durable outbox. A failed delivery
   never leaves a sink reading as ON: the last outcome
