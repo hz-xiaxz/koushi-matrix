@@ -1035,6 +1035,7 @@ export type MessageId =
   | "settings.notificationKeywordEmpty"
   | "settings.notificationKeywordAdd"
   | "settings.notificationKeywordRemove"
+  | "settings.notificationKeywordDisabled"
   | "settings.notificationKeywordHint"
   | "settings.notificationKeywordErrorEmpty"
   | "settings.notificationKeywordErrorTooLong"
@@ -3099,6 +3100,7 @@ const en: Catalog = {
   "settings.notificationKeywordEmpty": "No keywords yet.",
   "settings.notificationKeywordAdd": "Add a keyword",
   "settings.notificationKeywordRemove": "Remove {keyword}",
+  "settings.notificationKeywordDisabled": "Off on your account",
   "settings.notificationKeywordHint":
     "Keywords are saved on your homeserver, so this app and your other devices highlight them too. The switch above decides what this device sends mail about. A keyword matches a whole word, ignoring case.",
   "settings.notificationKeywordErrorEmpty": "Enter a keyword.",
@@ -5054,6 +5056,7 @@ const ja: Catalog = {
   "settings.notificationKeywordEmpty": "キーワードはまだありません。",
   "settings.notificationKeywordAdd": "キーワードを追加",
   "settings.notificationKeywordRemove": "{keyword}を削除",
+  "settings.notificationKeywordDisabled": "アカウントではオフ",
   "settings.notificationKeywordHint":
     "キーワードはホームサーバーに保存されるため、このアプリでも他の端末でも強調表示されます。上のスイッチは、この端末がメールで通知する対象を決めます。キーワードは大文字小文字を区別せず、単語単位で一致します。",
   "settings.notificationKeywordErrorEmpty": "キーワードを入力してください。",

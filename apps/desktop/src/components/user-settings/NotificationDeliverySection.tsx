@@ -790,6 +790,13 @@ function NotificationKeywordEditor({
               data-testid="notification-keyword-row"
             >
               <span dir="auto">{rule.pattern}</span>
+              {/* A rule another client switched off is still on the account and
+                  still removable; saying so keeps it from reading as active. */}
+              {!rule.enabled ? (
+                <small data-testid="notification-keyword-disabled">
+                  {t("settings.notificationKeywordDisabled")}
+                </small>
+              ) : null}
               <button
                 className="profile-settings-action"
                 type="button"

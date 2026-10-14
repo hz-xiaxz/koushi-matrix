@@ -89,11 +89,15 @@ function actions(): NotificationDeliveryActions {
 const KEYWORD_RULES: NotificationKeywordRule[] = [
   {
     rule_id: "org.matrix.desktop.notify.keyword.aaaaaaaaaaaaaaaa",
-    pattern: "Alpha"
+    pattern: "Alpha",
+    enabled: true
   },
   {
+    // Another client turned this rule off; it is still on the account, so it
+    // still appears in server order and is still removable.
     rule_id: "org.matrix.desktop.notify.keyword.bbbbbbbbbbbbbbbb",
-    pattern: "Beta"
+    pattern: "Beta",
+    enabled: false
   }
 ];
 
@@ -737,6 +741,21 @@ describe("NotificationDeliverySection keyword editor (#1427)", () => {
     expect(screen.queryByTestId("notification-keyword-empty")).toBeNull();
   });
 
+  test("keeps a rule another client switched off, in order, and says it is off", () => {
+    const { keywordHandlers } = renderKeywordSection();
+    const rows = screen.getAllByTestId("notification-keyword-row");
+    // The disabled rule is still the second row, in the server's own order.
+    expect(within(rows[1]).getByText("Beta")).toBeTruthy();
+    expect(within(rows[1]).getByTestId("notification-keyword-disabled").textContent).toBe(
+      "Off on your account"
+    );
+    // An enabled rule carries no off copy.
+    expect(within(rows[0]).queryByTestId("notification-keyword-disabled")).toBeNull();
+    // The remove control is unchanged, so a stale off rule can be cleared.
+    fireEvent.click(within(rows[1]).getByTestId("notification-keyword-remove"));
+    expect(keywordHandlers.remove).toHaveBeenCalledWith(KEYWORD_RULES[1].rule_id);
+  });
+
   test("removes exactly the rule its row names, without patching the delivery block", () => {
     const { handlers, keywordHandlers } = renderKeywordSection();
     const rows = screen.getAllByTestId("notification-keyword-row");
@@ -846,7 +865,8 @@ describe("NotificationDeliverySection keyword editor (#1427)", () => {
           ...KEYWORD_RULES,
           {
             rule_id: "org.matrix.desktop.notify.keyword.cccccccccccccccc",
-            pattern: "cake"
+            pattern: "cake",
+            enabled: true
           }
         ],
         keywordOperation: {

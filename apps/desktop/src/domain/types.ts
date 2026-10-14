@@ -735,6 +735,12 @@ export interface NotificationEmailAddress {
 export interface NotificationKeywordRule {
   rule_id: string;
   pattern: string;
+  /**
+   * Whether the account has this rule switched on. A rule another client turned
+   * off is still on the account: it still refuses a same-pattern add and is
+   * still removable here, so the list shows it and says it is off.
+   */
+  enabled: boolean;
 }
 
 export interface AccountNotificationsSnapshot {
