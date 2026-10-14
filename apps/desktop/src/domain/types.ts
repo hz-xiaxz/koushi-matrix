@@ -98,8 +98,9 @@ export type ComposerDraftAccountOwner = SavedSessionInfo;
  * Version 9 adds the persisted sidebar section bound
  * (`SidebarSectionSettings.expanded`) and its projection
  * (`SidebarModel.section_bounds`).
+ * Version 10 adds the device-local notification delivery projection (#1427).
  */
-export const SNAPSHOT_SCHEMA_VERSION = 9;
+export const SNAPSHOT_SCHEMA_VERSION = 10;
 
 /**
  * Snapshot state. #87 Phase 4 sectioned this into domain (Matrix/product, Rust-owned,

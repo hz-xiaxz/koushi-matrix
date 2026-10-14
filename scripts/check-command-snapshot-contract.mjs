@@ -70,6 +70,23 @@ if (/async fn current_snapshot\b/.test(readFileSync(helper, "utf8"))) {
   violations.push(`${relative(root, helper)} current_snapshot helper`);
 }
 
+// The IPC snapshot contract version exists in two languages, and the renderer rejects every
+// snapshot whose version it does not recognize, so a bump on one side alone ships an app that
+// renders its own recovery screen instead of the app. Both constants are read and compared.
+const versionSources = [
+  ["apps/desktop/src-tauri/src/dto.rs", /pub const SNAPSHOT_SCHEMA_VERSION: u32 = (\d+);/],
+  ["apps/desktop/src/domain/types.ts", /export const SNAPSHOT_SCHEMA_VERSION = (\d+);/]
+];
+const versions = versionSources.map(([name, pattern]) => {
+  const match = readFileSync(join(root, name), "utf8").match(pattern);
+  if (!match) violations.push(`${name} has no SNAPSHOT_SCHEMA_VERSION`);
+  return [name, match ? Number(match[1]) : null];
+});
+if (versions.every(([, version]) => version !== null)) {
+  const [[rustName, rust], [tsName, ts]] = versions;
+  if (rust !== ts) violations.push(`${rustName} says ${rust} while ${tsName} says ${ts}`);
+}
+
 if (violations.length) {
   console.error("desktop command/state ownership contract failed:\n" + violations.map((v) => `  ${v}`).join("\n"));
   process.exit(1);
