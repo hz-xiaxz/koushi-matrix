@@ -313,7 +313,13 @@ fn diagnostic_snapshot_exports_the_search_retention_summary() {
     let account_row = exported
         .entries
         .iter()
-        .find(|entry| entry.message.contains("account_index=0"))
+        // The diagnostics ring is process-global and other tests record
+        // `account_index=0` rows concurrently, so match this fixture's row.
+        .find(|entry| {
+            entry.source == "core.search_retention"
+                && entry.message.contains("account_index=0")
+                && entry.message.contains("search_rooms_total=3")
+        })
         .expect("account retention row must be exported");
     assert!(account_row.message.contains("search_rooms_total=3"));
     assert!(
