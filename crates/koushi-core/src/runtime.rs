@@ -12,6 +12,7 @@ mod composer;
 mod connection;
 mod deferred_dispatch;
 mod navigation;
+mod notification_delivery;
 mod profile_display_diagnostics;
 mod readers;
 mod reducer_support;
@@ -844,6 +845,14 @@ impl CoreRuntime {
         #[cfg(any(test, feature = "test-hooks"))]
         let composer_draft_store_actor_for_testing = composer_draft_store_actor.clone();
         let view_scopes = crate::view_scope_lifecycle::ViewScopeRegistry::default();
+        let (notification_delivery_outcome_tx, notification_delivery_outcome_rx) =
+            mpsc::channel(notification_delivery::MAX_INFLIGHT_NOTIFICATION_DELIVERY_SENDS);
+        // The channel is created from the settings the state was just loaded with, so the dwell
+        // it arms on the first observation is the user's, not the default.
+        let notification_delivery =
+            crate::notification_delivery::channel::NotificationDeliveryChannel::new(
+                &initial_state.settings.values.delivery,
+            );
         let actor = AppActor {
             view_scopes: view_scopes.clone(),
             command_tx: command_tx.downgrade(),
@@ -895,6 +904,11 @@ impl CoreRuntime {
             latest_focused_projection_generation: HashMap::new(),
             pending_date_navigation_request_id: None,
             cancelled_date_navigation_request_id: None,
+            notification_delivery,
+            notification_delivery_sends: Vec::new(),
+            notification_delivery_outcome_tx,
+            notification_delivery_outcome_rx,
+            notification_delivery_test_sequence: 1,
         };
         let view_lifetime = crate::view_scope_lifecycle::ViewRuntimeLifetime(view_scopes.clone());
         let (actor_completion_tx, actor_completion_rx) = watch::channel(None);
@@ -1306,6 +1320,18 @@ struct AppActor {
     /// `OpenFocusedContext` + `EnterAnchoredTimeline` reply is dropped and its
     /// focused subscription released instead of re-anchoring the main pane.
     cancelled_date_navigation_request_id: Option<RequestId>,
+    /// #1427: the device-local delivery channel's runtime state - the dwell trackers, the
+    /// rooms held for the next coalescing window, which sinks hold a credential, and the
+    /// armed retries. In memory only, and it never holds a secret.
+    notification_delivery: crate::notification_delivery::channel::NotificationDeliveryChannel,
+    /// One retained owner per in-flight delivery send, so dropping the actor aborts them.
+    notification_delivery_sends: Vec<AbortOnDrop<()>>,
+    notification_delivery_outcome_tx:
+        mpsc::Sender<notification_delivery::NotificationDeliverySendResult>,
+    notification_delivery_outcome_rx:
+        mpsc::Receiver<notification_delivery::NotificationDeliverySendResult>,
+    /// Monotonic counter for the window half of a test send's idempotency key.
+    notification_delivery_test_sequence: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -1491,9 +1517,18 @@ impl AppActor {
 
     async fn run(mut self) -> Result<(), CoreShutdownError> {
         loop {
+            // #1427: the attention projection this iteration sees is the one the previous one
+            // published, so the delivery channel observes the same rooms the badge and the unread
+            // marks already show. It publishes its own projection when it moves, which is once per
+            // credential read and once per send outcome.
+            if self.observe_notification_delivery().await {
+                let published_state = self.snapshot_tx.borrow().state.clone();
+                self.publish_state_change(&published_state);
+            }
             let composer_draft_persist_delay = self.composer_draft_persist_delay();
             let navigation_persist_delay = self.navigation_persist_delay();
             let scheduled_send_delay = self.scheduled_send_delay();
+            let notification_delivery_delay = self.notification_delivery_wake_delay();
             // #1060: wait for AccountActor capacity only while a batch-commit
             // dispatch is deferred.
             let deferred_dispatch_permit = self
@@ -1526,6 +1561,24 @@ impl AppActor {
                     let before_state = self.state.clone();
                     if self.dispatch_due_scheduled_send().await {
                         self.publish_state_change(&before_state);
+                    }
+                }
+                // #1427: one sleep for the whole delivery channel, on the core executor's
+                // clock: the earliest dwell deadline, or an armed retry. The body is empty
+                // because the top of the loop re-observes: waking is all this arm has to do,
+                // and a late wake-up delivers the same rooms a punctual one would.
+                _ = async {
+                    match notification_delivery_delay {
+                        Some(delay) => executor::sleep(delay).await,
+                        None => future::pending::<()>().await,
+                    }
+                } => {}
+                delivery_result = self.notification_delivery_outcome_rx.recv() => {
+                    if let Some(delivery_result) = delivery_result {
+                        let before_state = self.snapshot_tx.borrow().state.clone();
+                        if self.record_notification_delivery_outcome(delivery_result).await {
+                            self.publish_state_change(&before_state);
+                        }
                     }
                 }
                 settings_changed = receive_app_settings_update(&mut self.settings_updates) => {
@@ -3608,6 +3661,45 @@ impl AppActor {
                                 .await;
                             self.handle_app_effects(request_id, effects).await;
                             true
+                        }
+                        AppCommand::SetNotificationDeliverySecret {
+                            request_id,
+                            sink_id,
+                            secret,
+                        } => {
+                            // The secret is moved straight into the store call and is not
+                            // reduced, published, or logged. The command settles on the
+                            // projection the write publishes, so a store that refuses the value
+                            // is the only failure.
+                            let result = self
+                                .set_notification_delivery_secret(request_id, &sink_id, secret)
+                                .await;
+                            self.settle_notification_delivery_command(request_id, result)
+                                .await;
+                            false
+                        }
+                        AppCommand::ClearNotificationDeliverySecret {
+                            request_id,
+                            sink_id,
+                        } => {
+                            let result = self
+                                .clear_notification_delivery_secret(request_id, &sink_id)
+                                .await;
+                            self.settle_notification_delivery_command(request_id, result)
+                                .await;
+                            false
+                        }
+                        AppCommand::TestNotificationDelivery {
+                            request_id,
+                            sink_id,
+                        } => {
+                            let window_id = self.next_notification_delivery_test_window();
+                            let result = self
+                                .dispatch_notification_delivery_test(&sink_id, window_id)
+                                .await;
+                            self.settle_notification_delivery_command(request_id, result)
+                                .await;
+                            false
                         }
                         AppCommand::ImportLegacySettings {
                             request_id,
@@ -6059,6 +6151,8 @@ fn map_state_search_scope_to_core(scope: AppSearchScope) -> SearchScope {
     }
 }
 
+#[cfg(test)]
+mod notification_delivery_tests;
 #[cfg(test)]
 mod tests;
 

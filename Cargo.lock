@@ -3336,6 +3336,7 @@ dependencies = [
  "koushi-diagnostics",
  "koushi-key",
  "koushi-media",
+ "koushi-notify",
  "koushi-protocol",
  "koushi-sdk",
  "koushi-search",

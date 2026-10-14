@@ -376,3 +376,46 @@ fn single_line(text: &str) -> String {
 fn idempotency_key(sink_id: &str, window_id: &str) -> String {
     format!("koushi-notification/{sink_id}/{window_id}")
 }
+
+/// The subject a test send carries.
+///
+/// English, like the digest's own wording and for the same reason: this text never
+/// renders inside the app, it is what the recipient's mail client shows, and the
+/// message catalog owns what the app says, not what this device puts on the wire.
+pub const TEST_DELIVERY_SUBJECT: &str = "Koushi test notification";
+
+/// The body a test send carries: what it is and what it proves, and nothing else.
+///
+/// It names no room, event, sender, or message, because a test send happens before
+/// the user has trusted the channel with any of that
+/// (`docs/architecture/state-machine.md`, "Local Notification Delivery").
+pub const TEST_DELIVERY_BODY: &str = "This is a test notification from Koushi.\n\
+     If you can read it, this device can reach this delivery sink. No room, message, or \
+     account data is included in a test send.";
+
+/// Build the one canned intent a test send delivers through one sink.
+///
+/// The intent goes through the same sink path, the same credential read, and the same typed
+/// outcome projection as a real delivery, and it carries no attention state at all. It is
+/// deliberately kept out of the dispatch window: the caller records its outcome without touching
+/// the coalescing window, so testing a sink can neither suppress nor delay a real notification.
+///
+/// Neither the channel's own switch nor the sink's is required. A test send happens while the
+/// user is still setting the sink up, and asking them to turn the channel on before they can
+/// find out whether it works would be asking them to trust it first. The sink itself is always
+/// complete - the settings loader drops one that is not - so the request it builds is always a
+/// request a real send would have built.
+pub fn test_delivery_intent(
+    sink: &NotificationSinkSettings,
+    window_id: &str,
+) -> NotificationDeliveryIntent {
+    NotificationDeliveryIntent {
+        sink_id: sink.id.clone(),
+        destination: sink.destination.clone(),
+        from_address: sink.from_address.clone(),
+        sender_name: sink.sender_name.clone(),
+        subject: TEST_DELIVERY_SUBJECT.to_owned(),
+        body: TEST_DELIVERY_BODY.to_owned(),
+        idempotency_key: idempotency_key(&sink.id, window_id),
+    }
+}

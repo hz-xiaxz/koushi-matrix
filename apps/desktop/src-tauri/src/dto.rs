@@ -352,6 +352,8 @@ pub struct FrontendDomainStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub native_attention: Option<NativeAttentionState>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub notification_delivery: Option<koushi_state::NotificationDeliveryState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub cjk_text_policy: Option<CjkTextPolicyState>,
 }
 
@@ -417,6 +419,7 @@ impl FrontendDomainStateChangedSlices {
             && self.e2ee_trust.is_none()
             && self.local_encryption.is_none()
             && self.native_attention.is_none()
+            && self.notification_delivery.is_none()
             && self.cjk_text_policy.is_none()
     }
 }
@@ -550,6 +553,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
             }
             domain.native_attention = Some(native_attention);
         }
+        domain.notification_delivery = changed.notification_delivery;
         domain.cjk_text_policy = changed.cjk_text_policy;
 
         ui.navigation = changed.navigation;
@@ -640,6 +644,9 @@ pub struct FrontendDomainState {
     pub e2ee_trust: E2eeTrustState,
     pub local_encryption: LocalEncryptionState,
     pub native_attention: NativeAttentionState,
+    /// #1427: which device-local delivery sinks hold a credential and how their last send
+    /// ended. App scope, never persisted, and never a secret value.
+    pub notification_delivery: koushi_state::NotificationDeliveryState,
     pub cjk_text_policy: CjkTextPolicyState,
 }
 
@@ -718,6 +725,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
             e2ee_trust: state.e2ee_trust,
             local_encryption: state.local_encryption,
             native_attention,
+            notification_delivery: state.notification_delivery,
             cjk_text_policy: state.cjk_text_policy,
         },
         ui: FrontendUiState {
@@ -737,10 +745,10 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
     }
 }
 
-/// IPC snapshot contract version. Version 9 adds the persisted sidebar section
-/// bound (`SidebarSectionSettings.expanded`) and its projection
-/// (`SidebarModel.section_bounds`).
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 9;
+/// IPC snapshot contract version. Version 10 adds the device-local notification
+/// delivery projection (`NotificationDeliveryState`), which carries only whether
+/// each sink holds a credential and how its last send ended.
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 10;
 
 pub(crate) fn frontend_display_platform() -> DisplayPlatform {
     #[cfg(target_os = "macos")]

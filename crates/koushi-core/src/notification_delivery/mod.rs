@@ -29,14 +29,20 @@
 //! given and must not re-filter it. Only the channel's own `enabled` switch turns
 //! a due set into no message at all.
 //!
-//! Nothing calls this module yet. The runtime slice that observes the attention
-//! projection, owns the timer, coalesces sends, and reads a sink secret is the
-//! next change; this one is the decision engine and its tests.
+//! `qualifying` builds the set those three rules are applied to (the caller's
+//! half of "who qualifies"), and `channel` is the runtime state the actor owns:
+//! the dwell trackers, the rooms held for the next window, the configured flags,
+//! the outcomes, and the armed retries. The actor wires them together in
+//! `runtime::notification_delivery`, one sleep per channel on the executor's
+//! clock, and reads a sink secret only inside a spawned send.
 //!
 //! [`RoomAttentionKind`]: koushi_state::RoomAttentionKind
 
 pub mod digest;
 pub mod dwell;
+
+pub(crate) mod channel;
+pub(crate) mod qualifying;
 
 #[cfg(test)]
 mod tests;

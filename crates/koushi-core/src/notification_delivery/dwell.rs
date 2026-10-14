@@ -181,6 +181,20 @@ impl DwellTracker {
     pub fn is_pending(&self, room_id: &str) -> bool {
         self.pending.contains_key(room_id)
     }
+
+    /// The earliest instant at which a currently armed room comes due, or `None` when
+    /// no room is armed.
+    ///
+    /// This is what the caller arms its one timer on: it reports the earliest anchor
+    /// plus the dwell rather than deciding anything, so a caller that wakes late
+    /// delivers the same rooms a punctual one would, and a caller that wakes early
+    /// delivers none.
+    pub fn next_due_at(&self) -> Option<Instant> {
+        self.pending
+            .values()
+            .filter_map(|anchor| anchor.checked_add(self.dwell))
+            .min()
+    }
 }
 
 /// `Debug` reports the dwell and the number of armed and released rooms. Room ids

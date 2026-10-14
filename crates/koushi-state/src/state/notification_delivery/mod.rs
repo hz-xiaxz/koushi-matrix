@@ -469,6 +469,14 @@ pub struct NotificationDeliverySinkState {
     /// How this sink's most recent send ended, if it has sent in this run. The
     /// frontend must not read a sink as working while this is a failure.
     pub last_outcome: Option<NotificationDeliveryOutcomeState>,
+    /// Whether this device deleted a stored credential for this sink because it was
+    /// entered for a server or account the sink no longer names. It is a fact about
+    /// the credential and never the credential, and it is the only way the frontend
+    /// can learn about a deletion that happened while the settings were being loaded
+    /// rather than during an edit. A sink that never had a credential does not carry
+    /// the flag, and saving a new one clears it.
+    #[serde(default)]
+    pub secret_retired: bool,
 }
 
 /// One sink's most recent send, as a typed fact with the time it was observed.

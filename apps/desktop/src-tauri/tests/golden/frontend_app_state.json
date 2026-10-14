@@ -739,6 +739,10 @@
           "unread_count": 5
         }
       },
+      "notification_delivery": {
+        "presets": [],
+        "sinks": []
+      },
       "profile": {
         "ignored_user_ids": [],
         "ignored_user_update": {
@@ -1043,6 +1047,19 @@
             "math_mode": true,
             "recent_emojis": []
           },
+          "delivery": {
+            "direct_messages": true,
+            "dwell_secs": 300,
+            "enabled": false,
+            "keywords": true,
+            "mentions": true,
+            "min_interval_secs": 900,
+            "only_when_unfocused": true,
+            "prefix_chars": 80,
+            "prefix_consent": null,
+            "sinks": [],
+            "watched": []
+          },
           "display": {
             "code_block_wrap": true,
             "encrypted_url_previews_enabled": false,
@@ -1237,7 +1254,7 @@
         "platform": "linux"
       }
     },
-    "schema_version": 9,
+    "schema_version": 10,
     "ui": {
       "basic_operation": {
         "kind": "creatingRoom",

@@ -432,6 +432,7 @@ pub fn build_state_delta(
     changed_slice!(e2ee_trust);
     changed_slice!(local_encryption);
     changed_slice!(native_attention);
+    changed_slice!(notification_delivery);
     changed_slice!(cjk_text_policy);
     changed_slice!(errors);
 
@@ -688,6 +689,9 @@ fn audit_app_state_delta_slices(state: &AppState) {
         local_encryption: _,
         native_attention: _,
         native_attention_context: _,
+        // #1427: app-scoped runtime projection of the delivery channel; mirrored to the
+        // frontend by the `notification_delivery` slice above.
+        notification_delivery: _,
         cjk_text_policy: _,
         errors: _,
         device_cleanup: _,

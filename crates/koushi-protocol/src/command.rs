@@ -56,6 +56,9 @@ impl CoreCommand {
                 | AppCommand::RemoveInviteTarget { request_id, .. }
                 | AppCommand::UpdateSettings { request_id, .. }
                 | AppCommand::ImportLegacySettings { request_id, .. }
+                | AppCommand::SetNotificationDeliverySecret { request_id, .. }
+                | AppCommand::ClearNotificationDeliverySecret { request_id, .. }
+                | AppCommand::TestNotificationDelivery { request_id, .. }
                 | AppCommand::UpdateNavigationPreference { request_id, .. }
                 | AppCommand::RebuildSearchIndex { request_id }
                 | AppCommand::SetRoomUrlPreviewOverride { request_id, .. }
