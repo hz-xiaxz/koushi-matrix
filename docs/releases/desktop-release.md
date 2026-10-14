@@ -49,6 +49,13 @@ Claude Code and OpenCode have equivalent discovery entry points under
 - The macOS arm64 artifact must be Developer ID signed, notarized, stapled,
   and accepted by Gatekeeper. Koushi v0.1.0 was the final release to include
   an Intel Mac artifact.
+- `xcrun stapler` reads the accepted ticket from Apple's CloudKit
+  ticket-delivery service, which can lose the connection or answer
+  inconsistently while an accepted ticket propagates. The verification step
+  retries only the `stapler staple` and `stapler validate` calls, with bounded
+  backoff (15s, 30s, 60s, 120s, 120s). The last attempt still decides the gate:
+  every signature, ticket, checksum, and Gatekeeper assertion runs unchanged,
+  and a failure after the final attempt still fails the job.
 - The Windows x64 NSIS installer remains explicitly unsigned until a Windows
   certificate and signing gate are approved.
 - The Windows installer requires WebView2 `155.0.4283.45` or newer and invokes
@@ -235,6 +242,11 @@ gh run view <run-id> --log-failed
 - If draft creation succeeded and only the final publish step failed, rerun the
   failed job from the same workflow run so the successful build jobs and draft
   remain intact.
+- A `stapler` failure that names CloudKit in its output (`.../ticket-delivery/...`,
+  `CloudKit's response is inconsistent`, exit code 65 or 68) is a ticket lookup
+  that lost its connection, not a signing defect. The job already retries that
+  lookup; if the gate still failed, rerun the failed job instead of touching
+  signing material or weakening the verification.
 - Do not delete or recreate a draft, tag, or published Release without explicit
   authorization and a verified target. Those operations can break stable links
   or make an existing version ambiguous.
