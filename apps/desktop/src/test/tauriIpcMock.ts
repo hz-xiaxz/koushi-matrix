@@ -16,6 +16,7 @@
  */
 
 import type { CoreEventPayload } from "../domain/coreEvents";
+import { SNAPSHOT_SCHEMA_VERSION } from "../domain/types";
 import type { ViewportSyncReceipt } from "../backend/desktopApi";
 import { sidebarSectionBoundsForFake } from "./sidebarSectionBoundsFixture";
 
@@ -569,7 +570,7 @@ export function defaultSnapshotResponse() {
     else ui[key] = value;
   }
   return {
-    state: { schema_version: 9, domain, ui },
+    state: { schema_version: SNAPSHOT_SCHEMA_VERSION, domain, ui },
     sidebar: {
       active_space_id: null,
       account_home: {
