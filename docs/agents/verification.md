@@ -19,8 +19,8 @@ fix, strictly, never the reverse.
   DOM, never on logs or fixed sleeps. The fix is "done" only when that same
   check turns GREEN.
 - Measure performance claims; never eyeball them. Gate on a number — e.g. the
-  `cache_restore` scenario asserts a deep-history anchor is restored from cache
-  in ≤ N backward-paginate cycles while the network is blocked.
+  `idle_sync_gap_inspection` scenario asserts every healthy inspection decodes
+  zero event bodies and prints p50/p95 inspection durations.
 - To prove cache-served / offline behavior, block the network in-harness (the
   `headless-core-qa` `QaTcpProxy.disable()` pattern) and assert success with no
   `network` origin (the #123 `EventsOrigin` observer).

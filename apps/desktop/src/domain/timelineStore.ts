@@ -499,9 +499,6 @@ function timelineEventKeyId(event: TimelineEvent): string | null {
   if ("PaginationStateChanged" in event) {
     return keyStr(event.PaginationStateChanged.key);
   }
-  if ("AnchorRestoreFinished" in event) {
-    return keyStr(event.AnchorRestoreFinished.key);
-  }
   if ("NavigationUpdated" in event) {
     return keyStr(event.NavigationUpdated.key);
   }

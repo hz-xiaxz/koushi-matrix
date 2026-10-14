@@ -2121,18 +2121,15 @@ impl TimelineActor {
         }
         let mut candidate_display_projection =
             DisplayProjectionState::from_canonical_window(&items, 0..items.len());
-        let context = DisplayProjectionContext::for_timeline(
-            &self.key.kind,
-            &self.viewport_observation,
-            false,
-        )
-        .with_thread_roots(
-            self.thread_root_order,
-            self.thread_root_projection_service
-                .lock()
-                .expect("thread-root projection service lock must not be poisoned")
-                .display_data_for_room(self.key.room_id()),
-        );
+        let context =
+            DisplayProjectionContext::for_timeline(&self.key.kind, &self.viewport_observation)
+                .with_thread_roots(
+                    self.thread_root_order,
+                    self.thread_root_projection_service
+                        .lock()
+                        .expect("thread-root projection service lock must not be poisoned")
+                        .display_data_for_room(self.key.room_id()),
+                );
         candidate_display_projection.reproject(&context);
         let emitted_items = candidate_display_projection.display_items().to_vec();
         let _ = commit_prepared_initial_window_for_generation(

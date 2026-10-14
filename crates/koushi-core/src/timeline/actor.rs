@@ -29,8 +29,6 @@ use crate::search::SearchIndexMessage;
 use crate::startup_trace::{self, StartupPhase};
 use crate::threads_list::ThreadRootProjectionService;
 use koushi_protocol::command::MediaDownloadSelection;
-#[cfg(test)]
-use koushi_protocol::event::TimelineAnchorRestoreStatus;
 use koushi_protocol::event::{
     CoreEvent, LinkPreview, PaginationDirection, TimelineDiff, TimelineItem, TimelineItemId,
     TimelineNavigationSnapshot, TimelineReadStateSync, TimelineResyncReason, TimelineSendState,
@@ -52,9 +50,9 @@ use super::display_projection::{DisplayProjectionContext, DisplayProjectionState
 use super::gap_repair::{
     GapRepairEvaluationDiagnosticSignature, GapRepairViewportWakeDecision, GlobalCommitDecision,
     GlobalCommitFence, GlobalResponseCommit, PendingLiveTailRefreshCompletion,
-    PendingTimelineGapProjection, RestoreCausalProjectionBuffer, TimelineGapProjectionCorrelation,
-    TimelineGapRepairTracker, TimelineGapRepairTrigger, historical_causal_projection_operation,
-    projected_gaps_contain_id, rendered_live_edge_target, retain_room_subscription_checkpoint,
+    PendingTimelineGapProjection, TimelineGapProjectionCorrelation, TimelineGapRepairTracker,
+    TimelineGapRepairTrigger, historical_causal_projection_operation, projected_gaps_contain_id,
+    rendered_live_edge_target, retain_room_subscription_checkpoint,
     room_checkpoint_advances_global_fence, should_record_gap_repair_evaluation,
 };
 use super::item_projection::{
@@ -72,7 +70,7 @@ use super::media::{
 use super::navigation::{
     ActivePaginationTask, INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT,
     INITIAL_EMPTY_ROOM_HYDRATION_MAX_ROUNDS, InitialItemsRequestIdentity, PaginationCompletion,
-    RestoreTimelineAnchorState, TimelineActorGenerationGate, activity_rows_from_timeline_items,
+    TimelineActorGenerationGate, activity_rows_from_timeline_items,
     emit_initial_items_for_generation, emit_timeline_events_for_generation, send_generation_fenced,
     should_hydrate_empty_initial_room_timeline,
 };
@@ -280,15 +278,6 @@ pub(super) enum TimelineActorMessage {
         completion: PaginationCompletion,
     },
     OwnReadReceiptChanged,
-    RestoreTimelineAnchor {
-        request_id: RequestId,
-        event_id: String,
-        max_batches: u16,
-        event_count: u16,
-    },
-    RestoreTimelineAnchorContinue {
-        serial: u64,
-    },
     ObserveViewport {
         observation: TimelineViewportObservation,
     },
@@ -312,13 +301,6 @@ pub(super) enum TimelineActorMessage {
     ReplyQuoteRetryDue {
         event_id: String,
         token: super::reply_quote_hydration::HydrationToken,
-    },
-    /// Test-only: settle a ledger entry from an authoritative observation, as
-    /// a completed batch or an edit would, without an SDK lookup.
-    #[cfg(test)]
-    TestSettleReplyQuoteOriginal {
-        quote: koushi_state::ReplyQuote,
-        acknowledged: tokio::sync::oneshot::Sender<()>,
     },
     RequestRoomKey {
         request_id: Option<RequestId>,
@@ -450,26 +432,14 @@ pub(super) enum TimelineActorMessage {
     ReplayInitialItems {
         cause_request_id: Option<RequestId>,
     },
+    /// Inject one SDK-shaped batch through the normal diff path and wait for
+    /// the actor to settle it. Used by tests that need an acknowledged diff
+    /// seam (ignored-user reset), not by the removed anchor restore (#1395).
     #[cfg(test)]
-    TestBeginRestore {
-        request_id: RequestId,
-        event_id: String,
-        /// Answers the batch id the first post-restore emission or buffered
-        /// batch will take, so tests can tell pre-restore stragglers apart.
-        acknowledged: oneshot::Sender<TimelineBatchId>,
-    },
-    #[cfg(test)]
-    TestInjectRestoreDiff {
+    TestInjectDiff {
         diffs: Vec<eyeball_im::VectorDiff<Arc<SdkTimelineItem>>>,
         projections: BTreeSet<CausalProjectionId>,
         acknowledged: oneshot::Sender<()>,
-    },
-    #[cfg(test)]
-    TestRestoreCausalState(oneshot::Sender<(bool, bool, usize, BTreeSet<CausalProjectionId>)>),
-    #[cfg(test)]
-    TestFinishRestore {
-        request_id: RequestId,
-        response: oneshot::Sender<bool>,
     },
     #[cfg(test)]
     TestArmGapRepairCompletionPause {
@@ -980,31 +950,12 @@ pub(super) struct TimelineActor {
     /// A republish was requested while an anchor restore was buffering its
     /// coalesced emission; it runs at the end of the loop once the restore has
     /// flushed.
-    pub(super) reply_quote_republish_pending: bool,
     pub(super) pagination_task: Option<ActivePaginationTask>,
     pub(super) cache_reset_refill_pending: bool,
     pub(super) next_pagination_serial: u64,
     /// Application data directory for cached preview images.
     pub(super) data_dir: Option<std::path::PathBuf>,
     pub(super) account_work: AccountWorkScheduler,
-    pub(super) restore_anchor: Option<RestoreTimelineAnchorState>,
-    pub(super) next_restore_anchor_serial: u64,
-    /// Buffered `TimelineDiff`s accumulated during a restore walk. While
-    /// `restore_anchor.is_some()`, each `handle_diff_batch` call appends its
-    /// projected display-space diffs here instead of emitting `ItemsUpdated`
-    /// per chunk. Canonical state advances immediately; the
-    /// buffer is flushed as ONE `ItemsUpdated` when the restore terminates
-    /// (Found/EndReached/BudgetExhausted/Failed/Superseded), so React receives
-    /// a single settled update rather than O(chunks) intermediate renders.
-    pub(super) restore_emit_buffer: Vec<TimelineDiff>,
-    /// Causal SDK projection tags for the diffs above. They must be observed
-    /// only after the coalesced restore batch is published to the UI.
-    pub(super) restore_causal_projections: RestoreCausalProjectionBuffer,
-    /// `maybe_hydrate_missing_thread_roots` is deliberately deferred until a
-    /// buffered restore window has emitted its final canonical `ItemsUpdated`.
-    /// Otherwise a newly observed Pending projection is pruned by the store
-    /// before the reply that owns it is visible.
-    pub(super) hydrate_after_restore_flush: bool,
     /// Monotonically increasing counter, incremented at the start of every
     /// `handle_diff_batch` call (restore or not).
     pub(super) diff_batch_seq: u64,
@@ -1014,7 +965,6 @@ pub(super) struct TimelineActor {
     /// Historical projection released by a coalesced restore publication.
     /// The synchronous flush records the exact published batch; the actor loop
     /// performs the existing async scheduler handoff immediately afterwards.
-    pub(super) ready_restore_gap_projection_batch: Option<TimelineBatchId>,
     pub(super) live_tail_projection_correlation: TimelineGapProjectionCorrelation,
     pub(super) pending_live_tail_projection: Option<PendingLiveTailRefreshCompletion>,
     pub(super) live_tail_refresh: Option<(
@@ -1103,18 +1053,14 @@ fn canonical_pending_event_ids(
 
 impl TimelineActor {
     pub(super) fn display_projection_context(&self) -> DisplayProjectionContext {
-        DisplayProjectionContext::for_timeline(
-            &self.key.kind,
-            &self.viewport_observation,
-            self.restore_anchor.is_some(),
-        )
-        .with_thread_roots(
-            self.thread_root_order,
-            self.thread_root_projection_service
-                .lock()
-                .expect("thread-root projection service lock must not be poisoned")
-                .display_data_for_room(self.key.room_id()),
-        )
+        DisplayProjectionContext::for_timeline(&self.key.kind, &self.viewport_observation)
+            .with_thread_roots(
+                self.thread_root_order,
+                self.thread_root_projection_service
+                    .lock()
+                    .expect("thread-root projection service lock must not be poisoned")
+                    .display_data_for_room(self.key.room_id()),
+            )
     }
 
     pub(super) fn reproject_display_items(&mut self) -> Vec<TimelineDiff> {
@@ -1705,7 +1651,6 @@ impl TimelineActor {
         let initial_display_context = DisplayProjectionContext::for_timeline(
             &key.kind,
             &TimelineViewportObservation::default(),
-            false,
         )
         .with_thread_roots(
             thread_root_order,
@@ -2098,22 +2043,15 @@ impl TimelineActor {
             terminal_ingress,
             reply_quote_hydration,
             reply_quote_refresh: HashSet::new(),
-            reply_quote_republish_pending: false,
             pagination_task: None,
             cache_reset_refill_pending: false,
             next_pagination_serial: 0,
             data_dir,
             account_work,
-            restore_anchor: None,
-            next_restore_anchor_serial: 0,
-            restore_emit_buffer: Vec::new(),
-            restore_causal_projections: RestoreCausalProjectionBuffer::default(),
-            hydrate_after_restore_flush: false,
             diff_batch_seq: 0,
             gap_repair,
             gap_projection_correlation: TimelineGapProjectionCorrelation::default(),
             pending_gap_projection: None,
-            ready_restore_gap_projection_batch: None,
             live_tail_projection_correlation: TimelineGapProjectionCorrelation::default(),
             pending_live_tail_projection: None,
             live_tail_refresh: None,
@@ -2244,22 +2182,9 @@ impl TimelineActor {
             }
             self.finish_ready_causal_projection_handoffs().await;
             self.maybe_refill_reset_room_cache().await;
-            self.flush_deferred_reply_quote_republish();
-        }
-    }
-    /// Run a republish that was requested while an anchor restore was buffering
-    /// its coalesced emission, once that restore has flushed. This runs at the
-    /// loop tail so a relay batch that flushes the restore in the same turn
-    /// cannot leave the republish pending indefinitely.
-    fn flush_deferred_reply_quote_republish(&mut self) {
-        if self.reply_quote_republish_pending && self.restore_anchor.is_none() {
-            self.republish_reply_quote_dependents();
         }
     }
     async fn finish_ready_causal_projection_handoffs(&mut self) {
-        if let Some(batch_id) = self.ready_restore_gap_projection_batch.take() {
-            self.finish_pending_gap_projection(batch_id).await;
-        }
         if self.pending_live_tail_projection.is_some()
             && !self.live_tail_projection_correlation.is_pending()
             && self.finish_pending_live_tail_projection().await
@@ -2550,18 +2475,6 @@ impl TimelineActor {
             TimelineActorMessage::OwnReadReceiptChanged => {
                 self.handle_own_read_receipt_changed().await;
             }
-            TimelineActorMessage::RestoreTimelineAnchor {
-                request_id,
-                event_id,
-                max_batches,
-                event_count,
-            } => {
-                self.handle_restore_timeline_anchor(request_id, event_id, max_batches, event_count)
-                    .await;
-            }
-            TimelineActorMessage::RestoreTimelineAnchorContinue { serial } => {
-                self.handle_restore_timeline_anchor_continue(serial).await;
-            }
             TimelineActorMessage::ObserveViewport { observation } => {
                 self.viewport_observation = observation;
                 if let Some(target) = self.observe_local_viewed_boundary() {
@@ -2684,22 +2597,6 @@ impl TimelineActor {
             }
             TimelineActorMessage::ReplyQuoteRetryDue { event_id, token } => {
                 self.handle_reply_quote_retry_due(event_id, token);
-            }
-            #[cfg(test)]
-            TimelineActorMessage::TestSettleReplyQuoteOriginal {
-                quote,
-                acknowledged,
-            } => {
-                let mut refreshes = super::reply_quote_hydration::ReplyQuoteRefreshes::default();
-                let outcome = self.reply_quote_hydration.learn(quote.clone());
-                super::reply_quote_hydration::record_learn(
-                    &mut refreshes,
-                    quote.event_id.clone(),
-                    outcome,
-                );
-                self.apply_reply_quote_refreshes(refreshes);
-                self.republish_reply_quote_dependents();
-                let _ = acknowledged.send(());
             }
             TimelineActorMessage::RequestRoomKey {
                 request_id,
@@ -2998,26 +2895,7 @@ impl TimelineActor {
                 self.publish_current_canonical_activity().await;
             }
             #[cfg(test)]
-            TimelineActorMessage::TestBeginRestore {
-                request_id,
-                event_id,
-                acknowledged,
-            } => {
-                self.restore_anchor = Some(RestoreTimelineAnchorState {
-                    request_id,
-                    event_id,
-                    max_batches_remaining: 1,
-                    event_count: 1,
-                    in_flight: false,
-                    awaiting_diff_batch: false,
-                    continuation_scheduled: false,
-                    continuation_serial: None,
-                    anchor_relay_wait: None,
-                });
-                let _ = acknowledged.send(self.next_batch_id);
-            }
-            #[cfg(test)]
-            TimelineActorMessage::TestInjectRestoreDiff {
+            TimelineActorMessage::TestInjectDiff {
                 diffs,
                 projections,
                 acknowledged,
@@ -3025,24 +2903,6 @@ impl TimelineActor {
                 let provenance = ThreadAttentionBatchProvenance::from_sdk_diffs(&diffs);
                 self.handle_diff_batch(diffs, provenance, projections).await;
                 let _ = acknowledged.send(());
-            }
-            #[cfg(test)]
-            TimelineActorMessage::TestRestoreCausalState(response) => {
-                let _ = response.send((
-                    self.live_tail_projection_correlation.is_pending(),
-                    self.pending_live_tail_projection.is_some(),
-                    self.restore_emit_buffer.len(),
-                    self.restore_causal_projections.projections.clone(),
-                ));
-            }
-            #[cfg(test)]
-            TimelineActorMessage::TestFinishRestore {
-                request_id,
-                response,
-            } => {
-                let had_buffered_diffs = !self.restore_emit_buffer.is_empty();
-                self.finish_anchor_restore(request_id, TimelineAnchorRestoreStatus::EndReached);
-                let _ = response.send(had_buffered_diffs);
             }
             #[cfg(test)]
             TimelineActorMessage::TestArmGapRepairCompletionPause {
@@ -3056,10 +2916,6 @@ impl TimelineActor {
             TimelineActorMessage::Barrier(response) => {
                 let _ = response.send(());
             }
-        }
-        if self.hydrate_after_restore_flush && self.restore_anchor.is_none() {
-            self.hydrate_after_restore_flush = false;
-            self.maybe_hydrate_missing_thread_roots(None).await;
         }
     }
     pub(super) fn emit(&self, event: CoreEvent) {

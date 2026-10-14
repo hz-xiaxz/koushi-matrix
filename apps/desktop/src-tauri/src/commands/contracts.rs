@@ -308,36 +308,6 @@ fn tauri_command_routes_build_expected_core_commands() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    match build_restore_timeline_anchor_command(
-        fake_request_id(10),
-        active_account_key.clone(),
-        koushi_core::TimelineKey::room(active_account_key.clone(), room_id.clone()),
-        "$anchor:example.invalid".to_owned(),
-        TIMELINE_RESTORE_ANCHOR_MAX_BATCHES,
-        TIMELINE_BACKWARDS_PAGE_EVENT_COUNT,
-    ) {
-        CoreCommand::Timeline(TimelineCommand::RestoreTimelineAnchor {
-            request_id,
-            key,
-            event_id,
-            max_batches,
-            event_count,
-        }) => {
-            assert_eq!(request_id, fake_request_id(10));
-            assert_eq!(key.account_key, active_account_key);
-            assert_eq!(
-                key.kind,
-                koushi_protocol::TimelineKind::Room {
-                    room_id: room_id.clone()
-                }
-            );
-            assert_eq!(event_id, "$anchor:example.invalid");
-            assert_eq!(max_batches, TIMELINE_RESTORE_ANCHOR_MAX_BATCHES);
-            assert_eq!(event_count, TIMELINE_BACKWARDS_PAGE_EVENT_COUNT);
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-
     match build_send_text_command(
         fake_request_id(11),
         active_account_key.clone(),

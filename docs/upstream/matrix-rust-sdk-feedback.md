@@ -648,16 +648,16 @@ re-deriving the usage.
   `ngram_schema_uses_named_body_tokenizer` (matrix-sdk-search), plus the
   Koushi `search_crawler` and `edit_redact_search` QA scenarios.
 - **Event cache**: persisted gap inspection/repair (`RoomTimelineGapHandle`,
-  `RoomTimelineGapRepair*`, `inspect_timeline_gaps`), cache-only back
-  pagination (`run_backwards_cache_only`), live-tail refresh
+  `RoomTimelineGapRepair*`, `inspect_timeline_gaps`), live-tail refresh
   (`RoomLiveTailRefresh*`) and `RoomTimelineSyncObservation`. Ported onto
   upstream's `StateLockReadGuard`/`StateLockWriteGuard` and
   `states::selectors`; `latest_sync_observation` feeds the room-subscription
-  checkpoints.
+  checkpoints. Cache-only back pagination (`run_backwards_cache_only`,
+  `live_restore_from_cache`) was removed on 2026-10-14 by #1395; see the
+  reachability audit below.
   Call sites: `crates/koushi-sdk/src/timeline.rs`
   (`inspect_room_timeline_gaps`, `repair_room_timeline_gap`,
   `refresh_room_live_tail`, `MatrixCommittedRoomTimelineCheckpoint::from_room_subscription`),
-  `crates/koushi-core/src/timeline/navigation.rs` (`live_restore_from_cache`),
   `crates/koushi-core/src/timeline/gap_repair.rs`; SDK
   `crates/matrix-sdk/src/event_cache/caches/room/{pagination.rs,live_tail.rs,state.rs,mod.rs}`
   and `crates/matrix-sdk-ui/src/room_list_service/mod.rs` (checkpoint capture).
@@ -1409,3 +1409,59 @@ reclamation.
 
 Fork branch `fix/1344-owner-counters` (commit `81ae185f5`). Delivered through
 the app's #1344 diagnostic export as `core.search_retention` records.
+
+## 2026-10-14 (#1395): retained-customization reachability audit
+
+The inventory above was written so "later stages can judge a removal without
+re-deriving the usage", but the cache-only anchor-restore entry still named a
+call site (`navigation.rs` `live_restore_from_cache`) that no longer had a
+product consumer: the renderer transport that invoked `restore_timeline_anchor`
+was deleted on 2026-06-30, and only a headless QA scenario kept the chain
+compiling. A name-level scan had rated it `prod=1` because the unreachable
+handler still existed. Every other entry was therefore re-derived from the
+public surface it exposes to its consumer, not from the recorded call site.
+
+| Entry | Public surface checked | Verdict | Evidence |
+| --- | --- | --- | --- |
+| ngram / CJK search | `encrypted_directory_ngram`, store kinds, CJK candidates | used | `crates/koushi-sdk/src/search.rs`; `search_crawler` / `edit_redact_search` QA |
+| Event cache: gap inspection / repair | `inspect_room_timeline_gaps`, `repair_room_timeline_gap` | used | `crates/koushi-sdk/src/timeline.rs`; `#1392` idle-sync gap-inspection lane |
+| Event cache: live-tail refresh | `refresh_room_live_tail` | used | `crates/koushi-sdk/src/timeline.rs`; timeline QA lanes |
+| Event cache: sync observation | `MatrixCommittedRoomTimelineCheckpoint` | used | `crates/koushi-sdk/src/timeline.rs`, `crates/koushi-core/src/timeline/manager.rs` |
+| Event cache: cache-only back pagination | `run_backwards_cache_only`, `live_restore_from_cache` | **dead → removed** | no renderer or Core caller; `cache_restore` QA was its only driver. Fork PR [#24](https://github.com/shinaoka/matrix-rust-sdk-work/pull/24) removed the SDK surface; #1395 removed the app side (protocol command/event, Tauri command, Core state machine, QA scenario). |
+| Redaction replay | `pending_redactions` | used (SDK-internal consumers) | search index and thread aggregates read through the store |
+| Room subscriptions | `reconcile_room_subscriptions_with_generation`, `RoomSubscriptionCheckpoint` | used | `crates/koushi-core/src/timeline/residency.rs`; `room_space` / `invites_dm` QA |
+| Encryption sync readiness | `EncryptionSyncReadiness` (the guard is SDK-internal plumbing) | used | `crates/koushi-core/src/sync.rs`, `crates/koushi-sdk/src/sync.rs` |
+| Timeline lazy reveal | `live_lazy_paginate_backwards_with_reveal` | used | shared `paginate_backwards` reveal path; ordinary pagination depends on it |
+
+Fork patch surfaces: the marker grep (`Matrix desktop fork patch surface`) and
+this inventory were cross-checked. `CacheOnlyBackOutcome`,
+`RestoreFromCacheOutcome`, `run_backwards_cache_only`, `live_restore_from_cache`
+and the internal `reveal_lazy_items` helper existed only for the removed path
+and are gone; the retained markers all name a surface with a live consumer.
+
+Tauri commands: all 236 registered commands in
+`apps/desktop/src-tauri/src/lib.rs` were checked against `apps/desktop/src`.
+Two have no renderer caller and are kept with a recorded verdict, to be removed
+by their own change:
+
+| Command | Verdict | Note |
+| --- | --- | --- |
+| `refresh_pinned_events` | dead (renderer-less) | no `apps/desktop/src` reference; the pinned-event projection refreshes itself |
+| `toggle_reaction` | dead (renderer-less) | the renderer uses `send_reaction` / `redact_reaction` |
+
+Re-entry point for offline deep-anchor restore: if the product later wants
+"open a Room at a months-old event, offline and fast", the removed path was
+`Timeline::live_restore_from_cache` (live lazy reveal, then
+`RoomPagination::run_backwards_cache_only` chunk-by-chunk with
+`anchor_present`, `reached_start` and `hit_gap` in the outcome), driven by
+`TimelineCommand::RestoreTimelineAnchor` with `max_batches` / `event_count` and
+settled by `TimelineEvent::AnchorRestoreFinished(status)`. The
+`cache_restore` QA scenario and its `CACHE_RESTORE_*` constants recorded the
+fixture shape (deep warmed rooms, blocked network, bounded backward-paginate
+cycles, shallow room proving the lazy in-memory reveal). This removal is a
+deliberate deferral, not an oversight.
+
+Mechanical guard: `scripts/check-retained-reachability.mjs` fails CI when a
+manifest entry's recorded consumer disappears, when a registered Tauri command
+has neither a renderer caller nor a recorded renderer-less verdict, or when a
+removed surface reappears in `crates/` or `apps/`.

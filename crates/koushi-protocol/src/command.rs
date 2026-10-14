@@ -201,7 +201,6 @@ impl CoreCommand {
                 | TimelineCommand::Paginate { request_id, .. }
                 | TimelineCommand::CancelPagination { request_id, .. }
                 | TimelineCommand::CancelLinkPreviews { request_id, .. }
-                | TimelineCommand::RestoreTimelineAnchor { request_id, .. }
                 | TimelineCommand::ObserveViewport { request_id, .. }
                 | TimelineCommand::RepairGaps { request_id, .. }
                 | TimelineCommand::SendText { request_id, .. }

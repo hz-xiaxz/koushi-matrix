@@ -1349,8 +1349,6 @@ export const TimelineView = memo(function TimelineView({
             ? event.ItemsUpdated.key
             : "PaginationStateChanged" in event
               ? event.PaginationStateChanged.key
-              : "AnchorRestoreFinished" in event
-                ? event.AnchorRestoreFinished.key
                 : "SendCompleted" in event
                   ? event.SendCompleted.key
                   : "MediaSendQueued" in event

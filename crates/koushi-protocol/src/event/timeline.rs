@@ -76,11 +76,6 @@ pub enum TimelineEvent {
         /// `None` is used for admission rejection, start, cancellation, and failure.
         prepend_expected: Option<bool>,
     },
-    AnchorRestoreFinished {
-        request_id: RequestId,
-        key: TimelineKey,
-        status: TimelineAnchorRestoreStatus,
-    },
     NavigationUpdated {
         key: TimelineKey,
         /// Boxed so the ~144 B snapshot stays out of the inline `TimelineEvent`
@@ -220,14 +215,6 @@ impl fmt::Debug for TimelineEvent {
                 .field("key", &"TimelineKey(..)")
                 .field("direction", direction)
                 .field("state", state)
-                .finish(),
-            Self::AnchorRestoreFinished {
-                request_id, status, ..
-            } => formatter
-                .debug_struct("AnchorRestoreFinished")
-                .field("request_id", request_id)
-                .field("key", &"TimelineKey(..)")
-                .field("status", status)
                 .finish(),
             Self::NavigationUpdated { snapshot, .. } => formatter
                 .debug_struct("NavigationUpdated")
@@ -380,14 +367,6 @@ impl fmt::Debug for TimelineEvent {
                 .finish(),
         }
     }
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum TimelineAnchorRestoreStatus {
-    Found,
-    EndReached,
-    BudgetExhausted,
-    Superseded,
-    Failed { kind: TimelineFailureKind },
 }
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TimelineDisplayLabelUpdate {

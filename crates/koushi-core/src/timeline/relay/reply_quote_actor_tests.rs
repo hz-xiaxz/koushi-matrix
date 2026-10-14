@@ -8,7 +8,7 @@ use std::{sync::Arc, time::Duration};
 
 use koushi_protocol::{
     event::{CoreEvent, TimelineEvent, TimelineItem, TimelineItemId},
-    ids::{AccountKey, TimelineBatchId, TimelineKey},
+    ids::{AccountKey, TimelineKey},
 };
 use koushi_sdk::MatrixClientSession;
 use koushi_state::{ReplyQuoteState, SessionInfo};
@@ -25,14 +25,12 @@ use super::super::{
     actor::{TimelineActor, TimelineActorHandle, TimelineActorMessage},
     display_projection::apply_timeline_diffs_to_items,
     outbound_send::{PendingSendPhase, PendingSendProjection, pending_send_item},
-    reply_quote_hydration::placeholder_quote,
     test_support::{fake_rid, live_tail_test_manager},
 };
 use super::koushi_timeline_builder;
 use crate::{executor, link_preview::LinkPreviewContext};
 
 const ROOT: &str = "$root:example.invalid";
-const REPLY: &str = "$reply:example.invalid";
 const PENDING_TXN: &str = "pending-reply";
 /// Liveness bound for waits that must succeed: a regression hangs until it,
 /// while scheduler load alone must never reach it.
@@ -58,21 +56,6 @@ impl RoomActor {
         mut predicate: impl FnMut(&CoreEvent, &[TimelineItem]) -> bool,
     ) -> Result<(), tokio::time::error::Elapsed> {
         wait_for(&mut self.events, &mut self.items, &mut predicate).await
-    }
-
-    /// Settle a ledger entry from an authoritative observation, as a completed
-    /// batch or an edit would, without an SDK lookup.
-    async fn settle_original(&self, quote: koushi_state::ReplyQuote) {
-        let (settle_tx, settle_rx) = oneshot::channel();
-        assert!(
-            self.actor
-                .send(TimelineActorMessage::TestSettleReplyQuoteOriginal {
-                    quote,
-                    acknowledged: settle_tx,
-                })
-                .await
-        );
-        settle_rx.await.expect("settle acknowledged");
     }
 }
 
@@ -174,57 +157,6 @@ async fn wait_for(
     .await
 }
 
-/// Drain every event the actor has already published once a barrier proves
-/// its earlier turns finished. Batches whose ids precede `fence` were decided
-/// before the restore began and only reach the receiver late; any batch at or
-/// after the fence was published while the restore was buffering.
-async fn expect_no_items_updated_since(fixture: &mut RoomActor, fence: TimelineBatchId) {
-    let (barrier_tx, barrier_rx) = oneshot::channel();
-    assert!(
-        fixture
-            .actor
-            .send(TimelineActorMessage::Barrier(barrier_tx))
-            .await
-    );
-    barrier_rx.await.expect("actor barrier acknowledged");
-    loop {
-        match fixture.events.try_recv() {
-            Ok(CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
-                batch_id, diffs, ..
-            })) => {
-                assert!(
-                    batch_id < fence,
-                    "no item batch may overtake a buffered anchor restore: \
-                     batch {batch_id:?} at or after restore fence {fence:?}: {diffs:?}"
-                );
-                apply_timeline_diffs_to_items(&mut fixture.items, &diffs);
-            }
-            Ok(_) => {}
-            Err(broadcast::error::TryRecvError::Empty) => return,
-            Err(error) => panic!("live actor event stream: {error:?}"),
-        }
-    }
-}
-
-fn event_quote_state(items: &[TimelineItem], event_id: &str) -> Option<ReplyQuoteState> {
-    items.iter().find_map(|item| match &item.id {
-        TimelineItemId::Event { event_id: id } if id == event_id => {
-            item.reply_quote.as_ref().map(|quote| quote.state)
-        }
-        _ => None,
-    })
-}
-
-fn event_quote_body(items: &[TimelineItem], event_id: &str) -> Option<String> {
-    items.iter().find_map(|item| match &item.id {
-        TimelineItemId::Event { event_id: id } if id == event_id => item
-            .reply_quote
-            .as_ref()
-            .and_then(|quote| quote.body_preview.clone()),
-        _ => None,
-    })
-}
-
 fn pending_quote_state(items: &[TimelineItem]) -> Option<ReplyQuoteState> {
     items.iter().find_map(|item| match &item.id {
         TimelineItemId::Transaction { transaction_id } if transaction_id == PENDING_TXN => {
@@ -232,166 +164,6 @@ fn pending_quote_state(items: &[TimelineItem]) -> Option<ReplyQuoteState> {
         }
         _ => None,
     })
-}
-
-#[tokio::test]
-async fn reply_quote_republish_is_deferred_until_the_restore_flush() {
-    let server = MatrixMockServer::new().await;
-    let client = server.client_builder().build().await;
-    client.event_cache().subscribe().unwrap();
-    let room_id = room_id!("!reply-restore:example.invalid");
-    let alice = user_id!("@alice:example.invalid");
-    let factory = EventFactory::new().room(room_id);
-    let room = server.sync_joined_room(&client, room_id).await;
-    // The reply's original is never in this room's timeline, so the quote starts
-    // `Loading`; the actor's own lookup settles it from this route, which keeps
-    // the only later change the one this test injects.
-    server
-        .mock_room_event()
-        .match_event_id()
-        .ok(factory
-            .text_msg("Synthetic original")
-            .sender(alice)
-            .event_id(event_id!("$root:example.invalid"))
-            .into())
-        .mount()
-        .await;
-    server
-        .sync_room(
-            &client,
-            JoinedRoomBuilder::new(room_id).add_timeline_event(
-                factory
-                    .text_msg("Synthetic reply")
-                    .sender(alice)
-                    .reply_to(event_id!("$root:example.invalid"))
-                    .event_id(event_id!("$reply:example.invalid"))
-                    .into_raw_sync(),
-            ),
-        )
-        .await;
-    let mut fixture = spawn_room_actor(&room, &client, room_id, alice).await;
-
-    fixture
-        .wait_for(|event, _| {
-            matches!(
-                event,
-                CoreEvent::Timeline(TimelineEvent::InitialItems { .. })
-            )
-        })
-        .await
-        .expect("initial items");
-    // Let the actor's own lookup settle the quote before touching the restore,
-    // so the only later change is the one this test injects.
-    fixture
-        .wait_for(|_, items| {
-            event_quote_state(items, REPLY).is_some_and(|state| state != ReplyQuoteState::Loading)
-        })
-        .await
-        .expect("the reply quote reaches a steady state");
-
-    let (restore_tx, restore_rx) = oneshot::channel();
-    assert!(
-        fixture
-            .actor
-            .send(TimelineActorMessage::TestBeginRestore {
-                request_id: fake_rid(41),
-                event_id: "$anchor-absent:example.invalid".to_owned(),
-                acknowledged: restore_tx,
-            })
-            .await
-    );
-    // Batches queued before this fence may still be in the receiver; only a
-    // batch decided after the restore began can overtake it.
-    let fence = restore_rx.await.expect("restore fixture acknowledged");
-
-    // A live batch that arrives during the restore must be buffered, not
-    // emitted: this is what the deferred republish must not overtake.
-    server
-        .sync_room(
-            &client,
-            JoinedRoomBuilder::new(room_id).add_timeline_event(
-                factory
-                    .text_msg("Synthetic during restore")
-                    .sender(alice)
-                    .event_id(event_id!("$during:example.invalid"))
-                    .into_raw_sync(),
-            ),
-        )
-        .await;
-    let buffered = tokio::time::timeout(EVENT_LIVENESS, async {
-        loop {
-            let (state_tx, state_rx) = oneshot::channel();
-            assert!(
-                fixture
-                    .actor
-                    .send(TimelineActorMessage::TestRestoreCausalState(state_tx))
-                    .await
-            );
-            let (_live_tail_pending, _completion_waiting, buffered_diffs, _projections) =
-                state_rx.await.expect("restore state");
-            if buffered_diffs > 0 {
-                return buffered_diffs;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("a live batch must reach the restore buffer");
-    assert!(buffered > 0);
-
-    // Settling the original now would republish the reply's resolved quote.
-    let mut quote = placeholder_quote(ROOT, ReplyQuoteState::Ready);
-    quote.sender = Some(alice.to_string());
-    quote.body_preview = Some("Synthetic edited original".to_owned());
-    fixture.settle_original(quote).await;
-
-    expect_no_items_updated_since(&mut fixture, fence).await;
-
-    // Ending the restore on an in-window anchor clears the anchor and publishes
-    // the settlement (buffered items first, then the terminal); the deferred
-    // republish runs at the loop tail of the same actor turn, after both.
-    let mut restore_finished = false;
-    let mut buffered_before_terminal = false;
-    assert!(
-        fixture
-            .actor
-            .send(TimelineActorMessage::RestoreTimelineAnchor {
-                request_id: fake_rid(42),
-                event_id: REPLY.to_owned(),
-                max_batches: 1,
-                event_count: 1,
-            })
-            .await
-    );
-    fixture
-        .wait_for(|event, items| {
-            if matches!(
-                event,
-                CoreEvent::Timeline(TimelineEvent::AnchorRestoreFinished { .. })
-            ) {
-                restore_finished = true;
-                buffered_before_terminal = items.iter().any(|item| {
-                    matches!(&item.id, TimelineItemId::Event { event_id } if event_id == "$during:example.invalid")
-                        && !item.is_hidden
-                });
-            }
-            event_quote_body(items, REPLY).as_deref() == Some("Synthetic edited original")
-        })
-        .await
-        .expect("the deferred republish must run after the restore flush");
-    assert!(
-        restore_finished,
-        "the deferred republish must not overtake the restore's terminal event"
-    );
-    assert!(
-        buffered_before_terminal,
-        "the buffered restore publication must precede the terminal event"
-    );
-    assert_eq!(
-        event_quote_state(&fixture.items, REPLY),
-        Some(ReplyQuoteState::Ready),
-        "the refreshed quote keeps the settled state"
-    );
 }
 
 #[tokio::test]

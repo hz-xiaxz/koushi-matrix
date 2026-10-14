@@ -476,13 +476,6 @@ export interface TimelineNavigationSnapshot {
   read_state_sync: TimelineReadStateSync;
 }
 
-export type TimelineAnchorRestoreStatus =
-  | "Found"
-  | "EndReached"
-  | "BudgetExhausted"
-  | "Superseded"
-  | { Failed: { kind: TimelineFailureKind } };
-
 export interface TimelineGapId {
   topology_revision: string;
   ordinal: number;
@@ -536,13 +529,6 @@ export type TimelineEvent =
         state: PaginationState;
         /** Whether an accepted backward page structurally changed the oldest edge. */
         prepend_expected?: boolean | null;
-      };
-    }
-  | {
-      AnchorRestoreFinished: {
-        request_id: RequestId;
-        key: TimelineKey;
-        status: TimelineAnchorRestoreStatus;
       };
     }
   | {

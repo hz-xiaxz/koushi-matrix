@@ -236,6 +236,8 @@ jobs:
         run: node --test scripts/check-rust-test-structure.test.mjs
       - name: Rust test structure checker
         run: node scripts/check-rust-test-structure.mjs
+      - name: Retained-customization reachability guard
+        run: node scripts/check-retained-reachability.mjs
       - name: Rust cache report contract tests
         run: node --test scripts/ci-rust-cache-report.test.mjs scripts/ci-rust-cache-metrics.test.mjs
       # One invocation runs the ordinary crates, the koushi-core-testkit

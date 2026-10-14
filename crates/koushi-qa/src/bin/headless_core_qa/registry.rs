@@ -87,42 +87,6 @@ const ENV_STRESS_REPLAY_EXISTING: &str = "KOUSHI_QA_STRESS_REPLAY_EXISTING";
 pub(super) const QA_WRONG_RECOVERY_SECRET: &str =
     "koushi-desktop-headless-qa-wrong-recovery-secret";
 
-pub(super) const ENV_CACHE_RESTORE_ROOMS: &str = "KOUSHI_QA_CACHE_RESTORE_ROOMS";
-
-pub(super) const ENV_CACHE_RESTORE_DEPTH: &str = "KOUSHI_QA_CACHE_RESTORE_DEPTH";
-
-pub(super) const DEFAULT_CACHE_RESTORE_ROOMS: usize = 3;
-
-pub(super) const DEFAULT_CACHE_RESTORE_DEPTH: usize = 200;
-
-/// Batch size used for backward pagination during the populate (EndReached) pass.
-pub(super) const CACHE_RESTORE_PAGINATE_BATCH: u16 = 20;
-
-/// Production-faithful restore parameters, matching the app's live-room constants.
-/// Source: apps/desktop/src/components/TimelineView.tsx:406-407
-/// (LIVE_ROOM_ANCHOR_RESTORE_MAX_BATCHES=6, EVENT_COUNT=100).
-/// These are intentionally small. Room entry should fail fast for stale or
-/// very deep persisted anchors and let the UI fall back to live edge; deep
-/// event-centered restore belongs to an explicit focused-event timeline.
-pub(super) const CACHE_RESTORE_PROD_MAX_BATCHES: u16 = 6;
-
-pub(super) const CACHE_RESTORE_PROD_EVENT_COUNT: u16 = 100;
-
-/// Speed gate: maximum backward-paginate cycles allowed per room during an
-/// offline anchor restore. Deep anchors may end as BudgetExhausted, but they
-/// must not walk history long enough to block room entry.
-pub(super) const CACHE_RESTORE_MAX_CYCLES: u16 = 3;
-
-/// Number of messages in the shallow-anchor room.  Enough to exceed the SDK's
-/// initial visible window (~20 items) so that m0 (oldest) is hidden behind a
-/// lazy-reveal skip when the session restarts.  All events fit in a single
-/// stored chunk (well under 128), so chunks_loaded == 0 during the restore.
-/// The anchor (m0) lives in the live in-memory prefix that
-/// live_lazy_paginate_backwards reveals (lazy_reveal_batches == 1).
-/// The P1 lazy-reveal-fence fix gates on this: without it the settle fence
-/// misses the lazy-reveal DiffBatch and may conclude before items settle.
-pub(super) const CACHE_RESTORE_SHALLOW_DEPTH: usize = 30;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum QaScenario {
     AvatarDemand,
@@ -163,7 +127,6 @@ pub(super) enum QaScenario {
     SendQueue,
     RestoreCleanup,
     LinkPreview,
-    CacheRestore,
     ReadStateConvergence,
     HiddenStateAcl,
     ThreadLateJoiner,
@@ -209,7 +172,6 @@ pub(super) enum QaStage {
     SendQueue,
     RestoreCleanup,
     LinkPreview,
-    CacheRestore,
     ReadStateConvergence,
     HiddenStateAcl,
     ThreadLateJoiner,
@@ -291,7 +253,6 @@ impl QaScenario {
             "send_queue" => Ok(Self::SendQueue),
             "restore_cleanup" => Ok(Self::RestoreCleanup),
             "link_preview" => Ok(Self::LinkPreview),
-            "cache_restore" => Ok(Self::CacheRestore),
             "read_state_convergence" => Ok(Self::ReadStateConvergence),
             "hidden_state_acl" => Ok(Self::HiddenStateAcl),
             "thread_late_joiner" => Ok(Self::ThreadLateJoiner),
@@ -300,7 +261,7 @@ impl QaScenario {
             "account_notifications" => Ok(Self::AccountNotifications),
             "user_verification" => Ok(Self::UserVerification),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, search_crawler_catchup, room_history_export, scheduled_send, restore_cleanup, link_preview, cache_restore, read_state_convergence, hidden_state_acl, thread_late_joiner, avatar_demand, account_notifications, user_verification; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, search_crawler_catchup, room_history_export, scheduled_send, restore_cleanup, link_preview, read_state_convergence, hidden_state_acl, thread_late_joiner, avatar_demand, account_notifications, user_verification; got {other}"
             )),
         }
     }
@@ -519,7 +480,6 @@ impl QaScenario {
                     | QaStage::Composer
                     | QaStage::LinkPreview
             ),
-            Self::CacheRestore => matches!(stage, QaStage::Safety | QaStage::CacheRestore),
             Self::AvatarDemand => matches!(stage, QaStage::Safety | QaStage::AvatarDemand),
             Self::ReadStateConvergence => {
                 matches!(stage, QaStage::Safety | QaStage::ReadStateConvergence)
@@ -771,7 +731,6 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "link_preview_e2ee_default=ok",
             "link_preview_hide=ok",
         ],
-        QaStage::CacheRestore => &["cache_restore=ok", "cache_restore_continuity=reported"],
         QaStage::ReadStateConvergence => &["read_state_convergence=ok"],
         QaStage::HiddenStateAcl => &["hidden_state_acl=ok"],
         QaStage::ThreadLateJoiner => &[
@@ -1082,7 +1041,6 @@ pub(super) fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
             QaStage::Composer,
             QaStage::LinkPreview,
         ],
-        QaScenario::CacheRestore => vec![QaStage::Safety, QaStage::CacheRestore],
         QaScenario::AvatarDemand => vec![QaStage::Safety, QaStage::AvatarDemand],
         QaScenario::ReadStateConvergence => {
             vec![QaStage::Safety, QaStage::ReadStateConvergence]
@@ -1174,7 +1132,6 @@ pub(super) fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static st
             tokens
         }
         QaScenario::TimelineReconnect
-        | QaScenario::CacheRestore
         | QaScenario::DeviceCleanup
         | QaScenario::GateRestore
         | QaScenario::GateNegative
