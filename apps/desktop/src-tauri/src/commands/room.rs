@@ -747,13 +747,13 @@ pub async fn update_room_member_role(
 #[tauri::command]
 pub async fn preview_room_address(
     account_tab_id: Option<String>,
-    name: String,
+    create_session_id: u64,
     alias_localpart: Option<String>,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<koushi_state::RoomAddressPreview, String> {
     Ok(account_connection(state.inner(), account_tab_id.as_deref())
         .await?
-        .preview_room_address(&name, alias_localpart.as_deref()))
+        .preview_room_address(alias_localpart.as_deref(), create_session_id))
 }
 
 /// Mutate the Rust-owned access/history draft (#1177). Admission only: the

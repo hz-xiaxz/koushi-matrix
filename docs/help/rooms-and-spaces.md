@@ -54,47 +54,44 @@ suggested; the room's place in the Space and its access are unchanged.
 
 ## Create a room or Space
 
-Use **Create room** in the sidebar header, optionally enter a name, and review
-the privacy and encryption choices before creating it. When the selected Space
-is public, the dialog starts with **Public room** selected; otherwise it starts
-with **Private room**. You can switch before creating. A public room is never
-encrypted. Review the final options rather than assuming every new room is
-encrypted.
+Use **Create room** in the sidebar header, optionally enter a name, and choose
+**Who can join**:
+
+- **Members of *Space*** (only when a Space is selected): anyone in that Space
+  can find and join the room. You can also allow members of your other Spaces.
+- **Only people you invite**.
+- **Anyone**: a public room. Anyone, including people outside your Spaces, can
+  find it in the public room directory and join it. A public room is never
+  encrypted.
+
+A room created from **Home** is not part of any Space, so it offers only
+**Only people you invite** and **Anyone**. When the selected Space is public,
+the dialog starts with **Anyone** selected.
+
+Under **Earlier messages**, choose whether new members can read messages sent
+before they arrived, or only messages from when they were invited. For a public
+room you can also let people read the room without joining. Private rooms are
+encrypted unless you turn encryption off. A one-line summary above the buttons
+says what your choices mean.
 
 If you leave the room name empty, the room shows a name worked out from its
 address or its members instead; a room with only you in it can show as
 **Empty Room**. You can set or change the name later in the room's settings.
 
-A named public room also needs a **Room address**, shown in full (for example
-`#research-group-papers:example.org`) before you create it. The room name may
-repeat, but the address must be unique on your server, and every Space on that
-server shares the same addresses: a Space does not have addresses of its own.
-When you create a public room while a Space is selected, Koushi suggests an
-address that starts with the Space name, such as `research-group-papers` for
-the room `papers` in the Space `research-group`. This makes a conflict less
-likely but does not reserve the address. The suggestion follows the room name
-until you edit the address yourself. A public room created in a Space is listed
-in the public room directory, and anyone, including people outside the Space,
-can find and join it.
+A public room also has an **address**, such as `#research-group-3fa9c2:example.org`.
+The name is what people see in their room list; the address is the link
+that opens the room, for example in a message or on a web page. Koushi starts with a random
+address that begins with the Space name (or `room` at Home). Choose
+**Change** to replace it with one that is easier to read, such as
+`#research-group-papers`. The address must be unique on your server, and every
+Space on that server shares the same addresses.
 
-A public room without a name has no address to suggest, so it can be created
-without one. It is still public and listed in the directory, where people can
-find and join it. If you enter an address for an unnamed room, the
-room shows the name part of that address (for example `lobby`) until you give
-it a name.
-
-While you type, Koushi checks whether the address is already used and shows
-the result under the address field. This check is only advice: an address that
-was free when checked can still be taken before you create the room, and the
-check never reserves it. If the address is in use, Koushi shows a suggestion,
-marked as not checked yet; choose **Use this address** to put it in the address
-field, where it is checked in turn. If the check cannot be completed, you can
-still create the room.
-
-If the address is already in use, the dialog keeps everything you entered,
-names the address that was taken, and moves you to the address field. Keep the
-room name and change only the address, for example by adding a project name or
-a number. Availability is decided when the room is created.
+Koushi checks the address as you type. If it is already in use, **Create**
+stays disabled, the dialog says so, and it offers an alternative you can use
+with **Use this address**. If the check cannot be completed, you can still
+create the room; the server decides when the room is created. If the address
+was taken in the meantime, the dialog keeps everything you entered and moves
+you to the address field.
 
 Use **Create space**, the plus button near the bottom of the left rail, to
 create a Space. Room and Space administration actions depend on your role.

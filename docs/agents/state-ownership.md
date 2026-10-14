@@ -660,17 +660,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   Core derives `via` from the SDK. `create_room` returns
   `spaceLinkFailure` because a failed link does not fail creation. Browser tests
   push Rust-shaped `space_add_rooms` snapshots after the command receipt.
-- The create-room address preview (`preview_room_address`, #838/#1006) is Rust
-  owned: normalization, the `<space>-<room>` suggestion from the selected
-  Space's Matrix name (dropped when it would exceed 255 bytes), validation, the
-  full alias, and the `server_name` whose alias namespace all Spaces share.
-  React keeps only whether the address was edited, and re-requests the preview
-  for the current draft; an `aliasInUse` create failure is rendered with the
-  attempted full address and server captured from that preview. A submitted
-  alias is never renamed or retried automatically. The preview's
-  `without_address` (#1023) is Rust's verdict that an unnamed public room
-  may be created without an address (a named room never is);
-  React renders it and does not decide when an address is optional.
+- The create-room address preview (`preview_room_address`, #838/#1006/#1416)
+  is Rust owned: the create session's random default address (Core draws the
+  suffix into the create draft; the prefix is the attachment Space's Matrix
+  name, or `room`), normalization, validation, the full alias, and the
+  `server_name` whose alias namespace all Spaces share. The default never
+  follows the room name. React sends the create session id and the edited
+  address (or none), and re-requests the preview when either changes; an
+  `aliasInUse` create failure is rendered with the attempted full address and
+  server captured from that preview. A submitted alias is never renamed or
+  retried automatically, and a public room is never created without one.
 - The create-room dialog's initial choices (#1023) are
   `SidebarModel.create_room_defaults` (`create_room_defaults_for_state`): public
   in a Space whose synced join rule is public, otherwise private. React seeds the

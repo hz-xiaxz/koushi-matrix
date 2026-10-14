@@ -36,8 +36,8 @@ describe("TauriDesktopApi", () => {
     const preview = { localpart: "設計", full_alias: "#設計:example.invalid", error: null, server_name: "example.invalid" };
     vi.mocked(invoke).mockResolvedValueOnce(preview);
     const api = new TauriDesktopApi();
-    expect(await api.previewRoomAddress("設計", null)).toEqual(preview);
-    expect(invoke).toHaveBeenCalledWith("preview_room_address", { name: "設計", aliasLocalpart: null });
+    expect(await api.previewRoomAddress(7, null)).toEqual(preview);
+    expect(invoke).toHaveBeenCalledWith("preview_room_address", { createSessionId: 7, aliasLocalpart: null });
   });
 
   test("gets the diagnostic snapshot without private arguments", async () => {
@@ -213,7 +213,7 @@ describe("TauriDesktopApi", () => {
     await api.getSnapshot();
     await api.probeLocalEncryptionHealth();
     await api.resetLocalData();
-    await api.previewRoomAddress("alice", null);
+    await api.previewRoomAddress(3, null);
     await api.settlementSnapshot();
     await api.resyncSnapshot();
 
@@ -235,7 +235,7 @@ describe("TauriDesktopApi", () => {
     expect(invoke).toHaveBeenCalledWith("probe_local_encryption_health", { accountTabId: "add:2" });
     expect(invoke).toHaveBeenCalledWith("reset_local_data", { accountTabId: "add:2" });
     expect(invoke).toHaveBeenCalledWith("preview_room_address", {
-      name: "alice",
+      createSessionId: 3,
       aliasLocalpart: null,
       accountTabId: "add:2"
     });

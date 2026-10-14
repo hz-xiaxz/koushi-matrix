@@ -883,9 +883,7 @@ pub async fn create_room(
 ) -> Result<String, MatrixRoomOperationError> {
     if matches!(options.visibility, MatrixCreateRoomVisibility::Public)
         && preview_room_address(
-            &options.name,
-            Some(options.alias_localpart.as_deref().unwrap_or("")),
-            None,
+            options.alias_localpart.as_deref().unwrap_or(""),
             session.client().user_id().map(|id| id.as_str()),
         )
         .error
@@ -933,8 +931,7 @@ pub async fn create_public_directory_room(
     name: &str,
     alias_localpart: &str,
 ) -> Result<String, MatrixRoomOperationError> {
-    // A directory room is found by its address; unlike the create dialog's
-    // unnamed rooms (#1023), it is never created without one.
+    // A directory room is found by its address (#1416).
     if alias_localpart.trim().is_empty() {
         return Err(MatrixRoomOperationError::InvalidRoomAlias);
     }
@@ -999,12 +996,8 @@ pub(super) fn create_room_request(
                 validate_alias_localpart(alias_localpart)?;
                 request.room_alias_name = Some(alias_localpart.to_owned());
             }
-            // #1023: only an unnamed room may be public without an address;
-            // it still gets the public join rule and directory listing below.
-            None if koushi_state::public_room_address_required(&options.name) => {
-                return Err(MatrixRoomOperationError::InvalidRoomAlias);
-            }
-            None => {}
+            // #1416: a public room always has an address.
+            None => return Err(MatrixRoomOperationError::InvalidRoomAlias),
         }
         request.visibility = matrix_sdk::ruma::api::client::room::Visibility::Public;
         request.preset =
@@ -1131,51 +1124,28 @@ pub(super) fn create_room_request(
     Ok(request)
 }
 
-/// Resolve a draft against the account's Matrix server; this never probes availability.
-///
-/// An unedited address (`alias_localpart == None`) is suggested from the room
-/// name, prefixed with `space_name` when the room is created from a Space
-/// (#1006). The Space prefix is dropped rather than truncated when it alone
-/// would push the alias past Matrix's 255-byte limit.
+/// Resolve an address against the account's Matrix server; this never probes
+/// availability. The create session's default address is chosen by Core
+/// (#1416); this only normalizes, validates and qualifies a local part.
 pub fn preview_room_address(
-    name: &str,
-    alias_localpart: Option<&str>,
-    space_name: Option<&str>,
+    alias_localpart: &str,
     user_id: Option<&str>,
 ) -> koushi_state::RoomAddressPreview {
-    use koushi_state::{suggest_room_alias_localpart, suggest_space_room_alias_localpart};
     let user = user_id.and_then(|id| matrix_sdk::ruma::UserId::parse(id).ok());
     let server_name = user.as_ref().map(|user| user.server_name().to_string());
-    let alias_localpart = alias_localpart.map(str::trim);
-    // #1023: an unnamed room has nothing to suggest, and an empty address
-    // means "create without an address" rather than a missing one. A named
-    // room without a suggestion falls through and reports `Empty` (#1006).
-    if !koushi_state::public_room_address_required(name)
-        && alias_localpart.is_none_or(str::is_empty)
-    {
-        let mut preview = resolve_room_address(String::new(), server_name);
-        if preview.error == Some(koushi_state::RoomAddressError::Empty) {
-            preview.error = None;
-            preview.without_address = true;
-        }
-        return preview;
-    }
-    match alias_localpart {
-        Some(value) => resolve_room_address(value.to_owned(), server_name),
-        None => {
-            let suggested = resolve_room_address(
-                suggest_space_room_alias_localpart(space_name, name),
-                server_name.clone(),
-            );
-            if space_name.is_some()
-                && suggested.error == Some(koushi_state::RoomAddressError::Invalid)
-            {
-                resolve_room_address(suggest_room_alias_localpart(name), server_name)
-            } else {
-                suggested
-            }
-        }
-    }
+    resolve_room_address(alias_localpart.trim().to_owned(), server_name)
+}
+
+/// A fresh random suffix for a create session's default address (#1416): six
+/// lowercase hex characters from a v4 UUID, which also works on wasm.
+pub fn random_room_address_suffix() -> String {
+    matrix_sdk::ruma::TransactionId::new()
+        .as_str()
+        .chars()
+        .filter(char::is_ascii_hexdigit)
+        .map(|character| character.to_ascii_lowercase())
+        .take(6)
+        .collect()
 }
 
 fn resolve_room_address(
@@ -1197,7 +1167,6 @@ fn resolve_room_address(
         full_alias: None,
         error,
         server_name,
-        without_address: false,
     };
     if preview.error.is_none() {
         let alias = format!(

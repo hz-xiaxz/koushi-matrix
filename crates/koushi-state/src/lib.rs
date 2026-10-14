@@ -47,9 +47,8 @@ pub use room_access::{
 pub use room_address::{
     CreateRoomDefaults, CreateRoomVisibility, RoomAddressAvailability,
     RoomAddressAvailabilityState, RoomAddressError, RoomAddressPreview, RoomAddressSuggestion,
-    create_room_defaults_for_state, public_room_address_required,
-    suggest_alternative_room_alias_localpart, suggest_room_alias_localpart,
-    suggest_space_room_alias_localpart,
+    create_room_defaults_for_state, default_room_alias_localpart,
+    suggest_alternative_room_alias_localpart,
 };
 pub use sidebar::{
     AccountAttentionSummary, AccountHomeItem, RoomListItem, SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT,

@@ -157,10 +157,11 @@ Crate responsibilities:
   Password and recovery strings remain uncontrolled DOM values and do not enter
   React state. A repository AST gate prevents feature components from bypassing
   this layer with raw composable controls or forms.
-  Room-address previews are stateless Rust projections of raw unsent name/alias
-  drafts and the current Ready account's Matrix server name. Core returns the
-  suggested or manually entered local part, a validated full alias, and a typed
-  validation error; availability remains server-owned. Renderer-local draft
+  Room-address previews are stateless Rust projections of the raw unsent alias
+  draft, the create session's Rust-held random default address, and the current
+  Ready account's Matrix server name. Core returns the default or manually
+  entered local part, a validated full alias, and a typed validation error;
+  availability remains server-owned. Renderer-local draft
   identity fences late preview responses, without deriving aliases or Matrix
   server names in React. The existing create-room command revalidates the alias
   before network submission. A server `M_ROOM_IN_USE` response becomes the closed

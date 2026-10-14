@@ -3936,14 +3936,23 @@ stateDiagram-v2
   omits `m.room.name`, and the room shows the SDK-calculated display name:
   canonical alias (its localpart) before a member-derived name, then the SDK's
   `Empty Room` fallback. Setting a name later replaces the calculated name.
-- Address: `public_room_address_required(name)` is false only for an unnamed
-  room (empty or blank name). Then a public room with no entered address is
-  created without an alias, and `preview_room_address` reports
-  `without_address` instead of `empty`. Every named room keeps the #1006 rule:
-  a cleared suggestion, or a name that offers none (for example `🎉`), is
-  `empty` and needs a manually entered address. The join rule (`public`
-  via the `public_chat` preset) and the directory listing do not depend on an
-  alias; `CreatePublicDirectoryRoom` still requires one.
+- Address (#1416): a public room is always created with an address; there is
+  no unnamed-public-without-address path, and the address is never derived
+  from the room name, so the name stays the human label and the address stays
+  the link. Opening a create session gives the Rust create draft a random,
+  per-session address suffix (Core generates it and passes it in
+  `RoomAccessDraftOpened`, so the reducer stays deterministic). The default
+  local part is `default_room_alias_localpart(space, suffix)`: the ASCII slug
+  of the attachment Space's Matrix name (at most 24 bytes), or `room` at Home
+  or when the name has no ASCII letters or digits, then `-` and six lowercase
+  hex characters. `preview_room_address(alias, create_session_id)` resolves an
+  unedited address (`alias == None`) to that default for the matching create
+  session, and an edited address to itself; an edited empty address is
+  `empty`. The dialog shows the full alias read-only with a Change action and
+  opens the editor (with `#` and `:server` fixed outside the input) for a
+  change or a conflict. The join rule (`public` via the `public_chat` preset)
+  and the directory listing do not depend on the alias; Create rejects a
+  public room whose address does not resolve with `InvalidRoomAlias`.
 
 ### Advisory room address availability (#1006)
 
@@ -3979,8 +3988,12 @@ stateDiagram-v2
   append `-2`), validated on the same server. It has not been checked; using it
   changes the draft, and the new address gets its own check.
 - The renderer chooses when to ask (400 ms after the shown address stops
-  changing), shows a result only when its `full_alias` is the address shown, and
-  never blocks submission on it.
+  changing) and shows a result only when its `full_alias` is the address shown.
+  Create of a public room is enabled only once the shown address has a
+  `checked` result that is not `inUse` (#1416): `inUse` shows an inline error
+  with the suggestion and opens the address editor, `checking` or a result for
+  another address keeps Create disabled, and `unknown` allows Create because
+  the check is advisory and Create still reports `AliasInUse`.
 
 ## Room Management
 
@@ -4162,9 +4175,16 @@ stateDiagram-v2
   (>= 8, today V9). Supplying `history` sends exactly one initial-state event;
   omitting it keeps the legacy default. The private option keeps its
   encryption/invitation draft while public is selected; only the effective
-  submitted values are stripped. Membership selection is offered wherever the
-  viewer is joined to at least one Space; this is a product choice, not a Matrix
-  restriction, and the picker lists the viewer's joined Spaces.
+  submitted values are stripped. Membership selection is offered only when the
+  room is created in a Space (#1416); a room created at Home is outside every
+  Space and chooses between invite-only and public. This is a product choice,
+  not a Matrix restriction. Selecting membership in a create draft whose
+  target set is empty selects the attachment Space, so the choice labelled with
+  that Space's name always names it; the picker still lists the viewer's other
+  joined Spaces. The create dialog offers two history choices, `shared`
+  (members can read earlier messages) and `invited` (only from when they were
+  invited), plus a world-readable checkbox shown only for a public room;
+  leaving public drops a world-readable choice back to `shared`.
 - A successful local settings change installs its accepted value as a delta, not
   a level copy (#1177). The pre-send read may still lag the SDK echo of the other
   locally editable property, so an access change keeps the locally held history

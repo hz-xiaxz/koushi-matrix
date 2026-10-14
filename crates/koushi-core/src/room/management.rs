@@ -342,6 +342,12 @@ impl RoomActor {
             }
             RoomAccessDraftCommand::Reset { scope } => AppAction::RoomAccessDraftReset { scope },
             RoomAccessDraftCommand::Open { scope, create } => {
+                // #1416: the default address suffix is drawn here so the
+                // reducer stays deterministic; any renderer value is ignored.
+                let create = create.map(|mut seed| {
+                    seed.address_suffix = Some(koushi_sdk::random_room_address_suffix());
+                    seed
+                });
                 AppAction::RoomAccessDraftOpened { scope, create }
             }
         };

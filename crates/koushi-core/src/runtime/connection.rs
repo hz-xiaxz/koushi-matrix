@@ -1135,12 +1135,14 @@ impl CoreConnection {
 
     /// Preview an unsent room address against the current Ready Matrix account.
     /// This borrows only the session; it neither clones AppState nor probes availability.
-    /// A room created from the selected Space is suggested as `<space>-<room>`
-    /// (#1006), from the Space's Matrix name, never a local presentation name.
+    /// An unedited address (`alias_localpart == None`) is the create session's
+    /// random default (#1416): the attachment Space's Matrix name, never a
+    /// local presentation name or the room name, plus the session's suffix. A
+    /// session without a draft has no default and previews as empty.
     pub fn preview_room_address(
         &self,
-        name: &str,
         alias_localpart: Option<&str>,
+        create_session_id: u64,
     ) -> koushi_state::RoomAddressPreview {
         let snapshot = self.snapshot_rx.borrow();
         let state = &snapshot.state;
@@ -1148,18 +1150,34 @@ impl CoreConnection {
             koushi_state::SessionState::Ready(session) => Some(session.user_id.as_str()),
             _ => None,
         };
-        let space_name = state
-            .navigation
-            .active_space_id
-            .as_deref()
-            .and_then(|space_id| {
-                state
-                    .spaces
-                    .iter()
-                    .find(|space| space.space_id == space_id)
-                    .map(|space| space.raw_name.as_deref().unwrap_or(&space.display_name))
-            });
-        koushi_sdk::preview_room_address(name, alias_localpart, space_name, user_id)
+        let localpart = match alias_localpart {
+            Some(localpart) => localpart.to_owned(),
+            None => state
+                .room_management
+                .draft
+                .as_ref()
+                .filter(|draft| {
+                    draft.scope
+                        == koushi_state::RoomAccessDraftScope::Create {
+                            session_id: create_session_id,
+                        }
+                })
+                .and_then(|draft| {
+                    let suffix = draft.create_address_suffix.as_deref()?;
+                    let space_name = draft.create_parent_space_id.as_deref().and_then(|id| {
+                        state
+                            .spaces
+                            .iter()
+                            .find(|space| space.space_id == id)
+                            .and_then(|space| space.raw_name.as_deref())
+                    });
+                    Some(koushi_state::default_room_alias_localpart(
+                        space_name, suffix,
+                    ))
+                })
+                .unwrap_or_default(),
+        };
+        koushi_sdk::preview_room_address(&localpart, user_id)
     }
 
     /// A stateless preview of one Room Info access/history panel (#1177).

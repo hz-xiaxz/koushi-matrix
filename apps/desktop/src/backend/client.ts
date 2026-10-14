@@ -1268,8 +1268,8 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandSettlement>("join_room", { roomId });
   }
 
-  async previewRoomAddress(name: string, aliasLocalpart: string | null): Promise<RoomAddressPreview> {
-    return this.invokeCommand<RoomAddressPreview>("preview_room_address", { name, aliasLocalpart });
+  async previewRoomAddress(createSessionId: number, aliasLocalpart: string | null): Promise<RoomAddressPreview> {
+    return this.invokeCommand<RoomAddressPreview>("preview_room_address", { createSessionId, aliasLocalpart });
   }
 
   async setRoomAccessDraft(command: RoomAccessDraftCommand): Promise<CommandAdmission> {

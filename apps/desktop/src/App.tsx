@@ -1605,9 +1605,15 @@ function AccountContent({
   useEffect(() => {
     setAddExistingRoomSpaceId((open) => (open && open !== activeSpaceIdForAddRooms ? null : open));
   }, [activeSpaceIdForAddRooms]);
+  // #1416: the default address is the create session's random default, which
+  // Rust holds on that session's draft; the room name never feeds it.
+  const createRoomAddressDraftReady =
+    snapshot?.state.domain.room_management.draft?.scope.kind === "create" &&
+    snapshot.state.domain.room_management.draft.scope.sessionId === createAccessSessionId;
   const createRoomAddressPreview = useRoomAddressPreview(
-    api, createDraftName, createRoomManualAlias,
-    snapshot?.state.domain.session.user_id ?? null, createDialog === "room"
+    api, createAccessSessionId, createRoomManualAlias,
+    snapshot?.state.domain.session.user_id ?? null, createRoomAddressDraftReady,
+    createDialog === "room" && createAccessSessionId !== 0
   );
   // #1006: the advisory check follows the shown address after a short pause
   // in typing. Rust owns the lookup, its cancellation and stale-result
@@ -4707,7 +4713,12 @@ function AccountContent({
       (kind === "space" && !name) ||
       (kind === "room" &&
         createRoomDraftOptions.visibility === "public" &&
-        (!createRoomAddressPreview || createRoomAddressPreview.error !== null)) ||
+        (!createRoomAddressPreview ||
+          createRoomAddressPreview.error !== null ||
+          // #1416: Create waits for the advisory check of the shown address;
+          // an address in use blocks it, an incomplete check does not.
+          shownRoomAddressAvailability?.kind !== "checked" ||
+          shownRoomAddressAvailability.availability === "inUse")) ||
       isBusy ||
       (snapshot && snapshot.state.ui.basic_operation.kind !== "idle")
     ) {
@@ -7875,7 +7886,6 @@ function AccountContent({
       ) : null}
       {createDialog ? (
         <CreateEntityDialog
-          activeSpaceName={activeSpaceName}
           isBusy={isBusy || snapshot.state.ui.basic_operation.kind !== "idle"}
           kind={createDialog}
           roomOptions={displayedCreateRoomOptions}

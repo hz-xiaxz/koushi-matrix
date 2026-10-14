@@ -176,15 +176,14 @@ fn create_room_request_projects_public_alias_without_encryption() {
 }
 
 /// #1023: an unnamed room omits `m.room.name` so the SDK's calculated
-/// display name is used, and a public room whose name offers no address
-/// suggestion is created without an alias while staying public (the join
-/// rule and directory listing are independent of an alias).
+/// display name is used; as a public room it still carries its address
+/// (#1416), which never depends on the name.
 #[test]
-fn create_room_request_omits_the_name_and_alias_of_an_unnamed_public_space_room() {
+fn create_room_request_omits_the_name_of_an_unnamed_public_space_room() {
     let request = create_room_request(MatrixCreateRoomOptions {
         name: "   ".to_owned(),
         topic: None,
-        alias_localpart: None,
+        alias_localpart: Some("research-group-3fa9c2".to_owned()),
         encrypted: true,
         invited_only: false,
         visibility: MatrixCreateRoomVisibility::Public,
@@ -195,10 +194,13 @@ fn create_room_request_omits_the_name_and_alias_of_an_unnamed_public_space_room(
         access_policy: None,
         history: None,
     })
-    .expect("an unnamed public room needs no address");
+    .expect("an unnamed public room with an address is valid");
 
     assert_eq!(request.name, None);
-    assert_eq!(request.room_alias_name, None);
+    assert_eq!(
+        request.room_alias_name.as_deref(),
+        Some("research-group-3fa9c2")
+    );
     assert_eq!(
         request.visibility,
         matrix_sdk::ruma::api::client::room::Visibility::Public
@@ -241,10 +243,9 @@ fn create_room_request_keeps_an_explicit_address_for_an_unnamed_public_room() {
 }
 
 #[test]
-fn create_room_request_still_requires_an_address_for_a_named_public_room() {
-    // #1023 exempts only unnamed rooms: a name without letters or digits
-    // offers no suggestion but still needs a manual address (#1006).
-    for name in ["Synthetic Public", "🎉", "!!!"] {
+fn create_room_request_requires_an_address_for_every_public_room() {
+    // #1416: a public room always has an address, named or not.
+    for name in ["Synthetic Public", "🎉", "!!!", "", "   "] {
         for alias_localpart in [None, Some(String::new()), Some("  ".to_owned())] {
             assert!(
                 matches!(
@@ -576,7 +577,7 @@ fn create_room_request_keeps_the_private_encryption_draft_and_strips_effective_p
     let public = create_room_request(MatrixCreateRoomOptions {
         name: String::new(),
         topic: None,
-        alias_localpart: None,
+        alias_localpart: Some("room-3fa9c2".to_owned()),
         encrypted: true,
         invited_only: false,
         visibility: MatrixCreateRoomVisibility::Public,
