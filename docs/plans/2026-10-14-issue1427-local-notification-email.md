@@ -289,19 +289,36 @@ Frozen shapes, to be implemented as stated so the DTO mirror and the React side 
 written against them:
 
 - `AccountNotificationsSnapshot` gains `keywords: Vec<NotificationKeywordRuleState>`
-  ordered as the server orders the rules, each `{ rule_id, pattern }` - no action, no
-  index, nothing else, because the rule's action is an implementation detail and the
-  index is the order itself.
+  ordered as the server orders the rules, each `{ rule_id, pattern, enabled }` - no
+  action, no index, nothing else, because the rule's action is an implementation detail
+  and the index is the order itself. `enabled` is a server fact and not a local
+  preference: another client can turn a rule off, and a rule that is off is still on the
+  account, still refuses a same-pattern add, and still has to be removable, so it is
+  listed as off rather than hidden.
 - `AppCommand::App(AddNotificationKeyword { request_id, pattern })` and
   `AppCommand::App(RemoveNotificationKeyword { request_id, rule_id })`, both carrying a
-  request id so an admission settles the caller exactly as the other commands do.
+  request id so an admission settles the caller exactly as the other commands do. The
+  account surface's operation state mirrors them as `addNotificationKeyword { pattern }`
+  and `removeNotificationKeyword { ruleId }`, camelCase like the rest of that enum.
 - `normalize_notification_keyword` owns validation before anything leaves the client:
   trim, reject empty, reject control characters, reject over
   `MAX_NOTIFICATION_KEYWORD_CHARS` (64), and reject a pattern that matches an existing
   rule case-insensitively, because a duplicate would write a second rule that can never
-  fire. The homeserver stays the authority for the write itself.
-- `MAX_NOTIFICATION_KEYWORDS` (64) bounds the list: an add beyond it is refused with the
-  same typed failure rather than silently trimming the newest rule.
+  fire. The homeserver stays the authority for the write itself. The refusals are typed
+  and each has catalog copy: `emptyPattern`, `patternTooLong`, `duplicate`,
+  `limitReached`, and `unknownRule`, which is also what a removal naming a rule the
+  account does not have reports. A rule-id collision with a different pattern - which the
+  minted id makes astronomically unlikely - reports `duplicate`, because the account does
+  hold something at that name.
+- `MAX_NOTIFICATION_KEYWORDS` (64) bounds the list: an add beyond it is refused as
+  `limitReached` rather than silently trimming the newest rule.
+- The rule id is minted by `koushi-sdk` from the trimmed pattern: the prefix
+  `org.matrix.desktop.notify.keyword.` plus sixteen lowercase hex digits of a stable hash
+  of the text, so the id is deterministic, fixed width, outside the `.`-prefixed
+  namespace the spec reserves for server defaults, and free of pattern text.
+- The written rule's action is notify plus the highlight tweak, which is what reaches the
+  mention-kind authority. The SDK's own keyword helper writes notify plus a default sound
+  and no highlight, so it must not be used for this write.
 - A remove names a rule id that exists in the loaded list; an unknown id is refused.
 
 Adding and removing are the only writes, they happen only on explicit user action, and

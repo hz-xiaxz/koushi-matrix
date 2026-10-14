@@ -6181,7 +6181,13 @@ one country's infrastructure:
   (`override > content > room > sender > underride`), so a keyword wins over a room rule
   while a mute, which is an override, still wins over the keyword. The list is bounded,
   a pattern is bounded and trimmed, a duplicate is refused rather than written twice,
-  and a failed write is reported as a failure instead of being shown as saved.
+  and a failed write is reported as a failure instead of being shown as saved. The rule
+  name is minted from the pattern rather than taken from the user: a prefix this client
+  owns plus a hash of the trimmed text, so the same keyword cannot become two rules, no
+  pattern text travels in a URL path, and an id that collides with a different pattern is
+  refused instead of overwriting a rule this client did not write. A rule another client
+  turned off is listed as off and not hidden, because it is still on the account, still
+  refuses a same-pattern add, and still has to be removable.
 - **Watch list.** The user can name rooms and spaces that are delivered regardless
   of the three categories, so a busy space can be watched without turning on every
   group message. A watched space covers every joined room that is a child of it,
