@@ -1706,7 +1706,8 @@ describe("TimelineView", () => {
           NavigationUpdated: {
             key: KEY,
             snapshot: navigationSnapshot({
-              first_unread_event_id: "$latest-thread-reply:example.invalid",
+              first_unread_event_id: "$thread-root:example.invalid",
+              first_unread_display_event_id: "$latest-thread-reply:example.invalid",
               unread_event_count: 1,
               unread_position: "insideViewport"
             })
@@ -1777,7 +1778,8 @@ describe("TimelineView", () => {
           NavigationUpdated: {
             key: KEY,
             snapshot: navigationSnapshot({
-              first_unread_event_id: "$latest-thread-reply:example.invalid",
+              first_unread_event_id: "$thread-root:example.invalid",
+              first_unread_display_event_id: "$latest-thread-reply:example.invalid",
               unread_event_count: 1,
               unread_position: "belowViewport"
             })

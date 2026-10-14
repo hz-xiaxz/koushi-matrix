@@ -2107,6 +2107,15 @@ stateDiagram-v2
   at or before the boundary. A read thread root that latest-reply ordering moved
   below the boundary row therefore stays above the "Read up to here" divider.
   Rows changed only by reprojection re-derive navigation after `ItemsUpdated`.
+- `first_unread_event_id` stays the canonical first unread main-conversation
+  event; unread counts, position, and diagnostics use it. The "New messages"
+  divider instead renders at `first_unread_display_event_id`: in a Room, the
+  activity identity of the first displayed row, in display order, whose
+  content is an unread main-conversation event. An unread thread root shown at
+  its newest reply's position is keyed by that reply's id, and a root displaced
+  past other unread rows does not move the divider below them. The field is
+  set exactly when `first_unread_event_id` is, and falls back to it when no
+  displayed row qualifies.
 - `NavigationUpdated` is emitted only when the projection changes. Diff-driven
   updates are emitted after the corresponding `ItemsUpdated` event so the GUI
   has the referenced rows before it renders or scrolls to an anchor.

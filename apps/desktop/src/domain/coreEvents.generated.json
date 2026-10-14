@@ -1559,6 +1559,7 @@
         },
         "snapshot": {
           "can_jump_to_bottom": true,
+          "first_unread_display_event_id": "$unread:example.test",
           "first_unread_event_id": "$unread:example.test",
           "local_viewed_event_id": "$read:example.test",
           "newer_event_count": 3,

@@ -3363,7 +3363,7 @@ export const TimelineView = memo(function TimelineView({
     onRegisterJumpToLatest?.(jumpToBottom);
     return () => onRegisterJumpToLatest?.(null);
   }, [jumpToBottom, onRegisterJumpToLatest]);
-  const unreadMarkerEventId = navigationSnapshot?.first_unread_event_id ?? null;
+  const unreadMarkerEventId = navigationSnapshot?.first_unread_display_event_id ?? null;
   const readMarkerDisplayEventId =
     navigationSnapshot?.read_marker_display_event_id ??
     navigationSnapshot?.read_marker_event_id ??

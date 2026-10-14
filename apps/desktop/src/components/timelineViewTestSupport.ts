@@ -79,6 +79,7 @@ export function navigationSnapshot(overrides: Partial<{
   read_marker_event_id: string | null;
   read_marker_display_event_id: string | null;
   first_unread_event_id: string | null;
+  first_unread_display_event_id: string | null;
   unread_event_count: number;
   unread_position: "none" | "aboveViewport" | "insideViewport" | "belowViewport" | "unknown";
   newer_event_count: number;
@@ -91,6 +92,7 @@ export function navigationSnapshot(overrides: Partial<{
     read_marker_event_id: null,
     read_marker_display_event_id: null,
     first_unread_event_id: null,
+    first_unread_display_event_id: null,
     unread_event_count: 0,
     unread_position: "none" as const,
     newer_event_count: 0,

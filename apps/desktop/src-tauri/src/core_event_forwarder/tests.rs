@@ -938,6 +938,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                 read_marker_event_id: Some("$read:example.test".to_owned()),
                 read_marker_display_event_id: Some("$read:example.test".to_owned()),
                 first_unread_event_id: Some("$unread:example.test".to_owned()),
+                first_unread_display_event_id: Some("$unread:example.test".to_owned()),
                 local_viewed_event_id: Some("$read:example.test".to_owned()),
                 server_confirmed_read_event_id: Some("$read:example.test".to_owned()),
                 read_state_sync: koushi_core::TimelineReadStateSync::Synced,

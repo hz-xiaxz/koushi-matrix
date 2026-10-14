@@ -71,9 +71,10 @@ use super::{
     InitialItemsRequestIdentity, NavigationProjectionCleanup, NavigationProjectionIngress,
     NavigationProjectionIntent, ROOM_REPLAY_INITIAL_ITEMS_MAX, TimelineActorGenerationGate,
     acquire_pagination_permit_and_emit_paginating, activity_row_from_timeline_item,
-    align_read_marker_display_to_display_rows, backward_pagination_changed_oldest_edge,
-    derive_timeline_navigation_snapshot, derive_timeline_navigation_snapshot_with_read_state,
-    emit_initial_items_for_generation, receive_navigation_projection, replay_initial_items_window,
+    align_first_unread_display_to_display_rows, align_read_marker_display_to_display_rows,
+    backward_pagination_changed_oldest_edge, derive_timeline_navigation_snapshot,
+    derive_timeline_navigation_snapshot_with_read_state, emit_initial_items_for_generation,
+    receive_navigation_projection, replay_initial_items_window,
     should_hydrate_empty_initial_room_timeline, timeline_unread_consistency_diagnostic_event,
 };
 
@@ -3030,6 +3031,110 @@ fn read_divider_stays_above_an_unread_root_reordered_by_a_newer_reply() {
     assert_eq!(
         snapshot, unaligned,
         "an unread root keeps its unread divider"
+    );
+}
+
+#[test]
+fn unread_divider_follows_an_unread_root_reordered_by_a_newer_reply() {
+    let before = timeline_item("$before:test", Some("before"), "@other:test", false);
+    let root = timeline_item("$root:test", Some("root"), "@other:test", false);
+    let between = timeline_item("$between:test", Some("between"), "@other:test", false);
+    let mine = timeline_item("$mine:test", Some("mine"), "@me:test", false);
+    let mut reply = timeline_item("$reply:test", Some("reply"), "@other:test", false);
+    reply.thread_root = Some("$root:test".to_owned());
+
+    // The unread root is shown at its newest reply's position, so the divider
+    // keys to that row's activity identity. When the root is displaced past
+    // other unread rows, the divider precedes the first unread row in display
+    // order; the current user's own rows are never that row.
+    for (canonical, expected_display, case) in [
+        (
+            vec![before.clone(), root.clone(), reply.clone()],
+            "$reply:test",
+            "only the reordered root is unread",
+        ),
+        (
+            vec![before.clone(), root.clone(), between.clone(), reply.clone()],
+            "$between:test",
+            "an unread row is displayed before the reordered root",
+        ),
+        (
+            vec![before.clone(), root.clone(), mine.clone(), reply.clone()],
+            "$reply:test",
+            "an own row displayed before the reordered root is not unread",
+        ),
+    ] {
+        let display = latest_reply_display_rows(&canonical);
+        let mut snapshot = derive_timeline_navigation_snapshot_with_read_state(
+            &room_key().kind,
+            &canonical,
+            Some("$before:test"),
+            Some("$before:test"),
+            Some("$before:test"),
+            TimelineReadStateSync::Synced,
+            &TimelineViewportObservation::default(),
+            Some("@me:test"),
+        );
+        assert_eq!(
+            snapshot.first_unread_display_event_id, snapshot.first_unread_event_id,
+            "{case}: before alignment the divider names the canonical row"
+        );
+        align_first_unread_display_to_display_rows(
+            &room_key().kind,
+            &canonical,
+            &display,
+            Some("@me:test"),
+            &mut snapshot,
+        );
+        assert_eq!(
+            snapshot.first_unread_event_id.as_deref(),
+            Some("$root:test"),
+            "{case}: the canonical first unread stays the root"
+        );
+        assert_eq!(
+            snapshot.first_unread_display_event_id.as_deref(),
+            Some(expected_display),
+            "{case}"
+        );
+        let unaligned_read = snapshot.clone();
+        align_read_marker_display_to_display_rows(
+            &room_key().kind,
+            &canonical,
+            &display,
+            &mut snapshot,
+        );
+        assert_eq!(
+            snapshot, unaligned_read,
+            "{case}: the read divider stays suppressed"
+        );
+    }
+}
+
+#[test]
+fn unread_divider_without_display_rows_keeps_the_canonical_row() {
+    let before = timeline_item("$before:test", Some("before"), "@other:test", false);
+    let after = timeline_item("$after:test", Some("after"), "@other:test", false);
+    let canonical = vec![before, after];
+    let mut snapshot = derive_timeline_navigation_snapshot_with_read_state(
+        &room_key().kind,
+        &canonical,
+        Some("$before:test"),
+        Some("$before:test"),
+        Some("$before:test"),
+        TimelineReadStateSync::Synced,
+        &TimelineViewportObservation::default(),
+        Some("@me:test"),
+    );
+    align_first_unread_display_to_display_rows(
+        &room_key().kind,
+        &canonical,
+        &[],
+        Some("@me:test"),
+        &mut snapshot,
+    );
+    assert_eq!(
+        snapshot.first_unread_display_event_id.as_deref(),
+        Some("$after:test")
     );
 }
 
