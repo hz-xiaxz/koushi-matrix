@@ -9,6 +9,7 @@ use crate::locale_profile::DisplayPlatform;
 
 use super::AppState;
 use super::errors::OperationFailureKind;
+use super::notification_delivery::bounded_notification_delivery_prefix_source;
 #[cfg(test)]
 use super::room::RoomLatestEventSummary;
 use super::room::{
@@ -395,7 +396,7 @@ pub(crate) fn native_attention_projection_from_rooms_with_live_room(
 /// every one of them rather than only the single room a transient alert may target. It
 /// also needs the mention count, which the candidate deliberately discards. Both come
 /// from this one function so the delivery channel cannot drift from the badge.
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct RoomAttentionCandidate {
     pub room_id: String,
     /// The safe display label, the same one the candidate and the sidebar row use.
@@ -408,6 +409,36 @@ pub struct RoomAttentionCandidate {
     /// The spaces this room is a child of in the room list right now, so a watch list naming
     /// a space covers a room that joined it after the list was written.
     pub parent_space_ids: Vec<String>,
+    /// The body of the room's latest conversation event, when it is a plain text message
+    /// this device can already read and [`bounded_notification_delivery_prefix_source`]
+    /// has bounded it (#1427).
+    ///
+    /// It is the *latest* event, which may be newer than the unread event that made the
+    /// room qualify: a room can be unread because of an older mention while a newer plain
+    /// message sits at the top, and the room list previews that same newer message. It is
+    /// message text, so it is carried here and never serialized, logged, or rendered
+    /// except by `digest` under a per-sink consent.
+    pub newest_message_text: Option<String>,
+}
+
+impl fmt::Debug for RoomAttentionCandidate {
+    /// Redacts the message text: the candidate travels through failure output and
+    /// diagnostics, and a body is the one field here that is the sender's words.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RoomAttentionCandidate")
+            .field("room_id", &"RoomId(..)")
+            .field("display_label", &"DisplayLabel(..)")
+            .field("kind", &self.kind)
+            .field("unread", &self.unread)
+            .field("mentions", &self.mentions)
+            .field("parent_space_ids", &self.parent_space_ids.len())
+            .field(
+                "newest_message_text",
+                &self.newest_message_text.as_ref().map(|_| "MessageText(..)"),
+            )
+            .finish()
+    }
 }
 
 /// Every room with unread attention, for the device-local delivery channel.
@@ -490,6 +521,12 @@ pub fn attention_room_candidates(
             unread: u32::try_from(effective_unread_count).unwrap_or(u32::MAX),
             mentions: u32::try_from(highlight_total).unwrap_or(u32::MAX),
             parent_space_ids: room.parent_space_ids.clone(),
+            newest_message_text: room
+                .latest_event
+                .as_ref()
+                .filter(|event| !event.is_redacted)
+                .and_then(|event| event.message_text.as_deref())
+                .and_then(bounded_notification_delivery_prefix_source),
         });
     }
 
@@ -764,129 +801,5 @@ pub enum NativeAttentionSuppressionReason {
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use crate::state::{RoomSummary, RoomTags};
-
-    fn unread_room() -> RoomSummary {
-        RoomSummary {
-            display_name_placeholder: None,
-            display_label_placeholder: None,
-            room_id: "!room:example.invalid".to_owned(),
-            display_name: "Room".to_owned(),
-            display_label: "Room".to_owned(),
-            original_display_label: "Room".to_owned(),
-            avatar: None,
-            is_dm: false,
-            dm_user_ids: Vec::new(),
-            tags: RoomTags::default(),
-            unread_count: 2,
-            notification_count: 2,
-            highlight_count: 0,
-            thread_unread_count: 0,
-            thread_highlight_count: 0,
-            marked_unread: false,
-            recency_stamp: Some(42),
-            conversation_activity: None,
-            latest_event: Some(RoomLatestEventSummary {
-                event_id: "$observed:example.invalid".to_owned(),
-                relation_type: None,
-                relation_event_id: None,
-                thread_root_event_id: None,
-                sender_id: None,
-                sender_label: None,
-                sender_avatar: None,
-                preview: None,
-                timestamp_ms: 42,
-                is_redacted: false,
-            }),
-            parent_space_ids: Vec::new(),
-            dm_space_ids: Vec::new(),
-            is_encrypted: false,
-            joined_members: 2,
-        }
-    }
-
-    fn project(observation: NativeAttentionObservationKind) -> NativeAttentionProjection {
-        let rooms = [unread_room()];
-        native_attention_projection_from_rooms(NativeAttentionProjectionInput {
-            rooms: &rooms,
-            active_room_id: None,
-            muted_room_ids: &[],
-            room_notification_modes: &HashMap::new(),
-            ignored_user_ids: &BTreeSet::new(),
-            window_focused: false,
-            observation,
-            previous_candidate: None,
-            message_previews: false,
-            capabilities: NativeAttentionCapabilities::default(),
-        })
-    }
-
-    #[test]
-    fn native_attention_observation_suppresses_non_live_candidates() {
-        for (observation, reason) in [
-            (
-                NativeAttentionObservationKind::InitialSync,
-                NativeAttentionSuppressionReason::InitialSync,
-            ),
-            (
-                NativeAttentionObservationKind::Backfill,
-                NativeAttentionSuppressionReason::Backfill,
-            ),
-            (
-                NativeAttentionObservationKind::SelfEvent,
-                NativeAttentionSuppressionReason::SelfMessage,
-            ),
-        ] {
-            let projection = project(observation);
-            assert_eq!(projection.state.summary.unread_count, 2);
-            assert_eq!(projection.state.summary.badge_count, 2);
-            assert_eq!(projection.state.summary.candidate, None);
-            assert_eq!(
-                projection.state.dispatch,
-                NativeAttentionDispatchState::Suppressed { reason }
-            );
-        }
-
-        let live = project(NativeAttentionObservationKind::Live);
-        assert_eq!(live.state.summary.unread_count, 2);
-        assert_eq!(live.state.summary.badge_count, 2);
-        assert!(live.state.summary.candidate.is_some());
-        assert_eq!(live.state.dispatch, NativeAttentionDispatchState::Idle);
-        assert!(!live.active_room_match);
-    }
-
-    #[test]
-    fn native_badge_diagnostics_count_only_unique_non_muted_rooms() {
-        let included = unread_room();
-        let mut duplicate = included.clone();
-        duplicate.unread_count = 9;
-        let mut explicit_mute = unread_room();
-        explicit_mute.room_id = "!explicit:example.invalid".to_owned();
-        let mut mode_mute = unread_room();
-        mode_mute.room_id = "!mode:example.invalid".to_owned();
-        let rooms = [included, duplicate, explicit_mute, mode_mute];
-        let modes = HashMap::from([(
-            "!mode:example.invalid".to_owned(),
-            RoomNotificationMode::Mute,
-        )]);
-
-        let projection = native_attention_projection_from_rooms(NativeAttentionProjectionInput {
-            rooms: &rooms,
-            active_room_id: None,
-            muted_room_ids: &["!explicit:example.invalid".to_owned()],
-            room_notification_modes: &modes,
-            ignored_user_ids: &BTreeSet::new(),
-            window_focused: false,
-            observation: NativeAttentionObservationKind::Live,
-            previous_candidate: None,
-            message_previews: false,
-            capabilities: NativeAttentionCapabilities::default(),
-        });
-
-        assert_eq!(projection.state.summary.badge_count, 2);
-        assert_eq!(projection.badge_room_count, 1);
-        assert_eq!(projection.badge_excluded_room_count, 3);
-    }
-}
+#[path = "native_attention/tests.rs"]
+mod tests;

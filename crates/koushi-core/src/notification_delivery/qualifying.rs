@@ -35,8 +35,12 @@ use super::dwell::QualifyingRoom;
 ///   `mentions` or `keywords`, a direct message under `direct_messages`. A plain group
 ///   message has no trigger of its own and is delivered only through the watch list.
 ///
-/// [`QualifyingRoom::plaintext_prefix`] is `None` here: the prefix option renders decrypted
-/// message text, and the extraction and its consent check are not part of this slice.
+/// [`QualifyingRoom::plaintext_prefix`] is filled from the candidate's
+/// [`RoomAttentionCandidate::newest_message_text`] whenever
+/// [`NotificationDeliverySettings::prefix_chars`] is on, whatever any consent says: the
+/// consent is per sink and per destination, so it is applied in [`super::digest`]. The text
+/// is the body of the room's latest conversation event, which is the newest message this
+/// device already holds and may be newer than the unread event that qualified the room.
 pub(crate) fn qualifying_rooms(
     settings: &NotificationDeliverySettings,
     candidates: &[RoomAttentionCandidate],
@@ -60,7 +64,14 @@ pub(crate) fn qualifying_rooms(
             kind: candidate.kind,
             unread: candidate.unread,
             mentions: candidate.mentions,
-            plaintext_prefix: None,
+            // The character count is the whole decision here. Reading the text is already
+            // done - the candidate carries what the room list holds - and whether a sink
+            // may render it is a per-sink consent that `digest` applies.
+            plaintext_prefix: if settings.prefix_chars > 0 {
+                candidate.newest_message_text.clone()
+            } else {
+                None
+            },
         });
     }
     qualifying

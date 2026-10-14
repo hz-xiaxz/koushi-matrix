@@ -111,21 +111,16 @@ fn notification_sink_for(settings: &NotificationSinkSettings) -> NotificationSin
 }
 
 impl AppActor {
-    /// Whether this account tab's window is focused, which is the device's focus signal.
-    ///
-    /// The runtime keeps one window focus flag per account tab, and the attention projection
-    /// already reads the same flag to suppress the OS notification, so this is not a new
-    /// signal. It defaults to focused, so an unknown focus suppresses delivery rather than
-    /// sending to a device nobody has told us is unattended.
     /// Whether the tab this account is rendered in is in the foreground.
     ///
     /// Per account tab, this is "this account's tab is focused", not "the process has a window
-    /// somewhere": the adapter observes the selected tab's window and reports through
-    /// `ObserveNativeWindowFocus`, which is the same fact the in-app badge suppression uses. An
-    /// unknown focus reads as focused - `NativeAttentionContext::default()` starts there - and
-    /// [`NotificationDeliverySettings::only_when_unfocused`] then delivers nothing, so a device
-    /// that has not said anything yet fails closed rather than mailing a notification the user is
-    /// already looking at.
+    /// somewhere": the runtime keeps one window focus flag per account tab, the adapter observes
+    /// the selected tab's window and reports through `ObserveNativeWindowFocus`, and the
+    /// attention projection already reads the same flag to suppress the OS notification. So this
+    /// is not a new signal. An unknown focus reads as focused - `NativeAttentionContext::default()`
+    /// starts there - and [`NotificationDeliverySettings::only_when_unfocused`] then delivers
+    /// nothing, so a device that has not said anything yet fails closed rather than mailing a
+    /// notification the user is already looking at.
     fn notification_delivery_window_focused(&self) -> bool {
         self.state.native_attention_context.window_focused
     }

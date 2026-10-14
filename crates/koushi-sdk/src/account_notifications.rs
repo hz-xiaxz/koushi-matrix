@@ -18,7 +18,7 @@
 use koushi_state::{
     AccountNotificationsFailureKind, AccountNotificationsSnapshot, IdentityResetAuthRequest,
     NotificationCategory, NotificationCategoryState, NotificationCategoryStates,
-    NotificationEmailAddress, NotificationEmailManagement,
+    NotificationEmailAddress, NotificationEmailManagement, NotificationKeywordRuleState,
 };
 use matrix_sdk::ruma::{
     api::client::push::{
@@ -419,6 +419,17 @@ pub fn build_account_notifications_snapshot(
         email_management,
         emails,
         unverified_email_pusher_count,
+        // #1427: the keyword list is a projection of the same authoritative
+        // ruleset this read already fetched, so it costs no extra request and
+        // stays in the server's own rule order.
+        keywords: keyword_rules_from_ruleset(ruleset)
+            .into_iter()
+            .map(|rule| NotificationKeywordRuleState {
+                rule_id: rule.rule_id,
+                pattern: rule.pattern,
+                enabled: rule.enabled,
+            })
+            .collect(),
     }
 }
 

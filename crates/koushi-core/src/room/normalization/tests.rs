@@ -76,6 +76,7 @@ fn normalize_rooms_preserves_latest_redaction_fact() {
                 sender_label: None,
                 sender_avatar_mxc_uri: None,
                 preview: Some("deleted".to_owned()),
+                message_text: None,
                 timestamp_ms: 42,
                 event_type: Some("m.room.message".to_owned()),
                 relation_type: None,

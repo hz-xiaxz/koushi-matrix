@@ -747,8 +747,10 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
 
 /// IPC snapshot contract version. Version 10 adds the device-local notification
 /// delivery projection (`NotificationDeliveryState`), which carries only whether
-/// each sink holds a credential and how its last send ended.
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 10;
+/// each sink holds a credential and how its last send ended. Version 11 adds the
+/// keyword-rule projection (`AccountNotificationsSnapshot.keywords`), which
+/// carries the account's own `content` rules and their server-owned enabled flag.
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 11;
 
 pub(crate) fn frontend_display_platform() -> DisplayPlatform {
     #[cfg(target_os = "macos")]

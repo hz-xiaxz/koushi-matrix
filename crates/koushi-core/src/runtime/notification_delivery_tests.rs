@@ -9,8 +9,9 @@ use std::time::Duration;
 
 use koushi_protocol::command::{AppCommand, CoreCommand};
 use koushi_state::{
-    NotificationDeliveryOutcomeState, NotificationDeliverySettings, NotificationSinkConfig,
-    NotificationSinkSettings, SettingsPatch,
+    AppAction, CurrentDeviceTrustState, NotificationDeliveryOutcomeState,
+    NotificationDeliveryPrefixConsent, NotificationDeliverySettings, NotificationSinkConfig,
+    NotificationSinkSettings, RoomSummary, SessionInfo, SettingsPatch,
 };
 use wiremock::matchers::{method, path};
 use wiremock::{Mock, MockServer, ResponseTemplate};
@@ -25,6 +26,32 @@ const SECRET: &str = "fixture-relay-secret";
 const ROOM: &str = "!room:example.invalid";
 
 const TEST_LIVENESS: Duration = Duration::from_secs(60);
+
+/// The room the delivery channel observes, with the newest message text this device
+/// already holds set the way the room projection sets it.
+fn unread_dm_with_text(text: &str) -> RoomSummary {
+    let mut room: RoomSummary = serde_json::from_value(serde_json::json!({
+        "room_id": ROOM,
+        "display_name": "Fixture Room",
+        "display_label": "Fixture Room",
+        "is_dm": true,
+        "unread_count": 2,
+        "notification_count": 2,
+        "highlight_count": 0,
+        "parent_space_ids": [],
+        "latest_event": {
+            "event_id": "$event:example.invalid",
+            "preview": "fixture preview",
+            "timestamp_ms": 42,
+        },
+    }))
+    .expect("a room summary with a latest event");
+    room.latest_event
+        .as_mut()
+        .expect("the fixture has a latest event")
+        .message_text = Some(text.to_owned());
+    room
+}
 
 fn delivery_settings(endpoint: &str) -> NotificationDeliverySettings {
     NotificationDeliverySettings {
@@ -728,5 +755,123 @@ async fn a_test_send_for_an_unconfigured_sink_is_refused_by_kind() {
         "{failure:?}"
     );
     assert_eq!(sink_state(&connection).last_outcome, None);
+    drop(runtime);
+}
+
+/// #1427: the newest message text this device already holds leaves through the sink whose
+/// stored consent covers it, and never through the app-state snapshot the webview sees.
+#[tokio::test]
+async fn the_rooms_newest_text_reaches_the_wire_and_never_the_app_state_snapshot() {
+    const TEXT: &str = "Alice: review the budget";
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path("/emails"))
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({"id": "ok"})))
+        .mount(&server)
+        .await;
+    let endpoint = format!("{}/emails", server.uri());
+    let mut delivery = delivery_settings(&endpoint);
+    // Due on the first observation, so the fixture room does not need the clock moved.
+    delivery.dwell_secs = 0;
+    delivery.prefix_chars = 80;
+    delivery.prefix_consent = Some(NotificationDeliveryPrefixConsent {
+        sink_id: SINK.to_owned(),
+        destination: "fixture@example.invalid".to_owned(),
+        endpoint,
+        accepted_at_ms: 1,
+    });
+    let (runtime, _stores, mut connection) = runtime_with_delivery(delivery).await;
+    set_secret(&connection).await;
+    wait_for_runtime_snapshot(&mut connection, |state| {
+        state.notification_delivery.sinks[0].secret_configured
+    })
+    .await;
+
+    // A room list only reaches the state under a ready session, so the fixture
+    // establishes one exactly as the other runtime tests do.
+    runtime
+        .inject_actions(vec![
+            AppAction::AppStarted,
+            AppAction::RestoreSessionSucceeded(SessionInfo {
+                homeserver: "https://example.invalid".into(),
+                user_id: "@me:example.invalid".into(),
+                device_id: "DEVICE".into(),
+                authentication_method: Default::default(),
+            }),
+            // Verified trust is what promotes the provisional session to ready, and a
+            // room list only reaches the state under a ready session.
+            AppAction::CurrentDeviceTrustChanged(CurrentDeviceTrustState::Verified),
+            AppAction::RoomListUpdated {
+                spaces: Vec::new(),
+                rooms: vec![unread_dm_with_text(TEXT)],
+            },
+        ])
+        .await;
+    wait_for_runtime_snapshot(&mut connection, |state| {
+        state.rooms.iter().any(|room| room.room_id == ROOM)
+    })
+    .await;
+    let state = wait_for_runtime_snapshot(&mut connection, |state| {
+        state.notification_delivery.sinks[0].last_outcome.is_some()
+    })
+    .await;
+    assert!(
+        matches!(
+            state.notification_delivery.sinks[0].last_outcome,
+            Some(NotificationDeliveryOutcomeState::Delivered { .. })
+        ),
+        "the consented prefix delivery was recorded as {:?}",
+        state.notification_delivery.sinks[0].last_outcome
+    );
+    // The room really is in the state this snapshot is made of: the negative assertion
+    // below is about the field, not about an empty room list.
+    assert!(
+        state
+            .rooms
+            .iter()
+            .any(|room| room.latest_event.is_some() && room.display_label == "Fixture Room")
+    );
+    assert_eq!(state.settings.values.delivery.prefix_chars, 80);
+    let delivery = &state.settings.values.delivery;
+    assert!(
+        delivery.prefix_is_allowed_for(
+            &delivery.sinks[0].id,
+            &delivery.sinks[0].destination,
+            &delivery.sinks[0].endpoint()
+        ),
+        "the stored consent covers the sink: consent={:?} destination={} endpoint={}",
+        delivery.prefix_consent,
+        delivery.sinks[0].destination,
+        delivery.sinks[0].endpoint()
+    );
+    assert!(
+        state
+            .rooms
+            .iter()
+            .find(|room| room.room_id == ROOM)
+            .and_then(|room| room.latest_event.as_ref())
+            .is_some_and(|event| event.message_text.as_deref() == Some(TEXT)),
+        "the room kept the newest text the projection handed it"
+    );
+    let serialized = serde_json::to_string(&state).expect("the app state serializes");
+    assert!(
+        !serialized.contains(TEXT),
+        "the prefix source reached the app-state snapshot"
+    );
+
+    let requests = server
+        .received_requests()
+        .await
+        .expect("the stub keeps requests");
+    assert_eq!(requests.len(), 1, "one digest, one send");
+    let body: serde_json::Value =
+        serde_json::from_slice(&requests[0].body).expect("the request body is JSON");
+    let text = body["text"].as_str().expect("the body carries text");
+    assert!(
+        text.starts_with(TEXT),
+        "the consented sink renders the room's newest text first: {text}"
+    );
+    // The prefix is message text alone: the room id does not ride out with it.
+    assert!(!text.contains(ROOM), "{text}");
     drop(runtime);
 }

@@ -7,7 +7,7 @@ use std::time::Duration;
 
 use koushi_state::{
     NotificationDeliveryPrefixConsent, NotificationDeliverySettings, NotificationSinkConfig,
-    NotificationSinkSettings, RoomAttentionKind,
+    NotificationSinkSettings, RoomAttentionCandidate, RoomAttentionKind,
 };
 
 use crate::executor::Instant;
@@ -16,6 +16,7 @@ use koushi_state::MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS;
 
 use super::digest::{MAX_NOTIFICATION_DIGEST_ROOMS, coalesce_window, digest};
 use super::dwell::{DwellTracker, QualifyingRoom};
+use super::qualifying::qualifying_rooms;
 
 const DWELL: Duration = Duration::from_secs(60);
 const ROOM_ID: &str = "!room:example.invalid";
@@ -302,6 +303,74 @@ fn the_counts_only_body_names_rooms_without_ids_or_message_text() {
             "{identifier} must not reach the message"
         );
     }
+}
+
+/// A room projection candidate: what the attention projection hands the delivery channel.
+fn candidate(
+    room_id: &str,
+    label: &str,
+    newest_message_text: Option<&str>,
+) -> RoomAttentionCandidate {
+    RoomAttentionCandidate {
+        room_id: room_id.to_owned(),
+        display_label: label.to_owned(),
+        kind: RoomAttentionKind::Dm,
+        unread: 1,
+        mentions: 0,
+        parent_space_ids: Vec::new(),
+        newest_message_text: newest_message_text.map(str::to_owned),
+    }
+}
+
+/// #1427: the whole chain, from what the room projection already holds to what a sink
+/// renders. A room whose newest message is on this device carries its text through
+/// qualification, and `digest` renders it for the one sink whose stored consent names
+/// that sink, destination and endpoint - and for nobody else. A room whose newest message
+/// is not available still qualifies and is still delivered, without a prefix.
+#[test]
+fn the_rooms_newest_text_reaches_only_the_sink_whose_consent_names_it() {
+    let mut settings = settings_with_consented_prefix(80);
+    settings.sinks.push(sink("work", "work@example.invalid"));
+    let candidates = [
+        candidate(ROOM_ID, "Room A", Some("Alice: review the budget")),
+        candidate("!quiet:example.invalid", "Room B", None),
+    ];
+
+    let qualifying = qualifying_rooms(&settings, &candidates, false);
+    assert_eq!(ids(&qualifying), [ROOM_ID, "!quiet:example.invalid"]);
+    assert_eq!(
+        qualifying[1].plaintext_prefix, None,
+        "a room with no readable newest message carries no text"
+    );
+
+    let intents = digest(&settings, &qualifying, "window-1");
+    let home = intents
+        .iter()
+        .find(|intent| intent.sink_id == "home")
+        .expect("the consented sink is enabled");
+    let work = intents
+        .iter()
+        .find(|intent| intent.sink_id == "work")
+        .expect("the other sink is enabled");
+
+    // The prefix is the message text alone: no sender, room id, or label rides with it.
+    assert!(
+        home.body.starts_with("Alice: review the budget\n"),
+        "the consented sink renders the room's newest text first: {}",
+        home.body
+    );
+    assert!(
+        home.body.contains("Room B"),
+        "both rooms are still delivered"
+    );
+    assert!(!work.body.contains("review the budget"));
+
+    // The option off removes the text and changes nothing else about the digest.
+    settings.prefix_chars = 0;
+    let intents = digest(&settings, &qualifying, "window-1");
+    assert_eq!(intents.len(), 2);
+    assert!(!intents[0].body.contains("review the budget"));
+    assert!(intents[0].body.contains("Room A"));
 }
 
 #[test]

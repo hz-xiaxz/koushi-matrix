@@ -6185,6 +6185,12 @@ fn account_notifications_action(
         Request::ConfirmEmail => Operation::ConfirmEmail,
         Request::EnableEmailNotifications { .. } => Operation::EnableEmailNotifications,
         Request::DisableEmailNotifications => Operation::DisableEmailNotifications,
+        Request::AddKeyword { pattern } => Operation::AddNotificationKeyword {
+            pattern: pattern.clone(),
+        },
+        Request::RemoveKeyword { rule_id } => Operation::RemoveNotificationKeyword {
+            rule_id: rule_id.clone(),
+        },
     };
     AppAction::AccountNotificationsOperationRequested {
         request_id,

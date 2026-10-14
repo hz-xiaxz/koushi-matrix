@@ -1741,6 +1741,8 @@ pub fn run() {
             commands::account::cancel_notification_email,
             commands::account::enable_email_notifications,
             commands::account::disable_email_notifications,
+            commands::account::add_notification_keyword,
+            commands::account::remove_notification_keyword,
             commands::local_encryption::probe_local_encryption_health,
             commands::local_encryption::reset_local_data,
             commands::e2ee::bootstrap_cross_signing,

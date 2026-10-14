@@ -2,13 +2,69 @@ use super::{
     MatrixConversationActivity, MatrixConversationActivitySource, MatrixRoomTagInfo,
     MatrixRoomTags, SdkUnreadTrace, SpaceMemberLookupStatus, classify_space_member_ids,
     matrix_conversation_activity_from_timeline_event, matrix_conversation_activity_source,
-    matrix_room_latest_event_projection, matrix_room_list_room_from_counts,
-    matrix_timeline_event_is_redacted, newest_conversation_activity, people_scope_diagnostic_event,
+    matrix_message_text_from_msgtype, matrix_room_latest_event_projection,
+    matrix_room_list_room_from_counts, matrix_timeline_event_is_redacted,
+    newest_conversation_activity, people_scope_diagnostic_event,
     space_members_scope_diagnostic_event, trace_sdk_unread_snapshot,
 };
 
 use koushi_diagnostics::DiagnosticValue;
 use std::collections::BTreeMap;
+
+/// #1427: only the msgtypes whose body is what the sender typed may become a delivery
+/// prefix. A media body is a filename or a caption, and a custom or server-notice body is
+/// not a message this device can vouch for.
+#[test]
+fn only_text_notice_and_emote_bodies_are_message_text() {
+    use matrix_sdk::ruma::events::room::message::{
+        AudioMessageEventContent, EmoteMessageEventContent, FileMessageEventContent,
+        ImageMessageEventContent, MessageType, NoticeMessageEventContent, TextMessageEventContent,
+    };
+    let mxc = |uri: &str| matrix_sdk::ruma::OwnedMxcUri::from(uri);
+
+    let text = MessageType::Text(TextMessageEventContent::plain("the code is 1234"));
+    assert_eq!(
+        matrix_message_text_from_msgtype(&text, text.body()).as_deref(),
+        Some("the code is 1234"),
+    );
+    let notice = MessageType::Notice(NoticeMessageEventContent::plain("a notice"));
+    assert_eq!(
+        matrix_message_text_from_msgtype(&notice, notice.body()).as_deref(),
+        Some("a notice"),
+    );
+    let emote = MessageType::Emote(EmoteMessageEventContent::plain("waves"));
+    assert_eq!(
+        matrix_message_text_from_msgtype(&emote, emote.body()).as_deref(),
+        Some("waves"),
+    );
+
+    for msgtype in [
+        MessageType::Image(ImageMessageEventContent::plain(
+            "photo.png".to_owned(),
+            mxc("mxc://example.invalid/photo"),
+        )),
+        MessageType::File(FileMessageEventContent::plain(
+            "report.pdf".to_owned(),
+            mxc("mxc://example.invalid/report"),
+        )),
+        MessageType::Audio(AudioMessageEventContent::plain(
+            "note.ogg".to_owned(),
+            mxc("mxc://example.invalid/note"),
+        )),
+        MessageType::new(
+            "com.example.unknown",
+            "custom body".to_owned(),
+            serde_json::Map::new(),
+        )
+        .expect("a custom msgtype is constructible"),
+    ] {
+        assert_eq!(
+            matrix_message_text_from_msgtype(&msgtype, msgtype.body()),
+            None,
+            "{msgtype:?} must not become a delivery prefix",
+        );
+    }
+}
 #[test]
 fn people_scope_diagnostic_distinguishes_direct_space_members_from_child_room_aggregate() {
     let event = people_scope_diagnostic_event(true, 7, 3);
@@ -991,6 +1047,7 @@ fn unread_diagnostic_snapshot_rejects_private_synthetic_inputs() {
         sender_label: None,
         sender_avatar_mxc_uri: None,
         preview: Some("secret message".to_owned()),
+        message_text: Some("secret message".to_owned()),
         timestamp_ms: 42,
         event_type: Some("m.room.message".to_owned()),
         relation_type: None,
@@ -1042,6 +1099,7 @@ fn test_latest_event(event_id: &str) -> crate::MatrixRoomLatestEventSummary {
         sender_label: None,
         sender_avatar_mxc_uri: None,
         preview: None,
+        message_text: None,
         timestamp_ms: 42,
         event_type: Some("m.room.message".to_owned()),
         relation_type: None,

@@ -68,9 +68,11 @@ pub use contact_security::{
 pub use account_notifications::{
     AccountNotificationsFailureKind, AccountNotificationsLoadState, AccountNotificationsOperation,
     AccountNotificationsOperationState, AccountNotificationsSnapshot, AccountNotificationsState,
-    MAX_NOTIFICATION_EMAIL_LEN, NotificationCategory, NotificationCategoryState,
-    NotificationCategoryStates, NotificationEmailAddress, NotificationEmailManagement,
-    PendingNotificationEmail, normalize_notification_email,
+    MAX_NOTIFICATION_EMAIL_LEN, MAX_NOTIFICATION_KEYWORD_CHARS, MAX_NOTIFICATION_KEYWORDS,
+    NotificationCategory, NotificationCategoryState, NotificationCategoryStates,
+    NotificationEmailAddress, NotificationEmailManagement, NotificationKeywordRuleState,
+    PendingNotificationEmail, normalize_notification_email, normalize_notification_keyword,
+    normalize_notification_keyword_removal,
 };
 
 // ── Re-exports: sync ────────────────────────────────────────────────────────
@@ -131,10 +133,11 @@ pub use settings::{
 // ── Re-exports: notification delivery ───────────────────────────────────────
 pub use notification_delivery::{
     MAX_NOTIFICATION_DELIVERY_DWELL_SECS, MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
-    MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS, NotificationDeliveryOutcomeState,
-    NotificationDeliveryPrefixConsent, NotificationDeliveryPresetState,
-    NotificationDeliverySettings, NotificationDeliverySinkState, NotificationDeliveryState,
-    NotificationDeliveryTarget, NotificationSinkConfig, NotificationSinkSettings, SmtpTls,
+    MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS, MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS,
+    NotificationDeliveryOutcomeState, NotificationDeliveryPrefixConsent,
+    NotificationDeliveryPresetState, NotificationDeliverySettings, NotificationDeliverySinkState,
+    NotificationDeliveryState, NotificationDeliveryTarget, NotificationSinkConfig,
+    NotificationSinkSettings, SmtpTls, bounded_notification_delivery_prefix_source,
 };
 
 // ── Re-exports: profile ─────────────────────────────────────────────────────

@@ -323,3 +323,38 @@ fn an_smtp_sink_binds_its_consent_to_host_and_port() {
     settings.canonicalize();
     assert_eq!(settings.prefix_consent, None);
 }
+
+/// #1427: what a candidate holds is bounded before the dwell can carry it, and the
+/// bound never splits a character.
+#[test]
+fn prefix_source_is_bounded_on_a_character_boundary() {
+    assert_eq!(bounded_notification_delivery_prefix_source(""), None);
+    assert_eq!(
+        bounded_notification_delivery_prefix_source("short").as_deref(),
+        Some("short")
+    );
+
+    let at_cap = "a".repeat(MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS);
+    assert_eq!(
+        bounded_notification_delivery_prefix_source(&at_cap).as_deref(),
+        Some(at_cap.as_str())
+    );
+
+    let beyond = format!(
+        "{}tail",
+        "日".repeat(MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS)
+    );
+    let bounded = bounded_notification_delivery_prefix_source(&beyond).expect("a long body");
+    assert_eq!(
+        bounded.chars().count(),
+        MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS
+    );
+    assert!(bounded.chars().all(|character| character == '日'));
+
+    // Whitespace is kept here: dropping a prefix that renders to nothing is the
+    // digest's decision, not this bound's.
+    assert_eq!(
+        bounded_notification_delivery_prefix_source("   ").as_deref(),
+        Some("   ")
+    );
+}

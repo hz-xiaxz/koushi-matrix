@@ -20,7 +20,17 @@ fn candidate(
         unread,
         mentions,
         parent_space_ids: Vec::new(),
+        newest_message_text: None,
     }
+}
+
+/// The same candidate, with the newest message text the room projection already holds.
+fn candidate_with_text(
+    mut candidate: RoomAttentionCandidate,
+    text: &str,
+) -> RoomAttentionCandidate {
+    candidate.newest_message_text = Some(text.to_owned());
+    candidate
 }
 
 fn settings() -> NotificationDeliverySettings {
@@ -173,6 +183,7 @@ fn a_qualifying_room_carries_the_label_kind_and_counts_the_badge_shows() {
         unread: 5,
         mentions: 2,
         parent_space_ids: Vec::new(),
+        newest_message_text: None,
     }];
     let qualifying = qualifying_rooms(&settings(), &candidates, false);
     assert_eq!(qualifying.len(), 1);
@@ -181,4 +192,41 @@ fn a_qualifying_room_carries_the_label_kind_and_counts_the_badge_shows() {
     assert_eq!(qualifying[0].unread, 5);
     assert_eq!(qualifying[0].mentions, 2);
     assert!(qualifying[0].plaintext_prefix.is_none());
+}
+
+/// #1427: the plaintext option is what decides whether the text travels with the room, and
+/// the per-sink consent that decides whether it renders does not belong here.
+#[test]
+fn the_prefix_option_fills_the_room_text_and_consent_does_not() {
+    // The default settings carry the prefix option on.
+    let mut on = settings();
+    assert!(on.prefix_chars > 0);
+    let candidates = [
+        candidate_with_text(
+            candidate("!with-text:example.invalid", RoomAttentionKind::Dm, 0, 2),
+            "the newest message",
+        ),
+        candidate("!no-text:example.invalid", RoomAttentionKind::Dm, 0, 1),
+    ];
+    let rooms = qualifying_rooms(&on, &candidates, false);
+    assert_eq!(rooms.len(), 2);
+    assert_eq!(
+        rooms[0].plaintext_prefix.as_deref(),
+        Some("the newest message"),
+        "a room whose newest message is on this device carries it"
+    );
+    assert_eq!(
+        rooms[1].plaintext_prefix, None,
+        "a room with nothing readable still qualifies, without a prefix"
+    );
+
+    // No consent is stored at all, and the text still travels: the consent is per sink
+    // and per destination, so it is applied where a sink is known.
+    assert_eq!(on.prefix_consent, None);
+
+    // The option off drops the text, and the room still qualifies.
+    on.prefix_chars = 0;
+    let rooms = qualifying_rooms(&on, &candidates, false);
+    assert_eq!(rooms.len(), 2);
+    assert!(rooms.iter().all(|room| room.plaintext_prefix.is_none()));
 }

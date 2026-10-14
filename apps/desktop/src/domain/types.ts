@@ -99,8 +99,11 @@ export type ComposerDraftAccountOwner = SavedSessionInfo;
  * (`SidebarSectionSettings.expanded`) and its projection
  * (`SidebarModel.section_bounds`).
  * Version 10 adds the device-local notification delivery projection (#1427).
+ * Version 11 adds the keyword-rule projection
+ * (`AccountNotificationsSnapshot.keywords`), the account's own `content` rules
+ * in server order with their server-owned enabled flag (#1427).
  */
-export const SNAPSHOT_SCHEMA_VERSION = 10;
+export const SNAPSHOT_SCHEMA_VERSION = 11;
 
 /**
  * Snapshot state. #87 Phase 4 sectioned this into domain (Matrix/product, Rust-owned,

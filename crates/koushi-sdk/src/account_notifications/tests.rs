@@ -356,6 +356,43 @@ fn snapshot_matches_pushers_to_validated_emails_case_insensitively() {
     assert!(snapshot.email_notifications_active());
 }
 
+/// #1427: the keyword editor reads the same read the category surface makes, in
+/// the server's own rule order, and `enabled` stays the server fact it is.
+#[test]
+fn snapshot_projects_keyword_rules_in_server_order_with_enabled() {
+    let ruleset: Ruleset = serde_json::from_value(json!({
+        "override": [
+            {"rule_id": "custom.override", "default": false, "enabled": true,
+             "conditions": [], "actions": ["notify"]}
+        ],
+        "content": [
+            {"rule_id": "client.keyword.alpha", "default": false, "enabled": true,
+             "pattern": "alpha", "actions": ["notify", {"set_tweak": "highlight"}]},
+            {"rule_id": ".m.rule.contains_user_name", "default": true, "enabled": true,
+             "pattern": "alice", "actions": ["notify", {"set_tweak": "highlight"}]},
+            {"rule_id": "client.keyword.beta", "default": false, "enabled": false,
+             "pattern": "beta", "actions": ["notify"]}
+        ]
+    }))
+    .unwrap();
+    let snapshot = build_account_notifications_snapshot(
+        &ruleset,
+        koushi_state::NotificationEmailManagement::Available,
+        &[],
+        &[],
+    );
+    let keywords: Vec<(&str, bool)> = snapshot
+        .keywords
+        .iter()
+        .map(|rule| (rule.pattern.as_str(), rule.enabled))
+        .collect();
+    assert_eq!(
+        keywords,
+        vec![("alpha", true), ("beta", false)],
+        "server order, the disabled rule is listed as off, and a server-default rule is not a keyword"
+    );
+}
+
 // ── Server IO against a mock homeserver ─────────────────────────────────────
 
 async fn mock_session(server: &MatrixMockServer) -> crate::MatrixClientSession {

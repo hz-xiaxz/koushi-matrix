@@ -360,6 +360,18 @@
             }
           ],
           "encrypted_event_push": false,
+          "keywords": [
+            {
+              "enabled": true,
+              "pattern": "fixture-keyword",
+              "rule_id": "org.matrix.desktop.notify.keyword.0123456789abcdef"
+            },
+            {
+              "enabled": false,
+              "pattern": "fixture-disabled",
+              "rule_id": "org.matrix.desktop.notify.keyword.fedcba9876543210"
+            }
+          ],
           "unverified_email_pusher_count": 0
         }
       },
@@ -1254,7 +1266,7 @@
         "platform": "linux"
       }
     },
-    "schema_version": 10,
+    "schema_version": 11,
     "ui": {
       "basic_operation": {
         "kind": "creatingRoom",

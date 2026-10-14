@@ -31,6 +31,12 @@ pub const MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS: u64 = 86_400;
 /// through a consent the user gave for a glance.
 pub const MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS: u32 = 200;
 pub const DEFAULT_NOTIFICATION_DELIVERY_PREFIX_CHARS: u32 = 80;
+/// How much of a room's newest message text a delivery candidate holds (#1427).
+///
+/// The rendered prefix is cut at a grapheme boundary by `digest`; this bound only
+/// keeps a candidate - and the dwell state that holds it - from carrying a whole
+/// event body while the channel waits for its window.
+pub const MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS: usize = 240;
 /// Sinks are a short list the user configures by hand; the cap keeps a corrupted or
 /// hostile settings file from turning one settings load into unbounded work.
 pub const MAX_NOTIFICATION_DELIVERY_SINKS: usize = 8;
@@ -38,6 +44,26 @@ pub const MAX_NOTIFICATION_DELIVERY_SINKS: usize = 8;
 /// update, so the membership lookup has to stay bounded.
 pub const MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS: usize = 64;
 pub const MAX_NOTIFICATION_DELIVERY_FIELD_CHARS: usize = 320;
+
+/// Bound message text before a delivery candidate holds it (#1427).
+///
+/// A character count on a character boundary is all this needs: what renders is
+/// decided by `digest`, which flattens the text to one line and cuts it at a grapheme
+/// boundary. An empty body is `None` because there is nothing to render; a body of
+/// only whitespace is kept, and `digest` is the one that drops it.
+pub fn bounded_notification_delivery_prefix_source(text: &str) -> Option<String> {
+    if text.is_empty() {
+        return None;
+    }
+    match text
+        .char_indices()
+        .nth(MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS)
+    {
+        Some((index, _)) => Some(text[..index].to_owned()),
+        None => Some(text.to_owned()),
+    }
+}
+
 const MAX_NOTIFICATION_SINK_ID_BYTES: usize = 64;
 
 /// Default endpoint of the Resend sink, matching `koushi_notify::RESEND_ENDPOINT`.
