@@ -1,6 +1,6 @@
 #!/usr/bin/env node
 import { parseQaTitle,qaStatusHasAttentionBaseline,qaStatusHasRequiredPanel,qaStatusHasSendSuccess,qaStatusIsReady,qaWindowStatePathHasContract } from "./evidence.mjs";
-import { allowEmptyTimeline,args,artifactRoot,optionValue } from "./options.mjs";
+import { allowEmptyTimeline,args,artifactRoot,optionValue,realLoginFromStdin } from "./options.mjs";
 import { childEnvironment } from "./redaction.mjs";
 import { checks,run } from "./registry.mjs";
 import { checkLinuxTools,qaDataDirForRun } from "./runtime.mjs";
@@ -110,6 +110,10 @@ if (qaRecoveredTitleReadySample !== undefined) {
 }
 
 if (args.has("--run")) {
+  if (realLoginFromStdin) {
+    console.error("real-server GUI QA is retired; use disposable local Tuwunel/Synapse servers.");
+    process.exit(1);
+  }
   await run();
   process.exit(0);
 }

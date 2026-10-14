@@ -1,7 +1,8 @@
+import { spawnSync } from "node:child_process";
 import { existsSync,readFileSync } from "node:fs";
 import { describe,expect,test } from "vitest";
 
-import { readLinuxProductionSource,readRealHomeserverProductionSource,runScript } from "./releaseTestSupport";
+import { readLinuxProductionSource,runScript } from "./releaseTestSupport";
 
 describe("desktop release scripts", () => {
   test("macOS Keychain Tier 2 workflow stays disabled while retaining the temporary-keychain recipe", () => {
@@ -42,99 +43,19 @@ describe("desktop release scripts", () => {
     expect(output).toContain("package.scripts.qa:linux-gui");
   });
 
-  test("release preflight validates real account QA entry", () => {
+  test("release preflight does not require retired real account QA", () => {
     const output = runScript("scripts/desktop-release-preflight.mjs", ["--check-config"]);
 
-    expect(output).toContain("package.scripts.qa:real-account");
+    expect(output).not.toContain("package.scripts.qa:real-account");
   });
 
-  test("real homeserver QA runner forwards scenario selection to the binary", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-real-homeserver-qa.mjs", import.meta.url),
-      "utf8"
-    );
-
-    expect(source).toContain("--scenario");
-    expect(source).toContain("KOUSHI_REAL_QA_SCENARIO");
-    expect(source).toContain("compat|space_compat|all");
-  });
-
-  test("real homeserver QA binary names the staged real-server scenarios", () => {
-    const source = readRealHomeserverProductionSource();
-
-    expect(source).toContain("KOUSHI_REAL_QA_SCENARIO");
-    expect(source).toContain("RealQaScenario");
-    expect(source).toContain("SpaceCompat");
-    expect(source).toContain("All");
-  });
-
-  test("real homeserver QA treats space projection as an observation token", () => {
-    const source = readRealHomeserverProductionSource();
-
-    expect(source).toContain("real_space_projection=observed");
-    expect(source).toContain("real_space_projection=not_observed");
-  });
-
-  test("real homeserver QA runner enforces the private-data-free token contract", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-real-homeserver-qa.mjs", import.meta.url),
-      "utf8"
-    );
-
-    expect(source).toContain("./lib/qa-token-contract.mjs");
-    expect(source).toContain("assertNoMatrixIdentifiers");
-    expect(source).toContain("assertNoLocalPaths");
-    expect(source).toContain("assertNoRawSdkErrors");
-    expect(source).toContain("assertRequiredTokens");
-    expect(source).toContain("requiredTokensForScenario");
-  });
-
-  test("real homeserver QA runner checks private data before writing artifacts", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-real-homeserver-qa.mjs", import.meta.url),
-      "utf8"
-    );
-
-    const writeLogOffset = source.indexOf("writeFileSync(logPath");
-    const matrixIdCheckOffset = source.indexOf("assertNoMatrixIdentifiers(combinedOutput");
-    const localPathCheckOffset = source.indexOf("assertNoLocalPaths(combinedOutput");
-
-    expect(matrixIdCheckOffset).toBeGreaterThan(-1);
-    expect(localPathCheckOffset).toBeGreaterThan(-1);
-    expect(writeLogOffset).toBeGreaterThan(-1);
-    expect(matrixIdCheckOffset).toBeLessThan(writeLogOffset);
-    expect(localPathCheckOffset).toBeLessThan(writeLogOffset);
-  });
-
-  test("real homeserver QA runner stdout omits local paths and raw child output", () => {
-    const source = readFileSync(
-      new URL("../../../../scripts/desktop-real-homeserver-qa.mjs", import.meta.url),
-      "utf8"
-    );
-
-    expect(source).not.toContain("run dir = ${runDir}");
-    expect(source).not.toContain("credentials file = ${credentialsPath}");
-    expect(source).not.toContain("stdout: ${stdout");
-    expect(source).not.toContain("stderr: ${stderr");
-    expect(source).not.toContain("log: ${logPath}");
-    expect(source).not.toContain("PASSED. Log");
-    expect(source).toContain("child output omitted after private-data validation");
-  });
-
-  test("real homeserver QA binary emits private-data-free tokens (no Matrix ids)", () => {
-    const source = readRealHomeserverProductionSource();
-
-    // No token line or summary may interpolate a Matrix identifier.
-    expect(source).not.toContain("event_id={");
-    expect(source).not.toContain("user_id={");
-    expect(source).not.toContain("room_id={");
-    expect(source).not.toContain("space_id={");
-    expect(source).not.toContain("user={user_id}");
-    expect(source).not.toContain("{expected_event_id}");
-    expect(source).not.toContain("{space_id}");
-    expect(source).not.toContain("{child_room_id}");
-    expect(source).not.toContain("space={ev_space}");
-    expect(source).not.toContain("child={ev_child}");
+  test("retired real-server runner refuses before reading credentials", () => {
+    const result = spawnSync(process.execPath, ["scripts/desktop-real-homeserver-qa.mjs", "--run"], {
+      cwd: new URL("../../../../", import.meta.url).pathname,
+      encoding: "utf8"
+    });
+    expect(result.status).toBe(1);
+    expect(result.stderr).toContain("real-homeserver QA is retired");
   });
 
   test("qa token contract helper exposes token and private-data assertions", () => {
@@ -198,9 +119,9 @@ describe("desktop release scripts", () => {
       "node ../../scripts/desktop-headless-local-qa.mjs --run --server=both --core --scenario=login_sync,directory,timeline_reconnect,send_queue --timeout-ms=600000 --cargo-profile=release";
 
     expect(packageJson.scripts?.["qa:headless-basic:local"]).toBe(localHeadlessCoreReleaseQa);
-    expect(packageJson.scripts?.["qa:headless-basic:real"]).toBe(
-      "node ../../scripts/desktop-real-homeserver-qa.mjs --run --scenario=space_compat"
-    );
+    expect(packageJson.scripts?.["qa:headless-basic:real"]).toBeUndefined();
+    expect(packageJson.scripts?.["qa:real-account"]).toBeUndefined();
+    expect(packageJson.scripts?.["qa:real-homeserver"]).toBeUndefined();
   });
 
   test("redact/edit convergence QA is registered with its closed token", () => {
@@ -224,24 +145,14 @@ describe("desktop release scripts", () => {
     expect(qaLanes).toContain("thread_summary_convergence=ok");
   });
 
-  test("headless basic operations docs list the default real space_compat tokens", () => {
+  test("headless basic operations docs retire the real-server lane", () => {
     const docs = readFileSync(
       new URL("../../../../docs/qa/headless-basic-operations.md", import.meta.url),
       "utf8"
     );
 
-    for (const token of [
-      "login=ok",
-      "sync=running",
-      "real_reply=ok",
-      "real_space_create=ok",
-      "real_space_child=ok",
-      "real_space_cleanup=ok",
-      "logout=ok",
-      "post_logout_restore=not_found"
-    ]) {
-      expect(docs).toContain(token);
-    }
+    expect(docs).toContain("## matrix.org compatibility lane (retired)");
+    expect(docs).not.toContain("qa:headless-basic:real");
   });
 
   test("headless basic operations docs list the Phase 11 local thread tokens", () => {

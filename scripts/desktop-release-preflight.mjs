@@ -147,20 +147,9 @@ requireCheck(
   "npm Linux GUI smoke entry exists"
 );
 requireCheck(
-  packageJson.scripts?.["qa:real-account"]?.includes("password-login-smoke") &&
-    packageJson.scripts?.["qa:real-account"]?.includes("--real-account-qa"),
-  "package.scripts.qa:real-account",
-  "npm real-account QA smoke entry exists"
-);
-requireCheck(
   packageJson.scripts?.["qa:headless-local"]?.includes("desktop-headless-local-qa"),
   "package.scripts.qa:headless-local",
   "npm headless local QA entry exists"
-);
-requireCheck(
-  packageJson.scripts?.["qa:real-homeserver"]?.includes("desktop-real-homeserver-qa"),
-  "package.scripts.qa:real-homeserver",
-  "npm real homeserver QA entry exists (run manually: npm --prefix apps/desktop run qa:real-homeserver)"
 );
 
 if (macosSigning) {

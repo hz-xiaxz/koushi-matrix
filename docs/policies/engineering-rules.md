@@ -65,9 +65,8 @@ Rules:
    can be bypassed). It excludes `vendor/`, `.local-secrets/`, and
    generated artifacts.
 8. An unexpected macOS Keychain prompt during unattended QA is an
-   automation failure, not something to click through. Fix the run's
-   environment instead; the variables are listed in
-   [QA lanes](../agents/qa-lanes.md#real-account-lanes).
+   automation failure, not something to click through. Use disposable local
+   QA and fix the run's environment instead.
 9. OS notifications, badge labels, and QA window-title tokens are
    private-data-minimized surfaces. By default they may include only a safe
    room display label, notification kind (`mention`, `dm`, `message`), and
@@ -226,10 +225,10 @@ Rules:
    variant names, request ids, enum kinds, booleans, counts, lengths, and
    placeholders such as `Snippet(..)` or `RoomId(..)`.
 4. QA asserts on `CoreEvent` and `AppStateSnapshot`, never on log output.
-5. Real-account and real-homeserver QA output is tokenized before it becomes an
-   artifact. Captured logs must not contain raw Matrix IDs, room IDs, event IDs,
-   transaction IDs, user IDs, message bodies, search queries, local paths, or raw
-   SDK errors. Failure output may name the failed step and a coarse failure
+5. QA output is tokenized before it becomes an artifact. Captured logs must
+   not contain raw Matrix IDs, room IDs, event IDs, transaction IDs, user IDs,
+   message bodies, search queries, local paths, or raw SDK errors. Failure
+   output may name the failed step and a coarse failure
    kind. Producers should avoid formatting those values; wrappers must not
    write unredacted stdout/stderr and only then discover a leak.
 
@@ -430,9 +429,8 @@ GUI automation is a thin smoke layer, never the primary correctness gate.
    `image_upload_compression_policy`: #305 retired the automatic-compression
    preference, and resize/format is chosen per attachment in the upload-staging
    dialog.
-4. Operational GUI-smoke safety (FIFO credential entry, `Cmd+Q`, AppleScript
-   process names, Keychain-suppressing environment, `--allow-empty-timeline`)
-   is in [QA lanes](../agents/qa-lanes.md#real-account-lanes) and
+4. Operational GUI-smoke safety is in
+   [QA lanes](../agents/qa-lanes.md#linux-virtual-display-gui-lane) and
    [troubleshooting](../agents/troubleshooting.md#macos-gui-smoke).
 
 ## Desktop Text Input And IME Safety
@@ -514,12 +512,10 @@ GUI automation is a thin smoke layer, never the primary correctness gate.
    contracts run the affected documentation checks and `git diff --check`;
    product suites are not local prerequisites for those changes. Required CI
    checks still apply.
-4. Real homeserver QA is a release/preflight gate (network + approved
-   credentials), not an every-CI gate. It runs after the local headless and
-   Linux virtual-display lanes are green and cleanup behavior is proven. It is
-   also required before GUI-level confidence claims and after changes that
-   affect login, recovery, sync, encrypted restore, search, room cleanup, or
-   logout.
+4. Release/preflight QA runs on disposable local Tuwunel/Synapse only. Never
+   run automated QA against matrix.org or another external homeserver, even
+   with a dedicated test account. Local headless and virtual-display lanes
+   must pass before GUI-level confidence claims.
 5. Core crates stay platform-portable as specified in overview "Platform
    Portability". Test-only shared Core integration support belongs in
    non-default `koushi-core-testkit`, never a Core self-dev-dependency or
@@ -859,7 +855,7 @@ To reduce conflicts on these files:
 - `koushi-search` and `koushi-media` own only pure search/image algorithms.
   Actor/cache lifecycle, SDK queries, diagnostics, state projection and platform
   delivery remain in Core/adapters rather than moving to a leaf to reduce LOC.
-- `koushi-qa` owns authoritative headless and real-homeserver product QA
+- `koushi-qa` owns authoritative local headless product QA
   binaries/orchestration. It consumes `koushi-protocol` DTOs and narrow
   `koushi-core` test hooks, is not a default production package, and must not
   become a second product runtime or move QA-only channels into the public

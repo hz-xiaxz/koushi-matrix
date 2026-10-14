@@ -151,21 +151,16 @@ Open the Tauri shell in first-run mode with:
 KOUSHI_RESTORE_SESSION=0 npm run tauri dev
 ```
 
-Before typing live credentials into the native shell, the SDK password-login path
-can be smoke-tested from a terminal without storing secrets:
+The SDK password-login path can be smoke-tested against a disposable local
+homeserver from a terminal without storing secrets:
 
 ```bash
 cargo run -p koushi-sdk --features smoke --bin password-login-smoke
-cargo run -p koushi-sdk --features smoke --bin password-login-smoke -- --real-account-qa
 ```
 
 The smoke command prompts interactively, hides the password, prints no access
-token, and logs out by default after a successful login. The `--real-account-qa`
-variant also verifies in-memory persistable session export/import, SDK session
-restore, one SDK sync, private-data-free room-list counts, and private-data-free
-selected-room timeline item counts after timeline backfill. Use `-- --keep-session`
-only when deliberately leaving the Matrix device/session alive for follow-up
-manual testing.
+token, and logs out by default after a successful login. Use `-- --keep-session` only when deliberately keeping a disposable local QA
+session for follow-up checks.
 
 SDK sync, token persistence, and restore should replace only effect handlers.
 The UI should continue to read `SessionState` and `AppError` through the same

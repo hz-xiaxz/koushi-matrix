@@ -13,7 +13,7 @@ use koushi_sdk::{
 use koushi_state::{AuthSecret, LoginRequest};
 use tokio::runtime::Runtime;
 
-const DEFAULT_HOMESERVER: &str = "https://matrix.org";
+const DEFAULT_HOMESERVER: &str = "http://127.0.0.1:8008";
 const DEFAULT_DEVICE_DISPLAY_NAME: &str = "Koushi Smoke Test";
 const TIMELINE_ROOM_SAMPLE_LIMIT: usize = 20;
 const TIMELINE_BACKFILL_EVENT_COUNT: u16 = 30;
@@ -45,6 +45,10 @@ fn main() -> ExitCode {
     let real_account_qa = arguments
         .iter()
         .any(|argument| argument == "--real-account-qa");
+    if real_account_qa {
+        eprintln!("real-account QA is retired; use local Tuwunel/Synapse QA");
+        return ExitCode::FAILURE;
+    }
 
     match run(SmokeOptions {
         keep_session,
@@ -64,12 +68,10 @@ fn print_usage() {
         "Usage: password-login-smoke [--keep-session] [--check-room-list] [--real-account-qa]"
     );
     println!();
-    println!("Prompts interactively for homeserver, username, and password.");
+    println!("Prompts interactively for a loopback homeserver, username, and password.");
     println!("By default, logs out immediately after a successful smoke login.");
     println!("Use --check-room-list to run one sync and print private-data-free counts.");
-    println!(
-        "Use --real-account-qa to verify room list and timeline with private-data-free counts."
-    );
+    println!("--real-account-qa is retired and always rejected.");
 }
 
 fn run(options: SmokeOptions) -> Result<(), String> {
@@ -77,6 +79,14 @@ fn run(options: SmokeOptions) -> Result<(), String> {
     println!("Do not paste secrets into command-line arguments or shell history.");
 
     let homeserver = prompt_with_default("Homeserver", DEFAULT_HOMESERVER)?;
+    let host = url::Url::parse(&homeserver)
+        .map_err(|_| "smoke QA requires a valid local homeserver URL".to_owned())?
+        .host_str()
+        .ok_or_else(|| "smoke QA requires a local homeserver host".to_owned())?
+        .to_owned();
+    if !matches!(host.as_str(), "localhost" | "127.0.0.1" | "[::1]") {
+        return Err("smoke QA permits only a loopback homeserver".to_owned());
+    }
     let username = prompt_required("Username")?;
     let device_display_name =
         prompt_with_default("Device display name", DEFAULT_DEVICE_DISPLAY_NAME)?;

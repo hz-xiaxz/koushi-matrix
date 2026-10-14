@@ -1,5 +1,8 @@
 # Startup Latency Observability QA
 
+> Historical record: the real-server startup-latency lane is retired. Do not
+> run the commands below. Use disposable local homeservers for new measurements.
+
 ## Purpose
 
 This lane measures the wall-clock cost of the four startup macro-phases
@@ -48,7 +51,7 @@ device persists until `KOUSHI_STARTUP_LAT_TEARDOWN=1` is used.
 ## Command
 
 ```bash
-npm --prefix apps/desktop run qa:real-homeserver -- --scenario=startup_latency
+[retired real-server command]
 ```
 
 **Requires maintainer GO before the first run** (run 1 logs in to the
@@ -125,7 +128,7 @@ By default the QA device is **kept** on the homeserver so run 2+ can restore
 rather than login (cheaper on rate limits). To remove the device:
 
 ```bash
-KOUSHI_STARTUP_LAT_TEARDOWN=1 npm --prefix apps/desktop run qa:real-homeserver -- --scenario=startup_latency
+[retired teardown command]
 ```
 
 This causes the binary to log out at the end of the run, removing the device.

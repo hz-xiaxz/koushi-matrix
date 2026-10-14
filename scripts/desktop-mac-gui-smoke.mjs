@@ -141,6 +141,10 @@ if (qaTitleViewportSample !== undefined) {
 }
 
 if (args.has("--run")) {
+  if (realLoginFromStdin) {
+    console.error("real-server GUI QA is retired; use disposable local Tuwunel/Synapse servers.");
+    process.exit(1);
+  }
   await run();
   process.exit(0);
 }
