@@ -1572,10 +1572,28 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             }),
             membership: koushi_state::SpaceChildMembership::NotJoined,
             can_join: true,
+            // #1410: populated so the golden proves the suggested shapes.
+            suggested: true,
             is_space: false,
             joined_members: 12,
         }],
         load: koushi_state::SpaceChildrenLoadState::Idle,
+        can_edit_suggested: true,
+        suggested_edit: koushi_state::SpaceChildSuggestedEditState::Failed {
+            child_room_id: "!not-joined-room:example.invalid".to_owned(),
+            suggested: false,
+            failure: koushi_state::OperationFailureKind::Forbidden,
+        },
+        suggested_offer: koushi_state::SuggestedRoomsOffer::Completed {
+            space_id: "!space:example.invalid".to_owned(),
+            results: vec![koushi_state::SuggestedRoomJoinResult {
+                room_id: "!not-joined-room:example.invalid".to_owned(),
+                display_name: "Fixture Not Joined Room".to_owned(),
+                display_name_placeholder: None,
+                failure: Some(koushi_state::OperationFailureKind::Forbidden),
+            }],
+        },
+        ..Default::default()
     };
     state.rooms.push(RoomSummary {
         display_name_placeholder: None,

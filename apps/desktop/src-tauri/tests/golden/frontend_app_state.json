@@ -46,6 +46,7 @@
         "membership": "not_joined",
         "notification_count": 0,
         "room_id": "!not-joined-room:example.invalid",
+        "suggested": true,
         "tags": {
           "favourite": null,
           "low_priority": null
@@ -104,6 +105,7 @@
           "membership": "joined",
           "notification_count": 7,
           "room_id": "!low-priority-room:example.invalid",
+          "suggested": false,
           "tags": {
             "favourite": null,
             "low_priority": {
@@ -138,6 +140,7 @@
           "membership": "not_joined",
           "notification_count": 0,
           "room_id": "!not-joined-room:example.invalid",
+          "suggested": true,
           "tags": {
             "favourite": null,
             "low_priority": null
@@ -171,6 +174,7 @@
           "membership": "joined",
           "notification_count": 2,
           "room_id": "!room:example.invalid",
+          "suggested": false,
           "tags": {
             "favourite": null,
             "low_priority": null
@@ -278,6 +282,7 @@
         "membership": "joined",
         "notification_count": 2,
         "room_id": "!room:example.invalid",
+        "suggested": false,
         "tags": {
           "favourite": null,
           "low_priority": null
@@ -299,6 +304,7 @@
         "membership": "joined",
         "notification_count": 7,
         "room_id": "!low-priority-room:example.invalid",
+        "suggested": false,
         "tags": {
           "favourite": null,
           "low_priority": {
@@ -1134,6 +1140,7 @@
         "kind": "idle"
       },
       "space_children": {
+        "can_edit_suggested": true,
         "children": [
           {
             "avatar": {
@@ -1151,14 +1158,33 @@
             "is_space": false,
             "joined_members": 12,
             "membership": "not_joined",
-            "room_id": "!not-joined-room:example.invalid"
+            "room_id": "!not-joined-room:example.invalid",
+            "suggested": true
           }
         ],
         "generation": 3,
         "load": {
           "kind": "idle"
         },
-        "selected_space_id": "!space:example.invalid"
+        "selected_space_id": "!space:example.invalid",
+        "suggested_edit": {
+          "child_room_id": "!not-joined-room:example.invalid",
+          "failure": "forbidden",
+          "kind": "failed",
+          "suggested": false
+        },
+        "suggested_offer": {
+          "kind": "completed",
+          "results": [
+            {
+              "display_name": "Fixture Not Joined Room",
+              "display_name_placeholder": null,
+              "failure": "forbidden",
+              "room_id": "!not-joined-room:example.invalid"
+            }
+          ],
+          "space_id": "!space:example.invalid"
+        }
       },
       "space_members": {
         "can_edit_roles": false,

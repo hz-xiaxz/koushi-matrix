@@ -27,6 +27,7 @@ import type {
   ResolveComposerKeyAction,
   ComposerDocument,
   SpaceLeaveCandidate,
+  SuggestedRoomsOffer,
   StagedUploadFormatChoice,
   StagedUploadItem,
   StagedUploadOutputSelection,
@@ -63,7 +64,7 @@ import { FloatingLayer } from "./floatingLayer";
 import { Tooltip } from "./Tooltip";
 import { documentFromText } from "../domain/composerDocument";
 import { diagnosticReportPreview } from "../domain/diagnostics";
-import { roomListItemLabel } from "../domain/roomDisplayLabel";
+import { roomListItemLabel, spaceChildLabel } from "../domain/roomDisplayLabel";
 
 async function writeClipboardText(value: string): Promise<void> {
   if (typeof navigator !== "undefined" && navigator.clipboard?.writeText) {
@@ -98,6 +99,99 @@ export function ResetLocalDataConfirmationDialog({
           </button>
           <button type="button" className="dialog-button danger" disabled={isBusy} onClick={onConfirm}>
             {confirmLabel}
+          </button>
+        </div>
+      </div>
+    </ModalDialog>
+  );
+}
+
+// ===== SuggestedRoomsDialog =====
+
+/**
+ * Issue #1410: the one-time offer to join a newly joined Space's suggested
+ * rooms. The rooms are Rust's `SpaceChildrenState.suggested_offer`; the join
+ * command carries no room list, so this dialog can neither widen nor narrow
+ * what is joined. Nothing is joined until the user chooses Join all.
+ */
+export function SuggestedRoomsDialog({
+  offer,
+  spaceName,
+  onJoinAll,
+  onDismiss
+}: {
+  offer: Exclude<SuggestedRoomsOffer, { kind: "none" }>;
+  spaceName: string;
+  onJoinAll: () => void;
+  onDismiss: () => void;
+}) {
+  if (offer.kind === "completed") {
+    return (
+      <ModalDialog
+        title={t("suggestedRooms.resultTitle")}
+        className="confirmation-modal"
+        showCloseButton={false}
+        onClose={onDismiss}
+      >
+        <div className="confirmation-content leave-space-content">
+          <p>{t("suggestedRooms.resultCopy")}</p>
+          <ul className="leave-space-rooms" aria-label={t("suggestedRooms.listLabel")}>
+            {offer.results.map((result) => (
+              <li className="suggested-room-result" key={result.room_id}>
+                <span className="leave-space-room-name" dir="auto">
+                  {spaceChildLabel(result)}
+                </span>
+                <span
+                  className={`leave-space-room-note ${result.failure ? "is-failed" : ""}`}
+                >
+                  {result.failure
+                    ? t("suggestedRooms.failed", { reason: operationFailureLabel(result.failure) })
+                    : t("suggestedRooms.joined")}
+                </span>
+              </li>
+            ))}
+          </ul>
+          <div className="dialog-actions">
+            <button type="button" className="dialog-button primary" onClick={onDismiss}>
+              {t("suggestedRooms.done")}
+            </button>
+          </div>
+        </div>
+      </ModalDialog>
+    );
+  }
+  const isJoining = offer.kind === "joining";
+  return (
+    <ModalDialog
+      title={t("suggestedRooms.offerTitle", { space: spaceName })}
+      className="confirmation-modal"
+      showCloseButton={false}
+      dismissible={!isJoining}
+      onClose={onDismiss}
+    >
+      <div className="confirmation-content leave-space-content">
+        <p>{t("suggestedRooms.offerCopy")}</p>
+        <ul className="leave-space-rooms" aria-label={t("suggestedRooms.listLabel")}>
+          {offer.rooms.map((room) => (
+            <li className="suggested-room-result" key={room.room_id}>
+              <span className="leave-space-room-name" dir="auto">
+                {spaceChildLabel(room)}
+              </span>
+            </li>
+          ))}
+        </ul>
+        <div className="dialog-actions">
+          <button type="button" className="dialog-button" disabled={isJoining} onClick={onDismiss}>
+            {t("suggestedRooms.skip")}
+          </button>
+          <button
+            type="button"
+            className="dialog-button primary"
+            disabled={isJoining}
+            aria-busy={isJoining || undefined}
+            onClick={onJoinAll}
+          >
+            {isJoining ? t("suggestedRooms.joining") : t("suggestedRooms.joinAll")}
           </button>
         </div>
       </div>

@@ -151,12 +151,13 @@ pub use room_operations::{
     mark_room_as_unread, moderate_room_member, pin_event, preview_join_target,
     preview_room_address, query_public_room_directory, remove_room_tag, room_can_send_text_message,
     room_has_active_member_no_sync, room_is_joined, set_room_notification_mode, set_room_tag,
-    set_space_child, start_direct_message, unpin_event, update_room_member_power_level,
-    update_room_setting, update_space_member_power_level,
+    set_space_child, set_space_child_suggested, start_direct_message, unpin_event,
+    update_room_member_power_level, update_room_setting, update_space_member_power_level,
 };
 
 pub use space_children::{
-    MatrixSpaceChildEntry, MatrixSpaceChildMembership, matrix_space_children_projection,
+    MatrixSpaceChildEntry, MatrixSpaceChildMembership, matrix_space_can_edit_children,
+    matrix_space_children_projection,
 };
 
 pub use room_projection::{

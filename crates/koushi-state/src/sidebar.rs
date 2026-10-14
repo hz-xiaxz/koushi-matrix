@@ -221,6 +221,10 @@ pub struct RoomListItem {
     /// not-joined lane is the only producer of a true.
     #[serde(default)]
     pub can_join: bool,
+    /// Issue #1410: a Space admin suggests this not-joined child to members.
+    /// Only the not-joined lane produces a true.
+    #[serde(default)]
+    pub suggested: bool,
     /// The room's authoritative access condition (#1166), from its own
     /// `m.room.join_rules`. `None` means it has not been projected yet, never a
     /// guessed rule; it is independent of encryption, DM status, the viewer's
@@ -487,10 +491,16 @@ fn compose_sidebar_with_preferences(
         // could not describe them. Encrypted/private rooms can legitimately
         // arrive as `Unknown`; hiding them makes a real Space child disappear.
         .collect();
+    // #1410: suggested rooms lead the lane, then the name order.
     not_joined_children.sort_by(|left, right| {
-        left.display_name
-            .to_lowercase()
-            .cmp(&right.display_name.to_lowercase())
+        right
+            .suggested
+            .cmp(&left.suggested)
+            .then_with(|| {
+                left.display_name
+                    .to_lowercase()
+                    .cmp(&right.display_name.to_lowercase())
+            })
             .then_with(|| left.room_id.cmp(&right.room_id))
     });
     let not_joined_space_rooms: Vec<RoomListItem> = not_joined_children
@@ -714,6 +724,7 @@ fn not_joined_room_list_item(
         // Accepting an invitation this account holds is always available; for
         // everything else the server's join rule decides.
         can_join: invited || child.can_join,
+        suggested: child.suggested,
         // #1166: the not-joined lane projects no access condition yet.
         access_join_rule: None,
         access_restricted_conditions: None,
@@ -776,6 +787,7 @@ fn room_list_item(
         room_id: room.room_id.clone(),
         membership: SpaceChildMembership::Joined,
         can_join: false,
+        suggested: false,
         access_join_rule: room_access
             .get(&room.room_id)
             .and_then(|condition| condition.join_rule),
@@ -943,6 +955,7 @@ mod tests {
             avatar: None,
             membership,
             can_join: false,
+            suggested: false,
             is_space: false,
             joined_members,
         }

@@ -18,6 +18,7 @@ import {
   InviteTargetsDialog,
   LeaveSpaceDialog,
   ResetLocalDataConfirmationDialog,
+  SuggestedRoomsDialog,
   UploadStagingDialog
 } from "./dialogs";
 import type {
@@ -1378,5 +1379,90 @@ describe("upload staging failure affordances (#1147)", () => {
     renderFailedItem({ canUseOriginal: false });
     expect(screen.getByRole("button", { name: "Retry preparation" })).toBeTruthy();
     expect(screen.queryByRole("button", { name: "Use original" })).toBeNull();
+  });
+});
+
+// Issue #1410: the one-time suggested-rooms offer. The rooms come from Rust;
+// the dialog only asks, and nothing is joined without Join all.
+describe("SuggestedRoomsDialog", () => {
+  const rooms = [
+    { room_id: "!alpha:example.invalid", display_name: "Alpha" },
+    { room_id: "!beta:example.invalid", display_name: "Beta" }
+  ];
+
+  it("names the Space, lists the rooms, and joins only on Join all", () => {
+    const onJoinAll = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <SuggestedRoomsDialog
+        offer={{ kind: "offered", space_id: "!space:example.invalid", rooms }}
+        spaceName="Synthetic Workspace"
+        onJoinAll={onJoinAll}
+        onDismiss={onDismiss}
+      />
+    );
+    expect(
+      screen.getByRole("dialog", {
+        name: t("suggestedRooms.offerTitle", { space: "Synthetic Workspace" })
+      })
+    ).toBeTruthy();
+    const list = screen.getByRole("list", { name: t("suggestedRooms.listLabel") });
+    expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Alpha",
+      "Beta"
+    ]);
+    expect(onJoinAll).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: t("suggestedRooms.skip") }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onJoinAll).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: t("suggestedRooms.joinAll") }));
+    expect(onJoinAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables both choices while joining", () => {
+    render(
+      <SuggestedRoomsDialog
+        offer={{ kind: "joining", request_id: 3, space_id: "!space:example.invalid", rooms }}
+        spaceName="Synthetic Workspace"
+        onJoinAll={vi.fn()}
+        onDismiss={vi.fn()}
+      />
+    );
+    expect(
+      (screen.getByRole("button", { name: t("suggestedRooms.joining") }) as HTMLButtonElement)
+        .disabled
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: t("suggestedRooms.skip") }) as HTMLButtonElement).disabled
+    ).toBe(true);
+  });
+
+  it("reports each room's outcome after a partial failure", () => {
+    const onDismiss = vi.fn();
+    render(
+      <SuggestedRoomsDialog
+        offer={{
+          kind: "completed",
+          space_id: "!space:example.invalid",
+          results: [
+            { room_id: "!alpha:example.invalid", display_name: "Alpha", failure: null },
+            { room_id: "!beta:example.invalid", display_name: "Beta", failure: "forbidden" }
+          ]
+        }}
+        spaceName="Synthetic Workspace"
+        onJoinAll={vi.fn()}
+        onDismiss={onDismiss}
+      />
+    );
+    const items = within(
+      screen.getByRole("list", { name: t("suggestedRooms.listLabel") })
+    ).getAllByRole("listitem");
+    expect(items[0].textContent).toContain(t("suggestedRooms.joined"));
+    expect(items[1].textContent).toContain("Beta");
+    expect(items[1].textContent).not.toContain(t("suggestedRooms.joined"));
+    fireEvent.click(screen.getByRole("button", { name: t("suggestedRooms.done") }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 });

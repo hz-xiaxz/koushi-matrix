@@ -282,6 +282,7 @@ import {
   ReportReasonDialog,
   ResetLocalDataConfirmationDialog,
   LeaveSpaceDialog,
+  SuggestedRoomsDialog,
   uploadStagingItemsAreSendable,
   UserIdDialog
 } from "./components/dialogs";
@@ -7799,6 +7800,10 @@ function AccountContent({
           roomInfoReveal={roomInfoReveal}
           onRoomInfoRevealHandled={() => setRoomInfoReveal(null)}
           onUpdateSpaceJoinRule={(spaceId, joinRule) => updateRoomSetting(spaceId, { joinRule })}
+          onSetSpaceChildSuggested={(spaceId, childRoomId, suggested) => {
+            // The saving/failed state is Rust's; the command returns at admission.
+            runInBackground(settleCommand(api.setSpaceChildSuggested(spaceId, childRoomId, suggested)));
+          }}
           onIgnoreUser={(userId) => {
             runInBackground(ignoreUser(userId));
           }}
@@ -8026,6 +8031,30 @@ function AccountContent({
           }}
         />
       ) : null}
+      {(() => {
+        // Issue #1410: the one-time suggested-rooms offer is Rust state; it
+        // outlives the Space selection, so it is rendered at the App level.
+        const offer = snapshot.state.domain.space_children.suggested_offer;
+        if (!offer || offer.kind === "none") {
+          return null;
+        }
+        const offerSpaceName =
+          snapshot.sidebar.space_rail.find((space) => space.space_id === offer.space_id)
+            ?.display_name ?? offer.space_id;
+        return (
+          <SuggestedRoomsDialog
+            key={offer.space_id}
+            offer={offer}
+            spaceName={offerSpaceName}
+            onJoinAll={() => {
+              runInBackground(settleCommand(api.joinSuggestedSpaceRooms(offer.space_id)));
+            }}
+            onDismiss={() => {
+              runInBackground(settleCommand(api.dismissSuggestedSpaceRooms(offer.space_id)));
+            }}
+          />
+        );
+      })()}
       {pendingSpaceLeave ? (() => {
         const railItem = snapshot.sidebar.space_rail.find(
           (space) => space.space_id === pendingSpaceLeave.spaceId

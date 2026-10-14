@@ -848,6 +848,35 @@ impl RoomActor {
                 self.handle_set_space_child(request_id, space_id, child_room_id)
                     .await;
             }
+            RoomCommand::SetSpaceChildSuggested {
+                request_id,
+                space_id,
+                child_room_id,
+                suggested,
+            } => {
+                self.handle_set_space_child_suggested(
+                    request_id,
+                    space_id,
+                    child_room_id,
+                    suggested,
+                )
+                .await;
+            }
+            RoomCommand::JoinSuggestedSpaceRooms {
+                request_id,
+                space_id,
+                room_ids,
+            } => {
+                self.handle_join_suggested_space_rooms(request_id, space_id, room_ids)
+                    .await;
+            }
+            RoomCommand::DismissSuggestedSpaceRooms {
+                request_id: _,
+                space_id,
+            } => {
+                self.reduce_reliable(vec![AppAction::SuggestedRoomsOfferDismissed { space_id }])
+                    .await;
+            }
             RoomCommand::InviteUser {
                 request_id,
                 room_id,

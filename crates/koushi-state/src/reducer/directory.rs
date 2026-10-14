@@ -194,6 +194,7 @@ pub(crate) fn handle_directory_join_succeeded(
         || state.thread_attention != ThreadAttentionState::Closed;
     let had_threads_list = state.threads_list != ThreadsListState::Closed;
     state.directory.join = DirectoryJoinState::Idle;
+    super::space_children::record_room_joined(state, &room_id);
     // #1160: a successful join leaves the directory and selects the joined room,
     // so it closes the scoped scheduled-sends panel like a room selection.
     state.scheduled_sends_list = ScheduledSendsListState::Closed;

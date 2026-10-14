@@ -727,7 +727,50 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             space_id,
             generation,
             children,
-        } => space_children::handle_loaded(state, space_id, generation, children),
+            can_edit_suggested,
+        } => {
+            space_children::handle_loaded(state, space_id, generation, children, can_edit_suggested)
+        }
+        AppAction::SpaceChildSuggestedUpdateRequested {
+            request_id,
+            space_id,
+            child_room_id,
+            suggested,
+        } => space_children::handle_suggested_update_requested(
+            state,
+            request_id,
+            space_id,
+            child_room_id,
+            suggested,
+        ),
+        AppAction::SpaceChildSuggestedUpdateSettled {
+            request_id,
+            space_id,
+            child_room_id,
+            suggested,
+            failure,
+        } => space_children::handle_suggested_update_settled(
+            state,
+            request_id,
+            space_id,
+            child_room_id,
+            suggested,
+            failure,
+        ),
+        AppAction::SuggestedRoomsJoinRequested {
+            request_id,
+            space_id,
+        } => space_children::handle_suggested_rooms_join_requested(state, request_id, space_id),
+        AppAction::SuggestedRoomsJoinSettled {
+            request_id,
+            space_id,
+            outcomes,
+        } => space_children::handle_suggested_rooms_join_settled(
+            state, request_id, space_id, outcomes,
+        ),
+        AppAction::SuggestedRoomsOfferDismissed { space_id } => {
+            space_children::handle_suggested_rooms_offer_dismissed(state, space_id)
+        }
         AppAction::SpaceChildrenLoadFailed {
             space_id,
             generation,
@@ -2225,6 +2268,9 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.native_attention = Default::default();
     state.invite_workflow = Default::default();
     state.space_members = Default::default();
+    // #1410: the offer and the joins it waits for belong to the retired
+    // session; the children generation itself keeps counting.
+    let had_suggested_offer = space_children::clear_session_suggestions(&mut state.space_children);
     state.basic_operation = Default::default();
     state.space_child_links = Default::default();
     state.room_address_availability = Default::default();
@@ -2324,6 +2370,9 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     }
     if had_space_members {
         effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceMembersChanged));
+    }
+    if had_suggested_offer {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
     }
     if let Some(effect) = scheduled_send_persistence_effect {
         effects.push(effect);

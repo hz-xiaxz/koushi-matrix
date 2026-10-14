@@ -1244,6 +1244,8 @@ export interface SpaceChildSummary {
   can_join: boolean;
   is_space: boolean;
   joined_members: number;
+  /** Issue #1410: a Space admin suggests this child to members. */
+  suggested?: boolean;
 }
 
 export type SpaceChildrenLoadState =
@@ -1257,7 +1259,43 @@ export interface SpaceChildrenState {
   generation: number;
   children: SpaceChildSummary[];
   load: SpaceChildrenLoadState;
+  /** Issue #1410: whether this account may change the suggested flags. */
+  can_edit_suggested?: boolean;
+  suggested_edit?: SpaceChildSuggestedEditState;
+  /** Issue #1410: the one-time offer; it outlives the Space selection. */
+  suggested_offer?: SuggestedRoomsOffer;
 }
+
+/** Issue #1410: the admin toggle of one child's suggested flag. */
+export type SpaceChildSuggestedEditState =
+  | { kind: "idle" }
+  | { kind: "saving"; request_id: number; child_room_id: string; suggested: boolean }
+  | {
+      kind: "failed";
+      child_room_id: string;
+      suggested: boolean;
+      failure: OperationFailureKind;
+    };
+
+export interface SuggestedRoomCandidate {
+  room_id: string;
+  display_name: string;
+  display_name_placeholder?: RoomNamePlaceholder | null;
+}
+
+export interface SuggestedRoomJoinResult {
+  room_id: string;
+  display_name: string;
+  display_name_placeholder?: RoomNamePlaceholder | null;
+  failure?: OperationFailureKind | null;
+}
+
+/** Issue #1410: the one-time offer to join a newly joined Space's suggested rooms. */
+export type SuggestedRoomsOffer =
+  | { kind: "none" }
+  | { kind: "offered"; space_id: string; rooms: SuggestedRoomCandidate[] }
+  | { kind: "joining"; request_id: number; space_id: string; rooms: SuggestedRoomCandidate[] }
+  | { kind: "completed"; space_id: string; results: SuggestedRoomJoinResult[] };
 
 export interface SpaceMembersState {
   selected_space_id: string | null;
@@ -3098,6 +3136,8 @@ export interface RoomListItem {
   membership?: SpaceChildMembership;
   /** Whether this row offers a join. Always false for a joined room. */
   can_join?: boolean;
+  /** Issue #1410: a suggested not-joined Space child. Never true for a joined room. */
+  suggested?: boolean;
   /**
    * The room's own authoritative access condition (#1166), from its
    * `m.room.join_rules`. Absent means not yet projected, never a guessed rule;

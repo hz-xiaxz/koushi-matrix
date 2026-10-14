@@ -91,7 +91,10 @@ describe("DesktopApi command contract", () => {
         "previewCreateRoomAccess",
         "ignoreDesktopUpdate",
         "saveDiagnosticsReport",
-        "cancelOidcLogin"
+        "cancelOidcLogin",
+        "setSpaceChildSuggested",
+        "joinSuggestedSpaceRooms",
+        "dismissSuggestedSpaceRooms"
       )
       .sort();
     expect(new Set(current).size).toBe(current.length);

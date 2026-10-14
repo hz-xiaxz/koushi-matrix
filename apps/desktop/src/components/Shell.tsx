@@ -25,6 +25,7 @@ import {
   Plus,
   Search,
   Settings,
+  Sparkles,
   Users,
   X
 } from "lucide-react";
@@ -1660,6 +1661,16 @@ function RoomButton({
         access.descriptionSpaceName
       )
     : null;
+  // #1410: a not-joined child the Space marks as suggested carries a marker
+  // before its name; like the access condition, it is announced as the row's
+  // description so the row's accessible name stays the room label.
+  const suggestedDescriptionId = useId();
+  const suggested = kind === "notJoined" && room.suggested === true;
+  const rowDescriptionIds = [
+    access ? accessDescriptionId : null,
+    suggested ? suggestedDescriptionId : null
+  ].filter((id): id is string => id !== null);
+  const tooltipLabel = accessDescription ?? (suggested ? t("roomList.suggestedDescription") : null);
 
   function renderRow(triggerProps?: TooltipTriggerProps) {
     return (
@@ -1717,7 +1728,7 @@ function RoomButton({
       {...triggerProps}
       // Always the full condition text: an open tooltip renders the same
       // sentence, and the description stays reachable after the popup closes.
-      aria-describedby={access ? accessDescriptionId : undefined}
+      aria-describedby={rowDescriptionIds.length > 0 ? rowDescriptionIds.join(" ") : undefined}
     >
       <span className="room-avatar-shell">
         <EntityAvatar
@@ -1734,6 +1745,11 @@ function RoomButton({
           {accessDescription}
         </span>
       ) : null}
+      {suggested ? (
+        <span className="sr-only" id={suggestedDescriptionId}>
+          {t("roomList.suggestedDescription")}
+        </span>
+      ) : null}
       {/* #1166: the name and the access icon share the grid's name cell so the
           avatar and the trailing unread area keep their columns.
           #1247: the access icon follows the name so every name keeps one left
@@ -1742,6 +1758,16 @@ function RoomButton({
           the full localized label stays its accessible name, and the popup and
           the row description carry the explanation. */}
       <span className="room-name-shell">
+        {suggested ? (
+          <span
+            className="room-suggested-icon"
+            data-testid="room-suggested-icon"
+            role="img"
+            aria-label={t("roomList.suggested")}
+          >
+            <Sparkles size={ICON_SIZE.access} aria-hidden="true" />
+          </span>
+        ) : null}
         <span className="room-name" dir="auto">{roomLabel}</span>
         {access ? (
           <span
@@ -1784,11 +1810,11 @@ function RoomButton({
     );
   }
 
-  if (!access || !accessDescription) {
+  if (!tooltipLabel) {
     return renderRow();
   }
   return (
-    <Tooltip className="room-item-host" label={accessDescription}>
+    <Tooltip className="room-item-host" label={tooltipLabel}>
       {(triggerProps) => renderRow(triggerProps)}
     </Tooltip>
   );

@@ -4244,6 +4244,82 @@ stateDiagram-v2
   children of a disposable Space (a room outside the Space named in the
   command stays joined), then the Space, while an unselected child stays joined.
 
+## Suggested Space rooms (#1410)
+
+A Space's `m.space.child` events may mark a child `suggested`. Koushi uses the
+flag in three Rust-owned places: the Not joined lane, an administrator toggle,
+and a one-time opt-in offer to join the suggested rooms after joining a Space.
+
+### Projection
+
+`SpaceChildSummary.suggested` comes from the Space's own synced
+`m.space.child` (fresher than `/hierarchy` right after this account changes
+it), falling back to the hierarchy's `children_state`.
+`SpaceChildrenState.can_edit_suggested` is the account's permission to send
+`m.space.child` in the selected Space, loaded with the children under the same
+generation. The sidebar's Not joined section orders suggested rooms first
+(then by name, then room ID) and carries `RoomListItem.suggested`; React
+renders the mark and never sorts.
+
+### Suggested toggle
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Saving: SpaceChildSuggestedUpdateRequested [Ready + selected Space + loaded child + can_edit_suggested]
+    Failed --> Saving: SpaceChildSuggestedUpdateRequested [same guards]
+    Saving --> Idle: SpaceChildSuggestedUpdateSettled(ok) [matching request_id] / child.suggested = requested
+    Saving --> Failed: SpaceChildSuggestedUpdateSettled(failure) [matching request_id]
+    Saving --> Idle: Space selection changed / session cleared
+    Failed --> Idle: Space selection changed / session cleared
+```
+
+- One edit at a time per selected Space (`SpaceChildrenState.suggested_edit`);
+  a request while `Saving` is ignored. A settlement for another request, or
+  after the selection changed (which resets the slice), is inert.
+- The write is `koushi-sdk::set_space_child_suggested`: the existing
+  `m.space.child` content is re-sent with only `suggested` changed, so `via`,
+  `order` and unmodelled fields survive (Element Web's "Mark as suggested").
+  A pair with no routed child event is `WrongRoomState` — the toggle never
+  links a room — and a Space whose power levels deny `m.space.child` fails
+  `Forbidden` before any request.
+
+### Suggested rooms offer
+
+```mermaid
+stateDiagram-v2
+    [*] --> None
+    None --> Offered: SpaceChildrenLoaded [Space recently joined here + >=1 eligible child]
+    Offered --> Joining: SuggestedRoomsJoinRequested [same Space + Ready]
+    Offered --> None: SuggestedRoomsOfferDismissed [same Space]
+    Joining --> None: SuggestedRoomsJoinSettled [matching request_id, every room joined]
+    Joining --> Completed: SuggestedRoomsJoinSettled [matching request_id, a room failed]
+    Completed --> None: SuggestedRoomsOfferDismissed [same Space]
+    Offered --> None: account left the Space / session cleared
+    Completed --> None: account left the Space / session cleared
+```
+
+- Trigger: `RoomJoinedLocally` and `DirectoryJoinSucceeded` record the joined
+  room ID in a bounded recent-join list (`recently_joined_room_ids`, newest 16).
+  The first admitted `SpaceChildrenLoaded` for a Space in that list consumes the
+  entry, so the offer is made at most once per join and never on later visits
+  or after a restart.
+- Eligible children: `suggested`, `can_join`, not a Space, membership
+  `NotJoined` (never `Left`, `Invited`, `Knocked`, `Banned` or `Unknown`), at
+  least one joined member, and not already in the joined room list. Zero
+  eligible children makes no offer. Invite-only and knock rooms are therefore
+  never offered, and no join rule or invitation is changed.
+- `SuggestedRoomsJoinRequested` carries no room list: Core joins exactly the
+  offered rooms, in order, one request at a time, each through the same
+  residency-guarded join as **Join** (`RoomJoinedLocally` per success). Every
+  room settles independently; `SuggestedRoomsJoinSettled` carries one outcome
+  per room and a failed room is reported, not retried. While `Joining`, a
+  dismissal is ignored.
+- Upstream: Element Web shows a "Suggested" label and offers mark/unmark in the
+  Space hierarchy; Element X uses suggestions only when adding rooms. Neither
+  offers a bulk join after joining a Space; this offer is a deliberate Koushi
+  addition and joins nothing without the user's choice.
+
 ## Space Members
 
 Space-member membership, role options, and role-update settlement are a

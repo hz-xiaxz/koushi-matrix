@@ -1310,6 +1310,26 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandAdmission>("set_space_child", { spaceId, childRoomId });
   }
 
+  async setSpaceChildSuggested(
+    spaceId: string,
+    childRoomId: string,
+    suggested: boolean
+  ): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("set_space_child_suggested", {
+      spaceId,
+      childRoomId,
+      suggested
+    });
+  }
+
+  async joinSuggestedSpaceRooms(spaceId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("join_suggested_space_rooms", { spaceId });
+  }
+
+  async dismissSuggestedSpaceRooms(spaceId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("dismiss_suggested_space_rooms", { spaceId });
+  }
+
   async acceptInvite(roomId: string): Promise<CommandSettlement> {
     return this.invokeCommand<CommandSettlement>("accept_invite", { roomId });
   }

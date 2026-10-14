@@ -3580,3 +3580,73 @@ test("the Room Info access editor dispatches typed draft commands over Rust-shap
   });
   await expect(card.getByRole("status")).toHaveText("Saved");
 });
+
+// Issue #1410: the one-time suggested-rooms offer is Rust state. The dialog
+// names the Space, joins nothing without consent, sends no room list of its
+// own, and reports each room's outcome.
+test("suggested-rooms offer joins only on consent and reports per-room failures", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  const spaceId = "!harness-space:example.invalid";
+  const setOffer = (offer: unknown) =>
+    page.evaluate((nextOffer) => {
+      const next = structuredClone(window.__harness.currentSnapshot());
+      next.state.domain.space_children = {
+        ...next.state.domain.space_children,
+        suggested_offer: nextOffer as typeof next.state.domain.space_children.suggested_offer
+      };
+      window.__harness.setSnapshot(next);
+      window.__harness.pushStateUpdate();
+      window.__harness.clearInvocations();
+    }, offer);
+  const rooms = [
+    { room_id: "!alpha-suggested:example.invalid", display_name: "Alpha Suggested" },
+    { room_id: "!beta-suggested:example.invalid", display_name: "Beta Suggested" }
+  ];
+
+  await setOffer({ kind: "offered", space_id: spaceId, rooms });
+  const dialog = page.getByRole("dialog", {
+    name: t("suggestedRooms.offerTitle", { space: "Harness Space" })
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("listitem")).toHaveText(["Alpha Suggested", "Beta Suggested"]);
+  expect(await invocationCount(page, "join_suggested_space_rooms")).toBe(0);
+
+  await dialog.getByRole("button", { name: t("suggestedRooms.joinAll") }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__harness.invocationsOf("join_suggested_space_rooms").at(-1)?.args)
+    )
+    .toMatchObject({ spaceId });
+  const joinArgs = await page.evaluate(
+    () => window.__harness.invocationsOf("join_suggested_space_rooms").at(-1)?.args ?? {}
+  );
+  expect(Object.keys(joinArgs)).not.toContain("roomIds");
+
+  await setOffer({ kind: "joining", request_id: 1, space_id: spaceId, rooms });
+  await expect(dialog.getByRole("button", { name: t("suggestedRooms.joining") })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: t("suggestedRooms.skip") })).toBeDisabled();
+
+  await setOffer({
+    kind: "completed",
+    space_id: spaceId,
+    results: [
+      { ...rooms[0], failure: null },
+      { ...rooms[1], failure: "forbidden" }
+    ]
+  });
+  const result = page.getByRole("dialog", { name: t("suggestedRooms.resultTitle") });
+  await expect(result).toBeVisible();
+  await expect(result.getByRole("listitem").nth(0)).toContainText(t("suggestedRooms.joined"));
+  await expect(result.getByRole("listitem").nth(1)).not.toContainText(t("suggestedRooms.joined"));
+  await result.getByRole("button", { name: t("suggestedRooms.done") }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__harness.invocationsOf("dismiss_suggested_space_rooms").at(-1)?.args)
+    )
+    .toMatchObject({ spaceId });
+
+  await setOffer({ kind: "none" });
+  await expect(result).toHaveCount(0);
+});

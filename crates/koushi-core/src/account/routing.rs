@@ -49,6 +49,12 @@ fn trace_room_route(stage: &'static str, command: &RoomCommand) {
         RoomCommand::SetSpaceChild { request_id, .. } => {
             trace_room_route_event(stage, "set_space_child", *request_id);
         }
+        RoomCommand::SetSpaceChildSuggested { request_id, .. } => {
+            trace_room_route_event(stage, "set_space_child_suggested", *request_id);
+        }
+        RoomCommand::JoinSuggestedSpaceRooms { request_id, .. } => {
+            trace_room_route_event(stage, "join_suggested_space_rooms", *request_id);
+        }
         RoomCommand::InviteUser { request_id, .. } => {
             trace_room_route_event(stage, "invite_user", *request_id);
         }

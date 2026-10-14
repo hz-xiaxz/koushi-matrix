@@ -5072,10 +5072,12 @@ async fn leaving_a_selected_space_child_routes_a_space_children_reload() {
             avatar: None,
             membership: koushi_state::SpaceChildMembership::Joined,
             can_join: false,
+            suggested: false,
             is_space: false,
             joined_members: 2,
         }],
         load: koushi_state::SpaceChildrenLoadState::Idle,
+        ..Default::default()
     };
 
     let (

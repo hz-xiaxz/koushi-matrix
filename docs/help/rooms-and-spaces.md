@@ -35,6 +35,23 @@ If you have a room address:
 Explore also lets you search a server's public room directory. This searches
 rooms to join, whereas the top search field [searches messages](search.md).
 
+## Suggested rooms in a Space
+
+A Space can mark some of its rooms as suggested. In the Space's **Not joined**
+section, suggested rooms come first and show a sparkle icon before the name;
+hover over the row to see "Suggested by this Space".
+
+When you join a Space that suggests rooms you can join, Koushi asks once:
+**Join the suggested rooms in *Space*?** The dialog lists the rooms. Choose
+**Join all** to join them, or **Skip** to join none. The question is not asked
+again for that Space. Invite-only rooms are never offered, and nothing is joined
+unless you choose **Join all**. If some rooms cannot be joined, the dialog lists
+which ones were joined and why the others were not.
+
+If your role allows it, **Space info** shows a **Suggest to *Space* members**
+checkbox beside each room in **Rooms**. It changes only whether that room is
+suggested; the room's place in the Space and its access are unchanged.
+
 ## Create a room or Space
 
 Use **Create room** in the sidebar header, optionally enter a name, and review

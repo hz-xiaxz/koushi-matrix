@@ -4342,6 +4342,58 @@ impl AppActor {
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
+                    // Issue #1410: the reducer admits a toggle only for an
+                    // admin of the selected Space, one at a time, and a bulk
+                    // join only for the offer it holds.
+                    koushi_protocol::command::RoomCommand::SetSpaceChildSuggested {
+                        request_id,
+                        space_id,
+                        child_room_id,
+                        suggested,
+                    } => {
+                        let effects = self
+                            .reduce_app_action(AppAction::SpaceChildSuggestedUpdateRequested {
+                                request_id: request_id.sequence,
+                                space_id: space_id.clone(),
+                                child_room_id: child_room_id.clone(),
+                                suggested: *suggested,
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
+                    koushi_protocol::command::RoomCommand::JoinSuggestedSpaceRooms {
+                        request_id,
+                        space_id,
+                        ..
+                    } => {
+                        let effects = self
+                            .reduce_app_action(AppAction::SuggestedRoomsJoinRequested {
+                                request_id: request_id.sequence,
+                                space_id: space_id.clone(),
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
                     _ => {}
                 }
                 // #1060: room and Space selection are purely local navigation.

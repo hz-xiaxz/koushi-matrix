@@ -1582,6 +1582,23 @@ export type MessageId =
   | "roomList.membershipKnocked"
   | "roomList.membershipNotJoined"
   | "roomList.membershipUnknown"
+  | "roomList.suggested"
+  | "roomList.suggestedDescription"
+  | "space.suggestToMembers"
+  | "space.suggestToMembersFor"
+  | "space.suggestSaving"
+  | "space.suggestFailed"
+  | "suggestedRooms.offerTitle"
+  | "suggestedRooms.offerCopy"
+  | "suggestedRooms.listLabel"
+  | "suggestedRooms.joinAll"
+  | "suggestedRooms.skip"
+  | "suggestedRooms.joining"
+  | "suggestedRooms.resultTitle"
+  | "suggestedRooms.resultCopy"
+  | "suggestedRooms.joined"
+  | "suggestedRooms.failed"
+  | "suggestedRooms.done"
   | "workspace.people"
   | "workspace.rooms"
   | "workspace.resizeRoomList"
@@ -3505,6 +3522,23 @@ const en: Catalog = {
   "roomList.membershipKnocked": "Knock requested",
   "roomList.membershipNotJoined": "Not joined",
   "roomList.membershipUnknown": "Unavailable",
+  "roomList.suggested": "Suggested",
+  "roomList.suggestedDescription": "Suggested by this Space",
+  "space.suggestToMembers": "Suggest to {space} members",
+  "space.suggestToMembersFor": "Suggest {room} to {space} members",
+  "space.suggestSaving": "Saving…",
+  "space.suggestFailed": "Could not update the suggestion: {reason}",
+  "suggestedRooms.offerTitle": "Join the suggested rooms in {space}?",
+  "suggestedRooms.offerCopy": "The Space suggests these rooms. Nothing is joined unless you choose Join all.",
+  "suggestedRooms.listLabel": "Suggested rooms",
+  "suggestedRooms.joinAll": "Join all",
+  "suggestedRooms.skip": "Skip",
+  "suggestedRooms.joining": "Joining…",
+  "suggestedRooms.resultTitle": "Some suggested rooms could not be joined",
+  "suggestedRooms.resultCopy": "The other suggested rooms were joined.",
+  "suggestedRooms.joined": "Joined",
+  "suggestedRooms.failed": "Not joined: {reason}",
+  "suggestedRooms.done": "Close",
   "workspace.people": "Direct Messages",
   "workspace.rooms": "Rooms",
   "workspace.resizeRoomList": "Resize room list",
@@ -5314,6 +5348,23 @@ const ja: Catalog = {
   "roomList.membershipKnocked": "参加申請中",
   "roomList.membershipNotJoined": "未入室",
   "roomList.membershipUnknown": "参照不可",
+  "roomList.suggested": "おすすめ",
+  "roomList.suggestedDescription": "このスペースのおすすめルーム",
+  "space.suggestToMembers": "{space} のメンバーにおすすめする",
+  "space.suggestToMembersFor": "{room} を {space} のメンバーにおすすめする",
+  "space.suggestSaving": "保存中…",
+  "space.suggestFailed": "おすすめ設定を更新できませんでした: {reason}",
+  "suggestedRooms.offerTitle": "{space} のおすすめルームに一括入室しますか？",
+  "suggestedRooms.offerCopy": "このスペースがおすすめしているルームです。「すべて入室」を選ぶまで入室しません。",
+  "suggestedRooms.listLabel": "おすすめルーム",
+  "suggestedRooms.joinAll": "すべて入室",
+  "suggestedRooms.skip": "スキップ",
+  "suggestedRooms.joining": "入室中…",
+  "suggestedRooms.resultTitle": "一部のおすすめルームに入室できませんでした",
+  "suggestedRooms.resultCopy": "ほかのおすすめルームには入室しました。",
+  "suggestedRooms.joined": "入室済み",
+  "suggestedRooms.failed": "未入室: {reason}",
+  "suggestedRooms.done": "閉じる",
   "workspace.people": "Direct Messages",
   "workspace.rooms": "ルーム",
   "workspace.resizeRoomList": "ルームリストの幅を変更",
