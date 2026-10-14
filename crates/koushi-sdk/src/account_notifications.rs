@@ -31,6 +31,13 @@ use matrix_sdk::ruma::{
 
 use crate::MatrixClientSession;
 
+mod keyword_rules;
+pub use keyword_rules::{
+    KEYWORD_PATTERN_MAX_CHARS, KEYWORD_RULE_ID_MAX_CHARS, KEYWORD_RULE_ID_PREFIX,
+    KEYWORD_RULES_MAX, KeywordRule, MatrixKeywordRuleError, add_keyword_rule, fetch_keyword_rules,
+    keyword_rules_from_ruleset, plan_keyword_rule, remove_keyword_rule,
+};
+
 /// Element Web's app id for email pushers.
 pub const EMAIL_PUSHER_APP_ID: &str = "m.email";
 const EMAIL_PUSHER_APP_DISPLAY_NAME: &str = "Email Notifications";
@@ -48,14 +55,15 @@ pub enum RuleActions {
     Notify,
     /// `["notify", {"set_tweak": "sound", "value": "default"}]`.
     NotifyWithSound,
-    /// `["notify", {"set_tweak": "highlight"}]`.
+    /// `["notify", {"set_tweak": "highlight"}]`. This is the keyword shape:
+    /// the highlight tweak is what reaches the mention-kind authority.
     NotifyHighlight,
     /// `["notify", sound default, highlight]`.
     NotifyHighlightWithSound,
 }
 
 impl RuleActions {
-    fn to_ruma(self) -> Vec<Action> {
+    pub(crate) fn to_ruma(self) -> Vec<Action> {
         let sound = || Action::SetTweak(Tweak::Sound(SoundTweakValue::Default));
         let highlight = || Action::SetTweak(Tweak::Highlight(true.into()));
         match self {
