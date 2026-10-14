@@ -999,9 +999,11 @@ export type MessageId =
   | "settings.notificationDeliveryPrefixConsentBody"
   | "settings.notificationDeliveryPrefixConsentAccept"
   | "settings.notificationDeliveryPrefixConsentLink"
+  | "settings.notificationSource"
+  | "settings.notificationDeviceSource"
+  | "settings.notificationHomeserverSource"
   | "settings.notificationDeliveryEnable"
   | "settings.notificationDeliveryKeywordsHint"
-  | "settings.notificationDeliveryServerOwnerNote"
   | "settings.notificationDeliveryWatchedPick"
   | "settings.notificationDeliveryWatchedRooms"
   | "settings.notificationDeliveryWatchedSpaces"
@@ -1020,6 +1022,7 @@ export type MessageId =
   | "settings.notificationDeliverySinkUsernameFullAddress"
   | "settings.notificationDeliverySinkSaveSecret"
   | "settings.notificationDeliverySinkClearSecret"
+  | "settings.notificationDeliverySinkSecretRetired"
   | "settings.notificationDeliverySinkEmpty"
   | "settings.notificationDeliverySinkFailed"
   | "settings.notificationDeliveryResultRateLimitedAfter"
@@ -3029,11 +3032,16 @@ const en: Catalog = {
     "The start of the message leaves this device as plain text and passes through {service} to {destination} without end-to-end encryption. Whether, and for how long, that service keeps it depends on that service's own terms, so read them before turning this on. Room names and counts are sent either way.",
   "settings.notificationDeliveryPrefixConsentAccept": "Turn on and accept",
   "settings.notificationDeliveryPrefixConsentLink": "Read the service's terms",
+  // The two notification sources are different owners; the tab list says which
+  // source is showing, and each body says in one line who sends it.
+  "settings.notificationSource": "Notification source",
+  "settings.notificationDeviceSource":
+    "Koushi sends these from this device, through the mailbox or relay configured here.",
+  "settings.notificationHomeserverSource":
+    "Your homeserver sends these, and they apply to every device on the account.",
   "settings.notificationDeliveryEnable": "Send notifications from this device",
   "settings.notificationDeliveryKeywordsHint":
     "A message that matches one of your keywords arrives as a mention, so either this switch or Mentions and replies sends it.",
-  "settings.notificationDeliveryServerOwnerNote":
-    "Everything below is sent by your homeserver, not by this device. Turning it off does not affect the setting above.",
   "settings.notificationDeliveryWatchedPick": "Choose a room or space",
   "settings.notificationDeliveryWatchedRooms": "Rooms",
   "settings.notificationDeliveryWatchedSpaces": "Spaces",
@@ -3057,6 +3065,10 @@ const en: Catalog = {
     "The mailbox's full address",
   "settings.notificationDeliverySinkSaveSecret": "Save",
   "settings.notificationDeliverySinkClearSecret": "Clear",
+  // The credential is gone because the sink is no longer the server it was entered for;
+  // saying so keeps the empty field from reading as data loss.
+  "settings.notificationDeliverySinkSecretRetired":
+    "The saved password was removed because the server or account changed. Enter it again.",
   "settings.notificationDeliverySinkEmpty":
     "No service is configured yet. Nothing leaves this device until one is added and turned on.",
   "settings.notificationDeliverySinkFailed": "This service is not sending",
@@ -4969,11 +4981,14 @@ const ja: Catalog = {
     "メッセージの冒頭は平文でこの端末を離れ、エンドツーエンド暗号化なしで{service}から{destination}へ送られます。そのサービスが本文を保持するかどうか、また保持期間は、そのサービスの規約によります。オンにする前に規約を確認してください。ルーム名と件数はどちらでも送信されます。",
   "settings.notificationDeliveryPrefixConsentAccept": "オンにして同意する",
   "settings.notificationDeliveryPrefixConsentLink": "サービスの規約を読む",
+  "settings.notificationSource": "通知の送信元",
+  "settings.notificationDeviceSource":
+    "これらはKoushiがこの端末から、ここで設定したメールボックスまたはリレーを通して送信します。",
+  "settings.notificationHomeserverSource":
+    "これらはホームサーバーが送信し、アカウントのすべての端末に適用されます。",
   "settings.notificationDeliveryEnable": "この端末から通知を送信する",
   "settings.notificationDeliveryKeywordsHint":
     "キーワードに一致したメッセージはメンションとして届くため、「設定したキーワード」と「メンション・返信」のどちらをオンにしても送信されます。",
-  "settings.notificationDeliveryServerOwnerNote":
-    "ここから下は、この端末ではなくホームサーバーが送信します。オフにしても上の設定は変わりません。",
   "settings.notificationDeliveryWatchedPick": "ルームまたはスペースを選択",
   "settings.notificationDeliveryWatchedRooms": "ルーム",
   "settings.notificationDeliveryWatchedSpaces": "スペース",
@@ -4994,6 +5009,8 @@ const ja: Catalog = {
   "settings.notificationDeliverySinkUsernameFullAddress": "メールアドレス全体",
   "settings.notificationDeliverySinkSaveSecret": "保存",
   "settings.notificationDeliverySinkClearSecret": "消去",
+  "settings.notificationDeliverySinkSecretRetired":
+    "サーバーまたはアカウントが変更されたため、保存されていたパスワードは削除されました。もう一度入力してください。",
   "settings.notificationDeliverySinkEmpty":
     "送信方法がまだ設定されていません。追加してオンにするまで、この端末から何も送信されません。",
   "settings.notificationDeliverySinkFailed": "このサービスは送信できていません",

@@ -409,6 +409,13 @@ export interface NotificationSinkSettings {
   from_address: string;
   sender_name: string;
   config: NotificationSinkConfig;
+  /**
+   * What the stored credential was entered for; Rust drops it when the server or account
+   * changes. The user never edits it: a new sink sends `null`, an existing one echoes what
+   * Rust last reported. A binding with no credential beside it is a password Rust retired
+   * because the sink stopped being the server or account it was given for.
+   */
+  secret_binding: string | null;
 }
 
 /**
@@ -426,6 +433,14 @@ export interface NotificationDeliverySinkState {
   sink_id: string;
   /** A credential exists in the OS credential store; the value itself never crosses IPC. */
   secret_configured: boolean;
+  /**
+   * Rust deleted a stored credential for this sink because its binding no longer named the
+   * sink's server and account, whether on a patch or on the settings load that reconciled a
+   * binding-less record. The reason is Rust's to state: the credential and the binding go in
+   * the same round trip, so no comparison over the settings can recover why the password is
+   * gone. False again as soon as a secret is saved or the user clears one.
+   */
+  secret_retired: boolean;
   last_outcome: NotificationDeliveryOutcomeState | null;
 }
 

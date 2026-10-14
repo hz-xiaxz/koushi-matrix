@@ -36,7 +36,8 @@ const resendSink: NotificationSinkSettings = {
   destination: "recipient@example.invalid",
   from_address: "sender@example.invalid",
   sender_name: "",
-  config: { kind: "resend", endpoint: "https://api.example.invalid/emails" }
+  config: { kind: "resend", endpoint: "https://api.example.invalid/emails" },
+  secret_binding: null
 };
 
 const smtpSink: NotificationSinkSettings = {
@@ -52,7 +53,8 @@ const smtpSink: NotificationSinkSettings = {
     port: 465,
     tls: "implicit",
     username: "sender@example.invalid"
-  }
+  },
+  secret_binding: null
 };
 
 function delivery(overrides: Partial<NotificationDeliverySettings> = {}): NotificationDeliverySettings {
@@ -134,6 +136,7 @@ describe("notification sink endpoint", () => {
     expect(notificationSinkEndpoint(resendSink)).toBe("https://api.example.invalid/emails");
     expect(notificationSinkEndpoint(smtpSink)).toBe("smtp.example.invalid:465");
   });
+
 });
 
 describe("notification delivery outcomes", () => {
@@ -270,7 +273,9 @@ describe("new sinks", () => {
         port: 587,
         tls: "startTls",
         username: "sender@example.invalid"
-      }
+      },
+      // A sink the user has never given a password to has no binding to echo back.
+      secret_binding: null
     });
     // The Resend endpoint is left to Rust's default when the form leaves it empty.
     expect(

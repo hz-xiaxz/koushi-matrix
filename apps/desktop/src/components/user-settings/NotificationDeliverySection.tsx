@@ -788,6 +788,10 @@ function NotificationSinkCard({
   const failed = notificationDeliverySinkFailed(outcome);
   const service = notificationDeliveryServiceLabel(sink, presets);
   const secretConfigured = Boolean(sinkState?.secret_configured);
+  // Rust says when it deleted a stored credential because the sink stopped being the server
+  // or account it was entered for, so the empty field is explained rather than read as data
+  // the user lost.
+  const secretGone = Boolean(sinkState?.secret_retired) && !secretConfigured;
 
   /**
    * One field edit becomes one whole-block patch, built from the sink Rust last reported, so
@@ -1014,6 +1018,14 @@ function NotificationSinkCard({
           ? t("settings.notificationDeliverySinkSecretSet")
           : t("settings.notificationDeliverySinkSecretMissing")}
       </p>
+      {secretGone ? (
+        <p
+          className="profile-settings-hint"
+          data-testid="notification-delivery-sink-secret-retired"
+        >
+          {t("settings.notificationDeliverySinkSecretRetired")}
+        </p>
+      ) : null}
       <div className="session-actions">
         <button
           className="trust-action-button secondary"

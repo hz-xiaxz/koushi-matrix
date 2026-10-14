@@ -37,7 +37,20 @@ const resendSink: NotificationSinkSettings = {
   destination: "recipient@example.invalid",
   from_address: "sender@example.invalid",
   sender_name: "",
-  config: { kind: "resend", endpoint: "https://api.example.invalid/emails" }
+  config: { kind: "resend", endpoint: "https://api.example.invalid/emails" },
+  secret_binding: null
+};
+
+const smtpSink: NotificationSinkSettings = {
+  ...resendSink,
+  config: {
+    kind: "smtp",
+    preset: "gmail",
+    host: "smtp.example.invalid",
+    port: 465,
+    tls: "implicit",
+    username: "sender@example.invalid"
+  }
 };
 
 function delivery(overrides: Partial<NotificationDeliverySettings> = {}): NotificationDeliverySettings {
@@ -81,16 +94,14 @@ function spaces(): SpaceSummary[] {
   return [{ space_id: "!space:example.invalid", display_name: "Alpha space" } as SpaceSummary];
 }
 
-function renderSection({
-  delivery: block = delivery(),
-  runtime = state(),
-  handlers = actions()
-}: {
+type SectionProps = {
   delivery?: NotificationDeliverySettings;
   runtime?: NotificationDeliveryState;
   handlers?: NotificationDeliveryActions;
-} = {}) {
-  render(
+};
+
+function section({ delivery: block = delivery(), runtime = state(), handlers = actions() }: SectionProps = {}) {
+  return (
     <NotificationDeliverySection
       delivery={block}
       state={runtime}
@@ -99,6 +110,11 @@ function renderSection({
       actions={handlers}
     />
   );
+}
+
+function renderSection(props: SectionProps = {}) {
+  const handlers = props.handlers ?? actions();
+  render(section({ ...props, handlers }));
   return handlers;
 }
 
@@ -211,7 +227,7 @@ describe("NotificationDeliverySection", () => {
   test("keeps a sink's secret write-only and dispatches the set and clear commands", async () => {
     const handlers = renderSection({
       runtime: state({
-        sinks: [{ sink_id: SINK_ID, secret_configured: true, last_outcome: null }]
+        sinks: [{ sink_id: SINK_ID, secret_configured: true, secret_retired: false, last_outcome: null }]
       })
     });
     const secret = screen.getByTestId("notification-delivery-sink-secret") as HTMLInputElement;
@@ -239,6 +255,7 @@ describe("NotificationDeliverySection", () => {
           {
             sink_id: SINK_ID,
             secret_configured: true,
+            secret_retired: false,
             last_outcome: { kind: "invalidSecret", at_ms: 1 }
           }
         ]
@@ -263,6 +280,7 @@ describe("NotificationDeliverySection", () => {
           {
             sink_id: SINK_ID,
             secret_configured: true,
+            secret_retired: false,
             last_outcome: { kind: "rateLimited", at_ms: 1, retry_after_secs: 120 }
           }
         ]
@@ -271,10 +289,168 @@ describe("NotificationDeliverySection", () => {
     expect(screen.getByTestId("notification-delivery-sink-outcome").textContent).toContain("120 seconds");
   });
 
+  test("says why a stored password is gone when Rust retired it", () => {
+    const boundSink = {
+      ...smtpSink,
+      secret_binding: "smtp:smtp.example.invalid:465:sender@example.invalid"
+    };
+    const handlers = actions();
+    const { rerender } = render(
+      section({
+        delivery: delivery({ sinks: [boundSink] }),
+        runtime: state({
+          sinks: [{ sink_id: SINK_ID, secret_configured: true, secret_retired: false, last_outcome: null }]
+        }),
+        handlers
+      })
+    );
+    expect(screen.queryByTestId("notification-delivery-sink-secret-retired")).toBeNull();
+
+    const field = screen.getByTestId("notification-delivery-sink-host") as HTMLInputElement;
+    fireEvent.change(field, { target: { value: "smtp.other.invalid" } });
+    fireEvent.blur(field);
+    // The binding goes back to Rust untouched; Rust is what decides the credential is stale.
+    expect(lastUpdate(handlers).sinks[0].secret_binding).toBe(
+      "smtp:smtp.example.invalid:465:sender@example.invalid"
+    );
+
+    // Rust answers by deleting the credential and the binding together and reporting the
+    // deletion, because the settings come back saying only "no password saved". Without the
+    // explanation that reads as data the user lost.
+    rerender(
+      section({
+        delivery: {
+          ...lastUpdate(handlers),
+          sinks: lastUpdate(handlers).sinks.map((sink) => ({ ...sink, secret_binding: null }))
+        },
+        runtime: state({
+          sinks: [{ sink_id: SINK_ID, secret_configured: false, secret_retired: true, last_outcome: null }]
+        }),
+        handlers
+      })
+    );
+    const explanation = screen.getByTestId("notification-delivery-sink-secret-retired");
+    expect(explanation.textContent).toContain("server or account changed");
+    // One plain line inside the card, not a dialog.
+    expect(explanation.tagName).toBe("P");
+    expect(explanation.closest('[data-testid="notification-delivery-sink"]')).not.toBeNull();
+
+    // Saving a new password for the moved sink ends the explanation.
+    rerender(
+      section({
+        delivery: {
+          ...lastUpdate(handlers),
+          sinks: lastUpdate(handlers).sinks.map((sink) => ({ ...sink, secret_binding: null }))
+        },
+        runtime: state({
+          sinks: [{ sink_id: SINK_ID, secret_configured: true, secret_retired: false, last_outcome: null }]
+        }),
+        handlers
+      })
+    );
+    expect(screen.queryByTestId("notification-delivery-sink-secret-retired")).toBeNull();
+  });
+
+  test("never reads a configured sink as having had its password removed", () => {
+    // Rust clears the flag with the credential, so both can never be true together; if they
+    // ever are, "a password is saved" wins rather than the sink reading as broken.
+    renderSection({
+      delivery: delivery({ sinks: [resendSink] }),
+      runtime: state({
+        sinks: [{ sink_id: SINK_ID, secret_configured: true, secret_retired: true, last_outcome: null }]
+      })
+    });
+    expect(screen.getByTestId("notification-delivery-sink-secret-state").textContent).toContain(
+      "Saved."
+    );
+    expect(screen.queryByTestId("notification-delivery-sink-secret-retired")).toBeNull();
+  });
+
+  test("does not explain an absent password on a sink that never had one", () => {
+    renderSection({
+      delivery: delivery({ sinks: [resendSink] }),
+      runtime: state({
+        sinks: [{ sink_id: SINK_ID, secret_configured: false, secret_retired: false, last_outcome: null }]
+      })
+    });
+    expect(screen.queryByTestId("notification-delivery-sink-secret-retired")).toBeNull();
+  });
+
+  test("does not explain a password removal the user asked for", async () => {
+    // Rust clears the flag when the user clears the credential, so an explicit removal is
+    // never blamed on a server change.
+    const handlers = actions();
+    const { rerender } = render(
+      section({
+        delivery: delivery({
+          sinks: [{ ...resendSink, secret_binding: "resend:https://api.example.invalid/emails" }]
+        }),
+        runtime: state({
+          sinks: [{ sink_id: SINK_ID, secret_configured: true, secret_retired: false, last_outcome: null }]
+        }),
+        handlers
+      })
+    );
+    await act(async () => {
+      fireEvent.click(screen.getByTestId("notification-delivery-sink-clear-secret"));
+    });
+    expect(handlers.clearSecret).toHaveBeenCalledWith(SINK_ID);
+
+    // Rust answers a clear with both flags down, and nothing blames the server for it.
+    rerender(
+      section({
+        delivery: delivery({
+          sinks: [{ ...resendSink, secret_binding: "resend:https://api.example.invalid/emails" }]
+        }),
+        runtime: state({
+          sinks: [{ sink_id: SINK_ID, secret_configured: false, secret_retired: false, last_outcome: null }]
+        }),
+        handlers
+      })
+    );
+    expect(screen.queryByTestId("notification-delivery-sink-secret-retired")).toBeNull();
+  });
+
+  test("never retires the password for a destination, name, from address or enable change", () => {
+    const boundSink = { ...resendSink, secret_binding: "resend:https://api.example.invalid/emails" };
+    const handlers = renderSection({
+      delivery: delivery({ sinks: [boundSink] }),
+      runtime: state({
+        sinks: [{ sink_id: SINK_ID, secret_configured: true, secret_retired: false, last_outcome: null }]
+      })
+    });
+
+    fireEvent.click(screen.getByTestId("notification-delivery-sink-enabled"));
+    fireEvent.click(screen.getByTestId("notification-delivery-sink-enabled"));
+    for (const [testId, value] of [
+      ["notification-delivery-sink-from", "other@example.invalid"],
+      ["notification-delivery-sink-name", "Another name"],
+      ["notification-delivery-sink-to", "elsewhere@example.invalid"]
+    ] as const) {
+      const field = screen.getByTestId(testId) as HTMLInputElement;
+      fireEvent.change(field, { target: { value } });
+      fireEvent.blur(field);
+    }
+
+    // None of these fields describes the server or the account, so none of them may retire
+    // the credential, and the UI never dispatches a clear of its own accord.
+    expect(handlers.clearSecret).not.toHaveBeenCalled();
+    expect(handlers.setSecret).not.toHaveBeenCalled();
+    const calls = (handlers.update as unknown as { mock: { calls: NotificationDeliverySettings[][] } })
+      .mock.calls;
+    expect(calls.length).toBeGreaterThan(0);
+    // The binding travels back to Rust untouched: the user never edits it, and this page
+    // never revises the store behind Rust's back.
+    for (const call of calls) {
+      expect(call[0].sinks[0].secret_binding).toBe("resend:https://api.example.invalid/emails");
+    }
+    expect(screen.queryByTestId("notification-delivery-sink-secret-retired")).toBeNull();
+  });
+
   test("sends one test message through the typed command", async () => {
     const handlers = renderSection({
       runtime: state({
-        sinks: [{ sink_id: SINK_ID, secret_configured: true, last_outcome: null }]
+        sinks: [{ sink_id: SINK_ID, secret_configured: true, secret_retired: false, last_outcome: null }]
       })
     });
     await act(async () => {
@@ -460,7 +636,7 @@ describe("NotificationDeliverySection", () => {
   test("removes a sink and releases the credential it was keyed by", () => {
     const handlers = renderSection({
       runtime: state({
-        sinks: [{ sink_id: SINK_ID, secret_configured: true, last_outcome: null }]
+        sinks: [{ sink_id: SINK_ID, secret_configured: true, secret_retired: false, last_outcome: null }]
       })
     });
     fireEvent.click(screen.getByTestId("notification-delivery-sink-remove"));
@@ -498,6 +674,7 @@ describe("NotificationDeliverySection", () => {
           {
             sink_id: SINK_ID,
             secret_configured: false,
+            secret_retired: false,
             last_outcome: { kind: "transport", at_ms: 1 }
           }
         ]

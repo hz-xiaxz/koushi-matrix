@@ -53,10 +53,12 @@ import {
   type LocaleSettings,
   type NavigationPreferenceUpdate,
   type NotificationDeliverySinkState,
+  type NotificationSinkSettings,
   type RoomNotificationMode,
   type RoomNotificationSettings,
   type StageUploadBytesRequestItem,
   type SettingsPatch,
+  type SettingsState,
   type SidebarScopeSettings,
   type SidebarSectionKind,
   type StagedUploadItem,
@@ -1263,17 +1265,22 @@ function setNotificationDeliverySinkState(
   sinkId: string,
   change: {
     secret_configured?: boolean;
+    secret_retired?: boolean;
     last_outcome?: NotificationDeliverySinkState["last_outcome"];
+    /** `undefined` keeps Rust's binding rule; `null` records that the credential went away. */
+    secret_binding?: string | null;
   }
 ): DesktopSnapshot {
+  const { secret_binding, ...stateChange } = change;
   const existing = currentSnapshot.state.domain.notification_delivery.sinks.find(
     (sink) => sink.sink_id === sinkId
   );
   const next: NotificationDeliverySinkState = {
     sink_id: sinkId,
     secret_configured: existing?.secret_configured ?? false,
+    secret_retired: existing?.secret_retired ?? false,
     last_outcome: existing?.last_outcome ?? null,
-    ...change
+    ...stateChange
   };
   return setCurrentSnapshot({
     ...currentSnapshot,
@@ -1289,10 +1296,45 @@ function setNotificationDeliverySinkState(
             ),
             next
           ]
-        }
+        },
+        settings: withNotificationSinkBinding(currentSnapshot.state.domain.settings, sinkId, secret_binding)
       }
     }
   });
+}
+
+/**
+ * #1427: the harness's mirror of `NotificationSinkSettings::credential_identity` and the
+ * binding rule that goes with it. A real runtime owns both; the harness only has to stamp a
+ * saved credential with the sink's own server and account, and drop a binding that no longer
+ * names them, so the sink stops reading as configured exactly when Rust would say so.
+ */
+function notificationSinkBinding(sink: NotificationSinkSettings): string {
+  return sink.config.kind === "resend"
+    ? `resend:${sink.config.endpoint}`
+    : `smtp:${sink.config.host}:${sink.config.port}:${sink.config.username}`;
+}
+
+function withNotificationSinkBinding(
+  settings: SettingsState,
+  sinkId: string,
+  binding: string | null | undefined
+): SettingsState {
+  if (binding === undefined) {
+    return settings;
+  }
+  return {
+    ...settings,
+    values: {
+      ...settings.values,
+      delivery: {
+        ...settings.values.delivery,
+        sinks: settings.values.delivery.sinks.map((sink: NotificationSinkSettings) =>
+          sink.id === sinkId ? { ...sink, secret_binding: binding } : sink
+        )
+      }
+    }
+  };
 }
 
 function sidebarForSelection(activeSpaceId: string | null): DesktopSnapshot["sidebar"] {  return {
@@ -1904,6 +1946,17 @@ mock.setCommandResponse("import_legacy_settings", ({ patch }: { patch: SettingsP
 });
 mock.setCommandResponse("update_settings", ({ patch }: { patch: SettingsPatch }) => {
   const values = applySettingsPatch(currentSnapshot.state.domain.settings.values, patch);
+  // Rust drops a binding that no longer names the sink's own server and account, and with it
+  // the credential the store held; the harness applies the same rule to what it hands back.
+  const droppedSinkIds = values.delivery.sinks
+    .filter((sink: NotificationSinkSettings) => sink.secret_binding !== null && sink.secret_binding !== notificationSinkBinding(sink))
+    .map((sink: NotificationSinkSettings) => sink.id);
+  values.delivery = {
+    ...values.delivery,
+    sinks: values.delivery.sinks.map((sink: NotificationSinkSettings) =>
+      droppedSinkIds.includes(sink.id) ? { ...sink, secret_binding: null } : sink
+    )
+  };
   const sidebarSection = patch.sidebar_section;
   const appliesToVisibleSidebar =
     sidebarSection && sidebarSection.scope === (currentSnapshot.sidebar.active_space_id ?? "__home__");
@@ -1938,14 +1991,25 @@ mock.setCommandResponse("update_settings", ({ patch }: { patch: SettingsPatch })
       ...currentSnapshot.state,
       domain: {
         ...currentSnapshot.state.domain,
-      settings: {
-        ...currentSnapshot.state.domain.settings,
-        values,
-        persistence: { kind: "idle" }
-      },
-      locale_profile: resolveLocaleDisplayProfile(values.locale),
-      typography_profile: resolveTypographyDisplayProfile(values.typography)
-      },
+        settings: {
+          ...currentSnapshot.state.domain.settings,
+          values,
+          persistence: { kind: "idle" }
+        },
+        // The credential Rust retired is no longer in the store, and Rust is what says a
+        // retirement happened, so a sink that had one reads as retired rather than as never
+        // configured.
+        notification_delivery: {
+          ...currentSnapshot.state.domain.notification_delivery,
+          sinks: currentSnapshot.state.domain.notification_delivery.sinks.map((sink) =>
+            droppedSinkIds.includes(sink.sink_id)
+              ? { ...sink, secret_configured: false, secret_retired: sink.secret_configured }
+              : sink
+          )
+        },
+        locale_profile: resolveLocaleDisplayProfile(values.locale),
+        typography_profile: resolveTypographyDisplayProfile(values.typography)
+      }
     }
   });
 });
@@ -2254,13 +2318,28 @@ mock.setCommandResponse(
   "set_notification_delivery_secret",
   ({ sinkId, secret }: { sinkId: string; secret: string }) => {
     void secret;
-    return setNotificationDeliverySinkState(sinkId, { secret_configured: true });
+    // Saving a password is also what stamps the identity Rust will check it against. The
+    // harness reads the sink's own server and account the way Rust does, so a password saved
+    // for the current configuration is the one that stays usable.
+    const sink = currentSnapshot.state.domain.settings.values.delivery.sinks.find(
+      (candidate) => candidate.id === sinkId
+    );
+    return setNotificationDeliverySinkState(sinkId, {
+      secret_configured: true,
+      secret_retired: false,
+      secret_binding: sink ? notificationSinkBinding(sink) : null
+    });
   }
 );
 mock.setCommandResponse(
   "clear_notification_delivery_secret",
   ({ sinkId }: { sinkId: string }) =>
-    setNotificationDeliverySinkState(sinkId, { secret_configured: false, last_outcome: null })
+    setNotificationDeliverySinkState(sinkId, {
+      secret_configured: false,
+      secret_retired: false,
+      last_outcome: null,
+      secret_binding: null
+    })
 );
 mock.setCommandResponse(
   "test_notification_delivery",

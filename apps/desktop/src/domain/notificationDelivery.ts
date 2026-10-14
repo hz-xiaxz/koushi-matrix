@@ -143,7 +143,10 @@ export function notificationSinkFromDraft(id: string, draft: NotificationSinkDra
     destination: draft.destination.trim(),
     from_address: draft.from_address.trim(),
     sender_name: draft.sender_name.trim(),
-    config
+    config,
+    // Nothing is stored for a sink that has never had a password: the binding Rust records
+    // is the one that will be attached to whatever credential the user saves next.
+    secret_binding: null
   };
 }
 
