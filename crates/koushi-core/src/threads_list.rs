@@ -1720,7 +1720,11 @@ fn sender_label(profile: &TimelineDetails<matrix_sdk_ui::timeline::Profile>) -> 
 
 fn body_preview(content: Option<&matrix_sdk_ui::timeline::TimelineItemContent>) -> Option<String> {
     if let Some(message) = content.and_then(|c| c.as_message()) {
-        return Some(message.body().to_owned());
+        return Some(crate::timeline::mention_marked_message_preview(
+            message.msgtype(),
+            message.body(),
+            message.mentions(),
+        ));
     }
     if let Some(sticker) = content.and_then(|c| c.as_sticker()) {
         return Some(sticker.content().body.clone());

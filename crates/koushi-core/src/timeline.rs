@@ -73,6 +73,7 @@ mod thread_projection;
 
 pub(crate) use diagnostics::record_thread_summary_reconciliation;
 
+pub(crate) use item_projection::mention_marked_message_preview;
 pub use item_projection::sdk_item_to_timeline_item;
 /// #1110: the single authoritative row-visibility policy, shared by the
 /// timeline actor's projection and the consumer export.
