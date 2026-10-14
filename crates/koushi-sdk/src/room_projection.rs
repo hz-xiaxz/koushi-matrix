@@ -3450,6 +3450,41 @@ async fn matrix_parent_space_ids(room: &matrix_sdk::Room) -> Vec<String> {
         .await
 }
 
+/// Issue #1410: the `suggested` flag of each routed `m.space.child` the Space
+/// carries in local state, keyed by child room ID. The joined Space's synced
+/// state is fresher than a `/hierarchy` response after this account changes
+/// the flag, so it is preferred where present.
+pub(crate) async fn matrix_space_child_suggested_flags(
+    room: &matrix_sdk::Room,
+) -> std::collections::HashMap<String, bool> {
+    let Ok(child_events) = room
+        .get_state_events_static::<SpaceChildEventContent>()
+        .await
+    else {
+        return std::collections::HashMap::new();
+    };
+    child_events
+        .into_iter()
+        .filter_map(|child_event| match child_event.deserialize() {
+            Ok(SyncOrStrippedState::Sync(SyncStateEvent::Original(event)))
+                if !event.content.via.is_empty() =>
+            {
+                Some((event.state_key.to_string(), event.content.suggested))
+            }
+            Ok(SyncOrStrippedState::Stripped(event))
+                if event
+                    .content
+                    .via
+                    .as_ref()
+                    .is_some_and(|via| !via.is_empty()) =>
+            {
+                Some((event.state_key.to_string(), event.content.suggested))
+            }
+            _ => None,
+        })
+        .collect()
+}
+
 pub(crate) async fn matrix_space_child_room_ids(room: &matrix_sdk::Room) -> Vec<String> {
     let Ok(child_events) = room
         .get_state_events_static::<SpaceChildEventContent>()

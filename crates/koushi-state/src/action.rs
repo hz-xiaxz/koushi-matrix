@@ -312,11 +312,43 @@ pub enum AppAction {
         space_id: String,
         generation: u64,
         children: Vec<SpaceChildSummary>,
+        /// Issue #1410: whether this account may send `m.space.child` here.
+        can_edit_suggested: bool,
     },
     SpaceChildrenLoadFailed {
         space_id: String,
         generation: u64,
         failure: OperationFailureKind,
+    },
+    /// Issue #1410: mark or unmark a loaded child of the selected Space as
+    /// suggested.
+    SpaceChildSuggestedUpdateRequested {
+        request_id: u64,
+        space_id: String,
+        child_room_id: String,
+        suggested: bool,
+    },
+    SpaceChildSuggestedUpdateSettled {
+        request_id: u64,
+        space_id: String,
+        child_room_id: String,
+        suggested: bool,
+        failure: Option<OperationFailureKind>,
+    },
+    /// Issue #1410: the user chose to join the offered suggested rooms.
+    SuggestedRoomsJoinRequested {
+        request_id: u64,
+        space_id: String,
+    },
+    /// Issue #1410: every offered room settled; one outcome per room.
+    SuggestedRoomsJoinSettled {
+        request_id: u64,
+        space_id: String,
+        outcomes: Vec<crate::state::SuggestedRoomJoinOutcome>,
+    },
+    /// Issue #1410: Skip, or Close after a partial failure.
+    SuggestedRoomsOfferDismissed {
+        space_id: String,
     },
     SpaceMembersLoadRequested {
         request_id: u64,

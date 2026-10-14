@@ -139,7 +139,9 @@ pub use profile::{
 
 // ── Re-exports: space children ────────────────────────────────────────────
 pub use space_children::{
-    SpaceChildMembership, SpaceChildSummary, SpaceChildrenLoadState, SpaceChildrenState,
+    RECENTLY_JOINED_ROOM_LIMIT, RecentlyJoinedRoomIds, SpaceChildMembership,
+    SpaceChildSuggestedEditState, SpaceChildSummary, SpaceChildrenLoadState, SpaceChildrenState,
+    SuggestedRoomCandidate, SuggestedRoomJoinOutcome, SuggestedRoomJoinResult, SuggestedRoomsOffer,
 };
 
 // ── Re-exports: space members ─────────────────────────────────────────────

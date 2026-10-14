@@ -7993,6 +7993,34 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   font-size: 12px;
 }
 
+/* #1410: the admin's per-child suggested toggle. */
+.settings-detail-row .space-child-suggest {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 8px;
+  white-space: normal;
+}
+
+.space-child-suggest label {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+  cursor: pointer;
+}
+
+.settings-detail-row .space-child-suggest label span {
+  color: var(--text-muted);
+  font-size: 12px;
+  font-weight: 600;
+}
+
+.settings-detail-row .space-child-suggest-error {
+  color: var(--danger);
+  white-space: normal;
+}
+
 .shortcut-groups,
 .settings-list {
   display: grid;
@@ -10022,6 +10050,16 @@ kbd {
 }
 .leave-space-room-name { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
 .leave-space-room-note { color: var(--text-muted); font-size: 12px; }
+.suggested-room-result {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  align-items: center;
+  min-height: 30px;
+  padding: 0 6px;
+  font-size: 13px;
+}
+.suggested-room-result .leave-space-room-note.is-failed { color: var(--danger); }
 
 /* #1006 advisory address availability under the address field. */
 .create-room-address-availability p { margin: 4px 0 0; }
@@ -10159,6 +10197,15 @@ kbd {
   flex: 0 0 auto;
   align-items: center;
   color: var(--text-muted);
+}
+
+/* #1410: the suggested-room marker sits before the name of a not-joined
+   Space child. */
+.room-suggested-icon {
+  display: inline-flex;
+  flex: 0 0 auto;
+  align-items: center;
+  color: var(--brand);
 }
 
 /* #1327: the one-line header's status pills. They sit after the name, keep

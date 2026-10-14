@@ -1987,7 +1987,11 @@ pub async fn room_is_joined(
 }
 
 mod space_child;
-pub use space_child::{MatrixSpaceChildLinkOutcome, MatrixSpaceParentLinkOutcome, set_space_child};
+pub(crate) use space_child::space_child_events_permitted;
+pub use space_child::{
+    MatrixSpaceChildLinkOutcome, MatrixSpaceParentLinkOutcome, set_space_child,
+    set_space_child_suggested,
+};
 
 #[cfg(test)]
 mod address_tests;

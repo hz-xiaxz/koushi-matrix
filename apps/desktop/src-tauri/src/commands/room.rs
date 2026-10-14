@@ -987,6 +987,60 @@ pub async fn set_space_child(
     Ok(admission)
 }
 
+/// Issue #1410: an admin marks a Space child as suggested to members, or not.
+#[tauri::command]
+pub async fn set_space_child_suggested(
+    account_tab_id: Option<String>,
+    space_id: String,
+    child_room_id: String,
+    suggested: bool,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_set_space_child_suggested_command(request_id, space_id, child_room_id, suggested),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(admission)
+}
+
+/// Issue #1410: accept the one-time suggested-rooms offer. Core joins the
+/// rooms of the offer it holds; the GUI names none.
+#[tauri::command]
+pub async fn join_suggested_space_rooms(
+    account_tab_id: Option<String>,
+    space_id: String,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_join_suggested_space_rooms_command(request_id, space_id),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(admission)
+}
+
+/// Issue #1410: skip the suggested-rooms offer, or close its results.
+#[tauri::command]
+pub async fn dismiss_suggested_space_rooms(
+    account_tab_id: Option<String>,
+    space_id: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    submit_core_command_with_admission(
+        state.inner(),
+        build_dismiss_suggested_space_rooms_command(request_id, space_id),
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn join_room(
     account_tab_id: Option<String>,
@@ -1409,6 +1463,41 @@ pub(super) fn build_leave_space_command(
         request_id,
         space_id,
         child_room_ids,
+    })
+}
+
+pub(super) fn build_set_space_child_suggested_command(
+    request_id: koushi_protocol::RequestId,
+    space_id: String,
+    child_room_id: String,
+    suggested: bool,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::SetSpaceChildSuggested {
+        request_id,
+        space_id,
+        child_room_id,
+        suggested,
+    })
+}
+
+pub(super) fn build_join_suggested_space_rooms_command(
+    request_id: koushi_protocol::RequestId,
+    space_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::JoinSuggestedSpaceRooms {
+        request_id,
+        space_id,
+        room_ids: Vec::new(),
+    })
+}
+
+pub(super) fn build_dismiss_suggested_space_rooms_command(
+    request_id: koushi_protocol::RequestId,
+    space_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::DismissSuggestedSpaceRooms {
+        request_id,
+        space_id,
     })
 }
 

@@ -301,6 +301,7 @@ pub(crate) fn handle_room_left_locally(state: &mut AppState, room_id: String) ->
 
 pub(crate) fn handle_room_joined_locally(state: &mut AppState, room_id: String) -> Vec<AppEffect> {
     state.room_list.locally_left_room_ids.remove(&room_id);
+    super::space_children::record_room_joined(state, &room_id);
     Vec::new()
 }
 
@@ -468,6 +469,10 @@ fn handle_room_list_updated_with_crawler(
         if super::space_children::handle_selected(state, None) {
             effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
         }
+    }
+    // #1410: a Space this account is no longer in withdraws its offer.
+    if super::space_children::withdraw_suggested_offer_for_left_space(state) {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
     }
 
     if let Some(active_room_id) = state.navigation.active_room_id.clone() {

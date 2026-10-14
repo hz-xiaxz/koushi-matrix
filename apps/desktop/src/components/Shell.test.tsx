@@ -630,6 +630,40 @@ describe("Rust-projected workspace shell", () => {
     expect(sidebarProps().onSelectRoom).not.toHaveBeenCalled();
   });
 
+  // #1410: a suggested not-joined child carries the Sparkles marker before its
+  // name, announced through the row's description so its name stays the label.
+  it("marks a suggested not-joined room before its name and describes it", () => {
+    const snapshot = readyDesktopSnapshotFixture();
+    snapshot.sidebar.sections.not_joined = [
+      {
+        ...room("!suggested:example.invalid", "Suggested Room"),
+        membership: "not_joined",
+        can_join: true,
+        suggested: true
+      },
+      { ...room("!plain:example.invalid", "Plain Room"), membership: "not_joined", can_join: true }
+    ];
+
+    render(<Sidebar snapshot={snapshot} {...sidebarProps()} />);
+
+    const suggested = screen.getByRole("button", { name: "Suggested Room" });
+    const marker = within(suggested).getByRole("img", { name: t("roomList.suggested") });
+    const name = within(suggested).getByText("Suggested Room");
+    expect(
+      marker.compareDocumentPosition(name) & Node.DOCUMENT_POSITION_FOLLOWING
+    ).toBeTruthy();
+    const describedBy = suggested.getAttribute("aria-describedby") ?? "";
+    expect(
+      describedBy
+        .split(" ")
+        .map((id) => document.getElementById(id)?.textContent)
+    ).toContain(t("roomList.suggestedDescription"));
+
+    const plain = screen.getByRole("button", { name: "Plain Room" });
+    expect(within(plain).queryByTestId("room-suggested-icon")).toBeNull();
+    expect(plain.getAttribute("aria-describedby")).toBeNull();
+  });
+
   // Issue #961: a click must never fire a request the server would reject, and
   // an invitation is answered where accept and decline live, not by a single
   // click that silently joins.

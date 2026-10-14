@@ -198,6 +198,26 @@ pub enum RoomCommand {
         space_id: String,
         child_room_id: String,
     },
+    /// Issue #1410: set the `suggested` flag of a Space's `m.space.child`,
+    /// keeping every other field of the event.
+    SetSpaceChildSuggested {
+        request_id: RequestId,
+        space_id: String,
+        child_room_id: String,
+        suggested: bool,
+    },
+    /// Issue #1410: accept the one-time suggested-rooms offer. Core replaces
+    /// `room_ids` with the offer it holds, so a caller cannot widen it.
+    JoinSuggestedSpaceRooms {
+        request_id: RequestId,
+        space_id: String,
+        room_ids: Vec<String>,
+    },
+    /// Issue #1410: skip the suggested-rooms offer, or close its results.
+    DismissSuggestedSpaceRooms {
+        request_id: RequestId,
+        space_id: String,
+    },
     InviteUser {
         request_id: RequestId,
         room_id: String,
@@ -447,6 +467,35 @@ impl fmt::Debug for RoomCommand {
                 .field("request_id", request_id)
                 .field("space_id", &"RoomId(..)")
                 .field("child_room_id", &"RoomId(..)")
+                .finish(),
+            Self::SetSpaceChildSuggested {
+                request_id,
+                suggested,
+                ..
+            } => formatter
+                .debug_struct("SetSpaceChildSuggested")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
+                .field("child_room_id", &"RoomId(..)")
+                .field("suggested", suggested)
+                .finish(),
+            Self::JoinSuggestedSpaceRooms {
+                request_id,
+                room_ids,
+                ..
+            } => formatter
+                .debug_struct("JoinSuggestedSpaceRooms")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
+                .field(
+                    "room_ids",
+                    &format_args!("[RoomId(..); {}]", room_ids.len()),
+                )
+                .finish(),
+            Self::DismissSuggestedSpaceRooms { request_id, .. } => formatter
+                .debug_struct("DismissSuggestedSpaceRooms")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
                 .finish(),
             Self::InviteUser { request_id, .. } => formatter
                 .debug_struct("InviteUser")

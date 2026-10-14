@@ -238,6 +238,7 @@ fn loading_space_children_publishes_the_not_joined_sidebar_lane() {
         avatar: None,
         membership: SpaceChildMembership::NotJoined,
         can_join: false,
+        suggested: false,
         is_space: false,
         joined_members: 1,
     }];

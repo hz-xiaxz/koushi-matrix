@@ -504,6 +504,13 @@ export interface DesktopApi {
   createRoom(request: CreateRoomRequest): Promise<CreateRoomSettlement>;
   createSpace(name: string): Promise<CommandSettlement>;
   setSpaceChild(spaceId: string, childRoomId: string): Promise<CommandAdmission>;
+  setSpaceChildSuggested(
+    spaceId: string,
+    childRoomId: string,
+    suggested: boolean
+  ): Promise<CommandAdmission>;
+  joinSuggestedSpaceRooms(spaceId: string): Promise<CommandAdmission>;
+  dismissSuggestedSpaceRooms(spaceId: string): Promise<CommandAdmission>;
   checkRoomAddressAvailability(aliasLocalpart: string): Promise<CommandAdmission>;
   clearRoomAddressAvailability(): Promise<CommandAdmission>;
   acceptInvite(roomId: string): Promise<CommandSettlement>;

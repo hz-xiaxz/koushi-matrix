@@ -53,6 +53,7 @@ fn child(room_id: &str, label: &str, membership: SpaceChildMembership) -> SpaceC
             membership,
             SpaceChildMembership::NotJoined | SpaceChildMembership::Invited
         ),
+        suggested: false,
         is_space: false,
         joined_members: 4,
     }
@@ -75,7 +76,7 @@ fn state_with_children(children: Vec<SpaceChildSummary>) -> AppState {
         selected_space_id: Some(SPACE_ID.to_owned()),
         generation: 1,
         children,
-        load: Default::default(),
+        ..Default::default()
     };
     state
 }
@@ -452,6 +453,7 @@ fn leaving_a_child_refreshes_the_selected_spaces_children() {
         AppAction::SpaceChildrenLoaded {
             space_id: SPACE_ID.to_owned(),
             generation: 1,
+            can_edit_suggested: false,
             children: vec![child(
                 "!joined:example.invalid",
                 "Joined Room",
@@ -470,6 +472,7 @@ fn leaving_a_child_refreshes_the_selected_spaces_children() {
         AppAction::SpaceChildrenLoaded {
             space_id: SPACE_ID.to_owned(),
             generation: 2,
+            can_edit_suggested: false,
             children: vec![child(
                 "!joined:example.invalid",
                 "Joined Room",
@@ -506,6 +509,7 @@ fn leaving_a_child_during_the_first_load_fences_it_and_reloads() {
         AppAction::SpaceChildrenLoaded {
             space_id: SPACE_ID.to_owned(),
             generation: 1,
+            can_edit_suggested: false,
             children: vec![child(
                 "!joined:example.invalid",
                 "Joined Room",

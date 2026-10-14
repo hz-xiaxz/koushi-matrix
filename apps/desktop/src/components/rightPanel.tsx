@@ -218,6 +218,7 @@ export function ContextualRightPanel({
   roomInfoReveal = null,
   onRoomInfoRevealHandled,
   onUpdateSpaceJoinRule,
+  onSetSpaceChildSuggested,
   onIgnoreUser = () => undefined,
   onUnignoreUser = () => undefined,
   onReportUser = () => undefined,
@@ -404,6 +405,8 @@ export function ContextualRightPanel({
   onRoomInfoRevealHandled?: () => void;
   /** Issue #935: settles, or rejects when Rust refuses the change. */
   onUpdateSpaceJoinRule?: (spaceId: string, joinRule: RoomJoinRule) => Promise<void>;
+  /** Issue #1410: suggest (or stop suggesting) a Space child to its members. */
+  onSetSpaceChildSuggested?: (spaceId: string, childRoomId: string, suggested: boolean) => void;
   onIgnoreUser?: (userId: string) => void;
   onUnignoreUser?: (userId: string) => void;
   onReportUser?: (userId: string) => void;
@@ -857,6 +860,18 @@ export function ContextualRightPanel({
             snapshot.state.domain.space_children.selected_space_id === activeSpace.space_id
               ? snapshot.state.domain.space_children.children
               : []
+          }
+          canEditSuggested={
+            activeSpace !== null &&
+            snapshot.state.domain.space_children.selected_space_id === activeSpace.space_id &&
+            snapshot.state.domain.space_children.can_edit_suggested === true
+          }
+          suggestedEdit={snapshot.state.domain.space_children.suggested_edit}
+          onSetChildSuggested={
+            activeSpace && onSetSpaceChildSuggested
+              ? (childRoomId, suggested) =>
+                  onSetSpaceChildSuggested(activeSpace.space_id, childRoomId, suggested)
+              : undefined
           }
           onAcceptInvite={onAcceptInvite}
           onJoinRoom={onJoinRoom}

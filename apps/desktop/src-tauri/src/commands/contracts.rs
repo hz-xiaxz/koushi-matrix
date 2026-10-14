@@ -1351,6 +1351,57 @@ fn tauri_command_routes_build_expected_core_commands() {
         other => panic!("unexpected command: {other:?}"),
     }
 
+    match build_set_space_child_suggested_command(
+        fake_request_id(18),
+        "!space:example.org".to_owned(),
+        "!room:example.org".to_owned(),
+        true,
+    ) {
+        CoreCommand::Room(RoomCommand::SetSpaceChildSuggested {
+            request_id,
+            space_id,
+            child_room_id,
+            suggested,
+        }) => {
+            assert_eq!(request_id, fake_request_id(18));
+            assert_eq!(space_id, "!space:example.org");
+            assert_eq!(child_room_id, "!room:example.org");
+            assert!(suggested);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    // #1410: the GUI never names the rooms to join; Core uses its offer.
+    match build_join_suggested_space_rooms_command(
+        fake_request_id(18),
+        "!space:example.org".to_owned(),
+    ) {
+        CoreCommand::Room(RoomCommand::JoinSuggestedSpaceRooms {
+            request_id,
+            space_id,
+            room_ids,
+        }) => {
+            assert_eq!(request_id, fake_request_id(18));
+            assert_eq!(space_id, "!space:example.org");
+            assert!(room_ids.is_empty());
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    match build_dismiss_suggested_space_rooms_command(
+        fake_request_id(18),
+        "!space:example.org".to_owned(),
+    ) {
+        CoreCommand::Room(RoomCommand::DismissSuggestedSpaceRooms {
+            request_id,
+            space_id,
+        }) => {
+            assert_eq!(request_id, fake_request_id(18));
+            assert_eq!(space_id, "!space:example.org");
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
     match build_accept_invite_command(fake_request_id(19), "!invite:example.org".to_owned()) {
         CoreCommand::Room(RoomCommand::AcceptInvite {
             request_id,

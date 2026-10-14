@@ -636,6 +636,20 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   reported from `AppState.invites`, not from the server summary. A child the
   server did not describe is `unknown` with no join action — the permission model
   is never worked around.
+- Suggested Space rooms (#1410,
+  [canon](../architecture/state-machine.md#suggested-space-rooms-1410)) live in `AppState.space_children`
+  too. `SpaceChildSummary.suggested` comes from the Space's synced
+  `m.space.child` with the `/hierarchy` as fallback, and the Not joined lane
+  sorts suggested rows first and marks them with `RoomListItem.suggested`.
+  `can_edit_suggested` and `suggested_edit` (one save at a time) back the
+  admin's `set_space_child_suggested` toggle, which keeps every other field of
+  the child event. `suggested_offer` is the one-time bulk-join offer that the
+  reducer opens when a Space is joined. It outlives the Space selection and
+  leaves when the Space or the session goes. `join_suggested_space_rooms`
+  carries no room list, because admission rewrites it from the held offer.
+  React renders the offer, its `joining` state and its per-room `completed`
+  results, and it must not choose rooms, retry joins, or reopen a dismissed
+  offer.
 - Add existing room (#1007) renders `SidebarModel.space_add_rooms`, projected
   by `space_add_rooms_for_state` from the active Space's parent-side
   `child_room_ids`, the in-flight `LinkingSpaceChild` pair, and

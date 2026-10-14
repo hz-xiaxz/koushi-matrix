@@ -12,7 +12,9 @@ pub(crate) const SEARCH_UNAVAILABLE_MESSAGE: &str = "search unavailable";
 
 /// Narrow a `LeaveSpace` command's child rooms to the Space's current leave
 /// candidates, so a stale or forged ID never leaves a room outside the Space.
-/// Every other command passes through unchanged.
+/// A `JoinSuggestedSpaceRooms` command joins exactly the rooms of the admitted
+/// offer (#1410), whatever the caller sent. Every other command passes through
+/// unchanged.
 pub(crate) fn admit_leave_space_command(
     state: &AppState,
     command: koushi_protocol::command::RoomCommand,
@@ -28,6 +30,27 @@ pub(crate) fn admit_leave_space_command(
                 request_id,
                 space_id,
                 child_room_ids,
+            }
+        }
+        koushi_protocol::command::RoomCommand::JoinSuggestedSpaceRooms {
+            request_id,
+            space_id,
+            room_ids: _,
+        } => {
+            let room_ids = match &state.space_children.suggested_offer {
+                koushi_state::SuggestedRoomsOffer::Joining {
+                    request_id: admitted,
+                    space_id: offered,
+                    rooms,
+                } if *admitted == request_id.sequence && *offered == space_id => {
+                    rooms.iter().map(|room| room.room_id.clone()).collect()
+                }
+                _ => Vec::new(),
+            };
+            koushi_protocol::command::RoomCommand::JoinSuggestedSpaceRooms {
+                request_id,
+                space_id,
+                room_ids,
             }
         }
         other => other,
@@ -111,6 +134,33 @@ pub(crate) fn space_member_forward_failure_action(
                 ),
                 sent_revision: None,
                 projection: None,
+            },
+        )),
+        koushi_protocol::command::RoomCommand::SetSpaceChildSuggested {
+            request_id,
+            space_id,
+            child_room_id,
+            suggested,
+        } => Some((
+            *request_id,
+            AppAction::SpaceChildSuggestedUpdateSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                child_room_id: child_room_id.clone(),
+                suggested: *suggested,
+                failure: Some(OperationFailureKind::Sdk),
+            },
+        )),
+        koushi_protocol::command::RoomCommand::JoinSuggestedSpaceRooms {
+            request_id,
+            space_id,
+            ..
+        } => Some((
+            *request_id,
+            AppAction::SuggestedRoomsJoinSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                outcomes: Vec::new(),
             },
         )),
         _ => None,
@@ -544,5 +594,40 @@ mod tests {
             koushi_protocol::command::RoomCommand::LeaveRoom { room_id, .. }
                 if room_id == "!outside:example.invalid"
         ));
+    }
+
+    /// Issue #1410: a bulk join joins only the admitted offer, so a forged or
+    /// widened room list never reaches the SDK.
+    #[test]
+    fn suggested_rooms_join_admission_uses_the_held_offer() {
+        let space_id = "!space:example.invalid";
+        let id = request(9);
+        let mut state = AppState::default();
+        state.space_children.suggested_offer = koushi_state::SuggestedRoomsOffer::Joining {
+            request_id: id.sequence,
+            space_id: space_id.to_owned(),
+            rooms: vec![koushi_state::SuggestedRoomCandidate {
+                room_id: "!suggested:example.invalid".to_owned(),
+                display_name: "Suggested".to_owned(),
+                display_name_placeholder: None,
+            }],
+        };
+        let join = |request_id| koushi_protocol::command::RoomCommand::JoinSuggestedSpaceRooms {
+            request_id,
+            space_id: space_id.to_owned(),
+            room_ids: vec!["!forged:example.invalid".to_owned()],
+        };
+        let room_ids_of = |command| match command {
+            koushi_protocol::command::RoomCommand::JoinSuggestedSpaceRooms { room_ids, .. } => {
+                room_ids
+            }
+            other => panic!("unexpected command: {other:?}"),
+        };
+
+        assert_eq!(
+            room_ids_of(admit_leave_space_command(&state, join(id))),
+            ["!suggested:example.invalid"]
+        );
+        assert!(room_ids_of(admit_leave_space_command(&state, join(request(10)))).is_empty());
     }
 }
