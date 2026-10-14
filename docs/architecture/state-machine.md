@@ -2102,6 +2102,11 @@ stateDiagram-v2
   to their Thread timeline. Canonical positions are retained, including hidden
   replies, so an existing unthreaded read marker can still define the boundary.
   Room own-message divider advancement likewise excludes thread replies.
+- With no unread main-conversation event, the Room `read_marker_display_event_id`
+  names a displayed row by its activity identity: the last row whose content is
+  at or before the boundary. A read thread root that latest-reply ordering moved
+  below the boundary row therefore stays above the "Read up to here" divider.
+  Rows changed only by reprojection re-derive navigation after `ItemsUpdated`.
 - `NavigationUpdated` is emitted only when the projection changes. Diff-driven
   updates are emitted after the corresponding `ItemsUpdated` event so the GUI
   has the referenced rows before it renders or scrolls to an anchor.

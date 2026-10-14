@@ -1739,8 +1739,8 @@ impl TimelineActor {
             Some(item_count),
         );
     }
-    pub(super) fn emit_navigation_if_changed(&mut self) {
-        let snapshot = derive_timeline_navigation_snapshot_with_read_state(
+    fn current_navigation_snapshot(&self) -> TimelineNavigationSnapshot {
+        let mut snapshot = derive_timeline_navigation_snapshot_with_read_state(
             &self.key.kind,
             &self.navigation_items,
             self.fully_read_event_id.as_deref(),
@@ -1752,6 +1752,16 @@ impl TimelineActor {
             &self.viewport_observation,
             self.own_user_id.as_ref().map(|user_id| user_id.as_str()),
         );
+        align_read_marker_display_to_display_rows(
+            &self.key.kind,
+            &self.navigation_items,
+            self.display_projection.display_items(),
+            &mut snapshot,
+        );
+        snapshot
+    }
+    pub(super) fn emit_navigation_if_changed(&mut self) {
+        let snapshot = self.current_navigation_snapshot();
         if self.last_navigation_snapshot.as_ref() == Some(&snapshot) {
             return;
         }
@@ -1789,18 +1799,7 @@ impl TimelineActor {
         &mut self,
         terminal: Option<(RequestId, TimelineAnchorRestoreStatus)>,
     ) -> Option<bool> {
-        let navigation_snapshot = derive_timeline_navigation_snapshot_with_read_state(
-            &self.key.kind,
-            &self.navigation_items,
-            self.fully_read_event_id.as_deref(),
-            self.server_confirmed_read_event_id.as_deref(),
-            self.local_viewed_boundary
-                .as_ref()
-                .map(|boundary| boundary.event_id.as_str()),
-            self.read_state_sync,
-            &self.viewport_observation,
-            self.own_user_id.as_ref().map(|user_id| user_id.as_str()),
-        );
+        let navigation_snapshot = self.current_navigation_snapshot();
         let changed_navigation = (self.last_navigation_snapshot.as_ref()
             != Some(&navigation_snapshot))
         .then_some(navigation_snapshot);
@@ -2096,6 +2095,52 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
             .and_then(|(_, item)| timeline_item_event_id(item).map(ToOwned::to_owned));
     }
     snapshot
+}
+
+/// Key the Room "Read up to here" divider to a displayed row.
+///
+/// Latest-reply ordering shows a thread root at its newest reply's position, so
+/// a root the canonical boundary already covers can render below the boundary
+/// row. The divider follows the last displayed row whose content is at or
+/// before the boundary, named by that row's activity identity — the identity
+/// React matches. Thread replies stay out of Room unread state; while main
+/// conversation content is unread, the unread divider owns placement.
+pub(super) fn align_read_marker_display_to_display_rows(
+    kind: &TimelineKind,
+    navigation_items: &[TimelineItem],
+    display_items: &[TimelineItem],
+    snapshot: &mut TimelineNavigationSnapshot,
+) {
+    if !matches!(kind, TimelineKind::Room { .. }) || snapshot.first_unread_event_id.is_some() {
+        return;
+    }
+    let Some(boundary) = snapshot
+        .read_marker_display_event_id
+        .as_deref()
+        .or(snapshot.read_marker_event_id.as_deref())
+    else {
+        return;
+    };
+    let canonical_positions = navigation_items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| timeline_item_event_id(item).map(|event_id| (event_id, index)))
+        .collect::<HashMap<_, _>>();
+    let Some(&boundary_index) = canonical_positions.get(boundary) else {
+        return;
+    };
+    let anchor = display_items.iter().rev().find_map(|row| {
+        let metadata = row.display_metadata.as_ref()?;
+        let content_index = canonical_positions.get(metadata.content_event_id.as_deref()?)?;
+        (*content_index <= boundary_index)
+            .then_some(metadata.activity_event_id.as_deref())
+            .flatten()
+    });
+    if let Some(anchor) = anchor
+        && anchor != boundary
+    {
+        snapshot.read_marker_display_event_id = Some(anchor.to_owned());
+    }
 }
 
 fn timeline_unread_position_token(position: TimelineUnreadPosition) -> &'static str {
