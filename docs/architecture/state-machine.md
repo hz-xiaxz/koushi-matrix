@@ -6204,7 +6204,8 @@ one country's infrastructure:
   core executor's clock, and it restarts after a restart rather than being persisted.
 - **Delivery.** At send time the body is recomputed from the current projection, so
   the message matches the badge at that moment: a digest of the rooms that came due,
-  with each room's safe display label, kind, and counts, and nothing else. The subject
+  with each room's safe display label, kind, and counts. The plaintext prefix below is
+  the only other text a body can carry, and only under its consent. The subject
   and body are notification payload text and follow the OS notification wording that
   Core already owns, not the React message catalog: they never render inside the app,
   they are counts-only, and localizing them is a separate decision that has not been
@@ -6215,12 +6216,20 @@ one country's infrastructure:
   is projected to React per sink, an invalid key, a suspended account, or a rejected
   webhook is its own typed state, and only a rate limit or a transport failure is
   retried.
-- **Plaintext prefix.** OFF by default, added only when a stored consent matches
-  the current sink and destination. Changing either clears the consent and
-  turns the option off. It is independent of the OS notification preview switch,
-  is bounded and trimmed at a grapheme boundary, and adds no room, event, sender,
-  or transaction identifiers. The consent copy is provider-agnostic: it states
-  that the text leaves the device unencrypted, that whether and how long the
+- **Plaintext prefix.** OFF by default, added only when a stored consent names the
+  sink, the destination, and the endpoint it was given for and all three still
+  match. The text is the newest message this device already holds for the room - the
+  room list's latest event, which may be newer than the event that made the room
+  qualify - and a room whose latest event is redacted, undecryptable, or not a text
+  message is delivered without a prefix rather than failing. The consent is held for
+  one sink at a time: consenting for another
+  replaces it, which the replaced sink's own row shows as the option being off,
+  and that sink then sends without text. A settings load drops a consent that no
+  longer matches a configured sink, so a hand-edited or older settings file cannot
+  widen what leaves the device. It is independent of the OS notification preview
+  switch, is bounded and trimmed at a grapheme boundary, and adds no room, event,
+  sender, or transaction identifiers. The consent copy is provider-agnostic: it
+  states that the text leaves the device unencrypted, that whether and how long the
   configured service stores it depends on that service's own terms, and that the
   user must check those terms before enabling the option. The app asserts no
   provider-specific retention as fact.

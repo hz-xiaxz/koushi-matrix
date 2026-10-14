@@ -209,9 +209,13 @@ read-only rather than pretending to save.
 
 ### Message prefix and consent
 
-- The prefix is taken from the decrypted triggering message, trimmed to
+- The prefix is taken from the newest message this device already holds for the room
+  (the room list's latest event, which may be newer than the event that qualified the
+  room), trimmed to
   `prefix_chars` at a grapheme boundary, and added only when the option is on
-  **and** a stored consent matches the current sink and destination.
+  **and** a stored consent matches the current sink, destination, and endpoint. A
+  latest event that is redacted, undecryptable, or not text leaves the delivery
+  without a prefix instead of failing it.
 - Consent is its own state, never inferred from the toggle. Changing a sink, its
   endpoint, or a destination clears it and the option turns itself off until
   re-consented.
