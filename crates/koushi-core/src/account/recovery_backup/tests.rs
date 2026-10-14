@@ -11,6 +11,7 @@ use super::{
     project_reset_identity_auth_required, project_reset_identity_completed,
     project_restore_key_backup_result, recovery_result_is_current,
     secure_backup_inspection_admission, secure_backup_inspection_completion_action,
+    secure_backup_inspection_deadline_failure, secure_backup_inspection_settled_event,
     secure_backup_monitor_wakeup_is_current, secure_backup_retry_delay,
 };
 use crate::account::actor::{AccountActorHandle, AccountMessage};
@@ -144,11 +145,12 @@ fn secure_backup_completion_rejects_stale_or_unpromoted_sessions() {
             true,
             true,
             5,
-            Err(koushi_state::SecureBackupGateFailureKind::Timeout),
+            Err(secure_backup_inspection_deadline_failure()),
         ),
         Some(AppAction::SecureBackupGateChanged(
             koushi_state::SecureBackupGateState::DegradedRetrying {
-                failure: koushi_state::SecureBackupGateFailureKind::Timeout
+                failure: koushi_state::SecureBackupGateFailureKind::Timeout,
+                ..
             }
         ))
     ));
@@ -158,11 +160,12 @@ fn secure_backup_completion_rejects_stale_or_unpromoted_sessions() {
             true,
             false,
             5,
-            Err(koushi_state::SecureBackupGateFailureKind::Timeout),
+            Err(secure_backup_inspection_deadline_failure()),
         ),
         Some(AppAction::SecureBackupGateChanged(
             koushi_state::SecureBackupGateState::BlockedFailed {
-                failure: koushi_state::SecureBackupGateFailureKind::Timeout
+                failure: koushi_state::SecureBackupGateFailureKind::Timeout,
+                ..
             }
         ))
     ));
@@ -178,7 +181,8 @@ fn inconclusive_backup_probe_does_not_revoke_existing_send_admission() {
         secure_backup_inspection_completion_action(5, true, true, 5, Ok(inspection)),
         Some(AppAction::SecureBackupGateChanged(
             koushi_state::SecureBackupGateState::DegradedRetrying {
-                failure: koushi_state::SecureBackupGateFailureKind::Network
+                failure: koushi_state::SecureBackupGateFailureKind::Network,
+                ..
             }
         ))
     ));
@@ -188,6 +192,169 @@ fn inconclusive_backup_probe_does_not_revoke_existing_send_admission() {
             koushi_state::SecureBackupGateState::BlockedFailed { .. }
         ))
     ));
+}
+
+#[test]
+fn structured_inspection_failure_keeps_its_bounded_detail_on_the_gate() {
+    let detail = |http_status, matrix_error_kind, retryable| {
+        Some(koushi_state::SecureBackupFailureDetail {
+            stage: koushi_state::SecureBackupFailureStage::InspectServerTrust,
+            transport: koushi_state::SecureBackupFailureTransport::HttpResponse,
+            http_status,
+            matrix_error_kind,
+            retryable,
+        })
+    };
+
+    // A received 5xx response is retryable: admission is retained and the gate
+    // degrades without pretending the request never reached the server.
+    let action = secure_backup_inspection_completion_action(
+        5,
+        true,
+        true,
+        5,
+        Err(koushi_state::SecureBackupInspectionFailure {
+            kind: koushi_state::SecureBackupGateFailureKind::ServerResponse,
+            detail: detail(
+                Some(503),
+                Some(koushi_state::SecureBackupMatrixErrorKind::Unknown),
+                true,
+            ),
+        }),
+    )
+    .expect("gate action");
+    let AppAction::SecureBackupGateChanged(gate) = action else {
+        panic!("expected a gate change");
+    };
+    let (kind, structured) = gate.failure().expect("gate failure");
+    assert_eq!(
+        kind,
+        koushi_state::SecureBackupGateFailureKind::ServerResponse
+    );
+    let structured = structured.expect("structured detail survives");
+    assert_eq!(structured.http_status, Some(503));
+    assert_eq!(
+        structured.transport,
+        koushi_state::SecureBackupFailureTransport::HttpResponse
+    );
+    assert!(structured.retryable);
+    assert!(matches!(
+        gate,
+        koushi_state::SecureBackupGateState::DegradedRetrying { .. }
+    ));
+
+    // A non-retryable server response blocks instead of silently degrading.
+    let action = secure_backup_inspection_completion_action(
+        5,
+        true,
+        true,
+        5,
+        Err(koushi_state::SecureBackupInspectionFailure {
+            kind: koushi_state::SecureBackupGateFailureKind::Unauthorized,
+            detail: detail(
+                Some(401),
+                Some(koushi_state::SecureBackupMatrixErrorKind::UnknownToken),
+                false,
+            ),
+        }),
+    )
+    .expect("gate action");
+    let AppAction::SecureBackupGateChanged(gate) = action else {
+        panic!("expected a gate change");
+    };
+    assert!(matches!(
+        gate,
+        koushi_state::SecureBackupGateState::BlockedFailed { .. }
+    ));
+
+    // The inspection deadline is a structured timeout, not a bare kind.
+    let deadline = secure_backup_inspection_deadline_failure();
+    assert_eq!(
+        deadline.kind,
+        koushi_state::SecureBackupGateFailureKind::Timeout
+    );
+    let structured = deadline.detail.expect("deadline detail");
+    assert_eq!(
+        structured.stage,
+        koushi_state::SecureBackupFailureStage::InspectionDeadline
+    );
+    assert_eq!(
+        structured.transport,
+        koushi_state::SecureBackupFailureTransport::Timeout
+    );
+    assert!(structured.retryable);
+}
+
+#[test]
+fn inspection_settled_diagnostics_carry_only_bounded_failure_facts() {
+    use koushi_diagnostics::{DiagnosticValue, record};
+
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let before = koushi_diagnostics::test_support::detail_cursor();
+    let gate = koushi_state::SecureBackupGateState::BlockedFailed {
+        failure: koushi_state::SecureBackupGateFailureKind::ServerResponse,
+        detail: Some(koushi_state::SecureBackupFailureDetail {
+            stage: koushi_state::SecureBackupFailureStage::InspectServerTrust,
+            transport: koushi_state::SecureBackupFailureTransport::HttpResponse,
+            http_status: Some(503),
+            matrix_error_kind: Some(koushi_state::SecureBackupMatrixErrorKind::Unknown),
+            retryable: true,
+        }),
+    };
+    record(secure_backup_inspection_settled_event(&gate, 1234));
+
+    let record = koushi_diagnostics::test_support::detail_records_since(before)
+        .into_iter()
+        .find(|record| {
+            record.event.source == "core.secure_backup"
+                && record.event.stage == "inspection_settled"
+        })
+        .expect("settled diagnostic");
+    let field = |key: &str| {
+        record
+            .event
+            .fields
+            .iter()
+            .find(|field| field.key == key)
+            .map(|field| field.value.clone())
+    };
+    assert_eq!(
+        field("gate"),
+        Some(DiagnosticValue::Token("blocked_failed"))
+    );
+    assert_eq!(
+        field("failure"),
+        Some(DiagnosticValue::Token("server_response"))
+    );
+    assert_eq!(
+        field("failure_stage"),
+        Some(DiagnosticValue::Token("inspect_server_trust"))
+    );
+    assert_eq!(
+        field("failure_transport"),
+        Some(DiagnosticValue::Token("http_response"))
+    );
+    assert_eq!(field("http_status"), Some(DiagnosticValue::Count(503)));
+    assert_eq!(
+        field("matrix_error_kind"),
+        Some(DiagnosticValue::Token("unknown"))
+    );
+    assert_eq!(field("retryable"), Some(DiagnosticValue::Boolean(true)));
+    assert_eq!(
+        field("elapsed_ms"),
+        Some(DiagnosticValue::Milliseconds(1234))
+    );
+
+    // No raw SDK/server text can appear: every recorded value is bounded.
+    for field in &record.event.fields {
+        match &field.value {
+            DiagnosticValue::Token(_)
+            | DiagnosticValue::Count(_)
+            | DiagnosticValue::Boolean(_)
+            | DiagnosticValue::Milliseconds(_) => {}
+            other => panic!("unbounded diagnostic value {other:?} for {}", field.key),
+        }
+    }
 }
 
 #[test]
@@ -442,9 +609,7 @@ async fn recovery_submission_pauses_and_failure_resumes_the_single_provisional_o
 #[tokio::test]
 async fn recovery_trust_settlement_timeout_returns_to_recovery_failure() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock_async().await;
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let diagnostic_start = koushi_diagnostics::test_support::detail_cursor();
     let (handle, mut action_rx) = login_gated_actor().await;
     let flow_id = 80;
     let request_id = incoming_verification_request_id(flow_id);
@@ -493,7 +658,7 @@ async fn recovery_trust_settlement_timeout_returns_to_recovery_failure() {
         "recovery trust timeout must not promote the session or leave normal runtime running"
     );
     assert!(
-        koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+        koushi_diagnostics::test_support::detail_records_since(diagnostic_start)
             .iter()
             .any(|record| {
                 record.event.source == "core.recovery_verification"
@@ -933,7 +1098,8 @@ fn is_blocked_failed_timeout(gate: &koushi_state::SecureBackupGateState) -> bool
     matches!(
         gate,
         koushi_state::SecureBackupGateState::BlockedFailed {
-            failure: koushi_state::SecureBackupGateFailureKind::Timeout
+            failure: koushi_state::SecureBackupGateFailureKind::Timeout,
+            ..
         }
     )
 }
@@ -1013,6 +1179,153 @@ async fn proven_connectivity_before_deadline_disarms_deadline_and_starts_inspect
         owners.has_inspection_task,
         "proven must admit the inspection"
     );
+    shutdown_and_ack(&handle).await;
+}
+
+/// #1361 regression: with two restored accounts the proven connectivity edge
+/// can beat the actor's session promotion by a few hundred milliseconds. The
+/// edge is retained as a boolean, but its inspection side effects used to be
+/// skipped while the session was unpromoted, so the deferred request kept its
+/// deadline and expired into a retryable `BlockedFailed{Timeout}` even though
+/// sync was running. Promotion must replay the owed admission exactly once.
+#[tokio::test]
+async fn proven_connectivity_before_promotion_starts_the_pending_inspection_on_promotion() {
+    let (handle, mut action_rx) = login_gated_actor().await;
+    handle
+        .send(AccountMessage::ConfigureSecureBackupDeferWait {
+            wait: Duration::from_secs(30),
+        })
+        .await;
+    consume_initial_unknown_trust_projection(&mut action_rx).await;
+
+    // The initial inspection request lands before promotion and while sync
+    // connectivity is still unproven, so it defers behind the deadline.
+    handle.send(AccountMessage::InspectSecureBackup).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(owners.inspection_pending, "defer must leave work pending");
+    assert!(owners.has_defer_deadline, "defer must arm a deadline task");
+    assert!(!owners.has_inspection_task, "defer must not spawn yet");
+
+    // The proven edge arrives first. It cannot spawn the inspection yet, but
+    // it must not be forgotten once the session is promoted.
+    handle
+        .send(AccountMessage::SyncConnectivityChanged { proven: true })
+        .await;
+    assert!(
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await
+    );
+    acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(
+        owners.has_inspection_task,
+        "promotion after proven connectivity must start the pending inspection"
+    );
+    assert!(
+        !owners.has_defer_deadline,
+        "promotion must retire the deferred deadline"
+    );
+    assert!(
+        !owners.inspection_pending,
+        "the replayed inspection consumes the pending request"
+    );
+    shutdown_and_ack(&handle).await;
+}
+
+/// #1361: a proven edge recorded before the inspection request is processed
+/// must not let the unpromoted admission drop that request. It stays owed and
+/// starts at promotion instead of leaving `Checking` with no task, deadline,
+/// or monitor.
+#[tokio::test]
+async fn proven_connectivity_before_the_request_keeps_it_pending_until_promotion() {
+    let (handle, mut action_rx) = login_gated_actor().await;
+    handle
+        .send(AccountMessage::ConfigureSecureBackupDeferWait {
+            wait: Duration::from_secs(30),
+        })
+        .await;
+    consume_initial_unknown_trust_projection(&mut action_rx).await;
+    handle
+        .send(AccountMessage::SyncConnectivityChanged { proven: true })
+        .await;
+    handle.send(AccountMessage::InspectSecureBackup).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(
+        owners.inspection_pending,
+        "an unpromoted admitted request must stay owed"
+    );
+    assert!(!owners.has_inspection_task);
+
+    assert!(
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await
+    );
+    acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(
+        owners.has_inspection_task,
+        "promotion must start the retained request"
+    );
+    assert!(!owners.inspection_pending);
+    shutdown_and_ack(&handle).await;
+}
+
+/// #1361: the deferred wait can expire before the session is promoted. Its
+/// expiry cannot gate an unpromoted session, so it must release its handle and
+/// let promotion re-arm a fresh bounded wait instead of leaving `Checking`
+/// forever with no deadline and no terminal (#860).
+#[tokio::test]
+async fn deferred_deadline_expiring_before_promotion_is_rearmed_on_promotion() {
+    let (handle, mut action_rx) = login_gated_actor().await;
+    handle
+        .send(AccountMessage::ConfigureSecureBackupDeferWait {
+            wait: Duration::from_millis(300),
+        })
+        .await;
+    consume_initial_unknown_trust_projection(&mut action_rx).await;
+    handle.send(AccountMessage::InspectSecureBackup).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(owners.inspection_pending && owners.has_defer_deadline);
+
+    // The deadline fires while the session is still unpromoted: it must not
+    // project a terminal, but it must release its handle.
+    executor::sleep(Duration::from_millis(700)).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(owners.inspection_pending, "the request is still owed");
+    assert!(!owners.has_inspection_task);
+    assert!(
+        !owners.has_defer_deadline,
+        "an unpromoted expiry must release its handle"
+    );
+
+    assert!(
+        handle
+            .send(AccountMessage::CurrentDeviceTrustChanged {
+                generation: 2,
+                trust: koushi_state::CurrentDeviceTrustState::Verified,
+            })
+            .await
+    );
+    acknowledge_next_verified_projection(&handle, &mut action_rx).await;
+    let owners = inspect_secure_backup_owners(&handle).await;
+    assert!(
+        owners.has_defer_deadline,
+        "promotion with unproven connectivity must re-arm the bounded wait"
+    );
+
+    // The re-armed bounded wait still settles as a retryable failure.
+    assert!(is_blocked_failed_timeout(
+        &recv_gate_action_matching(&handle, &mut action_rx, is_blocked_failed_timeout).await
+    ));
     shutdown_and_ack(&handle).await;
 }
 
@@ -1111,9 +1424,12 @@ async fn saved_confirmation_clears_the_marker_before_dropping_the_matching_key()
     let mut slot = Some(revealed_key(7));
 
     assert!(matches!(
-        super::confirm_revealed_recovery_key(&mut slot, 8, async {
-            panic!("a stale confirmation must not touch the marker")
-        })
+        super::confirm_revealed_recovery_key(
+            &mut slot,
+            8,
+            super::RecoveryKeyConfirmation::SecureBackup,
+            async { panic!("a stale confirmation must not touch the marker") }
+        )
         .await,
         super::RecoveryKeyConfirmOutcome::Stale
     ));
@@ -1121,10 +1437,15 @@ async fn saved_confirmation_clears_the_marker_before_dropping_the_matching_key()
 
     let cleared = std::cell::Cell::new(false);
     assert!(matches!(
-        super::confirm_revealed_recovery_key(&mut slot, 7, async {
-            cleared.set(true);
-            Ok(())
-        })
+        super::confirm_revealed_recovery_key(
+            &mut slot,
+            7,
+            super::RecoveryKeyConfirmation::SecureBackup,
+            async {
+                cleared.set(true);
+                Ok(())
+            }
+        )
         .await,
         super::RecoveryKeyConfirmOutcome::MarkerCleared
     ));
@@ -1138,9 +1459,12 @@ async fn a_failed_marker_clear_keeps_the_key_and_restores_the_reveal() {
     held.delivery = koushi_state::RecoveryKeyDeliveryState::Written;
     let mut slot = Some(held);
 
-    let outcome = super::confirm_revealed_recovery_key(&mut slot, 7, async {
-        Err(koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive)
-    })
+    let outcome = super::confirm_revealed_recovery_key(
+        &mut slot,
+        7,
+        super::RecoveryKeyConfirmation::SecureBackup,
+        async { Err(koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive) },
+    )
     .await;
 
     let super::RecoveryKeyConfirmOutcome::MarkerClearFailed { restore, .. } = outcome else {
@@ -1171,9 +1495,12 @@ async fn passphrase_change_confirmation_drops_the_key_without_the_marker() {
     let mut slot = Some(held);
 
     assert!(matches!(
-        super::confirm_revealed_recovery_key(&mut slot, 11, async {
-            panic!("passphrase change never owns the setup delivery marker")
-        })
+        super::confirm_revealed_recovery_key(
+            &mut slot,
+            11,
+            super::RecoveryKeyConfirmation::SecureBackup,
+            async { panic!("passphrase change never owns the setup delivery marker") }
+        )
         .await,
         super::RecoveryKeyConfirmOutcome::Dismissed
     ));
@@ -1303,4 +1630,106 @@ async fn session_teardown_drops_the_held_recovery_key() {
 fn revealed_key_debug_is_redacted() {
     let debug = format!("{:?}", revealed_key(7));
     assert!(!debug.contains("synthetic-actor-held-key"), "{debug}");
+}
+
+#[test]
+fn session_bootstrap_holds_the_key_and_keeps_the_delivery_marker_pending() {
+    // #1049: the identity bootstrap reveals its key without a destination.
+    let mut slot = None;
+    let mut delivery_pending = false;
+
+    let actions = super::hold_session_bootstrap_recovery_key(
+        &mut slot,
+        &mut delivery_pending,
+        41,
+        "synthetic-bootstrap-held-key",
+    );
+
+    assert!(delivery_pending, "the marker stays set until confirmation");
+    let held = slot.as_ref().expect("the created key is held");
+    assert_eq!(held.reveal_request_id, 41);
+    assert_eq!(
+        held.source,
+        super::RecoveryKeyRevealSource::SessionBootstrap
+    );
+    assert!(matches!(
+        actions.as_slice(),
+        [AppAction::BootstrapRecoveryKeyReady { flow_id: 41, recovery_key }]
+            if recovery_key.expose_secret() == "synthetic-bootstrap-held-key"
+    ));
+}
+
+#[tokio::test]
+async fn session_bootstrap_and_secure_backup_confirmations_never_cross() {
+    let mut bootstrap = revealed_key(41);
+    bootstrap.source = super::RecoveryKeyRevealSource::SessionBootstrap;
+    let mut slot = Some(bootstrap);
+    assert!(matches!(
+        super::confirm_revealed_recovery_key(
+            &mut slot,
+            41,
+            super::RecoveryKeyConfirmation::SecureBackup,
+            async { panic!("a Secure Backup confirmation must not settle the bootstrap reveal") }
+        )
+        .await,
+        super::RecoveryKeyConfirmOutcome::Stale
+    ));
+    assert!(slot.is_some());
+
+    let mut setup_slot = Some(revealed_key(7));
+    assert!(matches!(
+        super::confirm_revealed_recovery_key(
+            &mut setup_slot,
+            7,
+            super::RecoveryKeyConfirmation::SessionBootstrap,
+            async { panic!("a bootstrap confirmation must not settle a setup reveal") }
+        )
+        .await,
+        super::RecoveryKeyConfirmOutcome::Stale
+    ));
+    assert!(setup_slot.is_some());
+
+    let cleared = std::cell::Cell::new(false);
+    assert!(matches!(
+        super::confirm_revealed_recovery_key(
+            &mut slot,
+            41,
+            super::RecoveryKeyConfirmation::SessionBootstrap,
+            async {
+                cleared.set(true);
+                Ok(())
+            }
+        )
+        .await,
+        super::RecoveryKeyConfirmOutcome::MarkerCleared
+    ));
+    assert!(
+        cleared.get(),
+        "bootstrap confirmation must clear the marker"
+    );
+    assert!(slot.is_none(), "confirmation must drop the held key");
+}
+
+#[tokio::test]
+async fn a_failed_bootstrap_marker_clear_keeps_the_key_and_the_reveal() {
+    let mut bootstrap = revealed_key(41);
+    bootstrap.source = super::RecoveryKeyRevealSource::SessionBootstrap;
+    let mut slot = Some(bootstrap);
+
+    let outcome = super::confirm_revealed_recovery_key(
+        &mut slot,
+        41,
+        super::RecoveryKeyConfirmation::SessionBootstrap,
+        async { Err(koushi_sdk::E2eeTrustError::SecureBackupInspectionInconclusive) },
+    )
+    .await;
+
+    let super::RecoveryKeyConfirmOutcome::MarkerClearFailed { restore, .. } = outcome else {
+        panic!("expected a kept reveal, got {outcome:?}");
+    };
+    assert_eq!(
+        *restore,
+        AppAction::BootstrapRecoverySavedConfirmFailed { flow_id: 41 }
+    );
+    assert!(slot.is_some(), "the saved key must stay held");
 }

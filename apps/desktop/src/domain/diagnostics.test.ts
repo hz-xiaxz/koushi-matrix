@@ -167,7 +167,7 @@ describe("diagnosticReport", () => {
             timestamp_ms: 1_800_000_000_000,
             body: "secret message body",
             attachment_filename: null,
-            reply_count: 0
+            reply_count: 0,
           }
         ],
         state: {
@@ -228,12 +228,14 @@ describe("diagnosticReport", () => {
                   latest_sender_label: "Alice",
                   latest_body_preview: "secret reply body",
                   latest_timestamp_ms: 1_800_000_001_000,
-                  reply_count: 2
+                  reply_count: 2,
+                  unread_count: 0,
                 }
               ],
               is_paginating: false,
               end_reached: true
             },
+            scheduled_sends_list: { kind: "closed" },
             errors: [
               {
                 code: "timeline_subscription_failed",
@@ -442,6 +444,87 @@ describe("diagnosticReport", () => {
     expect(report).toContain("security.avatar_src_schemes=asset:3,data:1");
     expect(report).toContain("security.avatar_broken_images=1");
     expect(report).not.toContain("Verbose diagnostics:");
+  });
+
+  test("reports the sampled renderer context and keeps an absent JS heap unavailable", async () => {
+    const api = createDesktopApiFixture();
+    const snapshot = await api.getSnapshot();
+    const baseInput = {
+      snapshot,
+      panelMode: "closed" as const,
+      sendStatus: "idle" as const,
+      timelineDiagnostics: {
+        visibleItems: 0,
+        downloadedItems: 0,
+        backfill: "Idle" as const,
+        avatarMxcItems: 0,
+        avatarReadyItems: 0,
+        avatarPendingItems: 0,
+        avatarFailedItems: 0,
+        avatarMissingItems: 0,
+        avatarRenderedImages: 0,
+        avatarBrokenImages: 0
+      },
+      domDiagnostics: { screen: "timeline" as const, rootChildren: 1, bodyTextLength: 0 },
+      uiLatencyDiagnostics: {
+        samples: 0,
+        lastFrameGapMs: 0,
+        averageFrameGapMs: 0,
+        maxFrameGapMs: 0,
+        longFrameCount: 0
+      }
+    };
+
+    const measured = diagnosticReport({
+      ...baseInput,
+      rendererContextDiagnostics: {
+        viewportWidth: 1134,
+        viewportHeight: 742,
+        devicePixelRatio: 2,
+        visibility: "visible",
+        mountedImages: 12,
+        mountedTimelineRows: 34,
+        jsHeapUsedBytes: 12_345_678,
+        jsHeapTotalBytes: 23_456_789
+      }
+    });
+
+    expect(measured).toContain("Renderer context (sampled when the export was requested):");
+    expect(measured).toContain("renderer.viewport_width_px=1134");
+    expect(measured).toContain("renderer.viewport_height_px=742");
+    expect(measured).toContain("renderer.device_pixel_ratio=2");
+    expect(measured).toContain("renderer.visibility=visible");
+    expect(measured).toContain("renderer.mounted_images=12");
+    expect(measured).toContain("renderer.mounted_timeline_rows=34");
+    expect(measured).toContain("renderer.js_heap_source=performance_memory");
+    expect(measured).toContain("renderer.js_heap_status=available");
+    expect(measured).toContain("renderer.js_heap_accuracy=engine_reported_approximate");
+    expect(measured).toContain("renderer.js_heap_used_bytes=12345678");
+    expect(measured).toContain("renderer.js_heap_total_bytes=23456789");
+    expect(measured).toContain(
+      "renderer.js_heap_scope=javascript_heap_only_excludes_webkit_gpu_and_native"
+    );
+
+    const unavailable = diagnosticReport({
+      ...baseInput,
+      rendererContextDiagnostics: {
+        viewportWidth: 800,
+        viewportHeight: 600,
+        devicePixelRatio: 1,
+        visibility: "hidden",
+        mountedImages: 0,
+        mountedTimelineRows: 0,
+        jsHeapUsedBytes: null,
+        jsHeapTotalBytes: null
+      }
+    });
+
+    expect(unavailable).toContain("renderer.js_heap_source=unavailable");
+    expect(unavailable).toContain("renderer.js_heap_status=unavailable");
+    expect(unavailable).toContain("renderer.js_heap_accuracy=unavailable");
+    expect(unavailable).toContain("renderer.js_heap_used_bytes=unavailable");
+    expect(unavailable).toContain("renderer.js_heap_total_bytes=unavailable");
+    expect(diagnosticReport(baseInput)).not.toContain("Renderer context");
   });
 
   test("normalizes invalid dropped diagnostic counts", async () => {

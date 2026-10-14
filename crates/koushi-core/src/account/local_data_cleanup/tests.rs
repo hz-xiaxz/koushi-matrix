@@ -505,7 +505,6 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         contact_security_load_task: None,
         pending_contact_verification_send: None,
         contact_verification_send_generation: 0,
-        incoming_verification_session_generation: 0,
         session_change_observer: None,
         account_hydration_task: None,
         account_management_discovery_task: None,
@@ -525,6 +524,8 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         avatar_session_generation: std::sync::Arc::new(std::sync::atomic::AtomicU64::new(0)),
         avatar_demand_rx: tokio::sync::watch::channel(None).1,
         avatar_demand: None,
+        demanded_avatar_sources: std::collections::BTreeSet::new(),
+        own_avatar_mxc_uri: None,
     };
     let request_id = test_request_id();
 

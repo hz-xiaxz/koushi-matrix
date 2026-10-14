@@ -1,5 +1,5 @@
 import { useEffect, useRef, useState } from "react";
-import { ImeSafeForm, ImeTextField, SecureImeTextField } from "./ImeTextControl";
+import { ImeSafeForm, SecureImeTextField } from "./ImeTextControl";
 import { ResetLocalDataConfirmationDialog } from "./dialogs";
 import { RecoveryKeyReveal, copyRecoveryKeyToClipboard } from "./RecoveryKeyReveal";
 import { t } from "../i18n/messages";
@@ -9,6 +9,7 @@ import type {
   CommandReceipt,
   DesktopSnapshot,
   PendingKeyCountBucket,
+  SecureBackupFailureDetail,
   SecureBackupGateFailureKind,
   SecureBackupGateState,
   SecureBackupSetupIntent
@@ -112,7 +113,9 @@ export function secureBackupFailureLabel(kind: SecureBackupGateFailureKind): str
       artifactDelivery: "gate.secureBackupFailureArtifactDelivery",
       forbidden: "gate.secureBackupFailureForbidden",
       timeout: "gate.secureBackupFailureTimeout",
-      sdk: "gate.secureBackupFailureSdk"
+      sdk: "gate.secureBackupFailureSdk",
+      serverResponse: "gate.secureBackupFailureServerResponse",
+      unauthorized: "gate.secureBackupFailureUnauthorized"
     } as const)[kind]
   );
 }
@@ -159,6 +162,72 @@ export function secureBackupGateFailure(
   return null;
 }
 
+/** The structured, privacy-safe cause of a gate failure, when Rust recorded one. */
+export function secureBackupGateFailureDetail(
+  gate: SecureBackupGateState
+): SecureBackupFailureDetail | null {
+  if (gate.kind === "degradedRetrying" || gate.kind === "blockedFailed") {
+    return gate.detail ?? null;
+  }
+  return null;
+}
+
+/**
+ * Specific, understandable gate copy. A structured detail distinguishes a
+ * request that never received a response from one that timed out and one that
+ * received a server response; without a detail the coarse kind's copy is used.
+ * No SDK error text, URL, identifier, status body, or credential is rendered.
+ */
+export function secureBackupFailurePresentation(
+  kind: SecureBackupGateFailureKind,
+  detail: SecureBackupFailureDetail | null
+): { explanation: string; action: string | null } {
+  if (!detail) {
+    return { explanation: secureBackupFailureLabel(kind), action: null };
+  }
+  const status = typeof detail.httpStatus === "number" ? detail.httpStatus : null;
+  switch (detail.transport) {
+    case "httpResponse": {
+      const explanation =
+        kind === "rateLimited"
+          ? t("gate.secureBackupFailureRateLimited")
+          : kind === "forbidden"
+            ? t("gate.secureBackupFailureForbidden")
+            : kind === "unauthorized"
+              ? t("gate.secureBackupFailureUnauthorized")
+              : status !== null
+                ? t("gate.secureBackupDetailHttpStatus", { status })
+                : t("gate.secureBackupDetailHttpResponse");
+      const action =
+        kind === "unauthorized"
+          ? t("gate.secureBackupActionSignInAgain")
+          : kind === "forbidden"
+            ? t("gate.secureBackupActionContactAdmin")
+            : kind === "rateLimited"
+              ? t("gate.secureBackupActionWaitAndRetry")
+              : detail.retryable
+                ? t("gate.secureBackupActionRetryLater")
+                : t("gate.secureBackupActionContactAdmin");
+      return { explanation, action };
+    }
+    case "timeout":
+      return {
+        explanation: t("gate.secureBackupDetailTimeout"),
+        action: t("gate.secureBackupActionRetry")
+      };
+    case "noResponse":
+      return {
+        explanation: t("gate.secureBackupDetailNoResponse"),
+        action: t("gate.secureBackupActionRetry")
+      };
+    default:
+      return {
+        explanation: t("gate.secureBackupDetailLocal"),
+        action: t("gate.secureBackupActionLocalRetry")
+      };
+  }
+}
+
 export function SessionVerificationGate({
   snapshot,
   onReceipt,
@@ -192,7 +261,6 @@ export function SessionVerificationGate({
   const secureBackupPassphraseRef = useRef<HTMLInputElement>(null);
   const cleanupPasswordRef = useRef<HTMLInputElement>(null);
   const passphraseRef = useRef<HTMLInputElement>(null);
-  const destinationRef = useRef<HTMLInputElement>(null);
   const flowId = session.flow_id;
   const methods = session.gate?.methods ?? [];
   const awaiting = session.kind === "awaitingVerification";
@@ -233,6 +301,12 @@ export function SessionVerificationGate({
   const secureBackupSetupState = snapshot.state.domain.e2ee_trust.key_management.secure_backup_setup;
   const revealedSetupKey =
     secureBackupSetupState.kind === "recoveryKeyReady" ? secureBackupSetupState : null;
+  // #1049: the identity bootstrap reuses the same Rust reveal slot, keyed by
+  // its flow id, while the session waits for the saved confirmation.
+  const revealedBootstrapKey =
+    session.kind === "awaitingBootstrapConfirmation" && revealedSetupKey?.request_id === flowId
+      ? revealedSetupKey
+      : null;
   const gateOperationsRef = useRef(new Set<GateOperationKind>());
   const secureBackupOperationRef = useRef<SecureBackupOperationKind | null>(null);
   const run = async (
@@ -391,7 +465,7 @@ export function SessionVerificationGate({
   };
   const heading = authenticationInvalidated
     ? t("gate.sessionExpired")
-    : secureBackupGateRequired && revealedSetupKey !== null
+    : (secureBackupGateRequired || revealedBootstrapKey !== null) && revealedSetupKey !== null
     ? t("gate.secureBackupDeliveryTitle")
     : secureBackupGateRequired
     ? secureBackupGateHeading(secureBackupGate)
@@ -403,6 +477,11 @@ export function SessionVerificationGate({
           ? t("gate.verifying")
           : t("gate.title");
   const secureBackupFailureKind = secureBackupGateFailure(secureBackupGate);
+  const secureBackupFailureDetail = secureBackupGateFailureDetail(secureBackupGate);
+  const secureBackupFailureCopy =
+    secureBackupFailureKind !== null
+      ? secureBackupFailurePresentation(secureBackupFailureKind, secureBackupFailureDetail)
+      : null;
   // The reveal follows the Rust-held key, not the gate: a transient gate
   // projection (for example `checking` after a retry) must not hide a key
   // that is still awaiting the saved confirmation.
@@ -428,8 +507,11 @@ export function SessionVerificationGate({
     {secureBackupGateRequired && secureBackupNeedsRecovery && (
       <p>{t("gate.secureBackupNeedsRecovery")}</p>
     )}
-    {secureBackupGateRequired && secureBackupFailureKind && (
-      <p role="alert">{secureBackupFailureLabel(secureBackupFailureKind)}</p>
+    {secureBackupGateRequired && secureBackupFailureCopy && (
+      <p role="alert">{secureBackupFailureCopy.explanation}</p>
+    )}
+    {secureBackupGateRequired && secureBackupFailureCopy?.action && (
+      <p className="session-verification-gate-action">{secureBackupFailureCopy.action}</p>
     )}
     {secureBackupGateRequired && secureBackupOperationError && (
       <p role="alert">{t("gate.secureBackupCommandFailed")}</p>
@@ -618,8 +700,28 @@ export function SessionVerificationGate({
     </div>}
     {sasVerifying && session.sas_emojis?.length === 7 && <div className="session-verification-emojis">{session.sas_emojis.map((emoji, index) => <span key={index}>{emoji.symbol} {emoji.description}</span>)}</div>}
     {sasVerifying && session.sas_emojis?.length === 7 && flowId !== undefined && <><button onClick={() => void run("sas", () => api.confirmSasVerification(flowId))}>{t("gate.match")}</button><button onClick={() => void run("sas", () => api.mismatchSasVerification(flowId))}>{t("gate.mismatch")}</button></>}
-    {awaiting && methods.includes("bootstrap") && <ImeSafeForm onSubmit={(event) => { event.preventDefault(); const destination = destinationRef.current?.value.trim() ?? ""; const passphrase = passphraseRef.current?.value || null; if (destinationRef.current) destinationRef.current.value = ""; if (passphraseRef.current) passphraseRef.current.value = ""; if (destination) void run("recovery", () => api.startSessionBootstrap(passphrase, destination)); }}><ImeTextField ref={destinationRef} aria-label={t("gate.destination")} syncKey="session-bootstrap-destination"/><SecureImeTextField ref={passphraseRef} aria-label={t("gate.passphrase")} autoComplete="new-password"/><button type="submit">{t("gate.bootstrap")}</button></ImeSafeForm>}
-    {session.kind === "awaitingBootstrapConfirmation" && flowId !== undefined && <button onClick={() => void run("recovery", () => api.confirmSessionBootstrapSaved(flowId))}>{t("gate.saved")}</button>}
+    {awaiting && methods.includes("bootstrap") && <>
+      <p>{t("gate.secureBackupSetupCopy")}</p>
+      <ImeSafeForm onSubmit={(event) => { event.preventDefault(); const passphrase = passphraseRef.current?.value || null; if (passphraseRef.current) passphraseRef.current.value = ""; void run("recovery", () => api.startSessionBootstrap(passphrase)); }}><SecureImeTextField ref={passphraseRef} aria-label={t("gate.passphrase")} autoComplete="new-password"/><button className="dialog-button is-primary" disabled={gateOperations.has("recovery")} type="submit">{t("gate.bootstrap")}</button></ImeSafeForm>
+    </>}
+    {revealedBootstrapKey && flowId !== undefined && <>
+      <p>{t("gate.secureBackupDeliveryRequired")}</p>
+      {secureBackupOperationError && <p role="alert">{t("gate.secureBackupCommandFailed")}</p>}
+      <RecoveryKeyReveal
+        key={revealedBootstrapKey.request_id}
+        recoveryKey={revealedBootstrapKey.recovery_key}
+        delivery={revealedBootstrapKey.delivery}
+        confirmationFailed={revealedBootstrapKey.confirmation_failed}
+        copyRecoveryKey={operations.copyRecoveryKey}
+        onSaveToFile={
+          operations.saveSecureBackupRecoveryKey
+            ? () => saveSecureBackupRecoveryKey(flowId)
+            : undefined
+        }
+        onConfirmSaved={() => run("recovery", () => api.confirmSessionBootstrapSaved(flowId))}
+        disabled={gateOperations.has("recovery")}
+      />
+    </>}
     {sasVerifying && flowId !== undefined && <button onClick={() => void run("sas", () => api.cancelVerification(flowId))}>{t("action.cancel")}</button>}
     {cleanupSurfaceOwned && deviceCleanup.kind === "offered" && <button className="dialog-button danger" type="button" disabled={gateOperations.size > 0} onClick={() => setConfirmDeviceCleanup(true)}>{t("gate.cleanupOffer")}</button>}
     {cleanupSurfaceOwned && confirmDeviceCleanup && <ResetLocalDataConfirmationDialog

@@ -1,8 +1,6 @@
 use super::*;
 
 pub(super) const TIMELINE_BACKWARDS_PAGE_EVENT_COUNT: u16 = 100;
-#[cfg(test)]
-pub(super) const TIMELINE_RESTORE_ANCHOR_MAX_BATCHES: u16 = 6;
 
 pub(super) fn trace_tauri_timeline_command(
     stage: &'static str,
@@ -115,26 +113,6 @@ pub(super) fn build_paginate_thread_timeline_backwards_command(
         },
         direction: PaginationDirection::Backward,
         event_count: TIMELINE_BACKWARDS_PAGE_EVENT_COUNT,
-    })
-}
-
-pub(super) fn build_restore_timeline_anchor_command(
-    request_id: koushi_protocol::RequestId,
-    account_key: AccountKey,
-    timeline_key: TimelineKey,
-    event_id: String,
-    max_batches: u16,
-    event_count: u16,
-) -> CoreCommand {
-    CoreCommand::Timeline(TimelineCommand::RestoreTimelineAnchor {
-        request_id,
-        key: TimelineKey {
-            account_key,
-            kind: timeline_key.kind,
-        },
-        event_id,
-        max_batches,
-        event_count,
     })
 }
 
@@ -499,24 +477,6 @@ pub(super) fn build_redact_message_command(
         key: build_timeline_key(account_key, room_id),
         event_id,
     })
-}
-
-pub(super) fn build_toggle_reaction_command(
-    request_id: koushi_protocol::RequestId,
-    account_key: AccountKey,
-    room_id: String,
-    event_id: String,
-    reaction_key: String,
-) -> Option<CoreCommand> {
-    if reaction_key.is_empty() {
-        return None;
-    }
-    Some(CoreCommand::Timeline(TimelineCommand::ToggleReaction {
-        request_id,
-        key: build_timeline_key(account_key, room_id),
-        event_id,
-        reaction_key,
-    }))
 }
 
 pub(super) fn build_send_reaction_command(
@@ -885,34 +845,6 @@ pub async fn paginate_timeline_backwards(
 }
 
 #[tauri::command]
-pub async fn restore_timeline_anchor(
-    account_tab_id: Option<String>,
-    timeline_key: TimelineKey,
-    event_id: String,
-    max_batches: u16,
-    event_count: u16,
-    app: AppHandle,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendCommandAdmission, String> {
-    let account_key = account_key_from_snapshot(state.inner(), account_tab_id.as_deref()).await?;
-    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
-    let admission = submit_core_command_with_admission(
-        state.inner(),
-        build_restore_timeline_anchor_command(
-            request_id,
-            account_key,
-            timeline_key,
-            event_id,
-            max_batches,
-            event_count,
-        ),
-    )
-    .await?;
-    update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(admission)
-}
-
-#[tauri::command]
 pub async fn ensure_timeline_subscribed(
     account_tab_id: Option<String>,
     timeline_key: TimelineKey,
@@ -1112,6 +1044,7 @@ pub async fn stage_upload_bytes(
     account_tab_id: Option<String>,
     target: koushi_state::ComposerTarget,
     items: Vec<StageUploadBytesInputItem>,
+    composer_document: Option<koushi_state::ComposerDocument>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendCommandSettlement, String> {
@@ -1129,7 +1062,7 @@ pub async fn stage_upload_bytes(
         .collect();
     let settled = account_connection(state.inner(), account_tab_id.as_deref())
         .await?
-        .stage_upload_bytes(target, items)
+        .stage_upload_bytes(target, items, composer_document)
         .await
         .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
@@ -1201,6 +1134,16 @@ pub async fn prepared_upload_preview(
         .map_err(|error| error.to_string())
 }
 
+/// Result of a prepared-upload send: `consumed_draft` reports whether Core moved the
+/// composer draft into the message caption (#1204).
+#[derive(Serialize)]
+#[serde(rename_all = "camelCase")]
+pub(crate) struct PreparedUploadSendResponse {
+    #[serde(flatten)]
+    pub settlement: FrontendCommandSettlement,
+    pub consumed_draft: bool,
+}
+
 #[tauri::command]
 #[expect(
     clippy::too_many_arguments,
@@ -1215,9 +1158,10 @@ pub async fn send_prepared_uploads(
     renderer_generation: String,
     target: koushi_state::ComposerTarget,
     draft_revision: koushi_state::ComposerDraftRevision,
+    draft_document: Option<koushi_state::ComposerDocument>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
-) -> Result<ComposerDraftAcceptanceResponse, String> {
+) -> Result<PreparedUploadSendResponse, String> {
     let expected_account = koushi_protocol::SessionKeyId {
         homeserver: account_homeserver,
         user_id: account_user_id,
@@ -1226,13 +1170,23 @@ pub async fn send_prepared_uploads(
     let (generation, lease) = parse_composer_wire_tokens(&renderer_generation, &lease_id)?;
     let settled = account_connection(state.inner(), account_tab_id.as_deref())
         .await?
-        .send_prepared_uploads(expected_account, generation, lease, target, draft_revision)
+        .send_prepared_uploads(
+            expected_account,
+            generation,
+            lease,
+            target,
+            draft_revision,
+            draft_document,
+        )
         .await
         .map_err(|error| error.to_string())?;
     update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(ComposerDraftAcceptanceResponse {
-        accepted_revision: settled.accepted_revision,
+    // #1130/#1204: Core decides whether this send consumed the draft (a single
+    // attachment whose caption is the submitted text) and reports it, so the renderer
+    // clears through its established overlay path without re-deciding the policy.
+    Ok(PreparedUploadSendResponse {
         settlement: command_settlement(settled.generation),
+        consumed_draft: settled.consumed_draft,
     })
 }
 
@@ -1410,8 +1364,28 @@ pub async fn save_downloaded_media(
 }
 
 #[tauri::command]
-pub async fn default_media_save_path(filename: String, app: AppHandle) -> Result<String, String> {
+pub async fn default_media_save_path(
+    filename: String,
+    media_kind: String,
+    timestamp_ms: Option<i64>,
+    utc_offset_minutes: i32,
+    local_name_prefix: String,
+    app: AppHandle,
+) -> Result<String, String> {
     let downloads_dir = app.path().download_dir().ok();
+    // #1135: the renderer resolves the catalog-owned prefix and the event's local
+    // offset; the naming decision itself stays in Core.
+    let facts = koushi_core::MediaSaveNameFacts {
+        local_name_prefix: &local_name_prefix,
+        kind: if media_kind == "image" {
+            koushi_core::MediaSaveKind::Image
+        } else {
+            koushi_core::MediaSaveKind::File
+        },
+        timestamp_ms: timestamp_ms.and_then(|value| u64::try_from(value).ok()),
+        utc_offset_minutes,
+    };
+    let filename = koushi_core::default_media_save_filename(&filename, facts);
     Ok(
         koushi_core::default_media_save_path(&filename, downloads_dir.as_deref())
             .to_string_lossy()
@@ -1601,31 +1575,6 @@ pub async fn redact_message(
     let admission = submit_core_command_with_admission(
         state.inner(),
         build_redact_message_command(request_id, account_key, room_id, event_id),
-    )
-    .await?;
-    update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(admission)
-}
-
-#[tauri::command]
-pub async fn toggle_reaction(
-    account_tab_id: Option<String>,
-    room_id: String,
-    event_id: String,
-    reaction_key: String,
-    app: AppHandle,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendCommandAdmission, String> {
-    if reaction_key.is_empty() {
-        return Err("reaction key must not be blank".to_owned());
-    }
-
-    let account_key = account_key_from_snapshot(state.inner(), account_tab_id.as_deref()).await?;
-    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
-    let admission = submit_required_admission(
-        state.inner(),
-        build_toggle_reaction_command(request_id, account_key, room_id, event_id, reaction_key),
-        "reaction target must not be blank",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;

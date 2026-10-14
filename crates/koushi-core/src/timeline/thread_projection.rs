@@ -32,8 +32,8 @@ use super::actor::{ThreadSummaryProjectionWake, TimelineActor};
 use super::item_projection::{
     MessageProjection, eligible_activity_preview, is_attention_eligible_event,
     link_ranges_for_message_projection, mentioned_user_ids_from_event_json,
-    message_projection_from_msgtype, sticker_projection_from_body, timeline_content_is_renderable,
-    timeline_item_event_id,
+    mentions_room_from_event_json, message_projection_from_msgtype, sticker_projection_from_body,
+    timeline_content_is_renderable, timeline_item_event_id,
 };
 use super::manager::{TimelineManagerActor, TimelineMessage};
 use super::navigation::TimelineActorGenerationGate;
@@ -822,6 +822,30 @@ pub(super) fn seed_thread_summary_item(
         .seed_canonical_root(key.room_id(), item);
 }
 
+/// #1259/#1238: the SDK thread cache's own threaded receipts for one root.
+pub(crate) async fn sdk_thread_unread_counts(
+    session: &koushi_sdk::MatrixClientSession,
+    room_id: &str,
+    root_event_id: &str,
+) -> Option<koushi_state::ThreadRootAttention> {
+    let room_id = matrix_sdk::ruma::RoomId::parse(room_id).ok()?;
+    let root_event_id = matrix_sdk::ruma::EventId::parse(root_event_id).ok()?;
+    let (cache, _drop_handles) = session
+        .client()
+        .event_cache()
+        .thread(&room_id, &root_event_id)
+        .await
+        .ok()?;
+    // `num_unread` already covers replies that also notify, so no separate
+    // notification count is read here. `num_mentions` is the thread's own mention
+    // counter; it drives mention styling without joining the main counters.
+    let receipts = cache.read_receipts().await.ok()?;
+    Some(koushi_state::ThreadRootAttention {
+        unread: u32::try_from(receipts.num_unread).unwrap_or(u32::MAX),
+        highlight: u32::try_from(receipts.num_mentions).unwrap_or(u32::MAX),
+    })
+}
+
 pub(super) fn seed_thread_summary_diff(
     service: &Arc<Mutex<ThreadRootProjectionService>>,
     key: &TimelineKey,
@@ -856,14 +880,22 @@ pub(super) fn overlay_thread_summary_item(
     if item.thread_root.is_some() {
         return item.clone();
     }
-    let Some(aggregate) = service
-        .lock()
-        .expect("thread-root projection service lock must not be poisoned")
-        .current_aggregate(key.room_id(), event_id)
-    else {
-        return item.clone();
-    };
-    thread_root_item_with_authoritative_aggregate(item, &aggregate)
+    {
+        let service = service
+            .lock()
+            .expect("thread-root projection service lock must not be poisoned");
+        let Some(aggregate) = service.current_aggregate(key.room_id(), event_id) else {
+            return item.clone();
+        };
+        // #1259: the chip dot is the SDK thread cache's own unread value for this root,
+        // read by the actor whenever the room-side summary changed.
+        let unread = service.thread_unread_for(key.room_id(), event_id).unread;
+        let mut overlaid = thread_root_item_with_authoritative_aggregate(item, &aggregate);
+        if let Some(summary) = overlaid.thread_summary.as_mut() {
+            summary.unread_count = unread;
+        }
+        overlaid
+    }
 }
 
 pub(super) fn overlay_thread_summary_diff(
@@ -896,6 +928,7 @@ pub(super) fn thread_root_item_with_authoritative_aggregate(
     let mut item = item.clone();
     let summary = item.thread_summary.get_or_insert(ThreadSummaryDto {
         reply_count: 0,
+        unread_count: 0,
         latest_event_id: None,
         latest_sender: None,
         latest_sender_label: None,
@@ -1275,6 +1308,36 @@ struct ThreadRootProjectionRenderContext {
     reactions: Vec<ReactionGroup>,
 }
 
+/// #1237: the reply target a raw thread projection should show.
+///
+/// Mirrors the SDK's thread-focus rule (`extract_reply_and_thread_root`): in a
+/// thread timeline an `m.thread` relation with `is_falling_back: true` is the
+/// compatibility fallback (normally the root or the previous event), not a real
+/// reply, so it must not produce a reply quote. Outside a thread timeline — and
+/// for a genuine in-thread reply (`is_falling_back` absent/false) — the
+/// `m.in_reply_to` target is kept.
+fn thread_in_reply_to_event_id(key: &TimelineKey, content: &serde_json::Value) -> Option<String> {
+    let relation = content.get("m.relates_to");
+    if matches!(key.kind, TimelineKind::Thread { .. }) {
+        let is_thread_relation = relation
+            .and_then(|relation| relation.get("rel_type"))
+            .and_then(serde_json::Value::as_str)
+            == Some("m.thread");
+        let is_falling_back = relation
+            .and_then(|relation| relation.get("is_falling_back"))
+            .and_then(serde_json::Value::as_bool)
+            .unwrap_or(false);
+        if is_thread_relation && is_falling_back {
+            return None;
+        }
+    }
+    relation
+        .and_then(|relation| relation.get("m.in_reply_to"))
+        .and_then(|reply| reply.get("event_id"))
+        .and_then(serde_json::Value::as_str)
+        .map(str::to_owned)
+}
+
 /// Convert the cache/network event payload into a self-contained root DTO
 /// without inserting it into the SDK timeline. `load_or_fetch_event` exposes a
 /// public decrypted raw event, not the SDK-private `EventTimelineItem`; this
@@ -1367,12 +1430,7 @@ fn thread_root_projection_item_from_raw_with_context(
         message_kind,
         spoiler_spans,
         timestamp_ms,
-        in_reply_to_event_id: content
-            .get("m.relates_to")
-            .and_then(|relation| relation.get("m.in_reply_to"))
-            .and_then(|reply| reply.get("event_id"))
-            .and_then(serde_json::Value::as_str)
-            .map(str::to_owned),
+        in_reply_to_event_id: thread_in_reply_to_event_id(key, content),
         formatted: formatted.clone(),
         reply_quote: None,
         thread_root: None,
@@ -1381,6 +1439,7 @@ fn thread_root_projection_item_from_raw_with_context(
         link_previews: None,
         link_ranges: link_ranges_for_message_projection(body.as_deref(), formatted.as_ref()),
         mentioned_user_ids: mentioned_user_ids_from_event_json(&raw),
+        mentions_room: mentions_room_from_event_json(&raw),
         reactions: context.reactions,
         can_react: !is_redacted
             && timeline_content_is_renderable(body.as_deref(), media.as_ref(), formatted.as_ref()),
@@ -1431,6 +1490,7 @@ fn thread_summary_from_loaded_root_raw(raw: &serde_json::Value) -> Option<Thread
             .and_then(serde_json::Value::as_u64)
             .and_then(|count| u32::try_from(count).ok())
             .unwrap_or(0),
+        unread_count: 0,
         latest_event_id: latest
             .and_then(|event| event.get("event_id"))
             .and_then(serde_json::Value::as_str)

@@ -1,8 +1,12 @@
+use std::path::Path;
+
 use serde::Serialize;
 use tauri::{AppHandle, Manager, State};
+use tauri_plugin_dialog::DialogExt;
 
 use crate::{
     CoreRuntimeState,
+    process_memory::{MemoryAuditSample, process_memory_audit_event, sample_process_memory_audit},
     viewport_sync::{
         ViewportSyncObservation, ViewportSyncReceipt, record_diagnostic, synchronize_now,
         validate_observation,
@@ -44,11 +48,181 @@ fn map_snapshot(
     }
 }
 
+fn record_search_retention_summaries(
+    rows: &[(
+        usize,
+        Option<koushi_core::search::AccountRetentionDiagnostics>,
+    )],
+) {
+    use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.search_retention", "summary")
+            .field(DiagnosticField::count("account_total", rows.len() as u64))
+            .field(DiagnosticField::count(
+                "account_available",
+                rows.iter()
+                    .filter(|(_, diagnostics)| diagnostics.is_some())
+                    .count() as u64,
+            )),
+    );
+    for (account_index, diagnostics) in rows {
+        let Some(diagnostics) = diagnostics else {
+            continue;
+        };
+        // Export-time sample; the record timestamp is the recording time, which
+        // can lag an early account's sample behind later timeout-bound waits.
+        koushi_diagnostics::record(
+            DiagnosticEvent::new(DiagnosticLevel::Info, "core.search_retention", "summary")
+                .field(DiagnosticField::count(
+                    "account_index",
+                    *account_index as u64,
+                ))
+                .field(DiagnosticField::token("status", "available"))
+                .field(DiagnosticField::token(
+                    "search_scope",
+                    "decrypted_index_allocations",
+                ))
+                .field(DiagnosticField::count(
+                    "search_rooms_total",
+                    diagnostics.search.rooms_total,
+                ))
+                .field(DiagnosticField::count(
+                    "search_opened_files_total",
+                    diagnostics.search.opened_files_total,
+                ))
+                .field(DiagnosticField::count(
+                    "search_decrypted_bytes_total",
+                    diagnostics.search.decrypted_bytes_total,
+                ))
+                .field(DiagnosticField::count(
+                    "search_live_decrypted_len_bytes",
+                    diagnostics.search.live_decrypted_len_bytes,
+                ))
+                .field(DiagnosticField::count(
+                    "search_live_decrypted_capacity_bytes",
+                    diagnostics.search.live_decrypted_capacity_bytes,
+                ))
+                .field(DiagnosticField::token(
+                    "event_cache_scope",
+                    "room_timeline_linked_chunk_only",
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_rooms",
+                    diagnostics.event_cache.rooms,
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_chunks",
+                    diagnostics.event_cache.chunks,
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_gap_chunks",
+                    diagnostics.event_cache.gap_chunks,
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_events",
+                    diagnostics.event_cache.events,
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_zero_subscriber_rooms",
+                    diagnostics.event_cache.zero_subscriber_rooms,
+                ))
+                .field(DiagnosticField::count(
+                    "event_cache_zero_subscriber_rooms_with_events",
+                    diagnostics.event_cache.zero_subscriber_rooms_with_events,
+                )),
+        );
+    }
+}
+
+/// #1394: export the resident timeline set of every live account tab. Counts
+/// only; the same per-account rows as the search-retention sample, so the
+/// resident Room/actor set can be read from one export instead of inferred
+/// from allocator samples.
+fn record_timeline_residency_summaries(
+    rows: &[(
+        usize,
+        Option<koushi_core::timeline::TimelineResidencyDiagnostics>,
+    )],
+) {
+    use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Info, "core.timeline_residency", "summary")
+            .field(DiagnosticField::count("account_total", rows.len() as u64))
+            .field(DiagnosticField::count(
+                "account_available",
+                rows.iter()
+                    .filter(|(_, diagnostics)| diagnostics.is_some())
+                    .count() as u64,
+            )),
+    );
+    for (account_index, diagnostics) in rows {
+        let Some(diagnostics) = diagnostics else {
+            continue;
+        };
+        koushi_diagnostics::record(
+            DiagnosticEvent::new(DiagnosticLevel::Info, "core.timeline_residency", "summary")
+                .field(DiagnosticField::count(
+                    "account_index",
+                    *account_index as u64,
+                ))
+                .field(DiagnosticField::token("status", "available"))
+                .field(DiagnosticField::count(
+                    "session_resident_rooms",
+                    diagnostics.session_resident_rooms,
+                ))
+                .field(DiagnosticField::count(
+                    "actual_room_subscriptions",
+                    diagnostics.actual_room_subscriptions,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_actors",
+                    diagnostics.resident_actors,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_room_actors",
+                    diagnostics.resident_room_actors,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_thread_actors",
+                    diagnostics.resident_thread_actors,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_focused_actors",
+                    diagnostics.resident_focused_actors,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_event_items",
+                    diagnostics.resident_event_items,
+                ))
+                .field(DiagnosticField::count(
+                    "deepest_actor_event_items",
+                    diagnostics.deepest_actor_event_items,
+                )),
+        );
+    }
+}
+
 fn snapshot_with_media_memory_summaries(
     thumbnail_stats: koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats,
     media_stats: koushi_core::media_preparation::MediaPreparationStats,
+    memory_audit: &MemoryAuditSample,
+    retention_rows: &[(
+        usize,
+        Option<koushi_core::search::AccountRetentionDiagnostics>,
+    )],
+    timeline_rows: &[(
+        usize,
+        Option<koushi_core::timeline::TimelineResidencyDiagnostics>,
+    )],
     sliding_sync: koushi_core::SlidingSyncDiagnosticsSnapshot,
 ) -> FrontendDiagnosticLogSnapshot {
+    // #1344: the native process/allocator audit observes only. It never trims,
+    // purges, evicts, or forces a collection while sampling.
+    koushi_diagnostics::record(process_memory_audit_event(memory_audit));
+    record_search_retention_summaries(retention_rows);
+    record_timeline_residency_summaries(timeline_rows);
     koushi_core::renderable_thumbnail::record_renderable_thumbnail_summary(thumbnail_stats);
     koushi_core::media_preparation::record_media_preparation_summary(media_stats);
     koushi_core::session_check_diagnostics::record_session_check_summary();
@@ -62,8 +236,61 @@ pub async fn get_diagnostic_snapshot(
     Ok(snapshot_with_media_memory_summaries(
         koushi_core::renderable_thumbnail::renderable_thumbnail_cache_stats(),
         state.runtime.media_preparation().stats().await,
+        &sample_process_memory_audit(),
+        &state.runtime.search_retention_diagnostics().await,
+        &state.runtime.timeline_residency_diagnostics().await,
         state.runtime.sliding_sync_diagnostics(),
     ))
+}
+
+/// The default file name offered by the native save dialog (#1383).
+const DIAGNOSTICS_FILE_NAME: &str = "koushi-diagnostics.txt";
+
+/// Ask for a destination and write the renderer-built diagnostics report there
+/// (#1383).
+///
+/// The report is private-data-free by construction: structured kinds, counts,
+/// and lengths only. It is written verbatim and never logged, and a dismissed
+/// dialog writes nothing. The adapter owns the native dialog, so the renderer
+/// supplies text and localized dialog labels and receives the chosen path or
+/// `None`.
+#[tauri::command]
+pub async fn save_diagnostics_report(
+    report: String,
+    dialog_title: String,
+    app: AppHandle,
+    window: tauri::WebviewWindow,
+) -> Result<Option<String>, String> {
+    let (sender, receiver) = tokio::sync::oneshot::channel();
+    let mut dialog = app
+        .dialog()
+        .file()
+        .set_parent(&window)
+        .set_title(dialog_title.clone())
+        .set_file_name(DIAGNOSTICS_FILE_NAME)
+        .add_filter(dialog_title, &["txt"]);
+    // Save next to the user's other downloads unless they choose elsewhere.
+    if let Ok(downloads) = app.path().download_dir() {
+        dialog = dialog.set_directory(downloads);
+    }
+    dialog.save_file(move |selected| {
+        let _ = sender.send(selected);
+    });
+    let Some(selected) = receiver.await.ok().flatten() else {
+        return Ok(None);
+    };
+    let path = selected
+        .into_path()
+        .map_err(|_| "diagnostics destination is not a local path".to_owned())?;
+    write_diagnostics_report(&path, &report)?;
+    path.into_os_string()
+        .into_string()
+        .map(Some)
+        .map_err(|_| "diagnostics destination is not valid UTF-8".to_owned())
+}
+
+fn write_diagnostics_report(path: &Path, report: &str) -> Result<(), String> {
+    std::fs::write(path, report).map_err(|_| "could not write the diagnostics report".to_owned())
 }
 
 #[tauri::command]
@@ -426,6 +653,8 @@ mod qa_tests {
                     unread_count: 0,
                     notification_count: 0,
                     highlight_count: 0,
+                    thread_unread_count: 0,
+                    thread_highlight_count: 0,
                     marked_unread: false,
                     recency_stamp: None,
                     conversation_activity: None,
@@ -449,6 +678,8 @@ mod qa_tests {
                     unread_count: 0,
                     notification_count: 0,
                     highlight_count: 0,
+                    thread_unread_count: 0,
+                    thread_highlight_count: 0,
                     marked_unread: false,
                     recency_stamp: None,
                     conversation_activity: None,
@@ -507,196 +738,7 @@ mod qa_tests {
 }
 
 #[cfg(test)]
-mod snapshot_tests {
-    use super::*;
-    #[test]
-    fn diagnostic_snapshot_maps_structured_snapshot_to_camel_case_frontend_contract() {
-        let snapshot = koushi_diagnostics::DiagnosticSnapshot {
-            records: vec![koushi_diagnostics::DiagnosticRecord {
-                timestamp_ms: 42,
-                event: koushi_diagnostics::DiagnosticEvent::new(
-                    koushi_diagnostics::DiagnosticLevel::Debug,
-                    "desktop.timeline",
-                    "submit",
-                )
-                .field(koushi_diagnostics::DiagnosticField::token(
-                    "operation",
-                    "send_reaction",
-                )),
-            }],
-            dropped_records: 7,
-        };
-        let json = serde_json::to_value(map_snapshot(
-            snapshot,
-            koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
-        ))
-        .unwrap();
-        assert_eq!(
-            json,
-            serde_json::json!({
-                "entries": [{
-                    "timestampMs": 42,
-                    "source": "desktop.timeline",
-                    "message": "stage=submit operation=send_reaction"
-                }],
-                "droppedEntries": 7,
-                "slidingSync": {
-                    "discoveryState": "not_started",
-                    "advertised": false,
-                    "discoverySource": "unknown",
-                    "lastProbeAgeBucket": "never",
-                    "lastHttpStatusClass": "unknown",
-                    "requestSchema": "element_x_all_rooms",
-                    "engine": "SyncService",
-                    "sdkSlidingSyncVersion": "unknown",
-                    "roomListSharePos": true,
-                    "encryptionSharePos": false,
-                    "encryptionConnectionProfile": "sdk_default_encryption",
-                    "encryptionExtensionProfile": "e2ee_to_device",
-                    "provisionalEncryptionStarted": false,
-                    "provisionalFirstResponseSeen": false,
-                    "provisionalStoppedBeforeFirstResponse": false,
-                    "provisionalToNormalHandoffBucket": "never",
-                    "lifecycle": "stopped",
-                    "connectivityProven": false,
-                    "committedGeneration": 0,
-                    "lastSuccessAgeBucket": "never",
-                    "consecutiveFailureCount": 0,
-                    "lastFailureOrigin": "none",
-                    "lastFailureKind": "none",
-                    "lastFailureStage": "none",
-                    "lastHttpErrorSource": "none",
-                    "lastHttpStatus": "none",
-                    "lastMatrixErrorKind": "none",
-                    "lastFailureRetryability": "none",
-                    "roomListTaskRunning": false,
-                    "encryptionTaskRunning": false,
-                    "posPresent": false,
-                    "directAccountDataSource": "unavailable",
-                    "directMappedRoomCount": 0,
-                    "directTargetCount": 0,
-                    "projectedDmCount": 0,
-                    "explicitDmCount": 0,
-                    "fallbackDmCount": 0,
-                    "directNonDmCount": 0,
-                    "directInvalidEntryCount": 0,
-                    "directEventWakeCount": 0,
-                    "directEventAppliedCount": 0,
-                    "directEventStreamRunning": false
-                }
-            })
-        );
-    }
-    #[test]
-    fn diagnostic_snapshot_serialization_excludes_synthetic_private_values() {
-        let snapshot = koushi_diagnostics::DiagnosticSnapshot {
-            records: vec![koushi_diagnostics::DiagnosticRecord {
-                timestamp_ms: 42,
-                event: koushi_diagnostics::DiagnosticEvent::new(
-                    koushi_diagnostics::DiagnosticLevel::Debug,
-                    "desktop.search",
-                    "submit",
-                )
-                .field(koushi_diagnostics::DiagnosticField::count(
-                    "query_bytes",
-                    23,
-                ))
-                .field(koushi_diagnostics::DiagnosticField::count(
-                    "query_chars",
-                    17,
-                )),
-            }],
-            dropped_records: 0,
-        };
-        let serialized = serde_json::to_string(&map_snapshot(
-            snapshot,
-            koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
-        ))
-        .unwrap();
-        for forbidden in [
-            "!room:synthetic.invalid",
-            "@user:synthetic.invalid",
-            "$event:synthetic.invalid",
-            "/Users/alice/private",
-            "secret message",
-            "synthetic search query",
-        ] {
-            assert!(
-                !serialized.contains(forbidden),
-                "serialized diagnostics leaked {forbidden}"
-            );
-        }
-        assert!(serialized.contains("query_bytes"));
-        assert!(serialized.contains("query_chars"));
-    }
-    #[test]
-    fn diagnostic_snapshot_exports_current_media_memory_summaries() {
-        let _guard = koushi_diagnostics::test_support::lock();
-        let exported = snapshot_with_media_memory_summaries(
-            koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats {
-                entry_count: 3,
-                retained_bytes: 300,
-                high_water_entry_count: 5,
-                high_water_bytes: 500,
-                eviction_count: 2,
-                clear_count: 1,
-                oversize_rejection_count: 4,
-            },
-            koushi_core::media_preparation::MediaPreparationStats {
-                source_count: 2,
-                source_bytes: 200,
-                variant_count: 3,
-                source_backed_variant_count: 2,
-                variant_bytes: 80,
-                selected_count: 2,
-                high_water_source_count: 4,
-                high_water_source_bytes: 400,
-                high_water_variant_count: 6,
-                high_water_variant_bytes: 160,
-            },
-            koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
-        );
-        let thumbnail = exported
-            .entries
-            .iter()
-            .rev()
-            .find(|entry| entry.source == "core.renderable_thumbnail")
-            .expect("renderable-thumbnail summary must be exported");
-        assert!(thumbnail.message.contains("stage=summary"));
-        assert!(thumbnail.message.contains("entry_count=3"));
-        let media = exported
-            .entries
-            .iter()
-            .rev()
-            .find(|entry| entry.source == "core.media_preparation")
-            .expect("media-preparation summary must be exported");
-        assert!(media.message.contains("stage=summary"));
-        assert!(media.message.contains("source_backed_variant_count=2"));
-        let details = koushi_diagnostics::test_support::detail_snapshot();
-        let summaries = ["core.renderable_thumbnail", "core.media_preparation"].map(|source| {
-            details
-                .records
-                .iter()
-                .rev()
-                .find(|record| record.event.source == source && record.event.stage == "summary")
-                .expect("media summary diagnostic must be present")
-        });
-        for record in summaries {
-            assert!(record.event.fields.iter().all(|field| matches!(
-                field.value,
-                koushi_diagnostics::DiagnosticValue::Count(_)
-                    | koushi_diagnostics::DiagnosticValue::Token(_)
-            )));
-        }
-        let serialized = serde_json::to_string(&exported).unwrap();
-        for forbidden in [
-            "!room:synthetic.invalid",
-            "@user:synthetic.invalid",
-            "$event:synthetic.invalid",
-            "/Users/alice/private",
-            "secret message",
-        ] {
-            assert!(!serialized.contains(forbidden));
-        }
-    }
-}
+mod export_tests;
+
+#[cfg(test)]
+mod snapshot_tests;

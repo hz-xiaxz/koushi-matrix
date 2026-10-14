@@ -637,7 +637,8 @@ test("auto-backfill keeps a slight live-edge scroll stable before near-top prefe
     }
   );
 
-  await expect(container.locator("[data-item-id]")).toHaveCount(155);
+  await expect(container).toHaveAttribute("data-total-items", "155");
+  await expect(container).toHaveAttribute("data-virtualized", "true");
 });
 
 test("short timeline does not auto-backfill on a small scroll up from the live edge", async ({ page }) => {

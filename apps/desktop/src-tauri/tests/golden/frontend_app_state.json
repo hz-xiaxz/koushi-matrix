@@ -18,7 +18,7 @@
     "dm_unread_count": 0,
     "dms_collapsed": false,
     "dms_sort": {
-      "kind": "activity"
+      "kind": "recentFirst"
     },
     "global_dms": [],
     "low_priority_collapsed": true,
@@ -42,19 +42,51 @@
         "highlight_count": 0,
         "is_attention_highlighted": false,
         "is_muted": false,
+        "main_unread_count": 0,
         "membership": "not_joined",
         "notification_count": 0,
         "room_id": "!not-joined-room:example.invalid",
+        "suggested": true,
         "tags": {
           "favourite": null,
           "low_priority": null
         },
+        "thread_unread_count": 0,
         "unread_count": 0
       }
     ],
     "rooms_collapsed": false,
     "rooms_sort": {
-      "kind": "activity"
+      "kind": "recentFirst"
+    },
+    "section_bounds": {
+      "dms": {
+        "expanded": false,
+        "expanded_by_active_room": false,
+        "hidden_count": 0,
+        "shows_expand_control": false,
+        "total_count": 0,
+        "visible_count": 0,
+        "visible_limit": 5
+      },
+      "low_priority": {
+        "expanded": true,
+        "expanded_by_active_room": false,
+        "hidden_count": 0,
+        "shows_expand_control": false,
+        "total_count": 1,
+        "visible_count": 1,
+        "visible_limit": 5
+      },
+      "rooms": {
+        "expanded": false,
+        "expanded_by_active_room": false,
+        "hidden_count": 0,
+        "shows_expand_control": false,
+        "total_count": 1,
+        "visible_count": 1,
+        "visible_limit": 5
+      }
     },
     "sections": {
       "favourites": [],
@@ -69,15 +101,18 @@
           "highlight_count": 2,
           "is_attention_highlighted": true,
           "is_muted": false,
+          "main_unread_count": 7,
           "membership": "joined",
           "notification_count": 7,
           "room_id": "!low-priority-room:example.invalid",
+          "suggested": false,
           "tags": {
             "favourite": null,
             "low_priority": {
               "order": "0.25"
             }
           },
+          "thread_unread_count": 0,
           "unread_count": 7
         }
       ],
@@ -101,13 +136,16 @@
           "highlight_count": 0,
           "is_attention_highlighted": false,
           "is_muted": false,
+          "main_unread_count": 0,
           "membership": "not_joined",
           "notification_count": 0,
           "room_id": "!not-joined-room:example.invalid",
+          "suggested": true,
           "tags": {
             "favourite": null,
             "low_priority": null
           },
+          "thread_unread_count": 0,
           "unread_count": 0
         }
       ],
@@ -125,20 +163,23 @@
             }
           },
           "can_join": false,
-          "display_count": 2,
+          "display_count": 3,
           "display_name": "Fixture Room",
           "has_unread_content": true,
           "has_unread_mention": true,
           "highlight_count": 1,
           "is_attention_highlighted": true,
           "is_muted": false,
+          "main_unread_count": 3,
           "membership": "joined",
           "notification_count": 2,
           "room_id": "!room:example.invalid",
+          "suggested": false,
           "tags": {
             "favourite": null,
             "low_priority": null
           },
+          "thread_unread_count": 0,
           "unread_count": 3
         }
       ]
@@ -219,27 +260,6 @@
     ],
     "space_rooms": [
       {
-        "avatar": null,
-        "can_join": false,
-        "display_count": 7,
-        "display_name": "Fixture Low Priority Room",
-        "has_unread_content": true,
-        "has_unread_mention": true,
-        "highlight_count": 2,
-        "is_attention_highlighted": true,
-        "is_muted": false,
-        "membership": "joined",
-        "notification_count": 7,
-        "room_id": "!low-priority-room:example.invalid",
-        "tags": {
-          "favourite": null,
-          "low_priority": {
-            "order": "0.25"
-          }
-        },
-        "unread_count": 7
-      },
-      {
         "avatar": {
           "mxc_uri": "mxc://example.invalid/fixture-avatar",
           "thumbnail": {
@@ -251,21 +271,48 @@
           }
         },
         "can_join": false,
-        "display_count": 2,
+        "display_count": 3,
         "display_name": "Fixture Room",
         "has_unread_content": true,
         "has_unread_mention": true,
         "highlight_count": 1,
         "is_attention_highlighted": true,
         "is_muted": false,
+        "main_unread_count": 3,
         "membership": "joined",
         "notification_count": 2,
         "room_id": "!room:example.invalid",
+        "suggested": false,
         "tags": {
           "favourite": null,
           "low_priority": null
         },
+        "thread_unread_count": 0,
         "unread_count": 3
+      },
+      {
+        "avatar": null,
+        "can_join": false,
+        "display_count": 7,
+        "display_name": "Fixture Low Priority Room",
+        "has_unread_content": true,
+        "has_unread_mention": true,
+        "highlight_count": 2,
+        "is_attention_highlighted": true,
+        "is_muted": false,
+        "main_unread_count": 7,
+        "membership": "joined",
+        "notification_count": 7,
+        "room_id": "!low-priority-room:example.invalid",
+        "suggested": false,
+        "tags": {
+          "favourite": null,
+          "low_priority": {
+            "order": "0.25"
+          }
+        },
+        "thread_unread_count": 0,
+        "unread_count": 7
       }
     ],
     "space_unread_count": 3
@@ -560,8 +607,42 @@
         },
         "rooms": {
           "!room:example.invalid": {
+            "focused_receipts_by_event": {
+              "$target:example.invalid": {
+                "$focused-reply:example.invalid": {
+                  "overflow_count": 0,
+                  "readers": [
+                    {
+                      "avatar": null,
+                      "display_name": "Focused Reader",
+                      "original_display_label": "Focused Reader",
+                      "timestamp_ms": 7,
+                      "user_id": "@focused-reader:example.invalid"
+                    }
+                  ],
+                  "total_count": 1
+                }
+              }
+            },
             "fully_read_event_id": "$read:example.invalid",
             "receipts_by_event": {},
+            "thread_receipts_by_event": {
+              "$root:example.invalid": {
+                "$thread-reply:example.invalid": {
+                  "overflow_count": 0,
+                  "readers": [
+                    {
+                      "avatar": null,
+                      "display_name": "Thread Reader",
+                      "original_display_label": "Thread Reader",
+                      "timestamp_ms": 9,
+                      "user_id": "@thread-reader:example.invalid"
+                    }
+                  ],
+                  "total_count": 1
+                }
+              }
+            },
             "typing_user_ids": [
               "@other:example.invalid"
             ],
@@ -830,6 +911,8 @@
             "favourite": null,
             "low_priority": null
           },
+          "thread_highlight_count": 0,
+          "thread_unread_count": 0,
           "unread_count": 3
         },
         {
@@ -858,6 +941,8 @@
               "order": "0.25"
             }
           },
+          "thread_highlight_count": 0,
+          "thread_unread_count": 0,
           "unread_count": 7
         },
         {
@@ -901,6 +986,8 @@
             "favourite": null,
             "low_priority": null
           },
+          "thread_highlight_count": 0,
+          "thread_unread_count": 0,
           "unread_count": 0
         }
       ],
@@ -987,7 +1074,7 @@
             "sound": true
           },
           "room_list_sort": {
-            "kind": "activity"
+            "kind": "recentFirst"
           },
           "search_crawler": {
             "include_filenames": true,
@@ -1005,20 +1092,23 @@
               "!space:example.invalid": {
                 "dms": {
                   "collapsed": false,
+                  "expanded": false,
                   "sort": {
-                    "kind": "activity"
+                    "kind": "recentFirst"
                   }
                 },
                 "low_priority": {
                   "collapsed": true,
+                  "expanded": true,
                   "sort": {
-                    "kind": "activity"
+                    "kind": "recentFirst"
                   }
                 },
                 "rooms": {
                   "collapsed": false,
+                  "expanded": false,
                   "sort": {
-                    "kind": "activity"
+                    "kind": "recentFirst"
                   }
                 }
               }
@@ -1050,6 +1140,7 @@
         "kind": "idle"
       },
       "space_children": {
+        "can_edit_suggested": true,
         "children": [
           {
             "avatar": {
@@ -1067,14 +1158,33 @@
             "is_space": false,
             "joined_members": 12,
             "membership": "not_joined",
-            "room_id": "!not-joined-room:example.invalid"
+            "room_id": "!not-joined-room:example.invalid",
+            "suggested": true
           }
         ],
         "generation": 3,
         "load": {
           "kind": "idle"
         },
-        "selected_space_id": "!space:example.invalid"
+        "selected_space_id": "!space:example.invalid",
+        "suggested_edit": {
+          "child_room_id": "!not-joined-room:example.invalid",
+          "failure": "forbidden",
+          "kind": "failed",
+          "suggested": false
+        },
+        "suggested_offer": {
+          "kind": "completed",
+          "results": [
+            {
+              "display_name": "Fixture Not Joined Room",
+              "display_name_placeholder": null,
+              "failure": "forbidden",
+              "room_id": "!not-joined-room:example.invalid"
+            }
+          ],
+          "space_id": "!space:example.invalid"
+        }
       },
       "space_members": {
         "can_edit_roles": false,
@@ -1127,7 +1237,7 @@
         "platform": "linux"
       }
     },
-    "schema_version": 7,
+    "schema_version": 9,
     "ui": {
       "basic_operation": {
         "kind": "creatingRoom",
@@ -1291,7 +1401,37 @@
           "source": "live"
         },
         "sort": {
-          "kind": "activity"
+          "kind": "recentFirst"
+        }
+      },
+      "scheduled_sends_list": {
+        "capability": "serverDelayedEvents",
+        "items": [
+          {
+            "body": "Scheduled room body",
+            "handle": {
+              "kind": "local"
+            },
+            "room_id": "!low-priority-room:example.invalid",
+            "scheduled_id": "sched-contract-room",
+            "send_at_ms": 1800000000000
+          },
+          {
+            "body": "Scheduled thread reply body",
+            "handle": {
+              "delay_id": "delay-contract",
+              "kind": "server"
+            },
+            "room_id": "!room:example.invalid",
+            "scheduled_id": "sched-contract-thread",
+            "send_at_ms": 1900000000000,
+            "thread_root_event_id": "$scheduled-thread-root:example.invalid"
+          }
+        ],
+        "kind": "open",
+        "scope": {
+          "kind": "space",
+          "space_id": "!space:example.invalid"
         }
       },
       "thread": {
@@ -1343,7 +1483,8 @@
             "root_event_id": "$thread-root:example.invalid",
             "root_sender": "@fixture:example.invalid",
             "root_sender_label": "Fixture User",
-            "root_timestamp_ms": 800000
+            "root_timestamp_ms": 800000,
+            "unread_count": 0
           }
         ],
         "kind": "open",

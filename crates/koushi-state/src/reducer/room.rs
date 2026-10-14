@@ -4,9 +4,9 @@ use crate::{
     effect::{AppEffect, UiEvent},
     state::{
         AppError, AppState, OperationFailureKind, PinOp, PinOperationState, PinnedEvent,
-        RoomListFailureKind, RoomListFilter, RoomListReadiness, RoomListSource, RoomSummary,
-        RoomTagInfo, RoomTagKind, SpaceSummary, ThreadAttentionState, ThreadPaneState,
-        ThreadsListState, TimelinePaneState,
+        RoomAccessObservation, RoomListFailureKind, RoomListFilter, RoomListReadiness,
+        RoomListSource, RoomSummary, RoomTagInfo, RoomTagKind, ScheduledSendsListState,
+        SpaceSummary, ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
     },
 };
 
@@ -23,6 +23,230 @@ use super::{
 
 const PIN_EVENT_FAILED_MESSAGE: &str = "Pinning the event failed";
 const UNPIN_EVENT_FAILED_MESSAGE: &str = "Unpinning the event failed";
+
+/// Project each joined room's own access condition (#1166).
+///
+/// The payload rides the same generation/source decision as its room-list
+/// snapshot: an authoritative snapshot replaces the slice, a provisional one
+/// merges it (mirroring how provisional snapshots merge rooms, and leaving the
+/// slice alone when the provisional payload is empty), and a stale or rejected
+/// snapshot changes nothing. Rooms removed by a local leave are pruned there.
+pub(crate) fn handle_room_access_updated(
+    state: &mut AppState,
+    generation: u64,
+    source: RoomListSource,
+    authoritative: bool,
+    observations: std::collections::BTreeMap<String, crate::state::RoomAccessObservation>,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state) {
+        return Vec::new();
+    }
+    // The snapshot arm of this batch already ran, so the accepted room list is
+    // in state: a room or Space filtered out there (local leave, unjoined) must
+    // not keep or regain an access condition through a stale payload. Spaces
+    // carry their own condition on the rail, so they are retained too.
+    let retained: std::collections::BTreeSet<&str> = state
+        .rooms
+        .iter()
+        .map(|room| room.room_id.as_str())
+        .chain(state.spaces.iter().map(|space| space.space_id.as_str()))
+        .collect();
+    let observations = observations
+        .into_iter()
+        .filter(|(room_id, _)| retained.contains(room_id.as_str()))
+        .collect::<std::collections::BTreeMap<_, _>>();
+
+    let mut advanced_rooms: Vec<(String, AccessObservationAdvance)> = Vec::new();
+    let mut list_changed = false;
+    if authoritative {
+        if !room_list_authoritative_matches_current(&state.room_list.readiness, generation, source)
+        {
+            return Vec::new();
+        }
+        // A room the accepted snapshot dropped leaves both ledgers.
+        let removed: Vec<String> = state
+            .room_access
+            .keys()
+            .chain(state.room_access_observed.keys())
+            .filter(|room_id| !observations.contains_key(room_id.as_str()))
+            .cloned()
+            .collect();
+        for room_id in &removed {
+            state.room_access.remove(room_id);
+            state.room_access_observed.remove(room_id);
+            state.room_access_pre_send.remove(room_id);
+        }
+        list_changed = !removed.is_empty();
+        apply_room_access_observations(
+            state,
+            &observations,
+            &mut advanced_rooms,
+            &mut list_changed,
+        );
+    } else {
+        if !room_list_provisional_matches_current(&state.room_list.readiness, generation, source)
+            || observations.is_empty()
+        {
+            return Vec::new();
+        }
+        apply_room_access_observations(
+            state,
+            &observations,
+            &mut advanced_rooms,
+            &mut list_changed,
+        );
+    }
+    if advanced_rooms.is_empty() {
+        return Vec::new();
+    }
+    let mut effects = Vec::new();
+    if list_changed {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::RoomListChanged));
+    }
+    let Some(open_room_id) = state
+        .room_management
+        .settings
+        .as_ref()
+        .map(|settings| settings.room_id.clone())
+    else {
+        return effects;
+    };
+    let Some((_, advance)) = advanced_rooms
+        .iter()
+        .find(|(room_id, _)| room_id == &open_room_id)
+    else {
+        return effects;
+    };
+    if let Some(observation) = state.room_access_observed.get(&open_room_id).cloned()
+        && reconcile_open_settings(state, &open_room_id, &observation, *advance)
+    {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::RoomManagementChanged));
+    }
+    effects
+}
+
+/// Which property of a room's observed access tuple advanced (#1177).
+///
+/// Access and history are written by separate state events, so one echo can
+/// carry a newly accepted access rule beside an unchanged old history (or the
+/// reverse). Only a property whose own observed value moved may overwrite a
+/// locally accepted value for that property; a metadata/order-only access
+/// advance must not release an unrelated old history value.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub(crate) struct AccessObservationAdvance {
+    pub(crate) access: bool,
+    pub(crate) history: bool,
+}
+
+/// Apply the observations that advanced since the last one (#1177), property
+/// by property. An unchanged old value for a property is skipped, so it never
+/// rolls back a value this client accepted locally but has not yet observed.
+/// `list_changed` reports whether the access projection itself moved; a
+/// history-only advance still lands in `advanced_rooms` so the open settings
+/// can reconcile it.
+fn apply_room_access_observations(
+    state: &mut AppState,
+    observations: &std::collections::BTreeMap<String, crate::state::RoomAccessObservation>,
+    advanced_rooms: &mut Vec<(String, AccessObservationAdvance)>,
+    list_changed: &mut bool,
+) {
+    for (room_id, observation) in observations {
+        let previous = state.room_access_observed.get(room_id);
+        let advance = AccessObservationAdvance {
+            access: previous.is_none_or(|previous| previous.access != observation.access),
+            history: previous.is_none_or(|previous| {
+                previous.history_visibility != observation.history_visibility
+            }),
+        };
+        if !advance.access && !advance.history {
+            continue;
+        }
+        state
+            .room_access_observed
+            .insert(room_id.clone(), observation.clone());
+        if advance.access && state.room_access.get(room_id) != Some(&observation.access) {
+            state
+                .room_access
+                .insert(room_id.clone(), observation.access.clone());
+            *list_changed = true;
+        }
+        advanced_rooms.push((room_id.clone(), advance));
+    }
+}
+
+/// Reconcile the open settings snapshot from an advancing observation (#1177).
+///
+/// Only the properties whose own observation advanced move; the caller passes
+/// that decision so an old value of the other property is never released. The
+/// observation is the shared `room_access_observed` tuple, so ordinary rooms
+/// reconcile too, not only Spaces. Canonical equality of the editable policy
+/// (rule plus sorted, deduplicated allow target ids) suppresses a false change,
+/// but it must not suppress authoritative metadata or availability advances: a
+/// target-kind advance (`unknown` -> verified `space`), a completeness advance
+/// and a join-rule availability advance all reach the open settings. Only the
+/// access-relevant fields move; name, topic, avatar, permissions and members
+/// stay.
+fn reconcile_open_settings(
+    state: &mut AppState,
+    room_id: &str,
+    observed: &RoomAccessObservation,
+    advance: AccessObservationAdvance,
+) -> bool {
+    let Some(settings) = state
+        .room_management
+        .settings
+        .as_mut()
+        .filter(|settings| settings.room_id == room_id)
+    else {
+        return false;
+    };
+    let mut changed = false;
+    if advance.access && settings.access != observed.access {
+        let same_editable_policy = crate::state::canonical_access_policy(&settings.access)
+            .is_some()
+            && crate::state::canonical_access_policy(&settings.access)
+                == crate::state::canonical_access_policy(&observed.access);
+        if same_editable_policy {
+            // Same editable policy: advance the authoritative metadata in place
+            // and keep the locally held target order. A reordered server allow
+            // list with identical facts is not a change at all.
+            let before = settings.access.clone();
+            apply_observed_access_metadata(&mut settings.access, &observed.access);
+            if settings.access != before {
+                settings.join_rule = settings.access.join_rule.unwrap_or(settings.join_rule);
+                changed = true;
+            }
+        } else {
+            settings.access = observed.access.clone();
+            settings.join_rule = settings.access.join_rule.unwrap_or(settings.join_rule);
+            changed = true;
+        }
+    }
+    if advance.history && settings.history_visibility != observed.history_visibility {
+        settings.history_visibility = observed.history_visibility;
+        changed = true;
+    }
+    changed
+}
+
+/// Advance the authoritative metadata of an equal editable policy: the rule
+/// availability, the restricted completeness and the verified target kinds.
+fn apply_observed_access_metadata(
+    current: &mut crate::state::RoomAccessCondition,
+    observed: &crate::state::RoomAccessCondition,
+) {
+    current.join_rule = observed.join_rule;
+    current.restricted = observed.restricted;
+    for target in &mut current.allow_targets {
+        if let Some(observed_target) = observed
+            .allow_targets
+            .iter()
+            .find(|candidate| candidate.room_id == target.room_id)
+        {
+            target.kind = observed_target.kind;
+        }
+    }
+}
 
 pub(crate) fn handle_room_list_updated(
     state: &mut AppState,
@@ -52,6 +276,10 @@ pub(crate) fn handle_room_left_locally(state: &mut AppState, room_id: String) ->
         .room_list
         .locally_left_room_ids
         .insert(room_id.clone());
+    // #1166: the room left the list, so its projected access condition goes with it.
+    state.room_access.remove(&room_id);
+    state.room_access_observed.remove(&room_id);
+    state.room_access_pre_send.remove(&room_id);
     let joined_members_before_leave = state
         .rooms
         .iter()
@@ -73,41 +301,8 @@ pub(crate) fn handle_room_left_locally(state: &mut AppState, room_id: String) ->
 
 pub(crate) fn handle_room_joined_locally(state: &mut AppState, room_id: String) -> Vec<AppEffect> {
     state.room_list.locally_left_room_ids.remove(&room_id);
+    super::space_children::record_room_joined(state, &room_id);
     Vec::new()
-}
-
-/// Carry a Space's join-rule change from sync into the open settings snapshot,
-/// so Space Info shows a change another client made (#935).
-///
-/// Only a change between two synced values counts. The settings snapshot is the
-/// fresher source right after this client saves, while the room list may still
-/// carry the old rule until the server echoes the event back; copying the
-/// room-list value level-wise would revert a just-saved change. Permissions are
-/// left alone: Core re-reads them before it sends any change.
-fn reconcile_open_settings_join_rule(state: &mut AppState, spaces: &[SpaceSummary]) -> bool {
-    let Some(settings) = state.room_management.settings.as_mut() else {
-        return false;
-    };
-    let Some(synced) = spaces
-        .iter()
-        .find(|space| space.space_id == settings.room_id)
-        .and_then(|space| space.join_rule)
-    else {
-        return false;
-    };
-    let Some(previous) = state
-        .spaces
-        .iter()
-        .find(|space| space.space_id == settings.room_id)
-        .and_then(|space| space.join_rule)
-    else {
-        return false;
-    };
-    if previous == synced || settings.join_rule == synced {
-        return false;
-    }
-    settings.join_rule = synced;
-    true
 }
 
 fn handle_room_list_updated_with_crawler(
@@ -143,24 +338,41 @@ fn handle_room_list_updated_with_crawler(
             .locally_left_room_ids
             .contains(&room.room_id)
     });
+    // A removed room's old per-root receipts cannot be reused on rejoin. A
+    // provisional list may be incomplete, so only prune it for a confirmed
+    // local leave; an authoritative list may prune every absent room.
+    let retained_room_ids = rooms
+        .iter()
+        .map(|room| room.room_id.clone())
+        .collect::<BTreeSet<_>>();
+    state.thread_unread.retain(|(room_id, _), _| {
+        if authoritative {
+            retained_room_ids.contains(room_id)
+        } else {
+            !state.room_list.locally_left_room_ids.contains(room_id)
+        }
+    });
     let mut spaces = spaces;
     preserve_known_avatar_thumbnails(state, &mut spaces, &mut rooms);
     suppress_stale_unread_after_local_read(state, &mut rooms);
+    // #1238: a room-list snapshot never carries the thread counts, so re-derive
+    // them from the reducer-held per-root values before any projection reads the
+    // badge. `suppress_stale_unread_after_local_read` above deliberately leaves
+    // these fields alone: a main-timeline read never touches a threaded receipt.
+    super::thread::apply_thread_badge_totals(&state.thread_unread, &mut rooms);
     crate::state::refresh_room_summary_display_projection(
         &mut rooms,
         &state.profile,
         own_user_id.as_deref(),
     );
-    let has_attention_increase = room_list_has_attention_increase(&state.rooms, &rooms);
-    let retained_room_ids = rooms
-        .iter()
-        .map(|room| room.room_id.clone())
-        .collect::<BTreeSet<_>>();
+    let newly_unread_room_id = newly_unread_room_id(&state.rooms, &rooms);
     let had_active_room_before_update = state.navigation.active_room_id.is_some();
     merge_new_spaces_into_preference(&mut state.navigation.space_order, &spaces);
     apply_space_order_preference(&mut spaces, &state.navigation.space_order);
-    let settings_join_rule_changed = reconcile_open_settings_join_rule(state, &spaces);
     state.spaces = spaces;
+    // The renderable allow-target subset depends on which Spaces are joined
+    // (#1177), so refresh it whenever the space list moves.
+    super::room_management::sync_draft_renderable_targets(state);
     let removed_room_interactions = if authoritative {
         let before = state.room_interactions.len();
         state
@@ -170,6 +382,26 @@ fn handle_room_list_updated_with_crawler(
     } else {
         false
     };
+    // #1364: merge the activity this client remembers for a room into the
+    // snapshot before it becomes authoritative, then advance the cache from the
+    // snapshot's live values. A provisional or partial list may only prune the
+    // rooms it knows left locally, exactly like the other room-keyed memory.
+    state.room_activity.merge_into_rooms(&mut rooms);
+    for room in &rooms {
+        if let Some(activity) = room.conversation_activity {
+            state.room_activity.observe(&room.room_id, activity);
+        }
+    }
+    if authoritative {
+        state
+            .room_activity
+            .retain_rooms(|room_id| retained_room_ids.contains(room_id));
+    } else {
+        let locally_left = &state.room_list.locally_left_room_ids;
+        state
+            .room_activity
+            .retain_rooms(|room_id| !locally_left.contains(room_id));
+    }
     state.rooms = rooms;
     retain_navigation_room_memory(state, authoritative);
     recompute_room_list_projection(state);
@@ -182,19 +414,20 @@ fn handle_room_list_updated_with_crawler(
     refresh_timeline_media_gallery(state);
 
     let mut effects = vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)];
-    if settings_join_rule_changed {
-        effects.push(AppEffect::EmitUiEvent(UiEvent::RoomManagementChanged));
-    }
     if removed_room_interactions {
         effects.push(AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged));
     }
-    let observation = if has_attention_increase {
+    let observation = if newly_unread_room_id.is_some() {
         crate::state::NativeAttentionObservationKind::Live
     } else {
         crate::state::NativeAttentionObservationKind::InitialSync
     };
     let (native_attention_changed, native_attention_diagnostic) =
-        super::native_attention::recompute_native_attention_from_rooms(state, observation);
+        super::native_attention::recompute_native_attention_from_rooms_for_live_room(
+            state,
+            observation,
+            newly_unread_room_id.as_deref(),
+        );
     effects.push(native_attention_diagnostic);
     if native_attention_changed {
         effects.push(AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged));
@@ -204,18 +437,18 @@ fn handle_room_list_updated_with_crawler(
     // RoomListUpdate so it can idempotently start/resume any missing
     // crawls. The actor is responsible for deduplication.
     if admit_crawler {
-        use crate::state::SearchCrawlerSpeed;
+        // Emit for every authoritative room list, whatever the crawler speed and
+        // even when it is empty: the notification also carries the account's
+        // content policy (which governs queries while crawling is paused) and is
+        // what prunes commitments for rooms that are gone. A paused setting only
+        // means the actor starts no crawls.
         let crawler_settings = &state.settings.values.search_crawler;
-        if crawler_settings.speed != SearchCrawlerSpeed::Paused {
-            let (room_ids, latest_event_ids) = super::search::search_crawler_rooms(state);
-            if !room_ids.is_empty() {
-                effects.push(AppEffect::NotifySearchCrawlerRoomsAvailable {
-                    room_ids,
-                    latest_event_ids,
-                    settings: crawler_settings.clone(),
-                });
-            }
-        }
+        let (room_ids, latest_event_ids) = super::search::search_crawler_rooms(state);
+        effects.push(AppEffect::NotifySearchCrawlerRoomsAvailable {
+            room_ids,
+            latest_event_ids,
+            settings: crawler_settings.clone(),
+        });
     }
 
     if state
@@ -237,6 +470,10 @@ fn handle_room_list_updated_with_crawler(
             effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
         }
     }
+    // #1410: a Space this account is no longer in withdraws its offer.
+    if super::space_children::withdraw_suggested_offer_for_left_space(state) {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SpaceChildrenChanged));
+    }
 
     if let Some(active_room_id) = state.navigation.active_room_id.clone() {
         let room_still_exists = state
@@ -255,6 +492,9 @@ fn handle_room_list_updated_with_crawler(
             state.thread = ThreadPaneState::Closed;
             state.thread_attention = ThreadAttentionState::Closed;
             state.threads_list = ThreadsListState::Closed;
+            // #1160: the active room disappeared, so the room-scoped panel
+            // projection closes with it (the backing queue stays authoritative).
+            state.scheduled_sends_list = ScheduledSendsListState::Closed;
             state.navigation.event_navigation = crate::state::EventNavigationState::Idle;
 
             effects.push(AppEffect::EmitUiEvent(UiEvent::TimelineChanged {
@@ -488,21 +728,37 @@ fn room_list_authoritative_matches_current(
     )
 }
 
-fn room_list_has_attention_increase(previous_rooms: &[RoomSummary], rooms: &[RoomSummary]) -> bool {
+/// #1364: apply the persisted per-room conversation-activity cache.
+///
+/// Merging is additive: a room keeps whichever timestamp is newer, so a load
+/// that lands after a live projection never moves a room backwards.
+pub(crate) fn handle_room_activity_loaded(
+    state: &mut AppState,
+    activity: crate::state::RoomActivityState,
+) -> Vec<AppEffect> {
+    state.room_activity = activity;
+    let merged = state.room_activity.merge_into_rooms(&mut state.rooms);
+    if !merged {
+        return Vec::new();
+    }
+    recompute_room_list_projection(state);
+    vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
+}
+
+fn newly_unread_room_id(previous_rooms: &[RoomSummary], rooms: &[RoomSummary]) -> Option<String> {
     let previous_by_id: HashMap<&str, &RoomSummary> = previous_rooms
         .iter()
         .map(|room| (room.room_id.as_str(), room))
         .collect();
-    rooms.iter().any(|room| {
-        let Some(previous) = previous_by_id.get(room.room_id.as_str()) else {
-            return false;
-        };
-        room_attention_metric(room) > room_attention_metric(previous)
-    })
-}
-
-fn room_attention_metric(room: &RoomSummary) -> u64 {
-    crate::state::room_activity_unread_count(room).max(room.highlight_count)
+    rooms
+        .iter()
+        .filter_map(|room| {
+            let previous = previous_by_id.get(room.room_id.as_str())?;
+            (room.unread_count > previous.unread_count)
+                .then(|| (room.unread_count - previous.unread_count, room))
+        })
+        .max_by_key(|(increase, room)| (*increase, room.recency_stamp.unwrap_or_default()))
+        .map(|(_, room)| room.room_id.clone())
 }
 
 fn suppress_stale_unread_after_local_read(state: &AppState, rooms: &mut [RoomSummary]) {
@@ -781,6 +1037,7 @@ pub(crate) fn handle_pin_event_failed(
         code: "pin_event_failed".to_owned(),
         message: PIN_EVENT_FAILED_MESSAGE.to_owned(),
         recoverable: true,
+        reason: None,
     });
     vec![
         AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged),
@@ -876,6 +1133,7 @@ pub(crate) fn handle_unpin_event_failed(
         code: "unpin_event_failed".to_owned(),
         message: UNPIN_EVENT_FAILED_MESSAGE.to_owned(),
         recoverable: true,
+        reason: None,
     });
     vec![
         AppEffect::EmitUiEvent(UiEvent::RoomInteractionsChanged),

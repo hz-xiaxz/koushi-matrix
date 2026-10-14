@@ -83,6 +83,7 @@ pub(crate) fn handle_native_attention_updated(
 fn projected_native_attention_from_rooms(
     state: &AppState,
     observation: NativeAttentionObservationKind,
+    live_room_id: Option<&str>,
 ) -> crate::state::NativeAttentionProjection {
     let room_notification_modes: HashMap<String, RoomNotificationMode> = state
         .room_notification_settings
@@ -90,7 +91,7 @@ fn projected_native_attention_from_rooms(
         .map(|(room_id, settings)| (room_id.clone(), settings.mode))
         .collect();
     let previous_candidate = state.native_attention.summary.candidate.as_ref();
-    let mut projection = crate::state::native_attention_projection_from_rooms(
+    let mut projection = crate::state::native_attention_projection_from_rooms_with_live_room(
         crate::state::NativeAttentionProjectionInput {
             rooms: &state.rooms,
             active_room_id: state.navigation.active_room_id.as_deref(),
@@ -103,6 +104,8 @@ fn projected_native_attention_from_rooms(
             message_previews: state.settings.values.notifications.message_previews,
             capabilities: state.native_attention.summary.capabilities,
         },
+        live_room_id,
+        true,
     );
     if !state.settings.values.notifications.badges {
         projection.state.summary.badge_count = 0;
@@ -114,7 +117,15 @@ pub(crate) fn recompute_native_attention_from_rooms(
     state: &mut AppState,
     observation: NativeAttentionObservationKind,
 ) -> (bool, AppEffect) {
-    let projection = projected_native_attention_from_rooms(state, observation);
+    recompute_native_attention_from_rooms_for_live_room(state, observation, None)
+}
+
+pub(crate) fn recompute_native_attention_from_rooms_for_live_room(
+    state: &mut AppState,
+    observation: NativeAttentionObservationKind,
+    live_room_id: Option<&str>,
+) -> (bool, AppEffect) {
+    let projection = projected_native_attention_from_rooms(state, observation, live_room_id);
     let suppression = match projection.state.dispatch {
         crate::state::NativeAttentionDispatchState::Suppressed { reason } => Some(reason),
         _ => None,
@@ -163,8 +174,11 @@ pub(crate) fn handle_native_window_focus_changed(
     }
     state.native_attention_context.window_focused = focused;
 
-    let mut next =
-        projected_native_attention_from_rooms(state, NativeAttentionObservationKind::InitialSync);
+    let mut next = projected_native_attention_from_rooms(
+        state,
+        NativeAttentionObservationKind::InitialSync,
+        None,
+    );
     next.state.summary.candidate = None;
     next.state.dispatch = crate::state::NativeAttentionDispatchState::Idle;
     if state.native_attention == next.state {
@@ -176,11 +190,14 @@ pub(crate) fn handle_native_window_focus_changed(
 }
 
 pub(crate) fn apply_badge_setting(state: &mut AppState) -> bool {
-    let next =
-        projected_native_attention_from_rooms(state, NativeAttentionObservationKind::InitialSync)
-            .state
-            .summary
-            .badge_count;
+    let next = projected_native_attention_from_rooms(
+        state,
+        NativeAttentionObservationKind::InitialSync,
+        None,
+    )
+    .state
+    .summary
+    .badge_count;
     if state.native_attention.summary.badge_count == next {
         return false;
     }

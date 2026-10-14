@@ -79,7 +79,7 @@ fn room_list_applied_records_without_trace_environment() {
             ),
             (
                 "display_count",
-                koushi_diagnostics::DiagnosticValue::Count(2)
+                koushi_diagnostics::DiagnosticValue::Count(3)
             ),
             (
                 "has_unread_content",

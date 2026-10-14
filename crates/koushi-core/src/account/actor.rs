@@ -79,7 +79,8 @@ use super::trust_gate::{
 use super::verification::{
     INCOMING_VERIFICATION_FLOW_ID_BASE, IncomingVerificationObservation, PendingSasVerification,
     PendingVerificationRequest, SasVerificationWaitState, VerificationObservation,
-    VerificationTerminal, incoming_verification_request_is_current, record_sas_verification_event,
+    VerificationTerminal, incoming_verification_request_dropped_event,
+    incoming_verification_request_is_current, record_sas_verification_event,
     sas_verification_event,
 };
 #[cfg(test)]
@@ -227,6 +228,9 @@ pub(crate) enum AccountMessage {
         send_at_ms: u64,
         draft_revision: ComposerDraftRevision,
         composer_permit: ForwardedComposerDraftPermit,
+        /// #1348: the composer formatting the schedule was admitted under, so the
+        /// stored delayed content matches what the composer would have sent.
+        formatting_options: koushi_state::ComposerFormattingOptions,
     },
     DispatchLocalScheduledSend {
         request_id: RequestId,
@@ -235,6 +239,8 @@ pub(crate) enum AccountMessage {
         room_id: String,
         thread_root_event_id: Option<String>,
         body: String,
+        /// #1348: the live composer formatting for the local fallback dispatch.
+        formatting_options: koushi_state::ComposerFormattingOptions,
     },
     CancelServerDelayedSend {
         request_id: RequestId,
@@ -249,6 +255,8 @@ pub(crate) enum AccountMessage {
         body: String,
         delay_id: String,
         send_at_ms: u64,
+        /// #1348: the live composer formatting for the replaced delayed content.
+        formatting_options: koushi_state::ComposerFormattingOptions,
     },
     OpenTimelineAtTimestamp {
         request_id: RequestId,
@@ -265,12 +273,40 @@ pub(crate) enum AccountMessage {
     ConfigureEventCacheFetchForTesting {
         fetch: oneshot::Receiver<super::RoomEventLookupResult>,
     },
+    #[cfg(test)]
+    ConfigureSearchActorForTesting {
+        handle: Option<SearchActorHandle>,
+        acknowledged: oneshot::Sender<()>,
+    },
+    /// Publish an own-profile avatar source without an SDK round trip, so the
+    /// superseded-entry retirement can be tested (#1396).
+    #[cfg(test)]
+    NoteOwnAvatarSourceForTesting {
+        mxc_uri: Option<String>,
+        acknowledged: oneshot::Sender<()>,
+    },
     RepairRoomTimeline {
         request_id: RequestId,
         account_key: AccountKey,
         room_id: String,
     },
     SearchCommand(SearchCommand),
+    /// Export-time retention sample (#1344): answered by the SearchActor (or
+    /// settled as unavailable) without holding the account actor.
+    SearchRetentionDiagnostics {
+        response: oneshot::Sender<Option<crate::search::AccountRetentionDiagnostics>>,
+    },
+    /// Export-time resident-set sample (#1394): forwarded to the timeline
+    /// manager, which answers from its own handles without awaiting an actor.
+    TimelineResidencyDiagnostics {
+        response: oneshot::Sender<Option<crate::timeline::TimelineResidencyDiagnostics>>,
+    },
+    /// A Search or Files request with the account's content policy at submission,
+    /// instead of waiting for a crawler notification behind a busy mailbox.
+    SearchWithPolicy {
+        command: SearchCommand,
+        content_policy: koushi_state::SearchCrawlerSettings,
+    },
     /// Record `AppEffect::NotifySearchCrawlerRoomsAvailable` as a latest-wins
     /// background crawler notification and try to flush it to SearchActor.
     NotifySearchCrawlerRoomsAvailable {
@@ -319,7 +355,7 @@ pub(crate) enum AccountMessage {
         started_at: Instant,
         result: Result<
             koushi_sdk::MatrixSecureBackupInspection,
-            koushi_state::SecureBackupGateFailureKind,
+            koushi_state::SecureBackupInspectionFailure,
         >,
     },
     RetrySecureBackupInspection {
@@ -353,6 +389,11 @@ pub(crate) enum AccountMessage {
     #[cfg(test)]
     InspectSessionCheckTimer {
         response: oneshot::Sender<Option<u64>>,
+    },
+    /// Whether a trust-recheck demand has joined the in-flight inspection.
+    #[cfg(test)]
+    InspectTrustRecheckJoined {
+        response: oneshot::Sender<bool>,
     },
     CurrentSessionStatusRefreshFinished {
         request_id: u64,
@@ -585,7 +626,10 @@ pub(crate) enum AccountMessage {
         flow_id: u64,
     },
     IncomingVerificationRequest {
-        generation: u64,
+        /// The session this request was observed for. Admission is fenced by
+        /// pointer identity against the actor's current session, so restarting
+        /// the same session's observer does not retire an observed request.
+        session: Arc<MatrixClientSession>,
         target: VerificationTarget,
         handle: koushi_sdk::MatrixVerificationRequestHandle,
     },
@@ -784,6 +828,21 @@ impl AccountActorHandle {
             return false;
         }
         acknowledged.await.is_ok()
+    }
+
+    #[cfg(test)]
+    pub(crate) async fn note_own_avatar_source_for_testing(&self, mxc_uri: Option<String>) {
+        let (acknowledged, done) = oneshot::channel();
+        if !self
+            .send(AccountMessage::NoteOwnAvatarSourceForTesting {
+                mxc_uri,
+                acknowledged,
+            })
+            .await
+        {
+            return;
+        }
+        let _ = done.await;
     }
 
     #[cfg(any(test, feature = "test-hooks"))]
@@ -1175,8 +1234,6 @@ pub struct AccountActor {
     pub(super) pending_contact_verification_send:
         Option<super::contact_security::PendingContactVerificationSend>,
     pub(super) contact_verification_send_generation: u64,
-    /// Epoch attached to incoming verification messages from the active SDK client.
-    pub(super) incoming_verification_session_generation: u64,
     /// SDK session-change observer for auth invalidation / soft logout.
     pub(super) session_change_observer: Option<SessionChangeObservation>,
     /// Optional profile/account-data hydration task for the active session.
@@ -1227,6 +1284,13 @@ pub struct AccountActor {
     pub(super) avatar_demand_rx:
         tokio::sync::watch::Receiver<Option<Arc<crate::view_scope_lifecycle::ChargedAvatarDemand>>>,
     pub(super) avatar_demand: Option<Arc<crate::view_scope_lifecycle::ChargedAvatarDemand>>,
+    /// Avatar sources observed in scoped demand this session (#1396). A source
+    /// that leaves the demand retires its retained bytes instead of waiting for
+    /// LRU pressure.
+    pub(super) demanded_avatar_sources: BTreeSet<String>,
+    /// The own profile's current avatar source, so a change retires the
+    /// superseded bytes (#1396).
+    pub(super) own_avatar_mxc_uri: Option<String>,
 }
 
 impl AccountActor {
@@ -1444,7 +1508,6 @@ impl AccountActor {
             contact_security_load_task: None,
             pending_contact_verification_send: None,
             contact_verification_send_generation: 0,
-            incoming_verification_session_generation: 0,
             session_change_observer: None,
             account_hydration_task: None,
             account_management_discovery_task: None,
@@ -1464,6 +1527,8 @@ impl AccountActor {
             avatar_session_generation: avatar_session_generation.clone(),
             avatar_demand_rx,
             avatar_demand: None,
+            demanded_avatar_sources: BTreeSet::new(),
+            own_avatar_mxc_uri: None,
         };
         crate::executor::spawn(actor.run());
         AccountActorHandle {
@@ -1792,6 +1857,7 @@ impl AccountActor {
                     send_at_ms,
                     draft_revision,
                     composer_permit,
+                    formatting_options,
                 } => {
                     self.handle_schedule_server_delayed_send(
                         request_id,
@@ -1803,6 +1869,7 @@ impl AccountActor {
                         send_at_ms,
                         draft_revision,
                         composer_permit,
+                        formatting_options,
                     )
                     .await;
                 }
@@ -1813,6 +1880,7 @@ impl AccountActor {
                     room_id,
                     thread_root_event_id,
                     body,
+                    formatting_options,
                 } => {
                     self.handle_dispatch_local_scheduled_send(
                         request_id,
@@ -1821,6 +1889,7 @@ impl AccountActor {
                         room_id,
                         thread_root_event_id,
                         body,
+                        formatting_options,
                     )
                     .await;
                 }
@@ -1840,6 +1909,7 @@ impl AccountActor {
                     body,
                     delay_id,
                     send_at_ms,
+                    formatting_options,
                 } => {
                     self.handle_reschedule_server_delayed_send(
                         request_id,
@@ -1849,6 +1919,7 @@ impl AccountActor {
                         body,
                         delay_id,
                         send_at_ms,
+                        formatting_options,
                     )
                     .await;
                 }
@@ -1863,6 +1934,24 @@ impl AccountActor {
                 #[cfg(test)]
                 AccountMessage::ConfigureEventCacheFetchForTesting { fetch } => {
                     self.event_cache_fetch_override = Some(fetch);
+                }
+                #[cfg(test)]
+                AccountMessage::NoteOwnAvatarSourceForTesting {
+                    mxc_uri,
+                    acknowledged,
+                } => {
+                    self.note_own_avatar_source(mxc_uri);
+                    let _ = acknowledged.send(());
+                }
+                #[cfg(test)]
+                AccountMessage::ConfigureSearchActorForTesting {
+                    handle,
+                    acknowledged,
+                } => {
+                    if let Some(handle) = handle {
+                        self.search_actor = Some(handle);
+                    }
+                    let _ = acknowledged.send(());
                 }
                 AccountMessage::EnsureRoomEventCached {
                     request_id,
@@ -1889,8 +1978,40 @@ impl AccountActor {
                     })
                     .await;
                 }
+                AccountMessage::SearchWithPolicy {
+                    command,
+                    content_policy,
+                } => {
+                    // A buffered roster must not restore an older policy after
+                    // this authoritative submission crosses mailbox pressure.
+                    if let Some(notification) = self.pending_crawler_notification.as_mut() {
+                        notification.settings = content_policy.clone();
+                    }
+                    self.route_search_command_with_policy(command, Some(content_policy))
+                        .await;
+                }
                 AccountMessage::SearchCommand(search_command) => {
                     self.route_search_command(search_command).await;
+                }
+                AccountMessage::SearchRetentionDiagnostics { response } => {
+                    match &self.search_actor {
+                        Some(search_actor) => {
+                            // Forwarded; on a failed send the sender is consumed
+                            // and the caller's bounded wait settles as
+                            // unavailable.
+                            let _ = search_actor.retention_diagnostics_forward(response).await;
+                        }
+                        None => {
+                            // No search session for this account: settle as
+                            // unavailable rather than holding the export.
+                            let _ = response.send(None);
+                        }
+                    }
+                }
+                AccountMessage::TimelineResidencyDiagnostics { response } => {
+                    // Forwarded; a closed manager drops the reply channel and the
+                    // caller's bounded wait settles as unavailable.
+                    self.timeline_manager.residency_diagnostics(response);
                 }
                 AccountMessage::NotifySearchCrawlerRoomsAvailable {
                     room_ids,
@@ -1954,6 +2075,10 @@ impl AccountActor {
                 AccountMessage::InspectSessionCheckTimer { response } => {
                     let _ =
                         response.send(self.session_check.timer.as_ref().map(|(token, _)| *token));
+                }
+                #[cfg(test)]
+                AccountMessage::InspectTrustRecheckJoined { response } => {
+                    let _ = response.send(self.session_check.trust_joined_inspection);
                 }
                 #[cfg(test)]
                 AccountMessage::ConfigureSessionCheckClock { base_epoch_ms } => {
@@ -2554,9 +2679,6 @@ impl AccountActor {
                     self.pending_oidc_login = Some(PendingOidcAttempt {
                         start_request_id,
                         flow: PendingOidcFlow::Synthetic { homeserver },
-                        authorization_url: "https://synthetic.invalid/authorize?opaque=fixture"
-                            .to_owned(),
-                        state: "synthetic-state".to_owned(),
                     });
                     self.oidc_completion_override = Some(session);
                 }
@@ -2568,9 +2690,6 @@ impl AccountActor {
                     self.pending_oidc_login = Some(PendingOidcAttempt {
                         start_request_id,
                         flow: PendingOidcFlow::Synthetic { homeserver },
-                        authorization_url: "https://synthetic.invalid/authorize?opaque=fixture"
-                            .to_owned(),
-                        state: "synthetic-state".to_owned(),
                     });
                 }
                 #[cfg(test)]
@@ -2669,18 +2788,18 @@ impl AccountActor {
                     }
                 }
                 AccountMessage::IncomingVerificationRequest {
-                    generation,
+                    session,
                     target,
                     handle,
                 } => {
-                    if incoming_verification_request_is_current(
-                        generation,
-                        self.incoming_verification_session_generation,
-                        self.session.is_some(),
-                    ) {
+                    if incoming_verification_request_is_current(self.session.as_ref(), &session) {
                         let request_id = self.next_incoming_verification_request_id();
                         self.handle_incoming_verification_request(request_id, target, handle)
                             .await;
+                    } else {
+                        record(incoming_verification_request_dropped_event(
+                            self.session.is_some(),
+                        ));
                     }
                 }
                 AccountMessage::SessionInvalidated { reason } => {
@@ -2747,8 +2866,13 @@ impl AccountActor {
             AccountCommand::StartOidcLogin {
                 request_id,
                 homeserver,
+                method,
             } => {
-                self.handle_start_oidc_login(request_id, homeserver).await;
+                self.handle_start_oidc_login(request_id, homeserver, method)
+                    .await;
+            }
+            AccountCommand::CancelOidcLogin { .. } => {
+                self.handle_cancel_oidc_login();
             }
             AccountCommand::CompleteOidcLogin {
                 request_id,
@@ -2958,16 +3082,17 @@ impl AccountActor {
                 request_id,
                 flow_id,
                 auth,
-                request,
+                passphrase,
             } => {
-                self.handle_start_session_bootstrap(request_id, flow_id, auth, request)
+                self.handle_start_session_bootstrap(request_id, flow_id, auth, passphrase)
                     .await;
             }
             AccountCommand::ConfirmSessionBootstrapSaved {
-                request_id: _,
-                flow_id: _,
+                request_id,
+                flow_id,
             } => {
-                self.request_authoritative_trust_recheck();
+                self.handle_confirm_session_bootstrap_saved(request_id, flow_id)
+                    .await;
             }
             AccountCommand::BootstrapCrossSigning { request_id, auth } => {
                 self.handle_bootstrap_cross_signing(request_id, auth).await;

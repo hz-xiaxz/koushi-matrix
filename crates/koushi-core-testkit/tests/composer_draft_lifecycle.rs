@@ -84,6 +84,7 @@ fn revision_bearing_commands_declare_exact_account_main_and_thread_scopes() {
                 expected_account: account.clone(),
                 target: main.clone(),
                 submitted_revision: 1.into(),
+                consumes_draft: true,
             }),
             main.clone(),
         ),
@@ -93,6 +94,7 @@ fn revision_bearing_commands_declare_exact_account_main_and_thread_scopes() {
                 expected_account: account.clone(),
                 target: thread.clone(),
                 submitted_revision: 1.into(),
+                consumes_draft: true,
             }),
             thread.clone(),
         ),
@@ -240,7 +242,7 @@ async fn retired_renderer_generation_cannot_submit_or_recreate_target() {
 
 #[tokio::test]
 async fn account_runtime_teardown_revokes_live_renderer_generation() {
-    let runtime = koushi_core::CoreRuntime::start();
+    let (runtime, _stores) = koushi_core::CoreRuntime::start_isolated();
     let registry = runtime.composer_draft_lease_registry_for_testing();
     let scope = main_scope(session_key(), "teardown-room");
     let generation = registry
@@ -415,6 +417,7 @@ async fn queued_stale_write_keeps_exact_target_protected() {
                 expected_account: session_key(),
                 target: scope.target.clone(),
                 submitted_revision: ComposerDraftRevision::from_u64(7),
+                consumes_draft: true,
             }),
         )
         .await

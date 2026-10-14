@@ -16,11 +16,14 @@ import {
 import { type CSSProperties, type ReactNode, type RefObject, useCallback, useEffect, useRef, useState } from "react";
 
 import { t } from "../../i18n/messages";
+import { Tooltip } from "../Tooltip";
+import { useOutsidePressDismissal } from "../popupDismissal";
 import { onMenuKeyDown } from "../ContextMenuSurface";
 import type { MediaTransferProgress, TimelineItem } from "../../domain/coreEvents";
 import type { TimelineMediaDownloadState } from "../../domain/types";
 import type { TimelineForwardDestination } from "../../domain/projectionTypes";
 import { mediaSourceUrl } from "../../backend/linkMediaRuntime";
+import type { MediaSaveNameFacts } from "../../backend/linkMediaPort";
 import type { TimelineTransport } from "./TimelineTransport";
 
 export type TimelineMediaViewerItem = {
@@ -33,6 +36,7 @@ export type TimelineMediaViewerItem = {
   height: number | null;
   encrypted: boolean;
   actions: TimelineMediaViewerActions;
+  saveName: MediaSaveNameFacts | null;
   saveMediaFile?: TimelineTransport["saveMediaFile"];
 };
 
@@ -95,10 +99,11 @@ async function saveMediaSource(
   sourceUrl: string,
   displayUrl: string,
   filename: string,
+  saveName: MediaSaveNameFacts | null,
   saveMediaFile?: TimelineTransport["saveMediaFile"]
 ): Promise<void> {
   if (saveMediaFile) {
-    await saveMediaFile(sourceUrl, filename);
+    await saveMediaFile(sourceUrl, filename, saveName);
     return;
   }
   await downloadMediaSource(displayUrl, filename);
@@ -112,6 +117,7 @@ export function TimelineMediaAttachment({
   onDownload,
   onOpenMediaViewer,
   onSaveMediaFile,
+  saveName,
   viewerActions
 }: {
   media: NonNullable<TimelineItem["media"]>;
@@ -121,6 +127,7 @@ export function TimelineMediaAttachment({
   onDownload: () => void;
   onOpenMediaViewer: (item: TimelineMediaViewerItem) => void;
   onSaveMediaFile?: TimelineTransport["saveMediaFile"];
+  saveName: MediaSaveNameFacts | null;
   viewerActions: TimelineMediaViewerActions;
 }) {
   const [detailsOpen, setDetailsOpen] = useState(false);
@@ -163,6 +170,7 @@ export function TimelineMediaAttachment({
           height: readyImagePreview.height,
           encrypted: media.source.encrypted,
           actions: viewerActions,
+          saveName,
           saveMediaFile: onSaveMediaFile
         };
   const progressPercent =
@@ -185,9 +193,10 @@ export function TimelineMediaAttachment({
       downloadState.source_url,
       mediaSourceUrl(downloadState.source_url),
       media.filename,
+      saveName,
       onSaveMediaFile
     );
-  }, [downloadState, media.filename, onSaveMediaFile]);
+  }, [downloadState, media.filename, onSaveMediaFile, saveName]);
   useEffect(() => {
     if (!detailsOpen) {
       return;
@@ -215,26 +224,34 @@ export function TimelineMediaAttachment({
       >
         <div className="message-media-figure" style={mediaFrameStyle}>
           {readyImagePreview && readyImageDownload ? (
-            <button
-              className="message-media-open"
-              type="button"
-              aria-label={t("timeline.mediaOpenFile")}
-              onClick={() => {
-                if (readyImageViewerItem) {
-                  onOpenMediaViewer(readyImageViewerItem);
-                }
-              }}
-            >
-              <img
-                className="message-media-image"
-                src={readyImagePreview.sourceUrl}
-                alt={media.filename}
-                title={media.filename}
-                width={readyImagePreview.width ?? undefined}
-                height={readyImagePreview.height ?? undefined}
-                loading="lazy"
-              />
-            </button>
+            <Tooltip label={t("timeline.mediaOpenFile")} placement="above">
+              {(tooltipProps) => (
+                <button
+                  className="message-media-open"
+                  type="button"
+                  aria-label={t("timeline.mediaOpenFile")}
+                  onClick={() => {
+                    if (readyImageViewerItem) {
+                      onOpenMediaViewer(readyImageViewerItem);
+                    }
+                  }}
+                  {...tooltipProps}
+                >
+                  {/* No native `title` here: the button's explanation is the
+                      action, and the attachment name stays in `alt` and in the
+                      media details popover. A native filename popup would paint
+                      over the styled bubble. */}
+                  <img
+                    className="message-media-image"
+                    src={readyImagePreview.sourceUrl}
+                    alt={media.filename}
+                    width={readyImagePreview.width ?? undefined}
+                    height={readyImagePreview.height ?? undefined}
+                    loading="lazy"
+                  />
+                </button>
+              )}
+            </Tooltip>
           ) : (
             <div className="message-media-image-placeholder" aria-hidden="true">
               <Icon className="message-media-icon" size={28} />
@@ -267,62 +284,92 @@ export function TimelineMediaAttachment({
             <span className="message-media-image-badge">{t("timeline.encryptedMedia")}</span>
           ) : null}
           <div className="message-media-hover-actions">
-            <button
-              ref={detailsTrigger}
-              className="message-media-hover-action"
-              type="button"
-              aria-label={t("timeline.mediaDetails", { filename: media.filename })}
-              aria-expanded={detailsOpen}
-              aria-haspopup="dialog"
-              onClick={(event) => {
-                event.stopPropagation();
-                setDetailsOpen((current) => !current);
-              }}
+            <Tooltip
+              label={t("timeline.mediaDetails", { filename: media.filename })}
+              placement="above"
             >
-              <Info size={16} />
-            </button>
+              {(tooltipProps) => (
+                <button
+                  ref={detailsTrigger}
+                  className="message-media-hover-action"
+                  type="button"
+                  aria-label={t("timeline.mediaDetails", { filename: media.filename })}
+                  aria-expanded={detailsOpen}
+                  aria-haspopup="dialog"
+                  onClick={(event) => {
+                    event.stopPropagation();
+                    setDetailsOpen((current) => !current);
+                  }}
+                  {...tooltipProps}
+                >
+                  <Info size={16} />
+                </button>
+              )}
+            </Tooltip>
             {canDownload && downloadState?.kind === "failed" ? (
-              <button
-                className="message-media-hover-action"
-                type="button"
-                aria-label={t("timeline.mediaDownloadRetry")}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  requestDownload();
-                }}
-              >
-                <RefreshCw size={16} />
-              </button>
+              <Tooltip label={t("timeline.mediaDownloadRetry")} placement="above">
+                {(tooltipProps) => (
+                  <button
+                    className="message-media-hover-action"
+                    type="button"
+                    aria-label={t("timeline.mediaDownloadRetry")}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      requestDownload();
+                    }}
+                    {...tooltipProps}
+                  >
+                    <RefreshCw size={16} />
+                  </button>
+                )}
+              </Tooltip>
             ) : canDownload && readyImageDownload && readyImagePreview ? (
-              <button
-                className="message-media-hover-action"
-                type="button"
-                aria-label={t("timeline.downloadMedia", { filename: media.filename })}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  void saveMediaSource(
-                    readyImageDownload.source_url,
-                    readyImagePreview.sourceUrl,
-                    media.filename,
-                    onSaveMediaFile
-                  );
-                }}
+              <Tooltip
+                label={t("timeline.downloadMedia", { filename: media.filename })}
+                placement="above"
               >
-                <Download size={16} />
-              </button>
+                {(tooltipProps) => (
+                  <button
+                    className="message-media-hover-action"
+                    type="button"
+                    aria-label={t("timeline.downloadMedia", { filename: media.filename })}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      void saveMediaSource(
+                        readyImageDownload.source_url,
+                        readyImagePreview.sourceUrl,
+                        media.filename,
+                        saveName,
+                        onSaveMediaFile
+                      );
+                    }}
+                    {...tooltipProps}
+                  >
+                    <Download size={16} />
+                  </button>
+                )}
+              </Tooltip>
             ) : canDownload ? (
-              <button
-                className="message-media-hover-action"
-                type="button"
-                disabled={downloadState?.kind === "pending"}
-                aria-label={t("timeline.downloadMedia", { filename: media.filename })}
-                onClick={(event) => {
-                  event.stopPropagation();
-                  requestDownload();
-                }}
+              <Tooltip
+                label={t("timeline.downloadMedia", { filename: media.filename })}
+                placement="above"
               >
-                <Download size={16} />
-              </button>
+                {(tooltipProps) => (
+                  <button
+                    className="message-media-hover-action"
+                    type="button"
+                    disabled={downloadState?.kind === "pending"}
+                    aria-label={t("timeline.downloadMedia", { filename: media.filename })}
+                    onClick={(event) => {
+                      event.stopPropagation();
+                      requestDownload();
+                    }}
+                    {...tooltipProps}
+                  >
+                    <Download size={16} />
+                  </button>
+                )}
+              </Tooltip>
             ) : null}
           </div>
           {detailsOpen ? (
@@ -336,14 +383,19 @@ export function TimelineMediaAttachment({
                 ))}
                 {media.source.encrypted ? <span>{t("timeline.encryptedMedia")}</span> : null}
               </div>
-              <button
-                className="message-media-details-close"
-                type="button"
-                aria-label={t("timeline.closeMediaDetails")}
-                onClick={() => setDetailsOpen(false)}
-              >
-                <XCircle size={16} />
-              </button>
+              <Tooltip label={t("timeline.closeMediaDetails")} placement="above">
+                {(tooltipProps) => (
+                  <button
+                    className="message-media-details-close"
+                    type="button"
+                    aria-label={t("timeline.closeMediaDetails")}
+                    onClick={() => setDetailsOpen(false)}
+                    {...tooltipProps}
+                  >
+                    <XCircle size={16} />
+                  </button>
+                )}
+              </Tooltip>
             </MediaDetailsPopup>
           ) : null}
           {progressPercent !== null ? (
@@ -405,40 +457,62 @@ export function TimelineMediaAttachment({
       </div>
       {canDownload ? (
         downloadState?.kind === "failed" ? (
-          <button
-            className="message-media-download message-media-retry"
-            type="button"
-            aria-label={t("timeline.mediaDownloadRetry")}
-            onClick={requestDownload}
-          >
-            <RefreshCw size={15} />
-          </button>
+          <Tooltip label={t("timeline.mediaDownloadRetry")} placement="above">
+            {(tooltipProps) => (
+              <button
+                className="message-media-download message-media-retry"
+                type="button"
+                aria-label={t("timeline.mediaDownloadRetry")}
+                onClick={requestDownload}
+                {...tooltipProps}
+              >
+                <RefreshCw size={15} />
+              </button>
+            )}
+          </Tooltip>
         ) : downloadState?.kind === "ready" ? (
-          <button
-            className="message-media-download"
-            type="button"
-            aria-label={t("timeline.downloadMedia", { filename: media.filename })}
-            onClick={() => {
-              void saveMediaSource(
-                downloadState.source_url,
-                mediaSourceUrl(downloadState.source_url),
-                media.filename,
-                onSaveMediaFile
-              );
-            }}
+          <Tooltip
+            label={t("timeline.downloadMedia", { filename: media.filename })}
+            placement="above"
           >
-            <Download size={15} />
-          </button>
+            {(tooltipProps) => (
+              <button
+                className="message-media-download"
+                type="button"
+                aria-label={t("timeline.downloadMedia", { filename: media.filename })}
+                onClick={() => {
+                  void saveMediaSource(
+                    downloadState.source_url,
+                    mediaSourceUrl(downloadState.source_url),
+                    media.filename,
+                    saveName,
+                    onSaveMediaFile
+                  );
+                }}
+                {...tooltipProps}
+              >
+                <Download size={15} />
+              </button>
+            )}
+          </Tooltip>
         ) : (
-          <button
-            className="message-media-download"
-            type="button"
-            disabled={downloadState?.kind === "pending"}
-            aria-label={t("timeline.downloadMedia", { filename: media.filename })}
-            onClick={requestDownload}
+          <Tooltip
+            label={t("timeline.downloadMedia", { filename: media.filename })}
+            placement="above"
           >
-            <Download size={15} />
-          </button>
+            {(tooltipProps) => (
+              <button
+                className="message-media-download"
+                type="button"
+                disabled={downloadState?.kind === "pending"}
+                aria-label={t("timeline.downloadMedia", { filename: media.filename })}
+                onClick={requestDownload}
+                {...tooltipProps}
+              >
+                <Download size={15} />
+              </button>
+            )}
+          </Tooltip>
         )
       ) : null}
     </div>
@@ -449,7 +523,19 @@ function MediaDetailsPopup({ anchor, onClose, children }: {
   anchor: RefObject<HTMLButtonElement | null>; onClose: () => void; children: ReactNode;
 }) {
   const placement = useFloatingPlacement({ anchorRef: anchor, placement: "below", align: "end", inlineSize: 260, blockSize: 180 });
+  const popupRef = useRef<HTMLDivElement>(null);
+  // #1368: the details panel renders in the body-level floating layer with no
+  // backdrop, so the shared owner dismisses it on an outside press and keeps
+  // one row's details open at a time.
+  useOutsidePressDismissal({
+    open: true,
+    kind: "media-details",
+    contentRef: popupRef,
+    triggerRef: anchor,
+    onDismiss: onClose
+  });
   return <FloatingLayer><div className="message-media-details-popover" role="dialog"
+    ref={popupRef}
     aria-label={t("timeline.mediaDetailsTitle")} style={floatingPlacementStyle(placement)}
     onKeyDown={event => {
       if (event.key === "Escape" && !event.nativeEvent.isComposing) {
@@ -541,36 +627,50 @@ export function TimelineMediaViewer({
             ) : null}
           </div>
           <div className="timeline-media-viewer-actions">
-            <button
-              className="timeline-media-viewer-action"
-              type="button"
-              aria-label={t("timeline.downloadMedia", { filename: item.filename })}
-              onClick={() => {
-                void saveMediaSource(
-                  item.downloadSourceUrl,
-                  item.sourceUrl,
-                  item.filename,
-                  item.saveMediaFile
-                );
-              }}
+            <Tooltip
+              label={t("timeline.downloadMedia", { filename: item.filename })}
+              placement="above"
             >
-              <Download size={20} />
-            </button>
-            {hasActionMenu ? (
-              <div className="timeline-media-viewer-menu-control" ref={actionMenuControlRef}>
+              {(tooltipProps) => (
                 <button
                   className="timeline-media-viewer-action"
                   type="button"
-                  aria-label={t("timeline.messageActions")}
-                  aria-expanded={isActionMenuOpen}
-                  aria-haspopup="menu"
+                  aria-label={t("timeline.downloadMedia", { filename: item.filename })}
                   onClick={() => {
-                    setForwardMenuOpen(false);
-                    setActionMenuOpen((current) => !current);
+                    void saveMediaSource(
+                      item.downloadSourceUrl,
+                      item.sourceUrl,
+                      item.filename,
+                      item.saveName,
+                      item.saveMediaFile
+                    );
                   }}
+                  {...tooltipProps}
                 >
-                  <MoreHorizontal size={22} />
+                  <Download size={20} />
                 </button>
+              )}
+            </Tooltip>
+            {hasActionMenu ? (
+              <div className="timeline-media-viewer-menu-control" ref={actionMenuControlRef}>
+                <Tooltip label={t("timeline.messageActions")} placement="above" align="end">
+                  {(tooltipProps) => (
+                    <button
+                      className="timeline-media-viewer-action"
+                      type="button"
+                      aria-label={t("timeline.messageActions")}
+                      aria-expanded={isActionMenuOpen}
+                      aria-haspopup="menu"
+                      onClick={() => {
+                        setForwardMenuOpen(false);
+                        setActionMenuOpen((current) => !current);
+                      }}
+                      {...tooltipProps}
+                    >
+                      <MoreHorizontal size={22} />
+                    </button>
+                  )}
+                </Tooltip>
                 {isActionMenuOpen ? (
                   <div
                     className="timeline-media-viewer-menu"
@@ -658,15 +758,20 @@ export function TimelineMediaViewer({
                 ) : null}
               </div>
             ) : null}
-            <button
-              ref={closeButtonRef}
-              className="timeline-media-viewer-action timeline-media-viewer-close"
-              type="button"
-              aria-label={t("mediaGallery.close")}
-              onClick={onClose}
-            >
-              <XCircle size={24} />
-            </button>
+            <Tooltip label={t("mediaGallery.close")} placement="above" align="end">
+              {(tooltipProps) => (
+                <button
+                  ref={closeButtonRef}
+                  className="timeline-media-viewer-action timeline-media-viewer-close"
+                  type="button"
+                  aria-label={t("mediaGallery.close")}
+                  onClick={onClose}
+                  {...tooltipProps}
+                >
+                  <XCircle size={24} />
+                </button>
+              )}
+            </Tooltip>
           </div>
         </div>
         <div className="timeline-media-viewer-stage">

@@ -757,6 +757,7 @@ fn finds_timeline_item_in_initial_items_by_body_substring() {
             link_previews: None,
             link_ranges: Vec::new(),
             mentioned_user_ids: Vec::new(),
+            mentions_room: false,
             reactions: Vec::new(),
             can_react: false,
             is_redacted: false,
@@ -791,6 +792,7 @@ fn finds_timeline_item_in_initial_items_by_body_substring() {
             link_previews: None,
             link_ranges: Vec::new(),
             mentioned_user_ids: Vec::new(),
+            mentions_room: false,
             reactions: Vec::new(),
             can_react: true,
             is_redacted: false,
@@ -836,6 +838,7 @@ fn thread_reply_missing_from_initial_items_requires_paginate_backfill() {
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: false,
         is_redacted: false,
@@ -879,6 +882,7 @@ fn thread_reply_present_in_initial_items_does_not_require_backfill() {
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: false,
         is_redacted: false,
@@ -908,6 +912,7 @@ fn thread_reply_stops_repagination_after_end_reached() {
 fn thread_summary_helper_requires_root_item_with_reply_count() {
     let summary = ThreadSummaryDto {
         reply_count: 1,
+        unread_count: 0,
         latest_event_id: None,
         latest_sender: None,
         latest_sender_label: None,
@@ -922,6 +927,7 @@ fn thread_summary_helper_requires_root_item_with_reply_count() {
         None,
         Some(ThreadSummaryDto {
             reply_count: 0,
+            unread_count: 0,
             ..summary.clone()
         }),
     );
@@ -948,6 +954,7 @@ fn room_thread_assertion_requires_rust_projected_root_activity_and_summary() {
         None,
         Some(ThreadSummaryDto {
             reply_count: 1,
+            unread_count: 0,
             latest_event_id: Some("$reply:test".to_owned()),
             latest_sender: None,
             latest_sender_label: None,
@@ -1003,6 +1010,7 @@ fn room_thread_summary_observer_waits_for_late_summary_diff() {
         None,
         Some(ThreadSummaryDto {
             reply_count: 1,
+            unread_count: 0,
             latest_event_id: None,
             latest_sender: None,
             latest_sender_label: None,
@@ -1033,6 +1041,7 @@ fn room_thread_summary_observer_rejects_stale_non_null_summary_until_rust_advanc
         None,
         Some(ThreadSummaryDto {
             reply_count: 1,
+            unread_count: 0,
             latest_event_id: Some("$reply-a:test".to_owned()),
             latest_sender: None,
             latest_sender_label: None,
@@ -1057,6 +1066,7 @@ fn room_thread_summary_observer_rejects_stale_non_null_summary_until_rust_advanc
         None,
         Some(ThreadSummaryDto {
             reply_count: 2,
+            unread_count: 0,
             latest_event_id: Some("$reply-b:test".to_owned()),
             latest_sender: None,
             latest_sender_label: None,
@@ -1264,6 +1274,7 @@ fn scheduled_send_scenario_runs_after_timeline_and_reports_private_tokens() {
             "scheduled_reschedule=ok",
             "scheduled_cancel=ok",
             "scheduled_fire=ok",
+            "scheduled_thread_reply=ok",
             "restore_cleanup=ok",
         ]
     );

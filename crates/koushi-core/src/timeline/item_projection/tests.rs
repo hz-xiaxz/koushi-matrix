@@ -1,8 +1,8 @@
 use std::collections::BTreeSet;
 
 use koushi_state::{
-    ComposerDocument, ComposerInline, LiveEventReceipts, LiveReadReceipt, MentionIntent,
-    MentionTarget, ReplyQuoteState,
+    ComposerDocument, ComposerFormattingOptions, ComposerInline, LiveEventReceipts,
+    LiveReadReceipt, MentionIntent, MentionTarget, ReplyQuoteState,
 };
 
 use matrix_sdk::room::edit::EditedContent;
@@ -13,7 +13,7 @@ use matrix_sdk::ruma::events::{
     Mentions, StateEventContentChange, room::name::RoomNameEventContent,
 };
 
-use matrix_sdk_ui::timeline::{MembershipChange, ReactionStatus, ReactionsByKeyBySender};
+use matrix_sdk_ui::timeline::{EventSendState, MembershipChange, ReactionsByKeyBySender};
 
 use crate::event_projection::message_actions_for_timeline_item;
 use koushi_protocol::command::TimelineCommand;
@@ -63,13 +63,14 @@ use super::{
     edited_content_for_edit_target, edited_document_content_for_edit_target,
     has_user_visible_content, link_ranges_for_message_projection,
     megolm_message_index_from_original_json, membership_change_projection,
-    mentioned_user_ids_from_event_json, message_edit_target_token, message_projection_from_msgtype,
-    msgtype_carries_editable_caption, project_local_megolm_rotation_reason,
-    reaction_groups_from_sdk, reply_quote_from_message_projection,
-    reset_loading_link_previews_to_pending, room_name_notice_projection, state_event_notice_body,
-    state_event_notice_projection, timeline_item_can_edit, timeline_item_can_react,
-    timeline_item_can_redact, timeline_item_should_be_hidden, validate_cancel_send,
-    validate_redact_reaction, validate_retry_send, validate_send_reaction,
+    mentioned_user_ids_from_event_json, mentions_room_from_event_json, message_edit_target_token,
+    message_projection_from_msgtype, msgtype_carries_editable_caption,
+    project_local_megolm_rotation_reason, reaction_groups_from_sdk,
+    reply_quote_from_message_projection, reset_loading_link_previews_to_pending,
+    room_name_notice_projection, state_event_notice_body, state_event_notice_projection,
+    timeline_item_can_edit, timeline_item_can_react, timeline_item_can_redact,
+    timeline_item_should_be_hidden, validate_cancel_send, validate_redact_reaction,
+    validate_retry_send, validate_send_reaction,
 };
 
 use super::super::test_support::{fake_rid, room_key, timeline_item};
@@ -196,7 +197,8 @@ fn reaction_groups_fixture() -> ReactionsByKeyBySender {
         OwnedUserId::try_from("@me:test").expect("user id"),
         ReactionInfo {
             timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(uint!(1)),
-            status: ReactionStatus::RemoteToRemote(
+            send_state: None,
+            event_id: Some(
                 matrix_sdk::ruma::OwnedEventId::try_from("$reaction:me").expect("event id"),
             ),
         },
@@ -205,21 +207,30 @@ fn reaction_groups_fixture() -> ReactionsByKeyBySender {
         OwnedUserId::try_from("@alice:test").expect("user id"),
         ReactionInfo {
             timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(uint!(2)),
-            status: ReactionStatus::LocalToRemote(None),
+            send_state: None,
+            event_id: Some(
+                matrix_sdk::ruma::OwnedEventId::try_from("$reaction:alice").expect("event id"),
+            ),
         },
     );
     thumbs.insert(
         OwnedUserId::try_from("@bob:test").expect("user id"),
         ReactionInfo {
             timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(uint!(3)),
-            status: ReactionStatus::LocalToRemote(None),
+            send_state: None,
+            event_id: Some(
+                matrix_sdk::ruma::OwnedEventId::try_from("$reaction:bob").expect("event id"),
+            ),
         },
     );
     thumbs.insert(
         OwnedUserId::try_from("@carol:test").expect("user id"),
         ReactionInfo {
             timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(uint!(4)),
-            status: ReactionStatus::LocalToRemote(None),
+            send_state: None,
+            event_id: Some(
+                matrix_sdk::ruma::OwnedEventId::try_from("$reaction:carol").expect("event id"),
+            ),
         },
     );
 
@@ -285,6 +296,46 @@ fn mentioned_user_ids_ignore_room_mentions() {
         }))
         .is_empty()
     );
+}
+
+/// #1123: the spec-standard Element room mention carries only the plain body
+/// and the flag, so the flag itself has to drive the pill.
+#[test]
+fn room_mentions_come_from_the_event_mentions_metadata() {
+    assert!(mentions_room_from_event_json(&serde_json::json!({
+        "content": { "body": "@room ", "m.mentions": { "room": true }, "msgtype": "m.text" }
+    })));
+    // A text that only looks like one, and a flag that is false or missing,
+    // never become a room mention.
+    assert!(!mentions_room_from_event_json(&serde_json::json!({
+        "content": { "body": "@room" }
+    })));
+    assert!(!mentions_room_from_event_json(&serde_json::json!({
+        "content": { "body": "@room", "m.mentions": { "room": false } }
+    })));
+    assert!(!mentions_room_from_event_json(&serde_json::json!({
+        "content": { "body": "@Alice", "m.mentions": { "user_ids": ["@alice:example.test"] } }
+    })));
+}
+
+#[test]
+fn room_mentions_follow_the_edit_replacement() {
+    assert!(mentions_room_from_event_json(&serde_json::json!({
+        "content": {
+            "body": "* plain",
+            "m.relates_to": { "rel_type": "m.replace", "event_id": "$original:example.test" },
+            "m.new_content": { "body": "@room", "m.mentions": { "room": true } }
+        }
+    })));
+    // The edited-away room mention no longer applies.
+    assert!(!mentions_room_from_event_json(&serde_json::json!({
+        "content": {
+            "body": "* @room",
+            "m.mentions": { "room": true },
+            "m.relates_to": { "rel_type": "m.replace", "event_id": "$original:example.test" },
+            "m.new_content": { "body": "plain", "m.mentions": {} }
+        }
+    })));
 }
 
 #[test]
@@ -660,6 +711,7 @@ fn reply_quote_projection_retains_sanitized_formatted_body() {
         "$root:example.invalid",
         Some("@bob:example.invalid".to_owned()),
         Some(projection),
+        Vec::new(),
     );
 
     assert_eq!(quote.state, ReplyQuoteState::Ready);
@@ -698,8 +750,12 @@ fn captionless_media_projections_can_reply_and_keep_filename_reply_quotes() {
         );
         assert!(actions.can_reply, "{filename} should be replyable");
 
-        let quote =
-            reply_quote_from_message_projection("$captionless-media:test", None, Some(projection));
+        let quote = reply_quote_from_message_projection(
+            "$captionless-media:test",
+            None,
+            Some(projection),
+            Vec::new(),
+        );
         assert_eq!(quote.body_preview.as_deref(), Some(filename.as_str()));
     }
 }
@@ -857,6 +913,30 @@ fn reaction_groups_project_my_sender_and_remote_event_id() {
 }
 
 #[test]
+fn reaction_groups_report_no_event_id_for_an_unsent_local_echo() {
+    // Ported from the pre-0.19 `ReactionStatus::LocalToRemote` shape: the SDK
+    // only knows a reaction's own event ID once the server assigned it, so an
+    // own local echo can be counted but not yet redacted by event ID.
+    let own_user_id = OwnedUserId::try_from("@me:test").expect("user id");
+    let mut reactions = ReactionsByKeyBySender::default();
+    reactions.entry("👍".to_owned()).or_default().insert(
+        own_user_id.clone(),
+        ReactionInfo {
+            timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(uint!(1)),
+            send_state: Some(EventSendState::NotSentYet { progress: None }),
+            event_id: None,
+        },
+    );
+
+    let groups = reaction_groups_from_sdk(&reactions, Some(own_user_id.as_ref()));
+
+    assert_eq!(groups.len(), 1);
+    assert_eq!(groups[0].count, 1);
+    assert!(groups[0].reacted_by_me);
+    assert_eq!(groups[0].my_reaction_event_id, None);
+}
+
+#[test]
 fn reaction_groups_count_unique_senders_after_sdk_deduplication() {
     let mut reactions = ReactionsByKeyBySender::default();
     let thumbs = reactions.entry("👍".to_owned()).or_default();
@@ -865,7 +945,8 @@ fn reaction_groups_count_unique_senders_after_sdk_deduplication() {
         alice.clone(),
         ReactionInfo {
             timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(uint!(1)),
-            status: ReactionStatus::RemoteToRemote(
+            send_state: None,
+            event_id: Some(
                 matrix_sdk::ruma::OwnedEventId::try_from("$reaction:old").expect("event id"),
             ),
         },
@@ -874,7 +955,8 @@ fn reaction_groups_count_unique_senders_after_sdk_deduplication() {
         alice,
         ReactionInfo {
             timestamp: matrix_sdk::ruma::MilliSecondsSinceUnixEpoch(uint!(2)),
-            status: ReactionStatus::RemoteToRemote(
+            send_state: None,
+            event_id: Some(
                 matrix_sdk::ruma::OwnedEventId::try_from("$reaction:new").expect("event id"),
             ),
         },
@@ -1103,9 +1185,11 @@ fn structured_edit_preserves_final_mentions_and_formats_text_and_media_captions(
         },
     ]);
     let text = MessageType::Text(TextMessageEventContent::plain("old"));
-    let EditedContent::RoomMessage(content) =
-        edited_document_content_for_edit_target(Some(&text), &document)
-    else {
+    let EditedContent::RoomMessage(content) = edited_document_content_for_edit_target(
+        Some(&text),
+        &document,
+        ComposerFormattingOptions::default(),
+    ) else {
         panic!("text edit must stay a room message")
     };
     let MessageType::Text(text) = content.msgtype else {
@@ -1123,7 +1207,11 @@ fn structured_edit_preserves_final_mentions_and_formats_text_and_media_captions(
         caption,
         formatted_caption,
         mentions,
-    } = edited_document_content_for_edit_target(Some(&media), &document)
+    } = edited_document_content_for_edit_target(
+        Some(&media),
+        &document,
+        ComposerFormattingOptions::default(),
+    )
     else {
         panic!("media edit must remain a caption edit")
     };
@@ -1314,6 +1402,179 @@ async fn reopening_edit_uses_latest_sdk_revision() {
 #[tokio::test]
 async fn reopening_thread_root_edit_uses_latest_sdk_revision() {
     check_reopening_edit(true).await;
+}
+
+#[tokio::test]
+async fn real_bundled_projection_is_admitted_without_a_cached_edit() {
+    use futures_util::StreamExt;
+    use koushi_protocol::{
+        CoreEvent,
+        command::SearchCommand,
+        event::SearchEvent,
+        ids::{RequestId, RuntimeConnectionId},
+    };
+    use koushi_sdk::MatrixClientSession;
+    use koushi_state::{AttachmentFilter, AttachmentScope, AttachmentSort, SearchCrawlerSettings};
+    use koushi_state::{SessionAuthenticationMethod, SessionInfo};
+    use matrix_sdk::{
+        ruma::{event_id, room_id},
+        test_utils::mocks::MatrixMockServer,
+    };
+    use matrix_sdk_test::JoinedRoomBuilder;
+    use tokio::sync::{broadcast, mpsc};
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    client.event_cache().subscribe().unwrap();
+    let rid = room_id!("!bundled:example.invalid");
+    let room = server.sync_joined_room(&client, rid).await;
+    let timeline = super::super::relay::koushi_timeline_builder(
+        &room,
+        matrix_sdk_ui::timeline::TimelineFocus::Live {
+            hide_threaded_events: false,
+        },
+    )
+    .build()
+    .await
+    .unwrap();
+    let (mut items, mut updates) = timeline.subscribe().await;
+    let root = serde_json::json!({"event_id": "$bundled-root", "type": "m.room.message", "sender": "@member:example.invalid",
+        "origin_server_ts": 1, "content": {"msgtype": "m.file", "body": "original.pdf", "url": "mxc://example.invalid/original"},
+        "unsigned": {"m.relations": {"m.replace": {"event_id": "$bundled-edit", "type": "m.room.message", "sender": "@member:example.invalid",
+            "origin_server_ts": 2, "content": {"msgtype": "m.file", "body": "* bundled.pdf", "url": "mxc://example.invalid/bundled",
+                "m.new_content": {"msgtype": "m.file", "body": "bundled.pdf", "url": "mxc://example.invalid/bundled"},
+                "m.relates_to": {"rel_type": "m.replace", "event_id": "$bundled-root"}}}}}});
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(rid).add_timeline_event(
+                serde_json::from_value::<
+                    matrix_sdk::ruma::serde::Raw<matrix_sdk::ruma::events::AnySyncTimelineEvent>,
+                >(root)
+                .unwrap(),
+            ),
+        )
+        .await;
+    let item = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if let Some(item) = items.iter().find(|item| {
+                item.as_event().is_some_and(|e| {
+                    e.event_id() == Some(event_id!("$bundled-root"))
+                        && e.content()
+                            .as_message()
+                            .is_some_and(|m| m.body() == "bundled.pdf")
+                })
+            }) {
+                break item.clone();
+            }
+            for diff in updates.next().await.unwrap() {
+                diff.apply(&mut items);
+            }
+        }
+    })
+    .await
+    .unwrap();
+    let (cache, _handles) = room.event_cache().await.unwrap();
+    assert!(
+        cache
+            .find_event(event_id!("$bundled-edit"))
+            .await
+            .unwrap()
+            .is_none()
+    );
+    let current = room
+        .resolve_cached_message(event_id!("$bundled-root"))
+        .await
+        .unwrap()
+        .expect("rendered root must have verifiable current content");
+    assert_eq!(
+        current.attachment_filename.as_deref(),
+        Some("bundled.pdf"),
+        "search must verify the same replacement the real SDK timeline renders"
+    );
+    let messages =
+        super::super::actor::TimelineActor::search_index_messages_for_item(rid.as_str(), &item);
+    assert_eq!(messages.len(), 2);
+    let session = MatrixClientSession::from_client_for_testing(
+        client.clone(),
+        SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client.user_id().unwrap().to_string(),
+            device_id: client.device_id().unwrap().to_string(),
+            authentication_method: SessionAuthenticationMethod::Unknown,
+        },
+    );
+    let (actions, _action_rx) = mpsc::channel(32);
+    let (events, mut event_rx) = broadcast::channel(32);
+    let handle = crate::search::SearchActor::spawn(
+        std::sync::Arc::new(session),
+        actions,
+        events,
+        crate::account_work::AccountWorkScheduler::default(),
+    );
+    let command = |sequence| SearchCommand::Attachments {
+        request_id: RequestId {
+            connection_id: RuntimeConnectionId(7),
+            sequence,
+        },
+        scope: AttachmentScope::Account,
+        filter: AttachmentFilter::default(),
+        sort: AttachmentSort::NewestFirst,
+    };
+    assert!(
+        handle
+            .send_query_command(
+                command(1),
+                Some(SearchCrawlerSettings {
+                    speed: koushi_state::SearchCrawlerSpeed::Paused,
+                    include_filenames: true,
+                    ..Default::default()
+                })
+            )
+            .await
+    );
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while !matches!(
+            event_rx.recv().await.unwrap(),
+            CoreEvent::Search(SearchEvent::AttachmentsResults { .. })
+        ) {}
+    })
+    .await
+    .unwrap();
+    for message in messages {
+        handle.index_sender().send(message).await.unwrap();
+    }
+    tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        while !matches!(
+            event_rx.recv().await.unwrap(),
+            CoreEvent::Search(SearchEvent::IndexUpdated { .. })
+        ) {}
+    })
+    .await
+    .unwrap();
+    assert!(handle.send_command(command(2)).await);
+    let results = tokio::time::timeout(std::time::Duration::from_secs(3), async {
+        loop {
+            if let CoreEvent::Search(SearchEvent::AttachmentsResults {
+                request_id,
+                results,
+            }) = event_rx.recv().await.unwrap()
+                && request_id.sequence == 2
+            {
+                break results;
+            }
+        }
+    })
+    .await
+    .unwrap();
+    assert_eq!(
+        results
+            .iter()
+            .map(|r| r.filename.as_str())
+            .collect::<Vec<_>>(),
+        ["bundled.pdf"]
+    );
+    assert!(handle.shutdown().await);
 }
 
 async fn check_reopening_edit(with_reply: bool) {

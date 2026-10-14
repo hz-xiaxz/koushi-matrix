@@ -55,8 +55,10 @@ export function moveRovingMenuFocus(
     activeMenu && container.contains(activeMenu) && activeMenu !== container
       ? activeMenu
       : container;
+  // `[role^="menuitem"]` covers menuitem, menuitemradio, and menuitemcheckbox,
+  // so a radio-style menu (a section's sort options) roves the same way.
   const items = Array.from(
-    scope.querySelectorAll<HTMLElement>('[role="menuitem"]:not([hidden])')
+    scope.querySelectorAll<HTMLElement>('[role^="menuitem"]:not([hidden])')
   ).filter((item) => item.closest('[role="menu"]') === scope);
   if (items.length === 0) {
     return;

@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet, HashMap};
+use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 
 use std::sync::{Arc, Mutex, atomic::Ordering};
 use std::task::Poll;
@@ -832,6 +832,7 @@ async fn duplicate_submission_routes_one_manager_enqueue_worker() {
         hide_redacted: false,
         timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
         live_tail_refreshes: LiveTailRefreshCoordinator::new(),
+        focused_builds: Default::default(),
         test_session_available: true,
     };
     manager.send_enqueue_workers.tasks.push(Box::pin(async {
@@ -1309,6 +1310,7 @@ async fn shutdown_cleans_captured_room_keys_before_acknowledging() {
         hide_redacted: false,
         timeline_actor_generations: generations.clone(),
         live_tail_refreshes: LiveTailRefreshCoordinator::new(),
+        focused_builds: Default::default(),
         test_session_available: true,
     };
     let run = executor::spawn(async move { manager.run().await });
@@ -1402,6 +1404,7 @@ async fn manager_enqueue_worker_waits_for_reducer_acceptance_delivery() {
         hide_redacted: false,
         timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
         live_tail_refreshes: LiveTailRefreshCoordinator::new(),
+        focused_builds: Default::default(),
         test_session_available: true,
     };
     let submission_id = SubmissionId::new("paused-admission");
@@ -1539,7 +1542,7 @@ fn submission_admission_tombstones_are_bounded_and_active_is_retained() {
 
 #[tokio::test]
 async fn send_without_authoritative_account_session_fails_closed() {
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
 
     runtime
@@ -1762,12 +1765,184 @@ fn local_echo_before_sdk_bind_preserves_fallback_until_terminal() {
             event_id: "$event-prebind:test".to_owned(),
         },
     );
+    // A send-queue echo is not a rendered row: the fallback stays, now as the
+    // sent event, until a canonical row converges it.
+    let mut owner = coordinator.lock().expect("coordinator");
+    assert!(matches!(
+        owner.projections_for_key(&key).as_slice(),
+        [projection] if matches!(
+            &projection.item.id,
+            koushi_protocol::event::TimelineItemId::Event { event_id }
+                if event_id == "$event-prebind:test"
+        )
+    ));
+    assert_eq!(
+        owner.reconcile_remote_event(key.room_id(), "$event-prebind:test"),
+        Some(key.clone())
+    );
+    assert!(owner.projections_for_key(&key).is_empty());
+}
+
+#[test]
+fn send_queue_local_echo_alone_keeps_the_fallback_row_through_sent() {
+    // The send queue reports its local echo on a different stream than the
+    // Timeline diff that renders it. Only a canonical row may retire the
+    // manager-owned fallback; otherwise a Sent terminal that lands before the
+    // canonical echo leaves no row for the message on screen.
+    let coordinator = SharedSendCompletionCoordinator::default();
+    let (ingress, _terminal_rx) = TimelineSendTerminalIngress::channel();
+    let key = room_key();
+    let fallback = |client_txn_id: &str| PendingSendProjection {
+        key: key.clone(),
+        sequence: 0,
+        client_txn_id: client_txn_id.to_owned(),
+        item: pending_send_item(client_txn_id, "body", None, None, None),
+        sdk_transaction_id: None,
+        handle: None,
+        terminal_event_id: None,
+        phase: PendingSendPhase::Pending,
+    };
+    let sent = |sdk_transaction_id: &str, event_id: &str| SendCompletionObservation::Sent {
+        sdk_transaction_id: sdk_transaction_id.to_owned(),
+        event_id: event_id.to_owned(),
+    };
+
+    let mut queue_echo_only = SendCompletionRegistration::begin_with_projection(
+        Arc::clone(&coordinator),
+        ingress.clone(),
+        key.clone(),
+        "client-queue-echo".to_owned(),
+        None,
+        fake_rid(7411),
+        true,
+        Some(fallback("client-queue-echo")),
+    );
+    queue_echo_only.activate();
+    queue_echo_only.bind("sdk-queue-echo".to_owned());
+    assert_eq!(
+        coordinator
+            .lock()
+            .expect("coordinator")
+            .observe_local_echo(key.room_id(), "sdk-queue-echo"),
+        None
+    );
+    apply_send_completion_observation_and_handoff(
+        &coordinator,
+        &ingress,
+        key.room_id(),
+        sent("sdk-queue-echo", "$queue-echo:test"),
+    );
+    {
+        let mut owner = coordinator.lock().expect("coordinator");
+        let visible = owner.projections_for_key(&key);
+        assert!(
+            matches!(visible.as_slice(), [projection] if matches!(
+                &projection.item.id,
+                koushi_protocol::event::TimelineItemId::Event { event_id }
+                    if event_id == "$queue-echo:test"
+            )),
+            "the fallback must stay visible until a canonical row exists"
+        );
+        assert_eq!(
+            owner.reconcile_remote_event(key.room_id(), "$queue-echo:test"),
+            Some(key.clone())
+        );
+        assert!(owner.projections_for_key(&key).is_empty());
+    }
+
+    let mut canonical_echo = SendCompletionRegistration::begin_with_projection(
+        Arc::clone(&coordinator),
+        ingress.clone(),
+        key.clone(),
+        "client-canonical-echo".to_owned(),
+        None,
+        fake_rid(7412),
+        true,
+        Some(fallback("client-canonical-echo")),
+    );
+    canonical_echo.activate();
+    canonical_echo.bind("sdk-canonical-echo".to_owned());
+    assert_eq!(
+        coordinator
+            .lock()
+            .expect("coordinator")
+            .reconcile_canonical_local_echo(key.room_id(), "sdk-canonical-echo"),
+        Some(key.clone())
+    );
+    apply_send_completion_observation_and_handoff(
+        &coordinator,
+        &ingress,
+        key.room_id(),
+        sent("sdk-canonical-echo", "$canonical-echo:test"),
+    );
     assert!(
         coordinator
             .lock()
             .expect("coordinator")
             .projections_for_key(&key)
-            .is_empty()
+            .is_empty(),
+        "a canonical echo already renders the message, so the fallback retires"
+    );
+}
+
+#[test]
+fn settled_sdk_row_stays_visible_until_its_remote_event_is_canonical() {
+    // After Sent, the SDK local-echo row is still a transaction row until the
+    // Timeline re-identifies it. Hiding it at Sent left the message with no row
+    // when the fallback had already been retired by that canonical echo.
+    let coordinator = SharedSendCompletionCoordinator::default();
+    let (ingress, _terminal_rx) = TimelineSendTerminalIngress::channel();
+    let key = room_key();
+    let mut registration = SendCompletionRegistration::begin_with_projection(
+        Arc::clone(&coordinator),
+        ingress.clone(),
+        key.clone(),
+        "client-settled".to_owned(),
+        None,
+        fake_rid(7413),
+        true,
+        Some(PendingSendProjection {
+            key: key.clone(),
+            sequence: 0,
+            client_txn_id: "client-settled".to_owned(),
+            item: pending_send_item("client-settled", "body", None, None, None),
+            sdk_transaction_id: None,
+            handle: None,
+            terminal_event_id: None,
+            phase: PendingSendPhase::Pending,
+        }),
+    );
+    registration.activate();
+    registration.bind("sdk-settled".to_owned());
+    assert_eq!(
+        coordinator
+            .lock()
+            .expect("coordinator")
+            .reconcile_canonical_local_echo(key.room_id(), "sdk-settled"),
+        Some(key.clone())
+    );
+    apply_send_completion_observation_and_handoff(
+        &coordinator,
+        &ingress,
+        key.room_id(),
+        SendCompletionObservation::Sent {
+            sdk_transaction_id: "sdk-settled".to_owned(),
+            event_id: "$settled:test".to_owned(),
+        },
+    );
+    let owner = coordinator.lock().expect("coordinator");
+    assert!(owner.projections_for_key(&key).is_empty());
+    assert!(
+        owner
+            .settled_transaction_ids(key.room_id(), &HashSet::new())
+            .is_empty(),
+        "the SDK transaction row is the only row for the message"
+    );
+    let canonical = HashSet::from(["$settled:test".to_owned()]);
+    assert_eq!(
+        owner.settled_transaction_ids(key.room_id(), &canonical),
+        HashSet::from(["sdk-settled".to_owned()]),
+        "a stale transaction row is hidden once the remote event is canonical"
     );
 }
 
@@ -2170,9 +2345,7 @@ fn hydrated_sent_projection_cache_evicts_oldest_without_consuming_active_capacit
 #[test]
 fn send_failure_trace_records_only_closed_failure_fields() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let diagnostic_start = koushi_diagnostics::test_support::detail_cursor();
     let key = room_key();
     let mut trace = SendLifecycleTrace::new(&key, true);
     let correlation = trace.correlation();
@@ -2187,8 +2360,8 @@ fn send_failure_trace_records_only_closed_failure_fields() {
         },
     );
 
-    let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
-    let event = &diagnostics.records[diagnostic_start..]
+    let diagnostics = koushi_diagnostics::test_support::detail_records_since(diagnostic_start);
+    let event = &diagnostics
         .iter()
         .find(|record| {
             record.event.source == "core.send"
@@ -2226,9 +2399,7 @@ fn send_failure_trace_records_only_closed_failure_fields() {
 #[test]
 fn encrypted_send_local_store_diagnostics_are_correlated_and_privacy_safe() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let diagnostic_start = koushi_diagnostics::test_support::detail_cursor();
     let key = room_key();
     let trace = SendLifecycleTrace::new(&key, true);
     let correlation = trace.correlation();
@@ -2244,8 +2415,8 @@ fn encrypted_send_local_store_diagnostics_are_correlated_and_privacy_safe() {
         dehydrated_own_other_device_count: Some(1),
         blacklisted_own_other_device_count: Some(1),
     });
-    let diagnostics = koushi_diagnostics::test_support::detail_snapshot();
-    let record = diagnostics.records[diagnostic_start..]
+    let diagnostics = koushi_diagnostics::test_support::detail_records_since(diagnostic_start);
+    let record = diagnostics
         .iter()
         .find(|record| {
             record.event.source == "core.send"
@@ -3501,4 +3672,58 @@ fn same_room_thread_media_progress_does_not_borrow_room_request_correlation() {
         ("sdk-media-progress".to_owned(), None),
         "same-room thread presentation must not borrow room request correlation"
     );
+}
+
+/// A manager-owned worker that must be polled for the inline await to finish,
+/// like a worker holding an SDK lock permit the inline await waits on. It never
+/// completes on its own.
+async fn parked_worker<T>(polled: oneshot::Sender<()>) -> T {
+    let _ = polled.send(());
+    std::future::pending::<T>().await
+}
+
+#[tokio::test]
+async fn inline_manager_await_drives_every_manager_polled_worker_set() {
+    for set in [
+        "send_enqueue",
+        "focused_build",
+        "read_worker",
+        "read_retry",
+        "global_observer",
+    ] {
+        let mut manager = live_tail_test_manager(HashMap::new());
+        let (polled_tx, polled_rx) = oneshot::channel();
+        match set {
+            "send_enqueue" => manager
+                .send_enqueue_workers
+                .tasks
+                .push(Box::pin(parked_worker(polled_tx))),
+            "focused_build" => manager
+                .focused_builds
+                .tasks
+                .push(Box::pin(parked_worker(polled_tx))),
+            "read_worker" => manager
+                .read_workers
+                .tasks
+                .push(Box::pin(parked_worker(polled_tx))),
+            "read_retry" => manager
+                .read_workers
+                .retry_tasks
+                .push(Box::pin(parked_worker(polled_tx))),
+            _ => {
+                manager.global_send_completion_observer_future =
+                    Some(Box::pin(parked_worker(polled_tx)));
+            }
+        }
+        // Liveness bound: without driving the set, the inline await never ends.
+        let driven = tokio::time::timeout(
+            Duration::from_secs(60),
+            manager.await_driving_manager_workers(polled_rx),
+        )
+        .await;
+        assert!(
+            matches!(driven, Ok(Ok(()))),
+            "{set}: an inline manager await must keep polling this worker set"
+        );
+    }
 }

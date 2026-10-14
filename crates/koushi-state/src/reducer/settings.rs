@@ -12,6 +12,24 @@ use super::{is_session_ready, recompute_room_list_projection};
 const SETTINGS_LOAD_FAILED_MESSAGE: &str = "Settings could not be loaded";
 const SETTINGS_PERSIST_FAILED_MESSAGE: &str = "Settings could not be saved";
 
+/// Close the search view when the account's content policy changes.
+///
+/// The results it shows were verified under the old policy, and an in-flight
+/// query may still be verifying under it. Closing the view means a later result
+/// for that request cannot match the state, and the user's next search runs
+/// under the new policy.
+fn close_search_for_content_policy_change(state: &mut AppState, effects: &mut Vec<AppEffect>) {
+    state.search_request_connection_id = None;
+    if state.search != crate::state::SearchState::Closed {
+        state.search = crate::state::SearchState::Closed;
+        effects.push(AppEffect::EmitUiEvent(UiEvent::SearchChanged));
+    }
+    // The Files view lists attachment filenames, so it is a policy surface too.
+    effects.extend(super::search::close_files_view_for_content_policy_change(
+        state,
+    ));
+}
+
 pub(crate) fn handle_settings_loaded(
     state: &mut AppState,
     values: crate::state::SettingsValues,
@@ -49,7 +67,7 @@ pub(crate) fn handle_account_settings_loaded(
         AppEffect::EmitUiEvent(UiEvent::SettingsChanged),
         AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
     ];
-    let crawler = &state.settings.values.search_crawler;
+    let crawler = state.settings.values.search_crawler.clone();
     let content_changed = previous_crawler.include_media_captions != crawler.include_media_captions
         || previous_crawler.include_filenames != crawler.include_filenames;
     if content_changed {
@@ -61,6 +79,7 @@ pub(crate) fn handle_account_settings_loaded(
                 *room_state = crate::state::SearchCrawlerRoomState::Idle;
             }
         }
+        close_search_for_content_policy_change(state, &mut effects);
         effects.push(AppEffect::InvalidateSearchCrawlerCache);
         let (room_ids, latest_event_ids) = super::search::search_crawler_rooms(state);
         if !room_ids.is_empty() {
@@ -123,6 +142,7 @@ pub(crate) fn handle_settings_load_failed(
         code: "settings_load_failed".to_owned(),
         message: SETTINGS_LOAD_FAILED_MESSAGE.to_owned(),
         recoverable: true,
+        reason: None,
     });
     vec![
         AppEffect::EmitUiEvent(UiEvent::SettingsChanged),
@@ -141,9 +161,29 @@ pub(crate) fn handle_settings_update_requested(
     let prev_room_list_sort = state.settings.values.room_list_sort;
     let prev_thread_list_order = state.settings.values.thread_list_order;
     let prev_sidebar = state.settings.values.sidebar.clone();
+    let prev_reveal = state.navigation.revealed_sidebar_section.clone();
 
     state.settings.values.apply_patch(patch.clone());
     state.settings.persistence = SettingsPersistenceState::Saving { request_id };
+
+    // #1366: the user's own collapse choice for a revealed section ends the
+    // session reveal, so the persisted preference decides again. Only the
+    // collapse choice: the bound toggle is a different dimension and must not
+    // re-collapse a section the user has open (a revealed section whose stored
+    // preference is collapsed would otherwise vanish on "Show more"). The
+    // reveal is navigation state and is never persisted with the patch.
+    if let Some(section) = patch.sidebar_section.as_ref()
+        && section.collapsed.is_some()
+        && state
+            .navigation
+            .revealed_sidebar_section
+            .as_ref()
+            .is_some_and(|reveal| {
+                reveal.scope == section.scope && reveal.section == section.section
+            })
+    {
+        super::navigation::clear_revealed_sidebar_section(state);
+    }
 
     let new_crawler = state.settings.values.search_crawler.clone();
     let mut effects = vec![
@@ -160,6 +200,7 @@ pub(crate) fn handle_settings_update_requested(
 
     if state.settings.values.room_list_sort != prev_room_list_sort
         || state.settings.values.sidebar != prev_sidebar
+        || state.navigation.revealed_sidebar_section != prev_reveal
     {
         recompute_room_list_projection(state);
         effects.push(AppEffect::EmitUiEvent(UiEvent::RoomListChanged));
@@ -189,6 +230,7 @@ pub(crate) fn handle_settings_update_requested(
             }
         }
         emit_search_crawler_changed = true;
+        close_search_for_content_policy_change(state, &mut effects);
         // Tell the actor to drop its completed-room cache so the
         // following re-enqueue actually starts new crawls.
         effects.push(AppEffect::InvalidateSearchCrawlerCache);
@@ -260,6 +302,7 @@ pub(crate) fn handle_settings_persist_failed(
         code: "settings_persist_failed".to_owned(),
         message: SETTINGS_PERSIST_FAILED_MESSAGE.to_owned(),
         recoverable: true,
+        reason: None,
     });
     vec![
         AppEffect::EmitUiEvent(UiEvent::SettingsChanged),
@@ -329,7 +372,7 @@ pub(crate) fn handle_room_preferences_loaded(
     }
     let (changed, diagnostic) = super::native_attention::recompute_native_attention_from_rooms(
         state,
-        NativeAttentionObservationKind::Live,
+        NativeAttentionObservationKind::InitialSync,
     );
     effects.push(diagnostic);
     if changed {
@@ -363,7 +406,7 @@ pub(crate) fn handle_room_notification_mode_set(
     recompute_room_list_projection(state);
     let (changed, diagnostic) = super::native_attention::recompute_native_attention_from_rooms(
         state,
-        NativeAttentionObservationKind::Live,
+        NativeAttentionObservationKind::InitialSync,
     );
     let mut effects = vec![
         AppEffect::EmitUiEvent(UiEvent::RoomNotificationSettingsChanged),

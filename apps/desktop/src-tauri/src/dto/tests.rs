@@ -442,6 +442,8 @@ fn room_live_signal_delta_crosses_the_frontend_boundary() {
         value["changed"]["state"]["domain"]["live_signals_rooms"]["!room:example.invalid"],
         json!({
             "receipts_by_event": {},
+            "focused_receipts_by_event": {},
+            "thread_receipts_by_event": {},
             "fully_read_event_id": null,
             "typing_user_ids": [],
             "typing_users": []
@@ -485,6 +487,14 @@ fn room_live_signal_metadata_delta_crosses_the_frontend_boundary() {
     );
     assert!(domain["live_signals_rooms"].is_null());
     assert!(domain["live_signals_receipts_by_room_event"].is_null());
+    assert!(
+        domain["live_signals_focused_receipts_by_room_event"].is_null(),
+        "a metadata-only change must not publish a focused receipt slice"
+    );
+    assert!(
+        domain["live_signals_thread_receipts_by_room_event"].is_null(),
+        "a metadata-only change must not publish a thread receipt slice"
+    );
 }
 
 #[test]
@@ -524,6 +534,116 @@ fn receipt_event_delta_crosses_the_frontend_boundary_without_full_room() {
             ["total_count"],
         json!(2)
     );
+    assert!(domain["live_signals_rooms"].is_null());
+    assert!(domain["live_signals"].is_null());
+    assert!(domain["live_signals_focused_receipts_by_room_event"].is_null());
+    assert!(domain["live_signals_thread_receipts_by_room_event"].is_null());
+}
+
+#[test]
+fn thread_scoped_receipt_delta_crosses_the_frontend_boundary_without_full_room() {
+    let mut previous = booted_app_state();
+    previous.live_signals.rooms.insert(
+        "!room:example.invalid".to_owned(),
+        koushi_state::RoomLiveSignals {
+            thread_receipts_by_event: std::collections::BTreeMap::from([(
+                "$root:example.invalid".to_owned(),
+                std::collections::BTreeMap::from([(
+                    "$reply:example.invalid".to_owned(),
+                    koushi_state::LiveEventReceiptSummary {
+                        total_count: 1,
+                        ..Default::default()
+                    },
+                )]),
+            )]),
+            ..Default::default()
+        },
+    );
+    let mut next = previous.clone();
+    next.live_signals
+        .rooms
+        .get_mut("!room:example.invalid")
+        .unwrap()
+        .thread_receipts_by_event
+        .get_mut("$root:example.invalid")
+        .unwrap()
+        .get_mut("$reply:example.invalid")
+        .unwrap()
+        .total_count = 2;
+
+    let delta =
+        koushi_core::build_state_delta(10, &previous, &next).expect("thread receipt change");
+    let value = serde_json::to_value(FrontendDesktopSnapshotDelta::from(delta))
+        .expect("thread receipt delta should serialize");
+    let domain = &value["changed"]["state"]["domain"];
+
+    assert_eq!(
+        domain["live_signals_thread_receipts_by_room_event"]["!room:example.invalid"]["$root:example.invalid"]
+            ["$reply:example.invalid"]["total_count"],
+        json!(2)
+    );
+    assert!(domain["live_signals_focused_receipts_by_room_event"].is_null());
+    assert!(domain["live_signals_receipts_by_room_event"].is_null());
+    assert!(domain["live_signals_rooms"].is_null());
+    assert!(domain["live_signals"].is_null());
+}
+
+#[test]
+fn focused_scoped_receipt_delta_crosses_the_frontend_boundary_without_full_room() {
+    let mut previous = booted_app_state();
+    previous.live_signals.rooms.insert(
+        "!room:example.invalid".to_owned(),
+        koushi_state::RoomLiveSignals {
+            focused_receipts_by_event: std::collections::BTreeMap::from([(
+                "$target:example.invalid".to_owned(),
+                std::collections::BTreeMap::from([(
+                    "$reply:example.invalid".to_owned(),
+                    koushi_state::LiveEventReceiptSummary {
+                        total_count: 1,
+                        ..Default::default()
+                    },
+                )]),
+            )]),
+            // A same-room thread scope that is unchanged must stay out of this
+            // delta: the two scopes are never folded together.
+            thread_receipts_by_event: std::collections::BTreeMap::from([(
+                "$root:example.invalid".to_owned(),
+                std::collections::BTreeMap::from([(
+                    "$reply:example.invalid".to_owned(),
+                    koushi_state::LiveEventReceiptSummary {
+                        total_count: 5,
+                        ..Default::default()
+                    },
+                )]),
+            )]),
+            ..Default::default()
+        },
+    );
+    let mut next = previous.clone();
+    next.live_signals
+        .rooms
+        .get_mut("!room:example.invalid")
+        .unwrap()
+        .focused_receipts_by_event
+        .get_mut("$target:example.invalid")
+        .unwrap()
+        .get_mut("$reply:example.invalid")
+        .unwrap()
+        .total_count = 3;
+
+    let delta =
+        koushi_core::build_state_delta(10, &previous, &next).expect("focused receipt change");
+    let value = serde_json::to_value(FrontendDesktopSnapshotDelta::from(delta))
+        .expect("focused receipt delta should serialize");
+    let domain = &value["changed"]["state"]["domain"];
+
+    assert_eq!(
+        domain["live_signals_focused_receipts_by_room_event"]["!room:example.invalid"]["$target:example.invalid"]
+            ["$reply:example.invalid"]["total_count"],
+        json!(3)
+    );
+    assert!(domain["live_signals_thread_receipts_by_room_event"].is_null());
+    assert!(domain["live_signals_receipts_by_room_event"].is_null());
     assert!(domain["live_signals_rooms"].is_null());
     assert!(domain["live_signals"].is_null());
 }
@@ -779,6 +899,8 @@ fn frontend_snapshot_serializes_profile_and_summary_avatars() {
         unread_count: 2,
         notification_count: 2,
         highlight_count: 1,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -908,6 +1030,8 @@ fn frontend_snapshot_sidebar_respects_muted_rooms_like_the_delta_path() {
         unread_count: 4,
         notification_count: 4,
         highlight_count: 2,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -1043,6 +1167,72 @@ fn frontend_snapshot_serializes_verification_gate() {
     assert_eq!(value["state"]["domain"]["sync"], json!("running"));
 }
 
+/// #1049: the identity bootstrap's recovery key reaches the WebView only
+/// through the #927 reveal slot; the session DTO stays coarse.
+#[test]
+fn frontend_snapshot_reveals_the_bootstrap_key_only_in_the_reveal_slot() {
+    const SYNTHETIC_KEY: &str = "synthetic-bootstrap-dto-key-1049";
+    let mut state = AppState {
+        session: SessionState::AwaitingBootstrapConfirmation {
+            info: SessionInfo {
+                homeserver: "https://matrix.example.invalid".to_owned(),
+                user_id: "@user:example.invalid".to_owned(),
+                device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            },
+            gate: koushi_state::VerificationGateState {
+                methods: vec![koushi_state::VerificationMethodCapability::Bootstrap],
+                account_kind: koushi_state::VerificationAccountKind::NewIdentity,
+                failure: None,
+            },
+            flow_id: 41,
+        },
+        ..AppState::default()
+    };
+    state.e2ee_trust.key_management.secure_backup_setup =
+        koushi_state::SecureBackupSetupState::RecoveryKeyReady {
+            request_id: 41,
+            recovery_key: koushi_state::RecoveryKeyMaterial::new(SYNTHETIC_KEY),
+            delivery: koushi_state::RecoveryKeyDeliveryState::NotWritten,
+            confirmation_failed: false,
+        };
+
+    let revealed = state.clone();
+    let value = serde_json::to_value(FrontendDesktopSnapshot::from(state))
+        .expect("snapshot should serialize");
+
+    let session = &value["state"]["domain"]["session"];
+    assert_eq!(
+        session,
+        &json!({
+            "kind": "awaitingBootstrapConfirmation",
+            "homeserver": "https://matrix.example.invalid",
+            "user_id": "@user:example.invalid",
+            "device_id": "DEVICE",
+            "gate": { "methods": ["bootstrap"], "account_kind": "newIdentity", "failureKind": null },
+            "flow_id": 41
+        })
+    );
+    assert_eq!(
+        value["state"]["domain"]["e2ee_trust"]["key_management"]["secure_backup_setup"],
+        json!({
+            "kind": "recoveryKeyReady",
+            "request_id": 41,
+            "recovery_key": SYNTHETIC_KEY,
+            "delivery": { "kind": "notWritten" },
+            "confirmation_failed": false
+        })
+    );
+
+    // The QA window title observes the gate but never the revealed key.
+    let title = crate::commands::qa_window_title_string(&revealed, 0);
+    assert!(
+        title.contains("session=awaitingBootstrapConfirmation"),
+        "{title}"
+    );
+    assert!(!title.contains(SYNTHETIC_KEY), "{title}");
+}
+
 #[test]
 fn frontend_session_gate_variants_are_private_safe_json() {
     let info = SessionInfo {
@@ -1087,7 +1277,6 @@ fn frontend_session_gate_variants_are_private_safe_json() {
             info: info.clone(),
             gate: gate.clone(),
             flow_id: 8,
-            destination_written: true,
         },
         SessionState::Rejecting {
             info,
@@ -1218,6 +1407,29 @@ fn composer_revision_tauri_wire_round_trips_max_and_rejects_numeric() {
         .is_ok()
     );
     assert!(serde_json::from_value::<ComposerDraftRevision>(json!(1)).is_err());
+}
+
+/// #1363/#1366: the bound React slices with crosses the IPC boundary under the
+/// exact snake_case field names `apps/desktop/src/domain/types.ts` declares.
+///
+/// The DTO golden carries `section_bounds` for its maximally-populated state,
+/// but every section there is at or below the bound, so this also pins the
+/// values a long section produces (`hidden_count`, `shows_expand_control`).
+#[test]
+fn the_sidebar_section_bound_serializes_a_hidden_count() {
+    let bound = koushi_state::SidebarSectionBound::project(9, false, None);
+    assert_eq!(
+        serde_json::to_value(bound).expect("the bound should serialize"),
+        json!({
+            "visible_limit": 5,
+            "total_count": 9,
+            "visible_count": 5,
+            "hidden_count": 4,
+            "expanded": false,
+            "expanded_by_active_room": false,
+            "shows_expand_control": true,
+        })
+    );
 }
 
 /// Characterization / golden test for the complete `FrontendAppState` DTO wire shape.
@@ -1360,10 +1572,28 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             }),
             membership: koushi_state::SpaceChildMembership::NotJoined,
             can_join: true,
+            // #1410: populated so the golden proves the suggested shapes.
+            suggested: true,
             is_space: false,
             joined_members: 12,
         }],
         load: koushi_state::SpaceChildrenLoadState::Idle,
+        can_edit_suggested: true,
+        suggested_edit: koushi_state::SpaceChildSuggestedEditState::Failed {
+            child_room_id: "!not-joined-room:example.invalid".to_owned(),
+            suggested: false,
+            failure: koushi_state::OperationFailureKind::Forbidden,
+        },
+        suggested_offer: koushi_state::SuggestedRoomsOffer::Completed {
+            space_id: "!space:example.invalid".to_owned(),
+            results: vec![koushi_state::SuggestedRoomJoinResult {
+                room_id: "!not-joined-room:example.invalid".to_owned(),
+                display_name: "Fixture Not Joined Room".to_owned(),
+                display_name_placeholder: None,
+                failure: Some(koushi_state::OperationFailureKind::Forbidden),
+            }],
+        },
+        ..Default::default()
     };
     state.rooms.push(RoomSummary {
         display_name_placeholder: None,
@@ -1379,6 +1609,8 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         unread_count: 3,
         notification_count: 2,
         highlight_count: 1,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: Some(1_000_000),
         conversation_activity: None,
@@ -1420,6 +1652,8 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         unread_count: 7,
         notification_count: 7,
         highlight_count: 2,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: Some(950_000),
         conversation_activity: None,
@@ -1448,6 +1682,8 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: Some(900_000),
         conversation_activity: None,
@@ -1477,6 +1713,9 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             section: koushi_state::SidebarSectionKind::LowPriority,
             collapsed: Some(true),
             sort: None,
+            // #1366: exercise the persisted bound preference next to the
+            // independent collapse choice.
+            expanded: Some(true),
         },
         state.settings.values.room_list_sort,
     );
@@ -1530,6 +1769,8 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         room_scroll_anchors: BTreeMap::new(),
         main_timeline_anchor: None,
         event_navigation: koushi_state::EventNavigationState::Idle,
+        // #1366: session-only, so it never reaches this DTO.
+        revealed_sidebar_section: None,
     };
 
     // room_interactions
@@ -1632,6 +1873,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             share_link: None,
             join_rule: RoomJoinRule::Invite,
             history_visibility: RoomHistoryVisibility::Shared,
+            access: koushi_state::RoomAccessCondition::default(),
             permissions: RoomPermissionFacts {
                 can_edit_settings: true,
                 can_change_join_rule: true,
@@ -1654,6 +1896,10 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
                 user_trust: None,
             }],
         }),
+        draft: None,
+        directory: koushi_state::RoomDirectoryVisibility::Loading,
+        active_room_editor: None,
+        active_create_session: None,
         operation: RoomManagementOperationState::Idle,
     };
 
@@ -1791,6 +2037,48 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             failure_kind: koushi_state::TimelineGapRepairFailureKind::Sdk,
         },
     };
+    // #1160: a populated, explicitly opened Space-scoped scheduled-sends list
+    // with one thread reply and one plain room reservation.
+    state.scheduled_sends = koushi_state::ScheduledSendStore {
+        capability: koushi_state::ScheduledSendCapability::ServerDelayedEvents,
+        items: [
+            (
+                "sched-contract-room".to_owned(),
+                koushi_state::ScheduledSendItem {
+                    scheduled_id: "sched-contract-room".to_owned(),
+                    room_id: "!low-priority-room:example.invalid".to_owned(),
+                    thread_root_event_id: None,
+                    body: "Scheduled room body".to_owned(),
+                    send_at_ms: 1_800_000_000_000,
+                    handle: koushi_state::ScheduledSendHandle::Local,
+                    is_dispatching: false,
+                },
+            ),
+            (
+                "sched-contract-thread".to_owned(),
+                koushi_state::ScheduledSendItem {
+                    scheduled_id: "sched-contract-thread".to_owned(),
+                    room_id: "!room:example.invalid".to_owned(),
+                    thread_root_event_id: Some("$scheduled-thread-root:example.invalid".to_owned()),
+                    body: "Scheduled thread reply body".to_owned(),
+                    send_at_ms: 1_900_000_000_000,
+                    handle: koushi_state::ScheduledSendHandle::Server {
+                        delay_id: "delay-contract".to_owned(),
+                    },
+                    is_dispatching: false,
+                },
+            ),
+        ]
+        .into_iter()
+        .collect(),
+    };
+    state.scheduled_sends_list = koushi_state::ScheduledSendsListState::Open {
+        scope: koushi_state::ScheduledSendsScope::Space {
+            space_id: "!space:example.invalid".to_owned(),
+        },
+        capability: koushi_state::ScheduledSendCapability::ServerDelayedEvents,
+        items: state.scheduled_sends.items.values().cloned().collect(),
+    };
     state.thread = koushi_state::ThreadPaneState::Open {
         room_id: "!room:example.invalid".to_owned(),
         root_event_id: "$thread-root:example.invalid".to_owned(),
@@ -1824,6 +2112,40 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
                 "!room:example.invalid".to_owned(),
                 RoomLiveSignals {
                     receipts_by_event: BTreeMap::new(),
+                    focused_receipts_by_event: BTreeMap::from([(
+                        "$target:example.invalid".to_owned(),
+                        BTreeMap::from([(
+                            "$focused-reply:example.invalid".to_owned(),
+                            koushi_state::LiveEventReceiptSummary {
+                                readers: vec![koushi_state::LiveReadReceipt {
+                                    user_id: "@focused-reader:example.invalid".to_owned(),
+                                    display_name: Some("Focused Reader".to_owned()),
+                                    original_display_label: "Focused Reader".to_owned(),
+                                    avatar: None,
+                                    timestamp_ms: Some(7),
+                                }],
+                                total_count: 1,
+                                overflow_count: 0,
+                            },
+                        )]),
+                    )]),
+                    thread_receipts_by_event: BTreeMap::from([(
+                        "$root:example.invalid".to_owned(),
+                        BTreeMap::from([(
+                            "$thread-reply:example.invalid".to_owned(),
+                            koushi_state::LiveEventReceiptSummary {
+                                readers: vec![koushi_state::LiveReadReceipt {
+                                    user_id: "@thread-reader:example.invalid".to_owned(),
+                                    display_name: Some("Thread Reader".to_owned()),
+                                    original_display_label: "Thread Reader".to_owned(),
+                                    avatar: None,
+                                    timestamp_ms: Some(9),
+                                }],
+                                total_count: 1,
+                                overflow_count: 0,
+                            },
+                        )]),
+                    )]),
                     fully_read_event_id: Some("$read:example.invalid".to_owned()),
                     typing_user_ids: vec!["@other:example.invalid".to_owned()],
                     typing_users: vec![koushi_state::LiveTypingUser {
@@ -2072,6 +2394,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             latest_body_preview: Some("Latest reply preview".to_owned()),
             latest_timestamp_ms: Some(810_000),
             reply_count: 3,
+            unread_count: 0,
         }],
         is_paginating: false,
         end_reached: false,
@@ -2265,5 +2588,22 @@ fn command_settlement_serializes_as_v1_camel_case_dto() {
             "protocolVersion": 1,
             "publishedGeneration": 43,
         })
+    );
+}
+
+/// #1160: a full snapshot always carries the scheduled-sends panel slice; the
+/// closed projection is explicit rather than an absent field, so the renderer
+/// can tell "panel closed" from "this build is older than the slice".
+#[test]
+fn scheduled_sends_list_full_snapshot_is_explicitly_closed() {
+    let value = serde_json::to_value(super::frontend_app_state_for_platform(
+        AppState::default(),
+        koushi_state::DisplayPlatform::Linux,
+    ))
+    .expect("default app state should serialize");
+
+    assert_eq!(
+        value["ui"]["scheduled_sends_list"],
+        json!({ "kind": "closed" })
     );
 }

@@ -36,8 +36,8 @@ describe("TauriDesktopApi", () => {
     const preview = { localpart: "設計", full_alias: "#設計:example.invalid", error: null, server_name: "example.invalid" };
     vi.mocked(invoke).mockResolvedValueOnce(preview);
     const api = new TauriDesktopApi();
-    expect(await api.previewRoomAddress("設計", null)).toEqual(preview);
-    expect(invoke).toHaveBeenCalledWith("preview_room_address", { name: "設計", aliasLocalpart: null });
+    expect(await api.previewRoomAddress(7, null)).toEqual(preview);
+    expect(invoke).toHaveBeenCalledWith("preview_room_address", { createSessionId: 7, aliasLocalpart: null });
   });
 
   test("gets the diagnostic snapshot without private arguments", async () => {
@@ -47,6 +47,22 @@ describe("TauriDesktopApi", () => {
     await api.getDiagnosticSnapshot();
 
     expect(invoke).toHaveBeenCalledWith("get_diagnostic_snapshot");
+  });
+
+  test("saves the diagnostics report through the adapter-owned native dialog", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    vi.mocked(invoke).mockResolvedValueOnce("/downloads/koushi-diagnostics.txt");
+
+    const api = new TauriDesktopApi();
+    const report = "Koushi diagnostics\nsync=running\n";
+
+    await expect(api.saveDiagnosticsReport(report, "Diagnostics")).resolves.toBe(
+      "/downloads/koushi-diagnostics.txt"
+    );
+    expect(invoke).toHaveBeenCalledWith("save_diagnostics_report", {
+      report,
+      dialogTitle: "Diagnostics"
+    });
   });
 
   test("starts the desktop update download only after confirmation", async () => {
@@ -63,6 +79,14 @@ describe("TauriDesktopApi", () => {
     await new TauriDesktopApi().checkForDesktopUpdate();
 
     expect(invoke).toHaveBeenCalledWith("check_for_desktop_update");
+  });
+
+  test("ignores an exact desktop update version on request", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
+    await new TauriDesktopApi().ignoreDesktopUpdate("1.2.4");
+
+    expect(invoke).toHaveBeenCalledWith("ignore_desktop_update", { version: "1.2.4" });
   });
 
   test("uses distinct state-only and state-plus-timeline resync commands", async () => {
@@ -93,6 +117,23 @@ describe("TauriDesktopApi", () => {
     });
   });
 
+  test("passes the captured scheduled-sends scope to Rust and closes it by request", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+
+    const api = new TauriDesktopApi();
+    await api.openScheduledSendsList({ kind: "space", space_id: "!space:example.invalid" });
+    await api.openScheduledSendsList({ kind: "home" });
+    await api.closeScheduledSendsList();
+
+    expect(invoke).toHaveBeenNthCalledWith(1, "open_scheduled_sends_list", {
+      scope: { kind: "space", space_id: "!space:example.invalid" }
+    });
+    expect(invoke).toHaveBeenNthCalledWith(2, "open_scheduled_sends_list", {
+      scope: { kind: "home" }
+    });
+    expect(invoke).toHaveBeenNthCalledWith(3, "close_scheduled_sends_list");
+  });
+
   test("discovers login methods through typed Tauri command", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
@@ -119,14 +160,15 @@ describe("TauriDesktopApi", () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
     const api = new TauriDesktopApi();
-    await api.startOidcLogin("https://example.test");
+    await api.startOidcLogin("https://example.test", "oauth");
     await api.completeOidcLogin(
       "https://example.test",
       "koushi-desktop://auth/callback?code=synthetic"
     );
 
     expect(invoke).toHaveBeenCalledWith("start_oidc_login", {
-      homeserver: "https://example.test"
+      homeserver: "https://example.test",
+      method: "oauth"
     });
     expect(invoke).toHaveBeenCalledWith("complete_oidc_login", {
       homeserver: "https://example.test",
@@ -139,15 +181,16 @@ describe("TauriDesktopApi", () => {
     setRendererSelectedAccountTabId("add:2");
 
     const api = new TauriDesktopApi().forAccountTab("add:2");
-    await api.startOidcLogin("https://example.test");
+    await api.startOidcLogin("https://example.test", "oauth");
 
     expect(invoke).toHaveBeenCalledWith("start_oidc_login", {
       homeserver: "https://example.test",
+      method: "oauth",
       accountTabId: "add:2"
     });
 
     setRendererSelectedAccountTabId("account:other");
-    await expect(api.startOidcLogin("https://example.test")).rejects.toThrow(
+    await expect(api.startOidcLogin("https://example.test", "oauth")).rejects.toThrow(
       "account tab is no longer selected"
     );
     expect(invoke).toHaveBeenCalledTimes(1);
@@ -170,7 +213,7 @@ describe("TauriDesktopApi", () => {
     await api.getSnapshot();
     await api.probeLocalEncryptionHealth();
     await api.resetLocalData();
-    await api.previewRoomAddress("alice", null);
+    await api.previewRoomAddress(3, null);
     await api.settlementSnapshot();
     await api.resyncSnapshot();
 
@@ -192,7 +235,7 @@ describe("TauriDesktopApi", () => {
     expect(invoke).toHaveBeenCalledWith("probe_local_encryption_health", { accountTabId: "add:2" });
     expect(invoke).toHaveBeenCalledWith("reset_local_data", { accountTabId: "add:2" });
     expect(invoke).toHaveBeenCalledWith("preview_room_address", {
-      name: "alice",
+      createSessionId: 3,
       aliasLocalpart: null,
       accountTabId: "add:2"
     });
@@ -512,6 +555,8 @@ describe("TauriDesktopApi", () => {
     const api = new TauriDesktopApi();
     await api.exportRoomKeys("/tmp/export.txt", "room-key-passphrase");
     await api.importRoomKeys("/tmp/import.txt", "room-key-passphrase");
+    await api.chooseRoomKeyExportDestination("Room key export");
+    await api.chooseRoomKeyImportSource("Room key import");
     await api.bootstrapSecureBackup("secure-backup-passphrase", { kind: "initialSetup" });
     await api.changeSecureBackupPassphrase(
       "old-secure-backup-passphrase",
@@ -520,6 +565,13 @@ describe("TauriDesktopApi", () => {
     await api.saveSecureBackupRecoveryKey(41, "/tmp/recovery.txt");
     await api.confirmSecureBackupRecoveryKeySaved(41);
 
+    // The adapter owns the room-key file dialogs (debug QA can answer them).
+    expect(invoke).toHaveBeenCalledWith("choose_room_key_export_destination", {
+      dialogTitle: "Room key export"
+    });
+    expect(invoke).toHaveBeenCalledWith("choose_room_key_import_source", {
+      dialogTitle: "Room key import"
+    });
     expect(invoke).toHaveBeenCalledWith("export_room_keys", {
       destinationPath: "/tmp/export.txt",
       passphrase: "room-key-passphrase"

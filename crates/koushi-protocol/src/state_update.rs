@@ -9,11 +9,11 @@ use koushi_state::{
     LocalEncryptionState, LocalUserAliasUpdateState, MentionCandidatesState, NativeAttentionState,
     NavigationState, OwnProfile, PresenceKind, ProfileState, ProfileUpdateState, QrLoginState,
     RoomInteractionState, RoomListProjection, RoomLiveSignals, RoomManagementState,
-    RoomNotificationSettings, RoomPreferencesState, RoomSummary, SearchCrawlerLastActive,
-    SearchCrawlerRoomState, SearchCrawlerState, SearchState, SecureBackupGateState, SessionState,
-    SettingsState, SidebarModel, SoftLogoutReauthState, SpaceChildrenState, SpaceMembersState,
-    SpaceSummary, SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState,
-    TimelinePaneState, UserProfile,
+    RoomNotificationSettings, RoomPreferencesState, RoomSummary, ScheduledSendsListState,
+    SearchCrawlerLastActive, SearchCrawlerRoomState, SearchCrawlerState, SearchState,
+    SecureBackupGateState, SessionState, SettingsState, SidebarModel, SoftLogoutReauthState,
+    SpaceChildrenState, SpaceMembersState, SpaceSummary, SyncState, ThreadAttentionState,
+    ThreadPaneState, ThreadsListState, TimelinePaneState, UserProfile,
 };
 use serde::{Deserialize, Serialize};
 use std::collections::{BTreeMap, HashMap};
@@ -42,13 +42,23 @@ pub struct RoomLiveSignalMetadata {
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StateDelta {
     pub generation: u64,
-    pub changed: StateDeltaChangedSlices,
+    /// Boxed so the delta stays out of the inline `CoreEvent` representation.
+    /// `StateDeltaChangedSlices` is ~7 KiB; keeping it inline made every
+    /// `CoreEvent` that size and forced a ~110 MiB per-account event-queue slot
+    /// allocation (#1150). Serde and `Deref` access are unchanged.
+    pub changed: Box<StateDeltaChangedSlices>,
 }
 
 /// Room-local profile replacement delta: room id -> (user id -> replacement),
 /// where `None` removes the entry at that level.
 pub type RoomProfileReplacementsDelta =
     BTreeMap<String, Option<BTreeMap<String, Option<UserProfile>>>>;
+
+/// Focused- or thread-scope receipt-summary replacement delta:
+/// room id -> scope key (permalink target or thread root) -> event id ->
+/// replacement, where `None` removes the entry at that level.
+pub type ScopedReceiptSummaryChanges =
+    BTreeMap<String, BTreeMap<String, BTreeMap<String, Option<LiveEventReceiptSummary>>>>;
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StateDeltaChangedSlices {
@@ -112,6 +122,11 @@ pub struct StateDeltaChangedSlices {
     pub thread: Option<ThreadPaneState>,
     pub thread_attention: Option<ThreadAttentionState>,
     pub threads_list: Option<ThreadsListState>,
+    /// The explicitly opened Home/Space scheduled-sends projection (#1160).
+    /// Emitted whenever it changes, including an explicit `Closed` when the
+    /// panel closes; an omitted field means the slice is unchanged. The backing
+    /// queue is never emitted.
+    pub scheduled_sends_list: Option<ScheduledSendsListState>,
     pub focused_context: Option<FocusedContextState>,
     pub search: Option<SearchState>,
     pub search_crawler: Option<SearchCrawlerState>,
@@ -129,6 +144,12 @@ pub struct StateDeltaChangedSlices {
     /// cloning the other events in a room for a receipt move/update.
     pub live_signals_receipts_by_room_event:
         Option<BTreeMap<String, BTreeMap<String, Option<LiveEventReceiptSummary>>>>,
+    /// Focused-scope receipt-summary replacements nested by room, permalink
+    /// target event, and event. The main scope is never merged into it.
+    pub live_signals_focused_receipts_by_room_event: Option<ScopedReceiptSummaryChanges>,
+    /// Thread-scope receipt-summary replacements nested by room, thread root
+    /// event, and event. The main scope is never merged into it.
+    pub live_signals_thread_receipts_by_room_event: Option<ScopedReceiptSummaryChanges>,
     /// Non-receipt room metadata replacements for existing room entries.
     pub live_signals_room_metadata_by_id: Option<BTreeMap<String, Option<RoomLiveSignalMetadata>>>,
     /// User-local presence replacements; `None` removes a user entry.

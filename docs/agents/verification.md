@@ -19,8 +19,8 @@ fix, strictly, never the reverse.
   DOM, never on logs or fixed sleeps. The fix is "done" only when that same
   check turns GREEN.
 - Measure performance claims; never eyeball them. Gate on a number — e.g. the
-  `cache_restore` scenario asserts a deep-history anchor is restored from cache
-  in ≤ N backward-paginate cycles while the network is blocked.
+  `idle_sync_gap_inspection` scenario asserts every healthy inspection decodes
+  zero event bodies and prints p50/p95 inspection durations.
 - To prove cache-served / offline behavior, block the network in-harness (the
   `headless-core-qa` `QaTcpProxy.disable()` pattern) and assert success with no
   `network` origin (the #123 `EventsOrigin` observer).
@@ -111,10 +111,10 @@ for merging into `main`:
 | `Browser headless (Playwright DOM tier)` | `npx playwright test` — a red spec is a blocked merge |
 | `Rust lint (rustfmt / clippy)` | `cargo fmt --check`, then workspace, QA-binary, and release-configuration clippy with `-D warnings` (see [Rust lint gate](#rust-lint-gate)) |
 | `Rust (workspace / src-tauri / wasm)` | submodule guard, diagnostic-isolation guard, one feature-unified workspace suite (including the `koushi-core-testkit` integration targets and the `koushi-desktop` DTO/IPC contract tests), wasm build, `cargo-deny`, `cargo-machete`, the CI-cache report, and workspace cargo metrics |
-| `macOS Tauri cargo check` | `cargo check --profile ci -p koushi-desktop` plus `cargo clippy ... -- -D warnings` on macOS, including `#[cfg(target_os = "macos")]` paths excluded by Linux CI |
+| `macOS Tauri cargo check` | `cargo check --profile ci -p koushi-desktop` plus `cargo clippy ... -- -D warnings` on macOS, including `#[cfg(target_os = "macos")]` paths excluded by Linux CI, and runs the native ImageIO decoder tests (`--test image_io_decoder`) |
 | `Core invitations (tuwunel)` / `Core invitations (synapse)` | real homeserver `--core --scenario=invites_dm` per server |
 | `Core QA binary tests` | `cargo test -p koushi-qa --features qa-bin --bin headless-core-qa` |
-| `Windows overlay ACL IPC` | `cargo test -p koushi-windows-overlay-acl windows_overlay_ipc_is_authorized`, OIDC launch tests, and desktop clippy with `-D warnings` for Windows-only cfg paths |
+| `Windows overlay ACL IPC` | `cargo test -p koushi-windows-overlay-acl windows_overlay_ipc_is_authorized`, OIDC launch tests, updater lifecycle/artifact-transfer and Core-before-installer shutdown tests, and desktop clippy with `-D warnings` for Windows-only cfg paths |
 
 Do not assume a green PR means a homeserver job passed — check the job
 explicitly, and confirm whether it is a required check before treating it as a

@@ -24,7 +24,7 @@
           "sender_label": "Synthetic peer",
           "thread_root_event_id": null,
           "timestamp_ms": 200,
-          "unread": true
+          "unread": false
         }
       ]
     },
@@ -36,15 +36,15 @@
       "rows": [
         {
           "context_label": "DM",
-          "event_id": "$activity-renderer-resolved:example.invalid",
+          "event_id": null,
           "highlight": false,
-          "kind": "event",
-          "preview": "Resolved message",
+          "kind": "roomUnread",
+          "preview": null,
           "room_id": "!activity-renderer-dm:example.invalid",
           "room_label": "Synthetic DM",
           "sender_avatar": null,
-          "sender_id": "@peer:example.invalid",
-          "sender_label": "Synthetic peer",
+          "sender_id": null,
+          "sender_label": null,
           "thread_root_event_id": null,
           "timestamp_ms": 200,
           "unread": true
@@ -116,7 +116,7 @@
           "sender_label": "Synthetic peer",
           "thread_root_event_id": null,
           "timestamp_ms": 100,
-          "unread": true
+          "unread": false
         }
       ]
     },
@@ -142,21 +142,6 @@
           "sender_label": null,
           "thread_root_event_id": null,
           "timestamp_ms": 200,
-          "unread": true
-        },
-        {
-          "context_label": "DM",
-          "event_id": "$activity-renderer-old:example.invalid",
-          "highlight": false,
-          "kind": "event",
-          "preview": "Older message",
-          "room_id": "!activity-renderer-dm:example.invalid",
-          "room_label": "Synthetic DM",
-          "sender_avatar": null,
-          "sender_id": "@peer:example.invalid",
-          "sender_label": "Synthetic peer",
-          "thread_root_event_id": null,
-          "timestamp_ms": 100,
           "unread": true
         }
       ]
@@ -187,7 +172,7 @@
           "sender_label": "Synthetic peer",
           "thread_root_event_id": null,
           "timestamp_ms": 100,
-          "unread": true
+          "unread": false
         }
       ]
     },
@@ -212,21 +197,6 @@
           "sender_label": null,
           "thread_root_event_id": null,
           "timestamp_ms": 200,
-          "unread": true
-        },
-        {
-          "context_label": "DM",
-          "event_id": "$activity-renderer-old:example.invalid",
-          "highlight": false,
-          "kind": "event",
-          "preview": "Older message",
-          "room_id": "!activity-renderer-dm:example.invalid",
-          "room_label": "Synthetic DM",
-          "sender_avatar": null,
-          "sender_id": "@peer:example.invalid",
-          "sender_label": "Synthetic peer",
-          "thread_root_event_id": null,
-          "timestamp_ms": 100,
           "unread": true
         }
       ]

@@ -1,7 +1,6 @@
 use koushi_state::{
     AppEffect, AppState, AvatarImage, AvatarThumbnailState, NativeAttentionObservationKind,
-    NativeAttentionSuppressionReason, RoomSummary, RoomTags, SearchCrawlerSettings, SessionInfo,
-    SessionState, SpaceSummary,
+    RoomSummary, RoomTags, SearchCrawlerSettings, SessionInfo, SessionState, SpaceSummary,
 };
 
 pub(super) fn session_info() -> SessionInfo {
@@ -46,7 +45,7 @@ pub(super) fn search_crawler_settings_standard() -> SearchCrawlerSettings {
 pub(super) fn initial_attention_diagnostic(
     unread_count: u64,
     badge_room_count: u64,
-    active_room_match: bool,
+    _active_room_match: bool,
 ) -> AppEffect {
     AppEffect::RecordNativeAttentionRecomputed {
         observation: NativeAttentionObservationKind::InitialSync,
@@ -56,9 +55,9 @@ pub(super) fn initial_attention_diagnostic(
         badge_room_count,
         badge_excluded_room_count: 0,
         candidate: None,
-        suppression: (unread_count > 0).then_some(NativeAttentionSuppressionReason::InitialSync),
+        suppression: None,
         window_focused: true,
-        active_room_match,
+        active_room_match: false,
     }
 }
 
@@ -78,6 +77,8 @@ pub(super) fn rooms() -> Vec<RoomSummary> {
             unread_count: 5,
             notification_count: 5,
             highlight_count: 1,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -101,6 +102,8 @@ pub(super) fn rooms() -> Vec<RoomSummary> {
             unread_count: 3,
             notification_count: 3,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -124,6 +127,8 @@ pub(super) fn rooms() -> Vec<RoomSummary> {
             unread_count: 2,
             notification_count: 2,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,

@@ -9,9 +9,12 @@ pub(super) async fn verify(
     conn_b: &mut CoreConnection,
 ) -> Result<(), String> {
     let name = format!("Koushi Address QA {}", std::process::id());
-    // Suggest from Home: no Space prefix for this unrelated room.
+    // #1416: the default from Home is `room-<random>`, never the name.
     select_space_for_address_qa(conn_a, None).await?;
-    let preview = conn_a.preview_room_address(&name, None);
+    let preview = open_create_draft_for_qa(conn_a, None, "address Home default").await?;
+    if !preview.localpart.starts_with("room-") || preview.localpart.contains("koushi") {
+        return Err("address: the Home default was not a random room address".into());
+    }
     let expected_alias = preview
         .full_alias
         .ok_or("address: suggestion was invalid")?;
@@ -23,6 +26,8 @@ pub(super) async fn verify(
         invited_only: false,
         visibility: CreateRoomVisibility::Public,
         parent_space: None,
+        access_policy: None,
+        history: None,
     };
     let request_id = conn_a.next_request_id();
     conn_a
@@ -113,11 +118,10 @@ pub(super) async fn verify(
     Ok(())
 }
 
-/// #1006: the unrelated room above owns the room-only address. Creating a
-/// public room with the same display name from a Space conflicts at that
-/// address (Spaces share the server's alias namespace), while the default
-/// `<space>-<room>` suggestion creates it, keeps the display name, and links
-/// it to the Space.
+/// #1006/#1416: the unrelated room above owns its address. Creating a public
+/// room from a Space at that address conflicts (Spaces share the server's
+/// alias namespace), while the session's default `<space>-<random>` address
+/// creates it, keeps the display name, and links it to the Space.
 async fn verify_space_prefixed_address(
     conn_a: &mut CoreConnection,
     name: &str,
@@ -140,7 +144,8 @@ async fn verify_space_prefixed_address(
     }
     select_space_for_address_qa(conn_a, Some(&space_id)).await?;
 
-    let prefixed = conn_a.preview_room_address(name, None);
+    let prefixed =
+        open_create_draft_for_qa(conn_a, Some(&space_id), "address Space default").await?;
     let prefixed_alias = prefixed
         .full_alias
         .clone()
@@ -174,6 +179,8 @@ async fn verify_space_prefixed_address(
         parent_space: Some(CreateRoomParentSpace {
             space_id: space_id.clone(),
         }),
+        access_policy: None,
+        history: None,
     };
 
     let conflict_id = conn_a.next_request_id();

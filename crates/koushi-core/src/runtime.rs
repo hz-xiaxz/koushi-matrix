@@ -16,9 +16,12 @@ mod profile_display_diagnostics;
 mod readers;
 mod reducer_support;
 pub mod request_outcome;
+mod room_activity;
 mod scheduled_send;
 #[cfg(test)]
 mod secure_backup_admission_tests;
+
+pub(crate) use crate::executor::AbortOnDrop;
 
 pub use composer::COMPOSER_DRAFT_PERSIST_DEBOUNCE;
 use composer::{
@@ -53,7 +56,7 @@ use std::collections::{BTreeSet, HashMap};
 use std::future;
 use std::path::PathBuf;
 #[cfg(any(test, feature = "test-hooks"))]
-use std::sync::atomic::{AtomicUsize, Ordering};
+use std::sync::atomic::Ordering;
 use std::sync::{Arc, atomic::AtomicU64};
 #[cfg(test)]
 use std::time::Duration;
@@ -107,6 +110,11 @@ use koushi_protocol::ids::{
 };
 
 pub const COMMAND_INBOX_CAPACITY: usize = 256;
+
+/// Reply bound for the export-time diagnostic sampling (#1344 search
+/// retention, #1394 timeline residency); a stalled read settles as unavailable
+/// instead of holding the export.
+const EXPORT_SAMPLE_REPLY_TIMEOUT_MS: u64 = 2_000;
 /// Per-consumer broadcast capacity. On large accounts (100+ rooms) initial and
 /// room-open sync bursts can emit thousands of `CoreEvent`s faster than a
 /// consumer (the Tauri forwarder, or a transient command connection waiting for
@@ -115,7 +123,28 @@ pub const COMMAND_INBOX_CAPACITY: usize = 256;
 /// `InitialItems` (blank timeline) and `select_room`'s correlated event ("room
 /// selection did not complete"). Sized to absorb a full large-account burst;
 /// genuine lag still self-heals via `EventStreamLag` -> resync.
+///
+/// The ring pre-allocates one slot per capacity entry per account, so large
+/// payloads must stay boxed out of the inline `CoreEvent` representation; see
+/// `EVENT_QUEUE_SLOT_BUDGET_BYTES` below for the enforced bound (#1150).
 pub const EVENT_QUEUE_CAPACITY: usize = 16384;
+/// Byte budget for the per-account event-queue slots. `CoreEvent` must stay
+/// compact enough that the always-allocated ring fits here; see the compile-time
+/// assertion below. Retained heap payloads are NOT budgeted here: a lagging
+/// consumer can still retain boxed `StateDelta`/timeline payloads, and bounding
+/// those needs a separate admission policy (follow-up).
+pub const EVENT_QUEUE_SLOT_BUDGET_BYTES: usize = 5 * 1024 * 1024;
+/// Conservative per-slot overhead outside the event value. `tokio::broadcast`
+/// stores `Mutex<Slot<T>>` (a reader count and a position alongside the value),
+/// and rounds capacity up to a power of two, so `size_of::<T>()` alone
+/// understates the ring.
+const EVENT_QUEUE_SLOT_OVERHEAD_BYTES: usize = 32;
+const _: () = assert!(
+    EVENT_QUEUE_CAPACITY.next_power_of_two()
+        * (std::mem::size_of::<CoreEvent>() + EVENT_QUEUE_SLOT_OVERHEAD_BYTES)
+        <= EVENT_QUEUE_SLOT_BUDGET_BYTES,
+    "CoreEvent no longer fits the per-account event-queue slot budget; box the new payload (#1150)"
+);
 /// AppActor action-projection inbox. Actors project a high volume of
 /// `Vec<AppAction>` here during large-account (100+ room) sync. It MUST be large
 /// enough that bursts never overflow.
@@ -294,6 +323,14 @@ enum CoreCommandEnvelope {
     },
     #[cfg(any(test, feature = "test-hooks"))]
     Qa(CoreQaCommand),
+    /// Export-time retention sample (#1344). Answered with the account's
+    /// owner-side counters or `None`; the caller bounds the wait.
+    RetentionDiagnostics(oneshot::Sender<Option<crate::search::AccountRetentionDiagnostics>>),
+    /// Export-time resident-set sample (#1394). Answered with the account's
+    /// resident timeline counts or `None`; the caller bounds the wait.
+    TimelineResidencyDiagnostics(
+        oneshot::Sender<Option<crate::timeline::TimelineResidencyDiagnostics>>,
+    ),
 }
 
 #[cfg(test)]
@@ -304,6 +341,8 @@ impl CoreCommandEnvelope {
             Self::ReadReceiptWindow { .. } | Self::ReaderPrepared(_) => {
                 panic!("expected public command envelope")
             }
+            Self::RetentionDiagnostics(_) => panic!("expected public command envelope"),
+            Self::TimelineResidencyDiagnostics(_) => panic!("expected public command envelope"),
             #[cfg(test)]
             Self::ResolveReceiptWindow { .. } => {
                 panic!("expected public command envelope")
@@ -313,43 +352,67 @@ impl CoreCommandEnvelope {
     }
 }
 
-/// A task handle that is aborted if its owner is dropped without an orderly
-/// shutdown. Explicit shutdown takes the handle and awaits it; error paths in
-/// headless QA and embedding callers therefore cannot leave detached runtime
-/// tasks keeping the process alive indefinitely.
-pub(crate) struct AbortOnDrop<T> {
-    handle: Option<executor::JoinHandle<T>>,
+/// Cloneable retention sampler for one account runtime (#1344).
+#[derive(Clone)]
+pub struct RetentionDiagnosticsProbe {
+    command_tx: mpsc::Sender<CoreCommandEnvelope>,
 }
 
-impl<T> AbortOnDrop<T> {
-    pub(crate) fn new(handle: executor::JoinHandle<T>) -> Self {
-        Self {
-            handle: Some(handle),
+impl RetentionDiagnosticsProbe {
+    /// Sample the account's owner-side retention counters now. Bounded: a
+    /// stalled reply settles as `None` instead of holding the export.
+    pub async fn sample(&self) -> Option<crate::search::AccountRetentionDiagnostics> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        if self
+            .command_tx
+            .try_send(CoreCommandEnvelope::RetentionDiagnostics(response_tx))
+            .is_err()
+        {
+            // Inbox full: the export proceeds without this account.
+            return None;
         }
-    }
-
-    fn get(&self) -> &executor::JoinHandle<T> {
-        self.handle
-            .as_ref()
-            .expect("abort-on-drop task handle must remain present")
-    }
-
-    fn take(&mut self) -> executor::JoinHandle<T> {
-        self.handle
-            .take()
-            .expect("abort-on-drop task handle must be taken once")
-    }
-
-    fn abort(&self) {
-        if let Some(handle) = &self.handle {
-            handle.abort();
+        match crate::executor::timeout(
+            std::time::Duration::from_millis(EXPORT_SAMPLE_REPLY_TIMEOUT_MS),
+            response_rx,
+        )
+        .await
+        {
+            Ok(Ok(reply)) => reply,
+            _ => None,
         }
     }
 }
 
-impl<T> Drop for AbortOnDrop<T> {
-    fn drop(&mut self) {
-        self.abort();
+/// Cloneable resident-set sampler for one account runtime (#1394).
+#[derive(Clone)]
+pub struct TimelineResidencyProbe {
+    command_tx: mpsc::Sender<CoreCommandEnvelope>,
+}
+
+impl TimelineResidencyProbe {
+    /// Sample the account's resident timeline set now. Bounded: a stalled reply
+    /// settles as `None` instead of holding the export.
+    pub async fn sample(&self) -> Option<crate::timeline::TimelineResidencyDiagnostics> {
+        let (response_tx, response_rx) = tokio::sync::oneshot::channel();
+        if self
+            .command_tx
+            .try_send(CoreCommandEnvelope::TimelineResidencyDiagnostics(
+                response_tx,
+            ))
+            .is_err()
+        {
+            // Inbox full: the export proceeds without this account.
+            return None;
+        }
+        match crate::executor::timeout(
+            std::time::Duration::from_millis(EXPORT_SAMPLE_REPLY_TIMEOUT_MS),
+            response_rx,
+        )
+        .await
+        {
+            Ok(Ok(reply)) => reply,
+            _ => None,
+        }
     }
 }
 
@@ -384,6 +447,39 @@ pub struct CoreRuntime {
     actor: AbortOnDrop<()>,
 }
 
+/// Temporary data and credential directories for one test runtime. Dropping
+/// it deletes both, so keep it alive for as long as the runtime runs.
+#[cfg(any(test, feature = "test-hooks"))]
+pub struct IsolatedStores {
+    data: tempfile::TempDir,
+    credentials: tempfile::TempDir,
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+impl IsolatedStores {
+    pub fn new() -> Self {
+        Self {
+            data: tempfile::tempdir().expect("isolated runtime data directory"),
+            credentials: tempfile::tempdir().expect("isolated runtime credential directory"),
+        }
+    }
+
+    pub fn data_dir(&self) -> &std::path::Path {
+        self.data.path()
+    }
+
+    pub fn credential_dir(&self) -> &std::path::Path {
+        self.credentials.path()
+    }
+}
+
+#[cfg(any(test, feature = "test-hooks"))]
+impl Default for IsolatedStores {
+    fn default() -> Self {
+        Self::new()
+    }
+}
+
 #[cfg(any(test, feature = "test-hooks"))]
 #[doc(hidden)]
 pub struct ComposerDraftIoBarrierForTesting {
@@ -392,7 +488,7 @@ pub struct ComposerDraftIoBarrierForTesting {
     save_completed: oneshot::Receiver<()>,
     load_started: oneshot::Receiver<()>,
     load_completed: oneshot::Receiver<()>,
-    load_attempt_count: Arc<AtomicUsize>,
+    load_counts: crate::store::ComposerDraftLoadCounts,
 }
 
 #[cfg(any(test, feature = "test-hooks"))]
@@ -404,7 +500,13 @@ impl ComposerDraftIoBarrierForTesting {
     }
 
     pub fn load_attempt_count(&self) -> usize {
-        self.load_attempt_count.load(Ordering::Acquire)
+        self.load_counts.attempts.load(Ordering::Acquire)
+    }
+
+    /// Failed loads of this runtime only (each also records one
+    /// `core.composer_draft/load_failed` diagnostic).
+    pub fn load_failure_count(&self) -> usize {
+        self.load_counts.failures.load(Ordering::Acquire)
     }
 
     pub fn load_started_before_release(&mut self) -> bool {
@@ -449,13 +551,12 @@ fn initial_send_read_receipts(state: &AppState) -> bool {
 }
 
 impl CoreRuntime {
-    /// Start the runtime. Must be called within an async runtime context.
-    pub fn start() -> Self {
-        Self::start_with_data_dir(default_data_dir())
-    }
-
     /// Start with a custom data directory (used by QA binaries and tests).
+    /// There is deliberately no constructor that defaults to the user's
+    /// profile: tests use [`Self::start_isolated`].
     pub fn start_with_data_dir(data_dir: PathBuf) -> Self {
+        #[cfg(any(test, feature = "test-hooks"))]
+        crate::test_isolation::assert_not_user_profile(&data_dir);
         let account_store_actor = StoreActor::new(data_dir.clone());
         let composer_draft_store_actor = StoreActor::new(data_dir.clone());
         #[cfg(any(test, feature = "test-hooks"))]
@@ -477,6 +578,8 @@ impl CoreRuntime {
         data_dir: PathBuf,
         native_artifacts: Arc<dyn NativeArtifactPort>,
     ) -> Self {
+        #[cfg(any(test, feature = "test-hooks"))]
+        crate::test_isolation::assert_not_user_profile(&data_dir);
         let account_store_actor = StoreActor::new(data_dir.clone());
         let composer_draft_store_actor = StoreActor::new(data_dir.clone());
         Self::start_inner(
@@ -498,7 +601,8 @@ impl CoreRuntime {
         // The OS-backed actor owns the in-memory credential-vault cache.  Keep one
         // instance per runtime and clone it for the independent consumers so a
         // single launch never asks Keychain for the vault master key twice.
-        let account_store_actor = StoreActor::with_os_backend(data_dir.clone(), os_backend);
+        let account_store_actor =
+            StoreActor::with_os_backend(data_dir.clone(), os_backend).with_exclusive_store_root();
         let composer_draft_store_actor = account_store_actor.clone();
         Self::start_inner(
             EVENT_QUEUE_CAPACITY,
@@ -515,7 +619,8 @@ impl CoreRuntime {
         os_backend: std::sync::Arc<dyn koushi_key::CredentialBackend>,
         native_artifacts: Arc<dyn NativeArtifactPort>,
     ) -> Self {
-        let account_store_actor = StoreActor::with_os_backend(data_dir.clone(), os_backend);
+        let account_store_actor =
+            StoreActor::with_os_backend(data_dir.clone(), os_backend).with_exclusive_store_root();
         Self::start_inner(
             EVENT_QUEUE_CAPACITY,
             data_dir,
@@ -525,17 +630,30 @@ impl CoreRuntime {
         )
     }
 
+    /// Start over fresh temporary data and credential directories. The
+    /// returned [`IsolatedStores`] owns them and must outlive the runtime.
     #[cfg(any(test, feature = "test-hooks"))]
-    pub fn start_with_event_capacity(event_capacity: usize) -> Self {
-        let data_dir = default_data_dir();
-        let account_store_actor = StoreActor::new(data_dir.clone());
-        let composer_draft_store_actor = StoreActor::new(data_dir.clone());
-        Self::start_inner(
+    pub fn start_isolated() -> (Self, IsolatedStores) {
+        Self::start_isolated_with_event_capacity(EVENT_QUEUE_CAPACITY)
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn start_isolated_with_event_capacity(event_capacity: usize) -> (Self, IsolatedStores) {
+        let stores = IsolatedStores::new();
+        let runtime = Self::start_with_event_capacity_and_file_credentials(
             event_capacity,
-            data_dir,
-            account_store_actor,
-            composer_draft_store_actor,
-            Arc::new(RejectingNativeArtifactPort),
+            stores.data_dir().to_path_buf(),
+            stores.credential_dir().to_path_buf(),
+        );
+        (runtime, stores)
+    }
+
+    /// Start again over the same isolated stores, for persistence tests.
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn restart_isolated(stores: &IsolatedStores) -> Self {
+        Self::start_with_data_dir_and_file_credentials(
+            stores.data_dir().to_path_buf(),
+            stores.credential_dir().to_path_buf(),
         )
     }
 
@@ -543,6 +661,53 @@ impl CoreRuntime {
     pub fn start_with_data_dir_and_file_credentials(
         data_dir: PathBuf,
         credential_dir: PathBuf,
+    ) -> Self {
+        Self::start_with_event_capacity_and_file_credentials(
+            EVENT_QUEUE_CAPACITY,
+            data_dir,
+            credential_dir,
+        )
+    }
+
+    /// Start over test-owned data and credential directories, so concurrent
+    /// test processes never share persisted session views.
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn start_with_event_capacity_and_file_credentials(
+        event_capacity: usize,
+        data_dir: PathBuf,
+        credential_dir: PathBuf,
+    ) -> Self {
+        Self::start_with_file_credentials_and_native_image_decoder(
+            event_capacity,
+            data_dir,
+            credential_dir,
+            None,
+        )
+    }
+
+    /// Isolated test runtime whose media preparation uses an injected
+    /// still-image decoder, as the desktop adapter does on macOS (#1147).
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub fn start_isolated_with_native_image_decoder(
+        event_capacity: usize,
+        native_image_decoder: Arc<dyn crate::NativeStillImageDecoder>,
+    ) -> (Self, IsolatedStores) {
+        let stores = IsolatedStores::new();
+        let runtime = Self::start_with_file_credentials_and_native_image_decoder(
+            event_capacity,
+            stores.data_dir().to_path_buf(),
+            stores.credential_dir().to_path_buf(),
+            Some(native_image_decoder),
+        );
+        (runtime, stores)
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    fn start_with_file_credentials_and_native_image_decoder(
+        event_capacity: usize,
+        data_dir: PathBuf,
+        credential_dir: PathBuf,
+        native_image_decoder: Option<Arc<dyn crate::NativeStillImageDecoder>>,
     ) -> Self {
         let account_store_actor = StoreActor::with_backend(
             koushi_store::CredentialStoreBackend::FileDir(koushi_store::FileCredentialStore::new(
@@ -556,12 +721,15 @@ impl CoreRuntime {
             )),
             data_dir.clone(),
         );
-        Self::start_inner(
-            EVENT_QUEUE_CAPACITY,
-            data_dir,
+        let settings_store = SettingsStore::new(&data_dir);
+        Self::start_inner_with_settings_store(
+            event_capacity,
             account_store_actor,
             composer_draft_store_actor,
             Arc::new(crate::native_artifact::NativeArtifactRegistry::new()),
+            settings_store,
+            crate::account_work::AccountWorkScheduler::default(),
+            native_image_decoder,
         )
     }
 
@@ -573,6 +741,7 @@ impl CoreRuntime {
         settings_store: SettingsStore,
         native_artifacts: Arc<dyn NativeArtifactPort>,
         account_work: crate::account_work::AccountWorkScheduler,
+        native_image_decoder: Option<Arc<dyn crate::NativeStillImageDecoder>>,
     ) -> Self {
         Self::start_inner_with_settings_store(
             EVENT_QUEUE_CAPACITY,
@@ -581,6 +750,7 @@ impl CoreRuntime {
             native_artifacts,
             settings_store,
             account_work,
+            native_image_decoder,
         )
     }
 
@@ -599,6 +769,7 @@ impl CoreRuntime {
             native_artifacts,
             settings_store,
             crate::account_work::AccountWorkScheduler::default(),
+            None,
         )
     }
 
@@ -609,6 +780,7 @@ impl CoreRuntime {
         native_artifacts: Arc<dyn NativeArtifactPort>,
         settings_store: SettingsStore,
         account_work: crate::account_work::AccountWorkScheduler,
+        native_image_decoder: Option<Arc<dyn crate::NativeStillImageDecoder>>,
     ) -> Self {
         let (command_tx, command_rx) = mpsc::channel(COMMAND_INBOX_CAPACITY);
         // NOTE: action_tx is the high-volume action-projection inbox; it must be
@@ -700,8 +872,10 @@ impl CoreRuntime {
             navigation_persistence_status: NavigationPersistenceStatus::Unloaded,
             scheduled_sends_loaded_for: None,
             room_preferences_loaded_for: None,
+            room_activity_loaded_for: None,
             account_settings_loaded_for: None,
             state_generation: 0,
+            active_search_request: None,
             pending_composer_draft_persist: None,
             pending_navigation_persist: None,
             composer_draft_leases: Arc::clone(&composer_draft_leases),
@@ -731,8 +905,11 @@ impl CoreRuntime {
             drop(_view_lifetime);
             actor_completion_tx.send_replace(Some(result));
         });
-        let media_preparation =
-            Arc::new(crate::media_preparation::MediaPreparationService::default());
+        let media_preparation = Arc::new(
+            crate::media_preparation::MediaPreparationService::with_native_image_decoder(
+                native_image_decoder,
+            ),
+        );
         let media_staging = Arc::new(crate::media_staging::MediaStagingService::new(Arc::clone(
             &media_preparation,
         )));
@@ -794,6 +971,22 @@ impl CoreRuntime {
         self.sliding_sync_diagnostics.snapshot()
     }
 
+    /// Cloneable probe for this runtime's retention sample (#1344). Captured
+    /// under the manager lock and sampled after it is released, so the export
+    /// never awaits while holding shared state.
+    pub fn retention_diagnostics_probe(&self) -> RetentionDiagnosticsProbe {
+        RetentionDiagnosticsProbe {
+            command_tx: self.command_tx.clone(),
+        }
+    }
+
+    /// Cloneable probe for this runtime's resident timeline set (#1394).
+    pub fn timeline_residency_probe(&self) -> TimelineResidencyProbe {
+        TimelineResidencyProbe {
+            command_tx: self.command_tx.clone(),
+        }
+    }
+
     /// Test hook: inject reducer actions as if an actor side effect produced
     /// them. Not part of the public production API.
     #[cfg(any(test, feature = "test-hooks"))]
@@ -849,7 +1042,7 @@ impl CoreRuntime {
         let (save_completed_tx, save_completed) = oneshot::channel();
         let (load_started_tx, load_started) = oneshot::channel();
         let (load_completed_tx, load_completed) = oneshot::channel();
-        let load_attempt_count = Arc::new(AtomicUsize::new(0));
+        let load_counts = crate::store::ComposerDraftLoadCounts::default();
         self.composer_draft_store_actor_for_testing
             .install_composer_draft_io_probe(
                 save_started_tx,
@@ -857,7 +1050,7 @@ impl CoreRuntime {
                 save_completed_tx,
                 load_started_tx,
                 load_completed_tx,
-                Arc::clone(&load_attempt_count),
+                load_counts.clone(),
             );
         ComposerDraftIoBarrierForTesting {
             save_started,
@@ -865,7 +1058,7 @@ impl CoreRuntime {
             save_completed,
             load_started,
             load_completed,
-            load_attempt_count,
+            load_counts,
         }
     }
 
@@ -1017,6 +1210,24 @@ enum SettingsLoadStatus {
     Failed,
 }
 
+/// The search request the state owns.
+#[derive(Clone, Copy, Debug)]
+struct ActiveSearchRequest {
+    request_id: RequestId,
+    /// The state admitted this request's result, so a later transition must not
+    /// report it as superseded. Publication still needs the identity.
+    settled: bool,
+}
+
+impl ActiveSearchRequest {
+    fn dispatched(request_id: RequestId) -> Self {
+        Self {
+            request_id,
+            settled: false,
+        }
+    }
+}
+
 struct AppActor {
     view_scopes: crate::view_scope_lifecycle::ViewScopeRegistry,
     command_tx: mpsc::WeakSender<CoreCommandEnvelope>,
@@ -1048,6 +1259,7 @@ struct AppActor {
     navigation_persistence_status: NavigationPersistenceStatus,
     scheduled_sends_loaded_for: Option<koushi_protocol::SessionKeyId>,
     room_preferences_loaded_for: Option<koushi_protocol::SessionKeyId>,
+    room_activity_loaded_for: Option<koushi_protocol::SessionKeyId>,
     account_settings_loaded_for: Option<koushi_protocol::SessionKeyId>,
     state_generation: u64,
     pending_composer_draft_persist: Option<PendingComposerDraftPersist>,
@@ -1079,6 +1291,16 @@ struct AppActor {
     pending_focused_navigation: Option<PendingFocusedNavigation>,
     latest_focused_projection_generation: HashMap<TimelineKey, (u64, TimelineGeneration)>,
     pending_date_navigation_request_id: Option<RequestId>,
+    /// The search request currently owned by the search state, so a transition
+    /// that supersedes it can settle it with `IntentLifecycle` (the
+    /// `SearchActor` aborts its in-flight query without emitting an outcome).
+    /// The search request the state owns, with whether it already produced the
+    /// result the state holds.
+    ///
+    /// Publication needs the full request identity after admission, while the
+    /// supersede check needs to know that an admitted request must not later be
+    /// reported as superseded.
+    active_search_request: Option<ActiveSearchRequest>,
     /// #1037: a date jump superseded by an accepted main send while its
     /// server lookup was in flight. The account actor's late
     /// `OpenFocusedContext` + `EnterAnchoredTimeline` reply is dropped and its
@@ -1468,6 +1690,9 @@ impl AppActor {
         // #1060: the requested room (`None` for a Space) of AppActor-local
         // navigation whose enrichment is scheduled after publication.
         let mut local_navigation_target: Option<Option<String>> = None;
+        // #1146: event navigations whose focused subscription failed in this
+        // batch; settled after publication like select outcomes.
+        let mut focused_subscription_failures = Vec::new();
         for action in actions {
             let Some(action) = normalize_activity_resolution_action(&self.state, action) else {
                 continue;
@@ -1542,7 +1767,7 @@ impl AppActor {
                 }
                 AppAction::ActivityResolutionRowsObserved { rows, .. } => {
                     self.activity_projection
-                        .ingest_resolution_rows(rows.clone());
+                        .ingest_resolution_rows(rows.clone(), &self.state);
                 }
                 _ => {}
             }
@@ -1591,6 +1816,13 @@ impl AppActor {
                 // retain only Open and wait for the WebView projection ACK.
                 self.pending_date_navigation_request_id = None;
                 continue;
+            }
+            if let AppAction::FocusedContextSubscriptionFailed {
+                room_id, event_id, ..
+            } = &action
+                && let Some(owner) = self.focused_subscription_failure_owner(room_id, event_id)
+            {
+                focused_subscription_failures.push(owner);
             }
             // For SelectRoom: capture observable facts BEFORE reduce so
             // we can classify the outcome afterwards and emit the
@@ -1864,6 +2096,11 @@ impl AppActor {
             });
         }
 
+        for (request_id, generation) in focused_subscription_failures {
+            self.settle_focused_subscription_failure(request_id, generation)
+                .await;
+        }
+
         // Only after publication and every terminal has been emitted may
         // cleanup, persistence, and other post-commit effects run.
         for (
@@ -1900,6 +2137,7 @@ impl AppActor {
         let before_post_commit_loads = self.state.clone();
         self.load_account_settings_for_current_session().await;
         self.load_room_preferences_for_current_session().await;
+        self.load_room_activity_for_current_session().await;
         // A queued old-account navigation write must not be
         // overtaken by the new account's load (#971).
         self.flush_pending_navigation().await;
@@ -2102,13 +2340,16 @@ impl AppActor {
             .filter(|room| placeholder_room_ids.contains(room.room_id.as_str()))
             .map(|room| ActivityResolutionRequest {
                 room_id: room.room_id.clone(),
+                own_user_id: match &self.state.session {
+                    SessionState::Ready(info) => info.user_id.clone(),
+                    _ => String::new(),
+                },
                 fully_read_event_id: self
                     .state
                     .live_signals
                     .rooms
                     .get(&room.room_id)
                     .and_then(|signals| signals.fully_read_event_id.clone()),
-                minimum_unread_count: room.notification_count.max(room.highlight_count).max(1),
             })
             .collect::<Vec<_>>();
         if requests.is_empty() {
@@ -2117,6 +2358,8 @@ impl AppActor {
         self.activity_resolution_generation = self.activity_resolution_generation.saturating_add(1);
         let generation = self.activity_resolution_generation;
         let requests = cap_activity_resolution_requests(requests, generation);
+        self.activity_projection
+            .record_resolution_request_markers(&requests);
         let effects = self
             .reduce_app_action(AppAction::ActivityResolutionStarted {
                 generation,
@@ -2224,6 +2467,12 @@ impl AppActor {
                 limit,
                 response,
             } => Box::pin(self.handle_read_receipt_window(source, start, limit, response)).await,
+            CoreCommandEnvelope::RetentionDiagnostics(response) => {
+                Box::pin(self.handle_retention_diagnostics(response)).await
+            }
+            CoreCommandEnvelope::TimelineResidencyDiagnostics(response) => {
+                Box::pin(self.handle_timeline_residency_diagnostics(response)).await
+            }
             envelope => Box::pin(self.handle_public_command(envelope)).await,
         }
     }
@@ -2277,6 +2526,38 @@ impl AppActor {
         false
     }
 
+    async fn handle_retention_diagnostics(
+        &mut self,
+        response: oneshot::Sender<Option<crate::search::AccountRetentionDiagnostics>>,
+    ) -> bool {
+        // A diagnostic sample changes no app state: never report state
+        // changed, so the command loop skips the state-delta publication work.
+        // The forward is bounded; on timeout the sender is dropped and the
+        // caller's bounded wait settles as unavailable.
+        let _ = crate::executor::timeout(
+            std::time::Duration::from_millis(EXPORT_SAMPLE_REPLY_TIMEOUT_MS),
+            self.account_actor
+                .send(AccountMessage::SearchRetentionDiagnostics { response }),
+        )
+        .await;
+        false
+    }
+
+    async fn handle_timeline_residency_diagnostics(
+        &mut self,
+        response: oneshot::Sender<Option<crate::timeline::TimelineResidencyDiagnostics>>,
+    ) -> bool {
+        // A diagnostic sample changes no app state: never report state
+        // changed, so the command loop skips the state-delta publication work.
+        // Enqueued without waiting for mailbox capacity (#1060): an export must
+        // never hold AppActor's loop, so a full mailbox settles the caller's
+        // bounded wait as unavailable instead.
+        let _ = self
+            .account_actor
+            .try_send(AccountMessage::TimelineResidencyDiagnostics { response });
+        false
+    }
+
     async fn handle_read_receipt_window(
         &mut self,
         source: koushi_protocol::view::ReceiptSourceRef,
@@ -2318,6 +2599,12 @@ impl AppActor {
             CoreCommandEnvelope::Qa(command) => return self.handle_qa_command(command).await,
             CoreCommandEnvelope::ReaderPrepared(_)
             | CoreCommandEnvelope::ReadReceiptWindow { .. } => {
+                unreachable!("internal command routed to public handler")
+            }
+            CoreCommandEnvelope::RetentionDiagnostics(_) => {
+                unreachable!("internal command routed to public handler")
+            }
+            CoreCommandEnvelope::TimelineResidencyDiagnostics(_) => {
                 unreachable!("internal command routed to public handler")
             }
             #[cfg(test)]
@@ -2435,7 +2722,6 @@ impl AppActor {
                         | AccountCommand::EraseDeviceCleanupLocalDataAnyway { .. }
                         | AccountCommand::SubmitRecovery { .. }
                         | AccountCommand::StartSessionBootstrap { .. }
-                        | AccountCommand::ConfirmSessionBootstrapSaved { .. }
                         | AccountCommand::StartOwnUserSas { .. }
                         | AccountCommand::ExportHistory { .. }
                         | AccountCommand::RetryHistoryExport { .. }
@@ -2583,6 +2869,7 @@ impl AppActor {
                             expected_account,
                             target,
                             submitted_revision,
+                            consumes_draft,
                         } => {
                             if !composer_draft_account_matches(&self.state, &expected_account) {
                                 return false;
@@ -2604,6 +2891,7 @@ impl AppActor {
                                 .reduce_app_action(AppAction::ComposerDraftAccepted {
                                     target,
                                     submitted_revision,
+                                    consumes_draft,
                                 })
                                 .await;
                             self.handle_app_effects(request_id, effects).await;
@@ -2770,6 +3058,15 @@ impl AppActor {
                                         send_at_ms,
                                         draft_revision,
                                         composer_permit: forwarded_permit,
+                                        // #1348: the delayed content is built by the
+                                        // account actor, so the live composer
+                                        // formatting travels with the command.
+                                        formatting_options: self
+                                            .state
+                                            .settings
+                                            .values
+                                            .composer
+                                            .formatting_options(),
                                     })
                                     .await
                                 {
@@ -2910,6 +3207,14 @@ impl AppActor {
                                         body,
                                         delay_id,
                                         send_at_ms,
+                                        // #1348: the replacement content also
+                                        // follows the live composer formatting.
+                                        formatting_options: self
+                                            .state
+                                            .settings
+                                            .values
+                                            .composer
+                                            .formatting_options(),
                                     })
                                     .await
                                 {
@@ -3675,6 +3980,20 @@ impl AppActor {
                             self.handle_app_effects(request_id, effects).await;
                             true
                         }
+                        AppCommand::OpenScheduledSendsList { request_id, scope } => {
+                            let effects = self
+                                .reduce_app_action(AppAction::OpenScheduledSendsList { scope })
+                                .await;
+                            self.handle_app_effects(request_id, effects).await;
+                            true
+                        }
+                        AppCommand::CloseScheduledSendsList { request_id } => {
+                            let effects = self
+                                .reduce_app_action(AppAction::CloseScheduledSendsList)
+                                .await;
+                            self.handle_app_effects(request_id, effects).await;
+                            true
+                        }
                         AppCommand::PaginateThreadsList { request_id, scope } => {
                             let effects = self
                                 .reduce_app_action(AppAction::PaginateThreadsList {
@@ -4023,6 +4342,58 @@ impl AppActor {
                         self.handle_ui_event_effects(&effects).await;
                         state_changed = true;
                     }
+                    // Issue #1410: the reducer admits a toggle only for an
+                    // admin of the selected Space, one at a time, and a bulk
+                    // join only for the offer it holds.
+                    koushi_protocol::command::RoomCommand::SetSpaceChildSuggested {
+                        request_id,
+                        space_id,
+                        child_room_id,
+                        suggested,
+                    } => {
+                        let effects = self
+                            .reduce_app_action(AppAction::SpaceChildSuggestedUpdateRequested {
+                                request_id: request_id.sequence,
+                                space_id: space_id.clone(),
+                                child_room_id: child_room_id.clone(),
+                                suggested: *suggested,
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
+                    koushi_protocol::command::RoomCommand::JoinSuggestedSpaceRooms {
+                        request_id,
+                        space_id,
+                        ..
+                    } => {
+                        let effects = self
+                            .reduce_app_action(AppAction::SuggestedRoomsJoinRequested {
+                                request_id: request_id.sequence,
+                                space_id: space_id.clone(),
+                            })
+                            .await;
+                        if effects.is_empty() {
+                            self.emit(CoreEvent::OperationFailed {
+                                request_id: *request_id,
+                                failure: CoreFailure::RoomOperationFailed {
+                                    kind: RoomFailureKind::Sdk,
+                                },
+                            });
+                            return false;
+                        }
+                        self.handle_ui_event_effects(&effects).await;
+                        state_changed = true;
+                    }
                     _ => {}
                 }
                 // #1060: room and Space selection are purely local navigation.
@@ -4135,6 +4506,7 @@ impl AppActor {
                         let effects = self
                             .reduce_app_action(AppAction::SearchSubmitted {
                                 request_id: request_id.sequence,
+                                connection_id: request_id.connection_id.0,
                                 query: query.clone(),
                                 scope: search_scope_to_state(&scope),
                             })
@@ -4206,6 +4578,12 @@ impl AppActor {
     async fn handle_app_effects(&mut self, request_id: RequestId, effects: Vec<AppEffect>) {
         for effect in effects {
             match effect {
+                AppEffect::PublishSearchResults {
+                    request_id: effect_request_id,
+                    ref results,
+                } => {
+                    self.publish_admitted_search_results(effect_request_id, results);
+                }
                 AppEffect::ContinueSlidingSyncAdmission {
                     account_epoch,
                     request_id,
@@ -4392,20 +4770,39 @@ impl AppActor {
                     query,
                     scope,
                     room_filter,
+                    content_policy,
                 } => {
                     if effect_request_id != request_id.sequence {
                         continue;
                     }
+                    // The state now owns this query. Replacing the owner retires
+                    // the previous request: the state no longer names it, so it
+                    // can never settle through the reducer, and its caller must
+                    // be told here. This also covers two connections whose
+                    // connection-local sequences collide.
+                    if let Some(previous) = self
+                        .active_search_request
+                        .replace(ActiveSearchRequest::dispatched(request_id))
+                        && previous.request_id != request_id
+                        && !previous.settled
+                    {
+                        self.emit(CoreEvent::IntentLifecycle {
+                            request_id: previous.request_id,
+                            outcome: IntentOutcome::BenignNoOp(IntentNoOpReason::Superseded),
+                            published_generation: self.state_generation,
+                        });
+                    }
                     let _ = self
                         .account_actor
-                        .send(crate::account::AccountMessage::SearchCommand(
-                            SearchCommand::Query {
+                        .send(crate::account::AccountMessage::SearchWithPolicy {
+                            command: SearchCommand::Query {
                                 request_id,
                                 query,
                                 scope: map_state_search_scope_to_core(scope),
                                 room_filter,
                             },
-                        ))
+                            content_policy,
+                        })
                         .await;
                 }
                 AppEffect::SearchAttachments {
@@ -4419,14 +4816,15 @@ impl AppActor {
                     }
                     let _ = self
                         .account_actor
-                        .send(crate::account::AccountMessage::SearchCommand(
-                            SearchCommand::Attachments {
+                        .send(crate::account::AccountMessage::SearchWithPolicy {
+                            command: SearchCommand::Attachments {
                                 request_id,
                                 scope,
                                 filter,
                                 sort,
                             },
-                        ))
+                            content_policy: self.state.settings.values.search_crawler.clone(),
+                        })
                         .await;
                 }
                 AppEffect::SubscribeThreadsList {
@@ -4650,6 +5048,17 @@ impl AppActor {
     ) {
         for effect in effects {
             match effect {
+                AppEffect::PublishSearchResults {
+                    request_id: effect_request_id,
+                    results,
+                } => {
+                    // The state admitted these results against the accepted query
+                    // and the account's current content policy, so this is the
+                    // authoritative publication point. This path owns the effects
+                    // of actor-originated (projection) actions, which is where a
+                    // search result arrives.
+                    self.publish_admitted_search_results(*effect_request_id, results);
+                }
                 AppEffect::ContinueSlidingSyncAdmission {
                     account_epoch,
                     request_id,
@@ -5083,6 +5492,31 @@ impl AppActor {
         )
     }
 
+    /// Publish a result set the state admitted.
+    ///
+    /// Only the accepted query's own result reaches the event stream, and only
+    /// once: the state is the authority on both.
+    fn publish_admitted_search_results(
+        &mut self,
+        request_sequence: u64,
+        results: &[koushi_state::SearchResult],
+    ) {
+        let Some(active) = self
+            .active_search_request
+            .as_ref()
+            .filter(|active| active.request_id.sequence == request_sequence)
+        else {
+            return;
+        };
+        let request_id = active.request_id;
+        self.emit(CoreEvent::Search(
+            koushi_protocol::event::SearchEvent::Results {
+                request_id,
+                results: crate::search::compact_search_results(results),
+            },
+        ));
+    }
+
     fn emit(&self, event: CoreEvent) {
         // A send error only means no consumer is currently attached.
         let _ = self.event_tx.send(event);
@@ -5220,6 +5654,14 @@ fn secure_backup_setup_projection_failure(
 }
 
 fn is_verification_gate_command(command: &CoreCommand, session: &SessionState) -> bool {
+    // The optional "Save to file" for the identity bootstrap's revealed key
+    // (#1049); AccountActor validates the reveal id against its held copy.
+    if matches!(
+        command,
+        CoreCommand::Account(AccountCommand::SaveSecureBackupRecoveryKey { .. })
+    ) {
+        return matches!(session, SessionState::AwaitingBootstrapConfirmation { .. });
+    }
     if matches!(
         command,
         CoreCommand::Account(AccountCommand::RetryCurrentDeviceTrustDiscovery { .. })
@@ -5336,9 +5778,6 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
                 method: koushi_state::VerificationMethod::ExistingDeviceSas,
                 flow_id: *flow_id,
             })
-        }
-        AccountCommand::ConfirmSessionBootstrapSaved { flow_id, .. } => {
-            Some(AppAction::BootstrapRecoverySavedConfirmed { flow_id: *flow_id })
         }
         AccountCommand::AcceptVerification { flow_id, .. } => {
             Some(AppAction::VerificationAccepted {
@@ -5580,6 +6019,7 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
             Some(AppAction::RestoreSessionRequested)
         }
         AccountCommand::CompleteOidcLogin { .. }
+        | AccountCommand::CancelOidcLogin { .. }
         | AccountCommand::RetrySlidingSyncCapability { .. }
         | AccountCommand::ChangeHomeserver { .. }
         | AccountCommand::QuerySavedSessions { .. }
@@ -5591,6 +6031,9 @@ fn account_command_projected_action(command: &AccountCommand) -> Option<AppActio
         | AccountCommand::RetryCurrentDeviceTrustDiscovery { .. }
         // The actor validates the revealed key and settles the save outcome.
         | AccountCommand::SaveSecureBackupRecoveryKey { .. }
+        // The actor clears the persisted delivery marker before the reveal
+        // may drop the key (#1049), then settles the confirmation.
+        | AccountCommand::ConfirmSessionBootstrapSaved { .. }
         | AccountCommand::SwitchAccount { .. } => None,
     }
 }
@@ -5614,28 +6057,6 @@ fn map_state_search_scope_to_core(scope: AppSearchScope) -> SearchScope {
         AppSearchScope::CurrentSpace { space_id } => SearchScope::CurrentSpace { space_id },
         AppSearchScope::CurrentRoom { room_id } => SearchScope::CurrentRoom { room_id },
     }
-}
-
-/// Resolve the user data directory from a `HOME` value (pure; testable).
-///
-/// Fails closed: there is NO current-working-directory fallback. The encrypted
-/// SDK store, encrypted search index, and persisted session live under this
-/// path, so silently writing them into an arbitrary CWD when `HOME` is missing
-/// would be a privacy/security footgun (REPOSITORY_RULES Key Management:
-/// "Missing, corrupt, or inaccessible OS secrets MUST fail closed").
-fn default_data_dir_from_home(home: Option<std::ffi::OsString>) -> Result<PathBuf, String> {
-    let home =
-        home.ok_or_else(|| "HOME is required to resolve koushi-desktop data dir".to_owned())?;
-    Ok(PathBuf::from(home)
-        .join(".local")
-        .join("share")
-        .join("koushi-desktop"))
-}
-
-/// Default application data directory (`$HOME/.local/share/koushi-desktop`).
-fn default_data_dir() -> PathBuf {
-    default_data_dir_from_home(std::env::var_os("HOME"))
-        .expect("HOME is required to resolve koushi-desktop data dir")
 }
 
 #[cfg(test)]

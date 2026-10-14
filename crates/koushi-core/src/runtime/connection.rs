@@ -494,6 +494,12 @@ impl CoreCommandHandle {
             CoreCommandEnvelope::Qa(_) => {
                 unreachable!("composer admission creates a public command")
             }
+            CoreCommandEnvelope::RetentionDiagnostics(_) => {
+                unreachable!("composer admission creates a public command")
+            }
+            CoreCommandEnvelope::TimelineResidencyDiagnostics(_) => {
+                unreachable!("composer admission creates a public command")
+            }
         };
         self.command_tx
             .send(CoreCommandEnvelope::Public {
@@ -587,6 +593,12 @@ impl CoreConnectionTestControl {
             }
             #[cfg(test)]
             CoreCommandEnvelope::ResolveReceiptWindow { .. } => {
+                unreachable!("test control expected a public command")
+            }
+            CoreCommandEnvelope::RetentionDiagnostics(_) => {
+                unreachable!("test control expected a public command")
+            }
+            CoreCommandEnvelope::TimelineResidencyDiagnostics(_) => {
                 unreachable!("test control expected a public command")
             }
         })
@@ -845,9 +857,12 @@ impl CoreConnection {
         &mut self,
         target: koushi_state::ComposerTarget,
         items: Vec<crate::media_preparation::StageUploadBytesInput>,
+        composer_document: Option<koushi_state::ComposerDocument>,
     ) -> Result<u64, crate::media_staging::MediaStagingError> {
         let service = Arc::clone(&self.media_staging);
-        service.stage_upload_bytes(self, target, items).await
+        service
+            .stage_upload_bytes_with_composer_document(self, target, items, composer_document)
+            .await
     }
 
     /// Return the published generation after this operation settles.
@@ -939,6 +954,7 @@ impl CoreConnection {
         lease: crate::composer_draft_lifecycle::ComposerDraftLeaseId,
         target: koushi_state::ComposerTarget,
         draft_revision: koushi_state::ComposerDraftRevision,
+        draft_document: Option<koushi_state::ComposerDocument>,
     ) -> Result<
         crate::media_staging::PreparedUploadSendResult,
         crate::media_staging::PreparedUploadSendError,
@@ -952,6 +968,7 @@ impl CoreConnection {
                 lease,
                 target,
                 draft_revision,
+                draft_document,
             )
             .await
     }
@@ -1118,12 +1135,14 @@ impl CoreConnection {
 
     /// Preview an unsent room address against the current Ready Matrix account.
     /// This borrows only the session; it neither clones AppState nor probes availability.
-    /// A room created from the selected Space is suggested as `<space>-<room>`
-    /// (#1006), from the Space's Matrix name, never a local presentation name.
+    /// An unedited address (`alias_localpart == None`) is the create session's
+    /// random default (#1416): the attachment Space's Matrix name, never a
+    /// local presentation name or the room name, plus the session's suffix. A
+    /// session without a draft has no default and previews as empty.
     pub fn preview_room_address(
         &self,
-        name: &str,
         alias_localpart: Option<&str>,
+        create_session_id: u64,
     ) -> koushi_state::RoomAddressPreview {
         let snapshot = self.snapshot_rx.borrow();
         let state = &snapshot.state;
@@ -1131,18 +1150,60 @@ impl CoreConnection {
             koushi_state::SessionState::Ready(session) => Some(session.user_id.as_str()),
             _ => None,
         };
-        let space_name = state
-            .navigation
-            .active_space_id
-            .as_deref()
-            .and_then(|space_id| {
-                state
-                    .spaces
-                    .iter()
-                    .find(|space| space.space_id == space_id)
-                    .map(|space| space.raw_name.as_deref().unwrap_or(&space.display_name))
-            });
-        koushi_sdk::preview_room_address(name, alias_localpart, space_name, user_id)
+        let localpart = match alias_localpart {
+            Some(localpart) => localpart.to_owned(),
+            None => state
+                .room_management
+                .draft
+                .as_ref()
+                .filter(|draft| {
+                    draft.scope
+                        == koushi_state::RoomAccessDraftScope::Create {
+                            session_id: create_session_id,
+                        }
+                })
+                .and_then(|draft| {
+                    let suffix = draft.create_address_suffix.as_deref()?;
+                    let space_name = draft.create_parent_space_id.as_deref().and_then(|id| {
+                        state
+                            .spaces
+                            .iter()
+                            .find(|space| space.space_id == id)
+                            .and_then(|space| space.raw_name.as_deref())
+                    });
+                    Some(koushi_state::default_room_alias_localpart(
+                        space_name, suffix,
+                    ))
+                })
+                .unwrap_or_default(),
+        };
+        koushi_sdk::preview_room_address(&localpart, user_id)
+    }
+
+    /// A stateless preview of one Room Info access/history panel (#1177).
+    ///
+    /// It borrows the current published snapshot, applies the Rust-owned draft
+    /// only when its scope matches, and never supplies a trusted verified-Space
+    /// or confirmed-publication assertion. The returned identity lets the
+    /// caller fence an older result.
+    pub fn preview_room_access(
+        &self,
+        scope: &koushi_state::RoomAccessDraftScope,
+        context: koushi_state::RoomAccessPreviewContext,
+    ) -> koushi_state::RoomAccessPreview {
+        let snapshot = self.snapshot_rx.borrow();
+        koushi_state::preview_room_access_draft(&snapshot.state, scope, context)
+    }
+
+    /// A stateless preview of the create dialog's effective proposed access
+    /// tuple (#1177), normalized with the same rules Create applies.
+    pub fn preview_create_room_access(
+        &self,
+        scope: &koushi_state::RoomAccessDraftScope,
+        input: koushi_state::CreateRoomAccessPreviewInput,
+    ) -> koushi_state::CreateRoomAccessPreview {
+        let snapshot = self.snapshot_rx.borrow();
+        koushi_state::preview_create_room_access(&snapshot.state, scope, input)
     }
 
     /// Latest state snapshot (latest-wins watch semantics).
@@ -1438,6 +1499,8 @@ fn composer_draft_has_content(
     }
 }
 
+#[cfg(test)]
+mod direct_message_tests;
 #[cfg(test)]
 mod event_navigation_tests;
 #[cfg(test)]

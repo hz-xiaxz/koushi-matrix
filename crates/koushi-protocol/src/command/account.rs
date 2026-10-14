@@ -296,6 +296,15 @@ pub enum AccountCommand {
     StartOidcLogin {
         request_id: RequestId,
         homeserver: String,
+        /// The user's bounded chosen delegated method (#1267). Core maps this
+        /// choice plus validated discovery onto the SDK start selection.
+        method: koushi_state::DelegatedAuthMethod,
+    },
+    /// Retire the pending browser (OAuth/SSO) attempt without starting a new
+    /// one (#1267). Idempotent: cancelling when nothing is pending succeeds
+    /// quietly.
+    CancelOidcLogin {
+        request_id: RequestId,
     },
     CompleteOidcLogin {
         request_id: RequestId,
@@ -439,11 +448,14 @@ pub enum AccountCommand {
         request_id: RequestId,
         request: RecoveryRequest,
     },
+    /// Verification-gate identity bootstrap (#1049). The created recovery
+    /// key is revealed on screen; saving it to a file is the optional
+    /// `SaveSecureBackupRecoveryKey { reveal_request_id: flow_id }`.
     StartSessionBootstrap {
         request_id: RequestId,
         flow_id: u64,
         auth: Option<koushi_state::AuthSecret>,
-        request: SecureBackupSetupRequest,
+        passphrase: Option<koushi_state::AuthSecret>,
     },
     ConfirmSessionBootstrapSaved {
         request_id: RequestId,
@@ -574,10 +586,17 @@ impl fmt::Debug for AccountCommand {
                 .field("request_id", request_id)
                 .field("homeserver", &"Homeserver(..)")
                 .finish(),
-            Self::StartOidcLogin { request_id, .. } => formatter
+            Self::StartOidcLogin {
+                request_id, method, ..
+            } => formatter
                 .debug_struct("StartOidcLogin")
                 .field("request_id", request_id)
                 .field("homeserver", &"Homeserver(..)")
+                .field("method", method)
+                .finish(),
+            Self::CancelOidcLogin { request_id } => formatter
+                .debug_struct("CancelOidcLogin")
+                .field("request_id", request_id)
                 .finish(),
             Self::CompleteOidcLogin { request_id, .. } => formatter
                 .debug_struct("CompleteOidcLogin")
@@ -797,13 +816,13 @@ impl fmt::Debug for AccountCommand {
                 request_id,
                 flow_id,
                 auth,
-                request,
+                passphrase,
             } => formatter
                 .debug_struct("StartSessionBootstrap")
                 .field("request_id", request_id)
                 .field("flow_id", flow_id)
                 .field("has_auth", &auth.is_some())
-                .field("request", request)
+                .field("has_passphrase", &passphrase.is_some())
                 .finish(),
             Self::ConfirmSessionBootstrapSaved {
                 request_id,

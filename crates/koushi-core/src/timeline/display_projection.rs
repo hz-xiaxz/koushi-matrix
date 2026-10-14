@@ -797,10 +797,8 @@ impl DisplayProjectionContext {
     pub(super) fn for_timeline(
         kind: &TimelineKind,
         observation: &TimelineViewportObservation,
-        restoring_anchor: bool,
     ) -> Self {
-        let bounded_live_edge =
-            matches!(kind, TimelineKind::Room { .. }) && observation.at_bottom && !restoring_anchor;
+        let bounded_live_edge = matches!(kind, TimelineKind::Room { .. }) && observation.at_bottom;
         Self {
             max_live_edge_items: bounded_live_edge.then_some(ROOM_REPLAY_INITIAL_ITEMS_MAX),
             include_prepend: !bounded_live_edge,
@@ -1267,6 +1265,7 @@ fn root_display_item(
         .thread_summary
         .get_or_insert(koushi_protocol::event::ThreadSummaryDto {
             reply_count: 0,
+            unread_count: 0,
             latest_event_id: None,
             latest_sender: None,
             latest_sender_label: None,
@@ -1274,6 +1273,9 @@ fn root_display_item(
             latest_timestamp_ms: None,
         });
     summary.reply_count = root.aggregate.reply_count;
+    // #1259: the chip dot comes from the root's stored SDK thread-cache unread, so the
+    // initial window carries it too.
+    summary.unread_count = root.unread;
     summary.latest_event_id = root.aggregate.latest_event_id.clone();
     summary.latest_sender = root.aggregate.latest_sender.clone();
     summary.latest_sender_label = root.aggregate.latest_sender_label.clone();
@@ -1317,6 +1319,7 @@ fn root_placeholder_item(root: &ThreadRootDisplayData) -> TimelineItem {
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: false,
         is_redacted: false,
@@ -1332,6 +1335,7 @@ fn root_placeholder_item(root: &ThreadRootDisplayData) -> TimelineItem {
     };
     let summary = koushi_protocol::event::ThreadSummaryDto {
         reply_count: root.aggregate.reply_count,
+        unread_count: 0,
         latest_event_id: root.aggregate.latest_event_id.clone(),
         latest_sender: root.aggregate.latest_sender.clone(),
         latest_sender_label: root.aggregate.latest_sender_label.clone(),
@@ -1839,21 +1843,10 @@ fn timeline_item_render_id(item: &TimelineItem) -> String {
     }
 }
 
-pub(super) fn timeline_diffs_include_prepend(diffs: &[TimelineDiff]) -> bool {
-    diffs.iter().any(|diff| match diff {
-        TimelineDiff::PushFront { .. } => true,
-        TimelineDiff::Insert { index, .. } => *index == 0,
-        TimelineDiff::Reset { .. } => true,
-        TimelineDiff::PushBack { .. }
-        | TimelineDiff::Set { .. }
-        | TimelineDiff::Remove { .. }
-        | TimelineDiff::Truncate { .. }
-        | TimelineDiff::Clear => false,
-    })
-}
-
 #[cfg(test)]
 mod issue_1110_tests;
+#[cfg(test)]
+mod issue_1141_tests;
 #[cfg(test)]
 mod tests;
 

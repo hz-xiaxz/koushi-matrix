@@ -12,6 +12,8 @@ import {
   Clock3,
   Compass,
   Image as ImageIcon,
+  LockKeyhole,
+  LockOpen,
   MessageCircle,
   MoreHorizontal,
   Search,
@@ -19,6 +21,8 @@ import {
   X
 } from "lucide-react";
 import { t } from "../i18n/messages";
+import { RoomAccessGlyphIcon } from "./RoomAccessGlyph";
+import { Tooltip } from "./Tooltip";
 import type {
   StagedUploadOutputSelection,
   ActivityMarkReadTarget,
@@ -36,8 +40,15 @@ import type {
 import { focusedTimelineKey, roomTimelineKey } from "../domain/coreEvents";
 import { invitePreviewLabel } from "../domain/roomDisplayLabel";
 import {
+  ROOM_ACCESS_CHECKING,
+  roomAccessIndicator,
+  sidebarRoomAccess
+} from "../domain/accessCondition";
+import {
   ICON_SIZE,
   avatarInitial,
+  hasScheduledSendPersistenceFailure,
+  roomAccessTooltipLabel,
   operationFailureLabel,
   type ComposerModeProp,
   type OpenContextMenu
@@ -94,7 +105,6 @@ export function ActivityPane({
   activity,
   onClose,
   onLoadMore,
-  onMarkRead,
   onOpenRow,
   onRetryResolution,
   onSetTab
@@ -111,17 +121,15 @@ export function ActivityPane({
     activity.kind === "open" ? activity.active_tab : activity.kind === "opening" ? activity.tab : "recent";
   const stream = activity.kind === "open" ? activityStream(activity, activeTab) : null;
   const rows = stream?.rows ?? [];
-  const resolution = activeTab === "unread" ? stream?.resolution : undefined;
+  // The background resolver hydrates Recent history. Verified room summaries
+  // in Unread stay usable even when that history request is slow or fails.
+  const resolution = activeTab === "recent" && activity.kind === "open"
+    ? activity.unread.resolution
+    : undefined;
   const visibleRows = activeTab === "unread"
-    ? rows.filter((row) => row.kind === "event")
+    ? rows.filter((row) => row.kind === "roomUnread")
     : rows;
   const markReadState = activity.kind === "open" ? activity.mark_read : { kind: "idle" as const };
-  const markAllPending =
-    markReadState.kind === "pending" && markReadState.target.kind === "all";
-  const markRoomPending = (row: ActivityRow) =>
-    markReadState.kind === "pending" &&
-    markReadState.target.kind === "room" &&
-    markReadState.target.room_id === row.room_id;
 
   return (
     <main className="main-pane activity-pane" aria-labelledby="activity-title">
@@ -131,25 +139,23 @@ export function ActivityPane({
           <h1 id="activity-title">{t("workspace.activity")}</h1>
         </div>
         <div className="activity-actions">
-          {activity.kind === "open" && activeTab === "unread" && rows.length > 0 ? (
-            <button
-              className="dialog-button secondary"
-              type="button"
-              disabled={markAllPending}
-              onClick={() => onMarkRead({ kind: "all" })}
-            >
-              <Check size={ICON_SIZE.small} />
-              <span>{t("activity.markAllRead")}</span>
-            </button>
-          ) : null}
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("action.close", { title: t("workspace.activity") })}
-            onClick={onClose}
+          <Tooltip
+            label={t("action.close", { title: t("workspace.activity") })}
+            placement="below"
+            align="end"
           >
-            <X size={ICON_SIZE.control} />
-          </button>
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("action.close", { title: t("workspace.activity") })}
+                onClick={onClose}
+                {...tooltipProps}
+              >
+                <X size={ICON_SIZE.control} />
+              </button>
+            )}
+          </Tooltip>
         </div>
       </header>
       <div className="tabs" role="tablist" aria-label={t("activity.tabs")}>
@@ -207,7 +213,7 @@ export function ActivityPane({
               return (
                 <li
                   className={`activity-row ${row.unread ? "is-unread" : ""} ${
-                    row.highlight ? "is-highlight" : ""
+                    !isPlaceholder && row.highlight ? "is-highlight" : ""
                   }`}
                   data-event-id={row.event_id ?? undefined}
                   data-room-id={row.room_id}
@@ -233,7 +239,6 @@ export function ActivityPane({
                         </span>
                         <span className="activity-row-meta">
                           {row.unread ? <span>{t("activity.unreadBadge")}</span> : null}
-                          {row.highlight ? <span>{t("activity.highlightBadge")}</span> : null}
                         </span>
                       </span>
                     </button>
@@ -272,23 +277,6 @@ export function ActivityPane({
                       </span>
                     </button>
                   )}
-                  {activeTab === "unread" && !isPlaceholder ? (
-                    <button
-                      className="activity-row-action"
-                      type="button"
-                      aria-label={t("activity.markRoomRead")}
-                      disabled={markRoomPending(row)}
-                      onClick={() =>
-                        onMarkRead({
-                          kind: "room",
-                          room_id: row.room_id,
-                          up_to_event_id: row.event_id
-                        })
-                      }
-                    >
-                      <Check size={ICON_SIZE.small} />
-                    </button>
-                  ) : null}
                 </li>
               );
             })}
@@ -754,6 +742,7 @@ export function TimelinePane({
   onOpenPeople,
   onOpenThreads,
   onToggleRoomInfo,
+  onOpenRoomInfoSetting,
   onReturnToLive,
   onTimelineDiagnosticsChange,
   onTimelineDiagnosticLogEntry
@@ -814,6 +803,12 @@ export function TimelinePane({
   onOpenPeople: () => void;
   onOpenThreads: () => void;
   onToggleRoomInfo: () => void;
+  /**
+   * #1327: the header access pill opens Room Info at the join-condition
+   * property. A caller that cannot address a property falls back to the plain
+   * Room Info toggle.
+   */
+  onOpenRoomInfoSetting?: () => void;
   onReturnToLive?: ReturnToLiveHandler;
   onTimelineDiagnosticsChange?: (diagnostics: TimelineDiagnostics) => void;
   onTimelineDiagnosticLogEntry?: (entry: TimelineDiagnosticLogEntry) => void;
@@ -822,6 +817,23 @@ export function TimelinePane({
   const currentUserId = snapshot.state.domain.session.user_id ?? null;
   const activeRoom = timelineRoomId
     ? snapshot.state.domain.rooms.find((room) => room.room_id === timelineRoomId) ?? null
+    : null;
+  // #1166: the header shows the active room's own access condition, from the
+  // same Rust projection the room list uses. #1327: a DM keeps its real rule, so
+  // only the explanation is shortened, never the condition itself.
+  const headerRoomAccess = timelineRoomId
+    ? sidebarRoomAccess(snapshot.sidebar, timelineRoomId)
+    : null;
+  const headerAccess = headerRoomAccess
+    ? roomAccessIndicator(
+        headerRoomAccess.joinRule,
+        headerRoomAccess.restricted,
+        {
+          spaceMembersRoute: headerRoomAccess.spaceMembersRoute,
+          allowedRoomNames: headerRoomAccess.allowedRoomNames
+        },
+        activeRoom?.is_dm ?? false
+      ) ?? ROOM_ACCESS_CHECKING
     : null;
   const liveLatestEventId = roomLatestDisplayEventId(activeRoom?.latest_event);
   const threadAttention = snapshot.state.domain.thread_attention;
@@ -844,9 +856,6 @@ export function TimelinePane({
     trackingThreadAttention?.highlight_count,
     trackingThreadAttention?.live_event_marker_count
   ]);
-  const threadsHeaderNotificationCount = timelineThreadAttention?.notificationCount ?? 0;
-  const threadsHeaderHighlightCount = timelineThreadAttention?.highlightCount ?? 0;
-  const threadsHeaderLiveCount = timelineThreadAttention?.liveEventMarkerCount ?? 0;
   // #161: when the main pane is anchored (jump-to-date landed on an event), it
   // renders the focused (event-centered) timeline instead of the live room
   // timeline; the right panel is not opened.
@@ -959,6 +968,9 @@ export function TimelinePane({
   const onOpenPeopleStable = useStableEvent(onOpenPeople);
   const onOpenThreadsStable = useStableEvent(onOpenThreads);
   const onToggleRoomInfoStable = useStableEvent(onToggleRoomInfo);
+  const onOpenRoomInfoSettingStable = useStableEvent(
+    onOpenRoomInfoSetting ?? onToggleRoomInfo
+  );
   const onTimelineDiagnosticsChangeStable = useStableEvent(
     (diagnostics: TimelineDiagnostics) => onTimelineDiagnosticsChange?.(diagnostics)
   );
@@ -982,67 +994,156 @@ export function TimelinePane({
             colorSeed={activeRoom?.room_id ?? activeRoomName}
             fallback={avatarInitial(activeRoomName)}
           />
-          <span dir="auto">{activeRoomName}</span>
+          <span className="channel-name" dir="auto">{activeRoomName}</span>
+          {/* #1327: two independent status pills after the name, on the one
+              existing header row. Encryption comes from `is_encrypted`, the
+              access condition from the confirmed join rule; neither is derived
+              from DM status, directory visibility, history or Space privacy.
+              In a narrow pane only the pill text is hidden; the icons and their
+              accessible descriptions stay. */}
+          {activeRoom ? (
+            <Tooltip
+              label={t(
+                activeRoom.is_encrypted
+                  ? "room.encryptedDescription"
+                  : "room.notEncryptedDescription"
+              )}
+              // A room switch dismisses the popup rather than rewriting it.
+              resetKey={activeRoom.room_id}
+            >
+              {(triggerProps) => (
+                <span
+                  className="channel-status-pill channel-encryption-pill"
+                  data-room-encryption={activeRoom.is_encrypted ? "encrypted" : "plaintext"}
+                  role="img"
+                  tabIndex={0}
+                  aria-label={t(
+                    activeRoom.is_encrypted ? "room.statusEncrypted" : "room.statusNotEncrypted"
+                  )}
+                  {...triggerProps}
+                >
+                  {activeRoom.is_encrypted ? (
+                    <LockKeyhole size={ICON_SIZE.small} aria-hidden="true" />
+                  ) : (
+                    <LockOpen size={ICON_SIZE.small} aria-hidden="true" />
+                  )}
+                  <span className="channel-status-pill-text">
+                    {t(
+                      activeRoom.is_encrypted ? "room.statusEncrypted" : "room.statusNotEncrypted"
+                    )}
+                  </span>
+                </span>
+              )}
+            </Tooltip>
+          ) : null}
+          {headerAccess ? (
+            <Tooltip
+              label={roomAccessTooltipLabel(
+                headerAccess.descriptionMessageId,
+                headerAccess.descriptionAllowedRoomNames,
+                headerAccess.descriptionSpaceName
+              )}
+              resetKey={activeRoom?.room_id ?? null}
+            >
+              {(triggerProps) => (
+                // The pill stays a button: the popup is explanatory and
+                // activation opens the join-rule property in Room Info.
+                <button
+                  className="channel-status-pill channel-access-pill"
+                  type="button"
+                  data-room-access={headerAccess.glyph}
+                  aria-label={t("room.statusShowSetting", {
+                    status: t(headerAccess.labelMessageId)
+                  })}
+                  onClick={onOpenRoomInfoSettingStable}
+                  {...triggerProps}
+                >
+                  <RoomAccessGlyphIcon glyph={headerAccess.glyph} size={ICON_SIZE.small} />
+                  <span className="channel-status-pill-text">
+                    {t(headerAccess.labelMessageId)}
+                  </span>
+                </button>
+              )}
+            </Tooltip>
+          ) : null}
         </div>
         <div className="channel-actions">
           <nav className="timeline-header-navigation" aria-label={t("timeline.navigation")}>
-            <button
-              className="icon-button timeline-control"
-              type="button"
-              aria-label={t("timeline.latest")}
-              title={t("timeline.latest")}
-              onClick={() => {
-                if (mainTimelineAnchorEventId && onReturnToLive) {
-                  invokeReturnToLiveSafely(onReturnToLive);
-                  return;
-                }
-                jumpToLatestRef.current?.();
-              }}
-            >
-              <ArrowDown size={ICON_SIZE.control} aria-hidden="true" />
-            </button>
+            <Tooltip label={t("timeline.latest")} placement="below" align="end">
+              {(tooltipProps) => (
+                <button
+                  className="icon-button timeline-control"
+                  type="button"
+                  aria-label={t("timeline.latest")}
+                  onClick={() => {
+                    if (mainTimelineAnchorEventId && onReturnToLive) {
+                      invokeReturnToLiveSafely(onReturnToLive);
+                      return;
+                    }
+                    jumpToLatestRef.current?.();
+                  }}
+                  {...tooltipProps}
+                >
+                  <ArrowDown size={ICON_SIZE.control} aria-hidden="true" />
+                </button>
+              )}
+            </Tooltip>
           </nav>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("panel.people")}
-            title={t("panel.people")}
-            onClick={onOpenPeopleStable}
-          >
-            <Users size={ICON_SIZE.panel} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("mediaGallery.open")}
-            title={t("mediaGallery.open")}
-            onClick={() => setGalleryOpen((open) => !open)}
-          >
-            <ImageIcon size={ICON_SIZE.panel} />
-          </button>
+          <Tooltip label={t("panel.people")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("panel.people")}
+                onClick={onOpenPeopleStable}
+                {...tooltipProps}
+              >
+                <Users size={ICON_SIZE.panel} />
+              </button>
+            )}
+          </Tooltip>
+          <Tooltip label={t("mediaGallery.open")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("mediaGallery.open")}
+                onClick={() => setGalleryOpen((open) => !open)}
+                {...tooltipProps}
+              >
+                <ImageIcon size={ICON_SIZE.panel} />
+              </button>
+            )}
+          </Tooltip>
           {/* #330: the only entry point to this room's threads, so it is always
               offered. The counts render as badges when non-zero. */}
-          <button
-            className="icon-button"
-            type="button"
-            data-count={threadsHeaderNotificationCount || undefined}
-            data-live-count={threadsHeaderLiveCount || undefined}
-            data-mention-count={threadsHeaderHighlightCount || undefined}
-            aria-label={t("workspace.threads")}
-            title={t("workspace.threads")}
-            onClick={onOpenThreadsStable}
-          >
-            <MessageCircle size={ICON_SIZE.panel} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("room.roomInfo")}
-            title={t("room.roomInfo")}
-            onClick={onToggleRoomInfoStable}
-          >
-            <MoreHorizontal size={ICON_SIZE.panel} />
-          </button>
+          <Tooltip label={t("workspace.threads")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                data-count={activeRoom?.thread_unread_count || undefined}
+                aria-label={t("workspace.threads")}
+                onClick={onOpenThreadsStable}
+                {...tooltipProps}
+              >
+                <MessageCircle size={ICON_SIZE.panel} />
+              </button>
+            )}
+          </Tooltip>
+          <Tooltip label={t("room.roomInfo")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("room.roomInfo")}
+                onClick={onToggleRoomInfoStable}
+                {...tooltipProps}
+              >
+                <MoreHorizontal size={ICON_SIZE.panel} />
+              </button>
+            )}
+          </Tooltip>
         </div>
       </header>
       {galleryOpen ? (
@@ -1104,6 +1205,8 @@ export function TimelinePane({
               codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
               recentEmojis={snapshot.state.domain.settings.values.composer.recent_emojis}
               onRecentEmojisChange={onRecentEmojisChangeStable}
+              mathModeEnabled={snapshot.state.domain.settings.values.composer.math_mode}
+              onMathModeChange={onComposerMathModeChangeStable}
               searchHighlightsByEventId={searchHighlightsByEventId}
               mediaDownloads={mediaDownloads}
               editMentionCandidates={editMentionCandidates}
@@ -1151,6 +1254,8 @@ export function TimelinePane({
         items={snapshot.state.ui.timeline.scheduled_sends}
         onCancel={onCancelScheduledSendStable}
         onReschedule={onRescheduleScheduledSendStable}
+        mathModeEnabled={snapshot.state.domain.settings.values.composer.math_mode}
+        onMathModeChange={onComposerMathModeChangeStable}
       />
       {stagedUploads.length > 0 ? (
         <UploadStagingDialog
@@ -1191,6 +1296,10 @@ export function TimelinePane({
         resolveComposerKeyAction={resolveComposerKeyActionStable}
         document={composerDocument}
         notice={composerNotice}
+        scheduledSendCount={snapshot.state.ui.timeline.scheduled_sends.length}
+        scheduledSendPersistenceFailed={hasScheduledSendPersistenceFailure(
+          snapshot.state.ui.errors
+        )}
         draftKey={composerDraftKey ?? timelineRoomId ?? "no-room"}
         roomName={activeRoomName}
         onCancelReply={onCancelReplyStable}

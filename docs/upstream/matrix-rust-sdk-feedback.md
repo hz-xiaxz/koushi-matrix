@@ -13,7 +13,8 @@ previous pin `a04792c7a` plus the retained Koushi customizations. The
 2026-07-27 snapshot below described the state before that upgrade. The fork is expected to be managed and
 maintained for a while; local SDK patches should therefore stay as small topic
 commits with clear upstream intent instead of being squashed into an opaque
-vendor snapshot.
+vendor snapshot. The gitlink has moved since; see the 2026-10-09 and 2026-10-10
+(#1188) sections.
 
 The current Koushi-required SDK topic stack is:
 
@@ -33,6 +34,7 @@ The current Koushi-required SDK topic stack is:
 - `fix(crypto): harden async delivery ownership`
 - `fix: avoid identity query Olm lock deadlock`
 - `Handle stale order tracker readers`
+- `fix(ui): keep the reaction's own event id on the timeline item`
 
 These are retained because Koushi currently depends on their public or
 behavioral contracts for verification delivery, restricted verification sync,
@@ -50,8 +52,52 @@ or SDK boundary without logging private Matrix payloads.
 
 ## Upstreamable Patch Material
 
+- Cancellation-safe event-focused initialization (#1146, 2026-10-07, fork
+  topic `8c861d4` on `fix/1146-transactional-focused-cache`) changes only `event_cache/caches/event_focused/mod.rs` and its constructor caller in
+  `event_cache/caches/mod.rs`. Initial context loading now completes on local,
+  unpublished state inside `StateLock::try_insert_once_with`; only success
+  registers the state and publishes the reusable handle, without another await
+  between those steps. Previously an HTTP error or cancelled `/context` left
+  registered state without a handle, so retry failed with
+  `CacheStateAlreadyExists`. No public API can remove that orphaned selector,
+  and dropping the whole room cache is not a targeted cancellation substitute.
+  The existing lock ordering and context errors are preserved. Core's
+  `sdk_focused_cache_context_error_does_not_poison_retry` reproduces the orphan
+  against the old SDK and passes with this patch; the real-SDK
+  `sdk_focused_build_waiting_on_context_is_cancelled_and_retry_starts_fresh`
+  proves a second request succeeds without releasing the original delayed
+  response. Upstream intent: submit this transactional-construction correction
+  with standalone SDK regressions; remove the fork topic once incorporated.
+  No upstream PR has been submitted by this session.
+- Cancellation-safe room-cache publication (#1146, 2026-10-07, fork topic
+  `1d3df6d8` on `fix/1146-transactional-focused-cache`) follows the focused-state
+  patch in the same file (`event_cache/caches/mod.rs`). `Caches::new` registered
+  the room state through `try_insert_once_with` and then awaited
+  `room_state.read()` for its emptiness probe; the enclosing `Caches` handle is
+  published only after `Caches::new` returns, so an aborted or failed caller in
+  that window left the room state registered without a handle, and every later
+  construction for that room failed with `CacheStateAlreadyExists`. The probe now
+  runs on the freshly constructed value inside the constructor, so no await
+  remains between registration and publication. Core cancels focused SDK
+  construction deliberately (#1146), which is what made that window reachable.
+  Upstream intent: submit together with the focused-state correction as one
+  transactional-construction change.
+
 The [2026-09-14 thread unread evidence packet](2026-09-14-thread-unread-regressions.md) records exact historical revisions, separate reproduction cases, sanitized RED/GREEN results, and patch export instructions. It distinguishes fork test evidence from still-pending clean upstream verification.
 
+- Absent `unread_notifications` must not clear a room's counts (#1176, 2026-10-08,
+  local SDK topic `fix/1176-unread-count-updates`). MSC4186 and v3 sync responses
+  carry `unread_notifications` flattened with `#[serde(default)]`, so the pair is
+  empty when the server sent no count update, and ruma's `is_empty()` documents
+  exactly that meaning. Both response processors converted the empty pair with
+  `UnreadNotificationsCount::from`, which maps the missing fields to `0`, and then
+  replaced the room's stored counts, so one room response without those fields
+  silently cleared a room's unread badge (and, combined with the Koushi room-list
+  top-up, reverted the top-up to the client's cold-start lower bound). The
+  processors now keep the counts already known for the room when the pair is
+  empty. No SDK-level regression test was added: `matrix-sdk-test`'s sync builders
+  cannot express an empty pair, and the simplified-sliding-sync processor has no
+  mock seam; verified by source and by the Koushi projection tests instead.
 - Thread-related edit notification ownership (2026-09-14, local SDK topic
   `9aac22df2`) follows the receipt-boundary fix below. A read main message
   followed by a thread reply and a notifying edit of that reply reproduced
@@ -602,16 +648,16 @@ re-deriving the usage.
   `ngram_schema_uses_named_body_tokenizer` (matrix-sdk-search), plus the
   Koushi `search_crawler` and `edit_redact_search` QA scenarios.
 - **Event cache**: persisted gap inspection/repair (`RoomTimelineGapHandle`,
-  `RoomTimelineGapRepair*`, `inspect_timeline_gaps`), cache-only back
-  pagination (`run_backwards_cache_only`), live-tail refresh
+  `RoomTimelineGapRepair*`, `inspect_timeline_gaps`), live-tail refresh
   (`RoomLiveTailRefresh*`) and `RoomTimelineSyncObservation`. Ported onto
   upstream's `StateLockReadGuard`/`StateLockWriteGuard` and
   `states::selectors`; `latest_sync_observation` feeds the room-subscription
-  checkpoints.
+  checkpoints. Cache-only back pagination (`run_backwards_cache_only`,
+  `live_restore_from_cache`) was removed on 2026-10-14 by #1395; see the
+  reachability audit below.
   Call sites: `crates/koushi-sdk/src/timeline.rs`
   (`inspect_room_timeline_gaps`, `repair_room_timeline_gap`,
   `refresh_room_live_tail`, `MatrixCommittedRoomTimelineCheckpoint::from_room_subscription`),
-  `crates/koushi-core/src/timeline/navigation.rs` (`live_restore_from_cache`),
   `crates/koushi-core/src/timeline/gap_repair.rs`; SDK
   `crates/matrix-sdk/src/event_cache/caches/room/{pagination.rs,live_tail.rs,state.rs,mod.rs}`
   and `crates/matrix-sdk-ui/src/room_list_service/mod.rs` (checkpoint capture).
@@ -1101,6 +1147,206 @@ duplicating cache ownership. This minimal fork fix is intended for upstream
 submission with its production-redaction and cache-restoration regression.
 See [reproduction and historical limits](2026-09-15-redacted-notifications.md).
 
+## 2026-10-10 (#1188): upstream base moves to `matrix-sdk-0.19.1`
+
+The vendored fork's upstream base moved from `6602de58e` (upstream `main`,
+2026-09-11, crates at 0.18.0) to the `matrix-sdk-0.19.1` tag
+(`b18166c68`, 2026-09-18). The merge is `6cb0a85c1` on the fork branch
+`chore/upstream-0.19.1`; the pinned tip is `6b420b8b4`. Every fork topic listed
+in the snapshot above survives. Eight files conflicted and were resolved to keep
+the Koushi contract (search, event-cache gap repair/live tail, validated edit
+selection, receipt counting, secret-storage helpers); the full list and each
+resolution are in the merge commit message and in
+[the worklog](../../docs/worklogs/2026-10-10-issue1188-sdk-0191.md).
+
+One upstream change did not preserve a Koushi requirement, so this adds a new
+topic to the stack:
+
+- `fix(ui): keep the reaction's own event id on the timeline item` (`66a32c747`,
+  marker-aligned by `6b420b8b4`). Upstream 0.19.0 deleted `ReactionStatus`;
+  `ReactionInfo::status` became `ReactionInfo::send_state`, and the reaction
+  event's own ID — previously `ReactionStatus::RemoteToRemote(event_id)` — is no
+  longer exposed anywhere public. Koushi's timeline projection publishes
+  `my_reaction_event_id` so the UI can redact the user's own reaction, and the
+  `RedactReaction` command validates the ID it displayed against the one it
+  would redact; Element X does not need the ID because its FFI
+  `toggle_reaction` adds or removes by key. `ReactionInfo` therefore gains an
+  additive `event_id: Option<OwnedEventId>`, populated from the aggregation's own
+  ID (`Some` for a server event, `None` for a local echo that has no ID yet) and
+  included in the "already applied" identity check so a server echo replaces the
+  local echo even when timestamp and send state match. No upstream behaviour
+  changes. Upstreaming intent: submit as an additive accessor; the downstream
+  patch retires if upstream exposes the aggregation's own ID.
+
+Two dependency declarations in `crates/koushi-sdk/Cargo.toml` followed upstream
+away from its git forks: `ruma` moved from the pinned `ruma/ruma` revision to
+`0.17` and the `vodozemac` dev-dependency from the pinned
+`matrix-org/vodozemac` revision to `0.11`, matching the versions the 0.19.1
+crates require. Keeping the old git pins left two `ruma-common`/`vodozemac`
+crates in the graph and broke koushi type compatibility.
+
+## 2026-10-10: Redaction events retain cached notification actions
+
+The earlier guard excluded the redacted target but still admitted the
+`m.room.redaction` event itself when cached push actions requested notify or
+highlight. `ReadReceipts::process_event` now excludes both from counters while
+keeping their receipt-ordering identities. This SDK-owned cache aggregate cannot
+be corrected through the public wrapper without duplicating receipt accounting.
+The minimal fork patch is `1298b0c07` on
+`codex/ignore-redaction-notifications`, intended for upstream submission alongside
+the earlier redacted-target fix. A RED-then-GREEN regression checks notification
+and mention removal, preservation of a subsequent unread message, and a receipt
+on the redaction itself. This independently reproduced defect does not establish
+the cause of an intermittent application badge that cleared after restart.
+
+## 2026-10-09: the #1150 search/index revision lands on the fork's `main`
+
+Fork PR #19 (`feat/1150-literal-bounded-search`) was the SDK half of #1150 and
+#1157: literal bounded-cursor search over raw and normalized text, and the
+cache-only resolved reader. It had never been merged to the fork's `main`; the
+client pinned it through the throwaway integration branch
+`integration/1157-burndown` at `55e51ffe8`, which also carried the clippy
+follow-up that #19's own head (`7ad7ee4e8`) lacked plus the #1146 and #1176
+topic branches.
+
+Fork PR #20 merged `integration/1157-burndown` into `main`. Fork `main`'s tree
+equalled the merge base (`669834a55`), so the merge was purely additive:
+
+| revision | tree |
+| --- | --- |
+| fork `main` before (`be17c637`) | `f64897ea` |
+| merge base (`669834a55`) | `f64897ea` |
+| previous client pin (`55e51ffe8`) | `f91ad0b6` |
+| fork `main` after (`f5d8028e0`) | `f91ad0b6` |
+
+Local verification of the merged revision, in a `/tmp` target directory:
+`matrix-sdk-search --lib` 41 passed; `matrix-sdk --lib --features
+experimental-search search_index::tests` 20 passed; `matrix-sdk-ui --lib` 391
+passed; `clippy -p matrix-sdk-search -p matrix-sdk -p matrix-sdk-ui --features
+experimental-search --all-targets` exit 0 with warnings only. Fork CI is not a
+usable gate: `main` before the merge already failed the same check names
+(`cargo-deny`, `Lint`, `msrv`, `All crates`, several benchmarks, coverage), and
+the merge introduced no new failing check name.
+
+The client's `vendor/matrix-rust-sdk` gitlink and `THIRD_PARTY_NOTICES.md` now
+name `f5d8028e0`, so the vendored revision is once more a commit on the fork's
+maintained `main` rather than a scratch integration branch.
+
+## 2026-10-07: Explicit redaction proof for Files metadata (#1150)
+
+This section and the ones that follow share one governing invariant: **what
+search verification reads must equal what the SDK timeline actually renders.**
+Every fork change below is retained only because it closes a concrete breach of
+that invariant (or because an undecryptable event must mean unknown rather than
+invalid); anything that does not serve it is not part of the patch.
+
+The existing shared pending-redaction registry (Stage 3 above) was reconstructed
+from storage but not updated by live room redaction processing. A redaction for
+an absent target was therefore forgotten until a reopen; a later cached replay
+could remain unredacted. The actual room `handle_sync` regression test reproduces
+this without a reopen. Live processing now remembers the committed redaction
+before the absent-target return, reusing the same encrypted-store-backed registry.
+A separate reconstruction test verifies proof after reopening with an absent
+target. No second registry or first-party body store is added.
+
+Files mutation admission needs positive redaction evidence even when an edit
+exists only in a focused timeline or bundled relation. Public `find_event` cannot
+provide that (and suppresses some storage errors). The minimal fork accessor
+`RoomEventCache::redacted_event_ids` checks requested IDs under one room-state
+guard, using a single pending-registry snapshot and fallible cached-event reads.
+Missing events are not proof; malformed cached events and storage errors remain
+errors. Existing `find_event`/`find_event_with_relations` and cached-content
+resolution now propagate backend read errors instead of reporting absence. The
+regression closes an encrypted SQLite backend while holding the store lease:
+the loaded root and its redaction proof still succeed, but the relation read and
+content resolver fail, then recover after reopen. Index deletion now removes
+both primary and deletion-key terms, including a committed edit redacted by its
+own ID; committed and same-batch regressions cover it. Core/adapters, not the
+SDK, own Files policy, retry bounds and failure settlement. SDK resident registry/index allocations are distinct from the
+first-party zero-history-body budget; entries remain necessary for later thread
+copies as explained above.
+
+Acknowledged indexing likewise propagates cache-preparation failures through
+`IndexError::EventPreparationFailed`, without copying raw cache errors into its
+public error. Bulk preparation collects every fallible result before executing
+any index operation, so a failed relation lookup cannot become a successful
+empty acknowledgement or a partially committed page. The encrypted SQLite
+regression exercises single and bulk acknowledgements, a separately preparable
+sticker in the failing batch, and recovery after reopening.
+
+SDK timeline edit selection also used arrival positions (or the bundled root's
+position), then validated only its chosen edit. The indispensable correction
+validates each remote candidate before choosing the greatest raw
+`(origin_server_ts, event_id)`, preserving local-echo priority and existing edit
+application. Display timestamp clamping remains unchanged; it must not collapse
+distinct future edit timestamps into an event-ID tie. Production timeline tests
+cover older bundles, both equal-timestamp arrival orders, and invalid newest
+sender/type/plain-over-encrypted edits queued before their target, checking both
+content and edit identity. Obsolete bundle-owner/position bookkeeping is removed.
+The thread-list selector still uses bounded timestamps; this inherited ordering
+defect is flagged for upstream follow-up, not silently fixed in this slice.
+
+Bundled-only replacements were also lost by ordinary sync persistence and could
+publish an unresolvable child-primary search candidate. The narrow correction
+retains only `unsigned.m.relations.m.replace` and its child-specific encryption
+metadata in the existing SDK root envelope, still discarding mutable thread and
+other relation summaries. A shared bundled-event constructor exposes that
+candidate without borrowing root encryption proof. The cached resolver compares
+it with ordinary replacements using full validity and raw timestamp ordering,
+excluding UTD and positively redacted children. It prefers the loaded root's
+latest envelope over the storage-only relation lookup's root.
+
+Index preparation uses child-primary identity only when the decoded cached child
+can route resolution to its canonical root; missing/UTD/redacted/malformed or
+wrong-target children use a root-primary document. Both preparation paths reuse
+`Edit(root, document)`, including ordinary root refreshes: `Add` would silently
+retain old terms when a root-primary edited document reverted after a positively
+redacted edit. Production regressions resolve the actual literal cursor ID,
+replace existing root documents, and cover same-ID UTD children, absent-child
+redaction and encrypted SQLite envelope save/reopen. Synthetic encryption
+metadata fixtures do not establish real key exchange or decryption. This does
+not add a schema, history store, child materialization or atomicity guarantee.
+
+Duplicate syncs are handled by the same invariant rather than by new storage. A
+same-ID re-delivery may not replace decodable content, nor a decodable bundled
+replacement, with something undecodable; a positively redacted root is never
+revived by its unredacted re-delivery; and only a strictly newer, valid bundled
+replacement is admitted. Refresh goes through the existing sanitizing,
+index-notifying update path, so it neither bypasses the relation narrowing nor
+leaves the search index unaware. Three production regressions (redacted root,
+bundleless mixed-batch duplicate, invalid newer replacement) fail without these
+guards.
+
+Known boundaries of this slice, stated rather than assumed:
+- When the last applicable edit is redacted, the cache resolver reverts to the
+  original content (the specification's outcome) while the timeline keeps the
+  edited item, which is an explicit upstream `TODO` in the un-edit path. Search
+  therefore follows the specification rather than the stale render; the two are
+  not equal in that one case and this fork does not implement the upstream TODO.
+  Approved for M2: reverting to the timeline's stale edited render would index
+  content the current edit resolution no longer selects, and the engineering
+  rules require redacted edits to stay out of the index.
+- Applying an edit overwrites the timeline item's encryption proof with the
+  edit's, so the selector's validity gate can reject a plaintext replacement
+  after a plaintext root already received an encrypted edit. The cache validator
+  uses the original root's proof and accepts it. This needs an original-root
+  encryption provenance tracked by the timeline item; it is left as an upstream
+  follow-up instead of widening this slice.
+  Approved for M2: search verification reads `resolve_cached_message`, i.e. the
+  SDK store's resolved content, which this cache validator resolves against the
+  original root's proof and with the specification's sender/type checks. The
+  mismatch therefore surfaces as an upstream timeline *rendering* defect (a valid
+  newer plaintext edit is not applied to the item), not as search publishing
+  unverified or redacted text. Adding original-root provenance to the timeline
+  item is a public-contract change in the vendored fork and stays out of this
+  slice.
+
+Upstreaming intent: submit the absent-target regression/fix, positive-evidence
+accessor, acknowledged-preparation failure propagation, bundled-candidate
+retention/addressability and timeline edit selection correction alongside the
+existing shared-redaction patch. The checked-out fork is
+pinned by the app gitlink; fork PR #19 remains a separate, unmerged decision.
+
 ## 2026-10-01: Reject partial `/keys/query` results for user identity
 
 A successful HTTP response may list the contact's homeserver under
@@ -1127,3 +1373,95 @@ responsiveness/cancellation tests in
 **Upstreaming intent:** submit the small SDK behavior fix and regression to
 matrix-rust-sdk; keep the downstream patch only until the upstream API has the
 same failure semantics.
+
+## 2026-10-11: #1344 owner-side retention counters
+
+Koushi issue #1344 (resident-memory audit) needs to attribute live bytes to
+owners before ratifying retention budgets. This fork patch adds content-free,
+observation-only owner-side counters; no eviction, no writer budget change, no
+reclamation.
+
+- `matrix-sdk-common::linked_chunk`: `LinkedChunk::memory_stats()` counts
+  resident chunks/items/gaps **without initializing the lazily created
+  sentinel chunk** (`chunks()`/`rchunks()` do initialize it). Diagnostic
+  sampling never mutates the structure.
+- `matrix-sdk-search::encrypted::EncryptedMmapDirectory`: optional shared
+  `DecryptedFileAccounting` (live len/capacity tracked through a
+  `StableDeref` owner stored inside `OwnedBytes`, so readers that convert to
+  `OwnedBytes`, such as a Delete file read into an `AliveBitSet`, keep the
+  allocation charged; lifetime transfer totals for `open_read`/`atomic_read`;
+  `atomic_read` bytes are caller-owned and transient). Threaded by
+  `EncryptedPhysicalRoomIndexBuilder`; `open_or_create_with_accounting` is
+  additive, existing callers keep the plain path.
+- `matrix-sdk-search::index::RoomIndex::has_active_reader()` observes the
+  cached `IndexReader` without initializing it.
+- `matrix-sdk::search_index::SearchIndex::diagnostics()` →
+  `SearchIndexDiagnostics` (rooms / rooms with an active reader / opened and
+  decrypted totals / live decrypted len and capacity).
+- `matrix-sdk::event_cache::EventCache::memory_diagnostics()` →
+  `EventCacheMemoryDiagnostics`: an in-memory-only aggregate of resident
+  room-timeline linked chunks (rooms / chunks / events / gap chunks /
+  zero-subscriber rooms, incl. those with resident events). It reads the
+  process-local state lock directly and never acquires the cross-process
+  store lock, so a dirty store cannot trigger a reload that unloads and
+  re-hydrates history while sampling. Scope is room-timeline linked chunks
+  only; thread/pinned/event-focused caches are separate owners.
+
+Fork branch `fix/1344-owner-counters` (commit `81ae185f5`). Delivered through
+the app's #1344 diagnostic export as `core.search_retention` records.
+
+## 2026-10-14 (#1395): retained-customization reachability audit
+
+The inventory above was written so "later stages can judge a removal without
+re-deriving the usage", but the cache-only anchor-restore entry still named a
+call site (`navigation.rs` `live_restore_from_cache`) that no longer had a
+product consumer: the renderer transport that invoked `restore_timeline_anchor`
+was deleted on 2026-06-30, and only a headless QA scenario kept the chain
+compiling. A name-level scan had rated it `prod=1` because the unreachable
+handler still existed. Every other entry was therefore re-derived from the
+public surface it exposes to its consumer, not from the recorded call site.
+
+| Entry | Public surface checked | Verdict | Evidence |
+| --- | --- | --- | --- |
+| ngram / CJK search | `encrypted_directory_ngram`, store kinds, CJK candidates | used | `crates/koushi-sdk/src/search.rs`; `search_crawler` / `edit_redact_search` QA |
+| Event cache: gap inspection / repair | `inspect_room_timeline_gaps`, `repair_room_timeline_gap` | used | `crates/koushi-sdk/src/timeline.rs`; `#1392` idle-sync gap-inspection lane |
+| Event cache: live-tail refresh | `refresh_room_live_tail` | used | `crates/koushi-sdk/src/timeline.rs`; timeline QA lanes |
+| Event cache: sync observation | `MatrixCommittedRoomTimelineCheckpoint` | used | `crates/koushi-sdk/src/timeline.rs`, `crates/koushi-core/src/timeline/manager.rs` |
+| Event cache: cache-only back pagination | `run_backwards_cache_only`, `live_restore_from_cache` | **dead → removed** | no renderer or Core caller; `cache_restore` QA was its only driver. Fork PR [#24](https://github.com/shinaoka/matrix-rust-sdk-work/pull/24) removed the SDK surface; #1395 removed the app side (protocol command/event, Tauri command, Core state machine, QA scenario). |
+| Redaction replay | `pending_redactions` | used (SDK-internal consumers) | search index and thread aggregates read through the store |
+| Room subscriptions | `reconcile_room_subscriptions_with_generation`, `RoomSubscriptionCheckpoint` | used | `crates/koushi-core/src/timeline/residency.rs`; `room_space` / `invites_dm` QA |
+| Encryption sync readiness | `EncryptionSyncReadiness` (the guard is SDK-internal plumbing) | used | `crates/koushi-core/src/sync.rs`, `crates/koushi-sdk/src/sync.rs` |
+| Timeline lazy reveal | `live_lazy_paginate_backwards_with_reveal` | used | shared `paginate_backwards` reveal path; ordinary pagination depends on it |
+
+Fork patch surfaces: the marker grep (`Matrix desktop fork patch surface`) and
+this inventory were cross-checked. `CacheOnlyBackOutcome`,
+`RestoreFromCacheOutcome`, `run_backwards_cache_only`, `live_restore_from_cache`
+and the internal `reveal_lazy_items` helper existed only for the removed path
+and are gone; the retained markers all name a surface with a live consumer.
+
+Tauri commands: all 236 commands registered at the time of the audit in
+`apps/desktop/src-tauri/src/lib.rs` were checked against `apps/desktop/src`.
+Two had no renderer caller; both were recorded as verdicts and removed by
+#1409, leaving 234:
+
+| Command | Verdict | Note |
+| --- | --- | --- |
+| `refresh_pinned_events` | **dead → removed by #1409** | no `apps/desktop/src` reference; the pinned-event projection refreshes itself. `RoomCommand::RefreshPinnedEvents` and its Core handler went with it; the sync-driven `RoomMessage::PinnedEventsChanged` refresh stays. |
+| `toggle_reaction` | **dead → removed by #1409** | the renderer uses `send_reaction` / `redact_reaction`. `TimelineCommand::ToggleReaction`, its Core handler and the manager route went with it; the SDK's `Timeline::toggle_reaction` stays as the delegation behind send/redact. |
+
+Re-entry point for offline deep-anchor restore: if the product later wants
+"open a Room at a months-old event, offline and fast", the removed path was
+`Timeline::live_restore_from_cache` (live lazy reveal, then
+`RoomPagination::run_backwards_cache_only` chunk-by-chunk with
+`anchor_present`, `reached_start` and `hit_gap` in the outcome), driven by
+`TimelineCommand::RestoreTimelineAnchor` with `max_batches` / `event_count` and
+settled by `TimelineEvent::AnchorRestoreFinished(status)`. The
+`cache_restore` QA scenario and its `CACHE_RESTORE_*` constants recorded the
+fixture shape (deep warmed rooms, blocked network, bounded backward-paginate
+cycles, shallow room proving the lazy in-memory reveal). This removal is a
+deliberate deferral, not an oversight.
+
+Mechanical guard: `scripts/check-retained-reachability.mjs` fails CI when a
+manifest entry's recorded consumer disappears, when a registered Tauri command
+has neither a renderer caller nor a recorded renderer-less verdict, or when a
+removed surface reappears in `crates/` or `apps/`.

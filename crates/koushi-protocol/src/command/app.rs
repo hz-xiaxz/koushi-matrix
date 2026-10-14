@@ -44,6 +44,10 @@ pub enum AppCommand {
         expected_account: crate::SessionKeyId,
         target: koushi_state::ComposerTarget,
         submitted_revision: ComposerDraftRevision,
+        /// #1130: whether the send that settles this draft actually dispatched
+        /// its text. A staged-attachment send dispatches only the staged items,
+        /// so it settles the revision and leaves the typed text in place.
+        consumes_draft: bool,
     },
     SetUploadStaging {
         request_id: RequestId,
@@ -233,6 +237,13 @@ pub enum AppCommand {
     CloseThreadsList {
         request_id: RequestId,
     },
+    OpenScheduledSendsList {
+        request_id: RequestId,
+        scope: koushi_state::ScheduledSendsScope,
+    },
+    CloseScheduledSendsList {
+        request_id: RequestId,
+    },
     PaginateThreadsList {
         request_id: RequestId,
         scope: koushi_state::ThreadsListScope,
@@ -311,10 +322,15 @@ impl fmt::Debug for AppCommand {
                 .field("root_event_id", &"EventId(..)")
                 .field("draft", &"MessageBody(..)")
                 .finish(),
-            Self::AcceptComposerDraft { request_id, .. } => formatter
+            Self::AcceptComposerDraft {
+                request_id,
+                consumes_draft,
+                ..
+            } => formatter
                 .debug_struct("AcceptComposerDraft")
                 .field("request_id", request_id)
                 .field("target", &"ComposerTarget(..)")
+                .field("consumes_draft", consumes_draft)
                 .finish(),
             Self::SetUploadStaging {
                 request_id, items, ..
@@ -592,6 +608,15 @@ impl fmt::Debug for AppCommand {
                 .finish(),
             Self::CloseThreadsList { request_id } => formatter
                 .debug_struct("CloseThreadsList")
+                .field("request_id", request_id)
+                .finish(),
+            Self::OpenScheduledSendsList { request_id, .. } => formatter
+                .debug_struct("OpenScheduledSendsList")
+                .field("request_id", request_id)
+                .field("scope", &"ScheduledSendsScope(..)")
+                .finish(),
+            Self::CloseScheduledSendsList { request_id } => formatter
+                .debug_struct("CloseScheduledSendsList")
                 .field("request_id", request_id)
                 .finish(),
             Self::PaginateThreadsList { request_id, .. } => formatter

@@ -32,8 +32,7 @@ use koushi_protocol::ids::AccountKey;
 use koushi_protocol::ids::{TimelineBatchId, TimelineGeneration, TimelineKey, TimelineKind};
 
 use crate::live_tail_freshness::{
-    FOREGROUND_LIVE_TAIL_LIMIT, LiveTailFreshnessState, LiveTailRefreshCoordinator,
-    LiveTailSchedulerAction,
+    FOREGROUND_LIVE_TAIL_LIMIT, LiveTailRefreshCoordinator, LiveTailSchedulerAction,
 };
 
 use crate::threads_list::ThreadRootProjectionService;
@@ -57,7 +56,7 @@ use super::super::gap_repair::{
 use super::super::item_projection::{
     sdk_item_to_timeline_item, sdk_vector_diffs_to_timeline_diffs, timeline_item_event_id,
 };
-use super::super::manager::{TimelineManagerActor, TimelineManagerControl, TimelineMessage};
+use super::super::manager::{TimelineManagerControl, TimelineMessage};
 use super::super::outbound_send::{
     SharedSendCompletionCoordinator, TimelineSendEnqueueContext, TimelineSendTerminalIngress,
 };
@@ -69,10 +68,11 @@ use super::super::test_support::{
 use super::super::thread_projection::ThreadAttentionTracker;
 use super::{
     InitialItemsRequestIdentity, NavigationProjectionCleanup, NavigationProjectionIngress,
-    NavigationProjectionIntent, ROOM_REPLAY_INITIAL_ITEMS_MAX, TimelineActorGenerationGate,
-    acquire_pagination_permit_and_emit_paginating, activity_row_from_timeline_item,
-    align_first_unread_display_to_display_rows, align_read_marker_display_to_display_rows,
-    backward_pagination_changed_oldest_edge, derive_timeline_navigation_snapshot,
+    NavigationProjectionIntent, PaginationAttempt, ROOM_REPLAY_INITIAL_ITEMS_MAX,
+    TimelineActorGenerationGate, acquire_pagination_permit_and_emit_paginating,
+    activity_row_from_timeline_item, align_first_unread_display_to_display_rows,
+    align_read_marker_display_to_display_rows, backward_pagination_changed_oldest_edge,
+    bounded_paginate_with, derive_timeline_navigation_snapshot,
     derive_timeline_navigation_snapshot_with_read_state, emit_initial_items_for_generation,
     receive_navigation_projection, replay_initial_items_window,
     should_hydrate_empty_initial_room_timeline, timeline_unread_consistency_diagnostic_event,
@@ -1469,350 +1469,6 @@ async fn room_actor_hydrates_a_historical_sender_without_a_live_event() {
 }
 
 #[tokio::test]
-async fn live_tail_restore_actor_flush_hands_completion_to_manager_once() {
-    use matrix_sdk::test_utils::mocks::{MatrixMockServer, RoomMessagesResponseTemplate};
-    use matrix_sdk_test::{ALICE, JoinedRoomBuilder, event_factory::EventFactory};
-
-    let server = MatrixMockServer::new().await;
-    let client = server.client_builder().build().await;
-    client
-        .event_cache()
-        .subscribe()
-        .expect("event cache subscription");
-    let sdk_room_id = matrix_sdk::ruma::room_id!("!restore-live-tail:example.org");
-    let stale_edge_id = matrix_sdk::ruma::event_id!("$stale-edge:example.org");
-    let refreshed_id = matrix_sdk::ruma::event_id!("$refreshed:example.org");
-    let room = server.sync_joined_room(&client, sdk_room_id).await;
-    let factory = EventFactory::new().room(sdk_room_id).sender(&ALICE);
-    server
-        .sync_room(
-            &client,
-            JoinedRoomBuilder::new(sdk_room_id).add_timeline_event(
-                factory
-                    .text_msg("stale edge")
-                    .event_id(stale_edge_id)
-                    .into_raw_sync(),
-            ),
-        )
-        .await;
-    let timeline = Arc::new(
-        koushi_timeline_builder(
-            &room,
-            TimelineFocus::Live {
-                hide_threaded_events: false,
-            },
-        )
-        .build()
-        .await
-        .expect("room timeline"),
-    );
-    let (initial_sdk_items, _fixture_stream) = timeline.subscribe().await;
-    let real_sdk_item = initial_sdk_items
-        .iter()
-        .find(|item| item.as_event().and_then(|event| event.event_id()) == Some(stale_edge_id))
-        .cloned()
-        .expect("real SDK timeline item for the wrong-tag restore batch");
-    server
-        .mock_room_messages()
-        .match_limit(u32::from(FOREGROUND_LIVE_TAIL_LIMIT))
-        .ok(RoomMessagesResponseTemplate::default()
-            .events(vec![
-                factory.text_msg("refreshed").event_id(refreshed_id),
-                factory.text_msg("stale edge").event_id(stale_edge_id),
-            ])
-            .with_delay(Duration::from_millis(500)))
-        .expect(1)
-        .named("restore-live-tail-production-refresh")
-        .mount()
-        .await;
-
-    let session = Arc::new(MatrixClientSession::from_client_for_testing(
-        client,
-        SessionInfo {
-            homeserver: "http://example.invalid".to_owned(),
-            user_id: ALICE.to_string(),
-            device_id: "DEVICE".to_owned(),
-            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
-        },
-    ));
-    let account = AccountKey("@restore:test".to_owned());
-    let room_a = TimelineKey::room(account.clone(), sdk_room_id.to_string());
-    let room_b = TimelineKey::room(account, "!delayed:example.org");
-    let delayed_log = Arc::new(Mutex::new(Vec::new()));
-    let mut manager = live_tail_test_manager(HashMap::from([(
-        room_b.clone(),
-        live_tail_test_actor_handle("B", delayed_log.clone()),
-    )]));
-    let (action_tx, mut action_rx) = mpsc::channel(8);
-    manager.action_tx = action_tx;
-    let _action_drain = executor::spawn(async move { while action_rx.recv().await.is_some() {} });
-    let mut event_rx = manager.event_tx.subscribe();
-    let actor_generation = manager
-        .timeline_actor_generations
-        .activate_after_quiescence(&room_a)
-        .await
-        .generation;
-    let projection_request_id = fake_rid(40);
-    let actor_handle = TimelineActor::spawn(
-        room_a.clone(),
-        timeline,
-        session,
-        projection_request_id,
-        true,
-        manager.action_tx.clone(),
-        manager.event_tx.clone(),
-        None,
-        Default::default(),
-        None,
-        LinkPreviewContext::default(),
-        manager.account_work.clone(),
-        Arc::clone(&manager.thread_root_projection_service),
-        manager.thread_root_order,
-        false,
-        Arc::clone(&manager.timeline_actor_generations),
-        actor_generation,
-        None,
-        Default::default(),
-        manager.terminal_ingress.clone(),
-        manager.msg_tx.clone(),
-    )
-    .await;
-    manager.timelines.insert(room_a.clone(), actor_handle);
-    loop {
-        if matches!(
-            event_rx.recv().await.expect("initial actor event"),
-            CoreEvent::Timeline(TimelineEvent::InitialItems { key, .. }) if key == room_a
-        ) {
-            break;
-        }
-    }
-
-    let (restore_tx, restore_rx) = oneshot::channel();
-    assert!(
-        manager
-            .timelines
-            .get(&room_a)
-            .expect("room A actor")
-            .send(TimelineActorMessage::TestBeginRestore {
-                request_id: fake_rid(41),
-                event_id: "$anchor-not-in-window:example.org".to_owned(),
-                acknowledged: restore_tx,
-            })
-            .await
-    );
-    restore_rx.await.expect("restore fixture acknowledged");
-
-    let starts = manager.live_tail_refreshes.activate(room_a.clone(), 7);
-    assert!(
-        manager
-            .live_tail_refreshes
-            .mark_unproven(room_b.clone(), 7)
-            .is_empty()
-    );
-    manager.apply_live_tail_scheduler_actions(starts).await;
-    let operation = live_tail_causal_projection_operation(1);
-    let wrong_projections = BTreeSet::from([
-        CausalProjectionId {
-            actor_generation: actor_generation + 1,
-            operation,
-            projection_batch: 1,
-        },
-        CausalProjectionId {
-            actor_generation,
-            operation: live_tail_causal_projection_operation(9),
-            projection_batch: 1,
-        },
-        CausalProjectionId {
-            actor_generation,
-            operation,
-            projection_batch: u32::MAX,
-        },
-    ]);
-    let (inject_tx, inject_rx) = oneshot::channel();
-    assert!(
-        manager
-            .timelines
-            .get(&room_a)
-            .expect("room A actor")
-            .send(TimelineActorMessage::TestInjectRestoreDiff {
-                diffs: vec![eyeball_im::VectorDiff::PushBack {
-                    value: real_sdk_item.clone(),
-                }],
-                projections: wrong_projections.clone(),
-                acknowledged: inject_tx,
-            })
-            .await
-    );
-    inject_rx.await.expect("wrong-tag diff handled");
-
-    let snapshot = |manager: &TimelineManagerActor, key: &TimelineKey| {
-        let (response, state) = oneshot::channel();
-        let handle = manager.timelines.get(key).expect("room A actor");
-        (handle.tx.clone(), response, state)
-    };
-    let (actor_tx, state_tx, state_rx) = snapshot(&manager, &room_a);
-    actor_tx
-        .send(TimelineActorMessage::TestRestoreCausalState(state_tx))
-        .await
-        .expect("snapshot request");
-    let (pending, completion_waiting, buffered_diff_count, buffered_projections) =
-        state_rx.await.expect("wrong-tag snapshot");
-    assert!(pending);
-    assert!(!completion_waiting);
-    assert_eq!(
-        buffered_diff_count, 0,
-        "a duplicate canonical slot is a valid projected display no-op"
-    );
-    assert_eq!(buffered_projections, wrong_projections);
-    assert_eq!(
-        manager.live_tail_refreshes.freshness(&room_a),
-        Some(LiveTailFreshnessState::Refreshing {
-            epoch: 7,
-            operation_generation: 1,
-        }),
-        "wrong actor, operation, and batch identities cannot prove freshness",
-    );
-    let matching_projection = tokio::time::timeout(Duration::from_secs(5), async {
-            loop {
-                let (actor_tx, state_tx, state_rx) = snapshot(&manager, &room_a);
-                actor_tx
-                    .send(TimelineActorMessage::TestRestoreCausalState(state_tx))
-                    .await
-                    .expect("snapshot request");
-                let (pending, completion_waiting, buffered_diff_count, projections) =
-                    state_rx.await.expect("matching-tag snapshot");
-                if let Some(projection) = projections.iter().copied().find(|projection| {
-                    projection.actor_generation == actor_generation
-                        && projection.operation == operation
-                        && projection.projection_batch != u32::MAX
-                }) && completion_waiting
-                {
-                    assert!(
-                        pending,
-                            "matching metadata remains pending until publication"
-                    );
-                    assert!(
-                        buffered_diff_count >= 2,
-                            "two real SDK batches must reach the actor restore buffer before terminal publication"
-                    );
-                    break projection;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("real tagged SDK diff reached the restore buffer");
-    assert_ne!(matching_projection.projection_batch, u32::MAX);
-
-    let manager_tx = manager.msg_tx.clone();
-    let actor_tx = manager
-        .timelines
-        .get(&room_a)
-        .expect("room A actor")
-        .tx
-        .clone();
-    let _manager_task = executor::spawn(manager.run());
-
-    while event_rx.try_recv().is_ok() {}
-    let (flush_tx, flush_rx) = oneshot::channel();
-    actor_tx
-        .send(TimelineActorMessage::TestFinishRestore {
-            request_id: fake_rid(41),
-            response: flush_tx,
-        })
-        .await
-        .expect("finish restore request");
-    assert!(flush_rx.await.expect("production restore terminal result"));
-
-    let (freshness, completion_dispatches, _) =
-        tokio::time::timeout(Duration::from_secs(2), async {
-            loop {
-                let (state_tx, state_rx) = oneshot::channel();
-                manager_tx
-                    .send(TimelineMessage::TestLiveTailDispatchState {
-                        key: room_a.clone(),
-                        epoch: 7,
-                        response: state_tx,
-                    })
-                    .await
-                    .expect("manager state request");
-                let state = state_rx.await.expect("manager state response");
-                if state.0 && !delayed_log.lock().expect("delayed start log").is_empty() {
-                    break state;
-                }
-                tokio::task::yield_now().await;
-            }
-        })
-        .await
-        .expect("production manager dispatch completed live-tail refresh");
-    assert!(freshness, "room A becomes Fresh for epoch 7");
-    assert_eq!(
-        completion_dispatches, 1,
-        "the production manager loop dispatches exactly one completion",
-    );
-    tokio::time::timeout(Duration::from_secs(1), async {
-        loop {
-            if !delayed_log.lock().expect("delayed start log").is_empty() {
-                break;
-            }
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("manager scheduled delayed room B");
-    assert_eq!(
-        *delayed_log.lock().expect("delayed start log"),
-        ["start:B:epoch=7:limit=128"],
-    );
-
-    let mut settlement_events = Vec::new();
-    while let Ok(event) = event_rx.try_recv() {
-        match event {
-            CoreEvent::Timeline(TimelineEvent::ItemsUpdated { .. }) => {
-                settlement_events.push("items")
-            }
-            CoreEvent::Timeline(TimelineEvent::NavigationUpdated { .. }) => {
-                settlement_events.push("navigation")
-            }
-            CoreEvent::Timeline(TimelineEvent::AnchorRestoreFinished { .. }) => {
-                settlement_events.push("terminal")
-            }
-            _ => {}
-        }
-    }
-    assert_eq!(
-        settlement_events
-            .iter()
-            .filter(|event| **event == "items")
-            .count(),
-        1,
-        "restore publishes one convergent coalesced batch"
-    );
-    let items_position = settlement_events
-        .iter()
-        .position(|event| *event == "items")
-        .expect("coalesced ItemsUpdated");
-    let navigation_position = settlement_events
-        .iter()
-        .position(|event| *event == "navigation")
-        .expect("settled NavigationUpdated");
-    let terminal_position = settlement_events
-        .iter()
-        .position(|event| *event == "terminal")
-        .expect("AnchorRestoreFinished terminal");
-    assert!(items_position < navigation_position && navigation_position < terminal_position);
-
-    let (shutdown_tx, shutdown_rx) = oneshot::channel();
-    manager_tx
-        .send(TimelineMessage::Shutdown {
-            acknowledged: Some(shutdown_tx),
-        })
-        .await
-        .expect("manager shutdown request");
-    shutdown_rx.await.expect("manager shutdown acknowledged");
-}
-
-#[tokio::test]
 async fn timeline_actor_spawn_returns_before_authoritative_publish_waits_for_manager_capacity() {
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
     use matrix_sdk_test::{ALICE, JoinedRoomBuilder, event_factory::EventFactory};
@@ -1905,7 +1561,8 @@ async fn timeline_actor_spawn_returns_before_authoritative_publish_waits_for_man
         Some(TimelineMessage::IgnoredUsersUpdated { .. })
     ));
     assert!(matches!(
-        executor::timeout(Duration::from_millis(100), manager_rx.recv())
+        // Liveness bound: a publish that never resumes leaves this pending.
+        executor::timeout(Duration::from_secs(60), manager_rx.recv())
             .await
             .expect("authoritative startup publish must resume after capacity opens"),
         Some(TimelineMessage::AuthoritativeReadStateObserved {
@@ -2306,6 +1963,7 @@ fn unread_consistency_diagnostic_correlates_thread_receipt_with_latest_reply_pro
     let mut root = timeline_item("$root:test", Some("root"), "@me:test", false);
     root.thread_summary = Some(ThreadSummaryDto {
         reply_count: 1,
+        unread_count: 0,
         latest_event_id: Some("$reply:test".to_owned()),
         latest_sender: Some("@alice:test".to_owned()),
         latest_sender_label: Some("Alice".to_owned()),
@@ -2370,7 +2028,7 @@ fn unread_consistency_diagnostic_correlates_thread_receipt_with_latest_reply_pro
 
 #[tokio::test]
 async fn forward_pagination_on_room_key_fails_invalid_direction() {
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
 
     // Inject a Ready session so commands are not gated.
@@ -2447,7 +2105,7 @@ async fn forward_pagination_on_room_key_fails_invalid_direction() {
 
 #[tokio::test]
 async fn forward_pagination_on_thread_key_not_subscribed() {
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
 
     runtime
@@ -2537,7 +2195,7 @@ fn backward_direction_never_invalid_for_any_kind() {
 
 #[tokio::test]
 async fn paginate_on_unsubscribed_key_returns_not_subscribed() {
-    let runtime = CoreRuntime::start();
+    let (runtime, _stores) = CoreRuntime::start_isolated();
     let mut conn = runtime.attach();
 
     runtime
@@ -2733,7 +2391,10 @@ fn navigation_display_anchor_stays_at_marker_when_no_own_messages_after() {
     );
 
     assert_eq!(snapshot.first_unread_event_id, Some("$remote".to_owned()));
-    assert_eq!(snapshot.read_marker_display_event_id, None);
+    assert_eq!(
+        snapshot.read_marker_display_event_id.as_deref(),
+        Some("$other")
+    );
 }
 
 #[test]
@@ -2824,7 +2485,8 @@ fn room_navigation_preserves_hidden_receipt_position_and_thread_scope() {
         Some("@me:test"),
     );
     assert_eq!(
-        read_room.read_marker_display_event_id, None,
+        read_room.read_marker_display_event_id.as_deref(),
+        Some("$later:test"),
         "an own hidden reply must not move the room divider"
     );
     let thread = derive_timeline_navigation_snapshot(
@@ -2919,7 +2581,6 @@ fn latest_reply_display_rows(
     let context = DisplayProjectionContext::for_timeline(
         &room_key().kind,
         &TimelineViewportObservation::default(),
-        false,
     )
     .with_thread_roots(
         koushi_state::TimelineThreadRootOrder::LatestReply,
@@ -2938,6 +2599,7 @@ fn latest_reply_display_rows(
             },
             pending: false,
             failure_kind: None,
+            unread: 0,
         }],
     );
     state.reproject(&context);
@@ -3401,4 +3063,46 @@ async fn same_generation_room_readmission_reprojects_the_room() {
         .expect("stale demand wake");
     manager.handle_navigation_projection(demand).await;
     assert_eq!(manager.applied_room_projection, Some(2));
+}
+
+/// #1239: a pagination whose SDK await never returns must settle as a retryable
+/// timeout instead of leaving the pane in `Paginating`.
+#[tokio::test(start_paused = true)]
+async fn bounded_pagination_times_out_to_a_retryable_failure() {
+    assert_eq!(
+        PaginationAttempt::Failed(TimelineFailureKind::Timeout).trace_token(),
+        "timeout"
+    );
+
+    let timed_out = bounded_paginate_with(
+        Duration::from_secs(30),
+        std::future::pending::<Result<bool, matrix_sdk_ui::timeline::Error>>(),
+    )
+    .await;
+    assert!(matches!(
+        timed_out,
+        PaginationAttempt::Failed(TimelineFailureKind::Timeout)
+    ));
+    assert_eq!(
+        timed_out.into_state(),
+        PaginationState::Failed {
+            kind: TimelineFailureKind::Timeout
+        },
+        "the timeout must surface through the normal retryable pagination state"
+    );
+
+    assert!(matches!(
+        bounded_paginate_with(Duration::from_secs(30), async {
+            Ok::<bool, matrix_sdk_ui::timeline::Error>(true)
+        })
+        .await,
+        PaginationAttempt::ReachedEnd
+    ));
+    assert!(matches!(
+        bounded_paginate_with(Duration::from_secs(30), async {
+            Ok::<bool, matrix_sdk_ui::timeline::Error>(false)
+        })
+        .await,
+        PaginationAttempt::Idle
+    ));
 }

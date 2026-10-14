@@ -5,9 +5,12 @@ mod commands;
 mod core_event_forwarder;
 mod desktop_menu;
 mod dto;
+#[cfg(target_os = "macos")]
+pub mod image_io_decoder;
 pub mod keyring_backend;
 mod media_save;
 mod oidc_browser;
+mod process_memory;
 mod spell_checking;
 mod tray;
 mod viewport_sync;
@@ -42,7 +45,9 @@ use crate::window_state::{
 // koushi-core owns each account runtime. All session, credential, and Matrix
 // operations go through CoreCommand/CoreEvent; the adapter never touches the
 // credential store or SDK directly.
-use koushi_core::account_runtime_manager::{AccountRuntimeManager, AccountTabId};
+use koushi_core::account_runtime_manager::{
+    AccountRuntimeManager, AccountTabId, OidcCallbackCorrelation,
+};
 use koushi_core::renderable_thumbnail::{
     cleanup_legacy_media_downloads, cleanup_legacy_plaintext_thumbnail_dirs,
     lookup_renderable_thumbnail,
@@ -228,6 +233,7 @@ pub(crate) struct AccountTabSummary {
     pub avatar_source_ref: Option<String>,
     pub status: AccountTabStatus,
     pub unread_count: u64,
+    pub invite_count: u64,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize)]
@@ -510,6 +516,7 @@ fn account_tabs_snapshot_from_states(
                         }
                         _ => None,
                     });
+            let attention = koushi_state::account_attention_summary_for_state(&state);
             AccountTabSummary {
                 id: tab.id.as_str().to_owned(),
                 account_key: tab.account_key.map(|key| key.0),
@@ -517,7 +524,8 @@ fn account_tabs_snapshot_from_states(
                 display_name: state.profile.own.display_name,
                 avatar_source_ref,
                 status,
-                unread_count: state.native_attention.summary.unread_count,
+                unread_count: attention.unread_count,
+                invite_count: attention.invite_count,
             }
         })
         .collect();
@@ -679,11 +687,25 @@ fn start_account_runtime_manager_for_tauri(data_dir: PathBuf) -> Arc<AccountRunt
     };
     let native_artifact_factory: Arc<dyn Fn() -> Arc<dyn NativeArtifactPort> + Send + Sync> =
         Arc::new(|| Arc::new(NativeArtifactRegistry::new()));
-    Arc::new(AccountRuntimeManager::new(
+    Arc::new(AccountRuntimeManager::new_with_native_image_decoder(
         store,
         SettingsStore::new(data_dir),
         native_artifact_factory,
+        native_image_decoder(),
     ))
+}
+
+/// HEIC/HEIF photos decode through ImageIO on macOS (#1147); other platforms
+/// keep Core's pure decoder.
+fn native_image_decoder() -> Option<Arc<dyn koushi_core::NativeStillImageDecoder>> {
+    #[cfg(target_os = "macos")]
+    {
+        Some(Arc::new(image_io_decoder::ImageIoStillImageDecoder))
+    }
+    #[cfg(not(target_os = "macos"))]
+    {
+        None
+    }
 }
 
 fn observed_native_window_focus(event: &tauri::WindowEvent) -> Option<bool> {
@@ -956,7 +978,7 @@ impl<R: tauri::Runtime> ApplicationExit for tauri::AppHandle<R> {
 // Restart-after-shutdown barrier shared by every updater install backend. It
 // is compiled where a backend can request a relaunch and in the
 // platform-neutral restart-barrier tests (see app_updates.rs).
-#[cfg(any(koushi_updater_backend, test))]
+#[cfg(any(target_os = "macos", test))]
 fn request_application_restart_with(
     quit_stage: &AtomicU8,
     restart_after_shutdown: &AtomicBool,
@@ -975,7 +997,7 @@ fn request_application_restart_with(
     }
 }
 
-#[cfg(koushi_updater_backend)]
+#[cfg(target_os = "macos")]
 pub(crate) fn request_application_restart(app: &tauri::AppHandle) {
     let core_state = app.state::<CoreRuntimeState>();
     request_application_restart_with(
@@ -1090,6 +1112,64 @@ fn claim_core_shutdown(quit_stage: &AtomicU8) -> bool {
         .is_ok()
 }
 
+#[cfg(test)]
+mod windows_update_shutdown_tests;
+
+#[cfg(any(windows, test))]
+async fn prepare_windows_update_install(
+    updater: impl std::future::Future<Output = ()>,
+    core: impl std::future::Future<Output = CoreExitOutcome>,
+    install: impl FnOnce()
+        -> std::pin::Pin<Box<dyn std::future::Future<Output = Result<(), ()>> + Send>>,
+) -> Result<(), ()> {
+    updater.await;
+    if core.await != CoreExitOutcome::Completed {
+        return Err(());
+    }
+    install().await
+}
+
+#[cfg(windows)]
+pub(crate) fn claim_windows_update_shutdown(app: &tauri::AppHandle) -> bool {
+    claim_core_shutdown(&app.state::<CoreRuntimeState>().quit_stage)
+}
+
+#[cfg(windows)]
+pub(crate) fn begin_windows_update_shutdown(
+    app: tauri::AppHandle,
+    updater: impl std::future::Future<Output = ()> + Send + 'static,
+    install: impl FnOnce() -> Result<(), ()> + Send + 'static,
+) -> tauri::async_runtime::JoinHandle<()> {
+    tauri::async_runtime::spawn(async move {
+        let core_state = app.state::<CoreRuntimeState>();
+        let result =
+            prepare_windows_update_install(updater, stop_core_state_for_exit(&core_state), || {
+                Box::pin(async move {
+                    tauri::async_runtime::spawn_blocking(install)
+                        .await
+                        .unwrap_or(Err(()))
+                })
+            })
+            .await;
+        // Successful installer launch exits within Tauri. Any return means the
+        // process must exit normally; Core has either stopped or failed cleanup.
+        if result.is_err() {
+            koushi_diagnostics::record(DiagnosticEvent::new(
+                DiagnosticLevel::Warn,
+                "desktop.lifecycle",
+                "windows_update_failed",
+            ));
+        }
+        core_state
+            .restart_after_shutdown
+            .store(false, Ordering::Release);
+        core_state
+            .quit_stage
+            .store(QuitStage::ForcedExit.repr(), Ordering::Release);
+        app.exit(0);
+    })
+}
+
 /// Hold the exit, shut the core runtime down, then exit for real.
 ///
 /// After the updater/installer settles, Core submission and acknowledged cleanup
@@ -1197,17 +1277,47 @@ pub(crate) fn oidc_callback_state(callback_url: &str) -> Option<String> {
     }
 }
 
+/// Classify the shape of a sign-in callback so the account-tab manager can
+/// correlate it with a pending attempt.
+///
+/// This only reads the URL; it never decides account state. An OAuth/MAS
+/// callback must repeat exactly one nonempty CSRF `state` and no `loginToken`.
+/// A legacy `m.login.sso` callback carries exactly one nonempty `loginToken`
+/// and no `state` at all (#1266); anything else — a missing, empty, or
+/// duplicated parameter, or a hybrid of both shapes — is malformed and
+/// rejected before correlation.
+pub fn oidc_callback_correlation(callback_url: &str) -> Option<OidcCallbackCorrelation> {
+    let url = url::Url::parse(callback_url).ok()?;
+    let login_tokens: Vec<String> = url
+        .query_pairs()
+        .filter(|(key, _)| key == "loginToken")
+        .map(|(_, value)| value.into_owned())
+        .collect();
+    if !login_tokens.is_empty() {
+        // A legacy callback carries exactly one nonempty loginToken and none of
+        // the OAuth parameters; a hybrid shape matches neither provider flow.
+        let [token] = login_tokens.as_slice() else {
+            return None;
+        };
+        if token.is_empty() || url.query_pairs().any(|(key, _)| key == "state") {
+            return None;
+        }
+        return Some(OidcCallbackCorrelation::LegacySso);
+    }
+    oidc_callback_state(callback_url).map(OidcCallbackCorrelation::OAuthState)
+}
+
 fn submit_oidc_callback_url(app: tauri::AppHandle, callback_url: String) {
     if !is_oidc_callback_url(&callback_url) {
         return;
     }
 
-    let Some(oidc_state) = oidc_callback_state(&callback_url) else {
+    let Some(correlation) = oidc_callback_correlation(&callback_url) else {
         return;
     };
     tauri::async_runtime::spawn(async move {
         let core_state = app.state::<CoreRuntimeState>();
-        let Some(tab_id) = core_state.runtime.take_oidc_attempt(&oidc_state) else {
+        let Some(tab_id) = core_state.runtime.take_oidc_attempt(correlation) else {
             return;
         };
         let Ok((_, connection)) = core_state.connection.lock_for_tab_id(&tab_id).await else {
@@ -1257,6 +1367,9 @@ fn install_oidc_deep_link_handler(_app: &tauri::App) -> tauri::Result<()> {
 }
 
 pub fn run() {
+    // #1344: the diagnostic memory audit reports elapsed time since this entry.
+    process_memory::mark_process_start();
+
     #[cfg(target_os = "macos")]
     desktop_menu::configure_fullscreen_menu();
 
@@ -1284,7 +1397,7 @@ pub fn run() {
         }));
     }
 
-    #[cfg(target_os = "macos")]
+    #[cfg(any(target_os = "macos", windows))]
     {
         builder = builder.plugin(
             tauri_plugin_updater::Builder::new()
@@ -1565,7 +1678,9 @@ pub fn run() {
             commands::app_updates::get_desktop_update_state,
             commands::app_updates::download_desktop_update,
             commands::app_updates::restart_to_install_desktop_update,
+            commands::app_updates::ignore_desktop_update,
             commands::diagnostics::get_diagnostic_snapshot,
+            commands::diagnostics::save_diagnostics_report,
             commands::diagnostics::observe_viewport_sync,
             commands::account_tabs::list_account_tabs,
             commands::account_tabs::select_account_tab,
@@ -1577,6 +1692,7 @@ pub fn run() {
             commands::session::resync_snapshot,
             commands::session::discover_login_methods,
             commands::session::start_oidc_login,
+            commands::session::cancel_oidc_login,
             commands::session::complete_oidc_login,
             commands::session::submit_login,
             commands::session::submit_soft_logout_reauth,
@@ -1640,6 +1756,8 @@ pub fn run() {
             commands::e2ee::export_room_keys,
             commands::e2ee::import_room_keys,
             commands::history_export::history_export_time_zone,
+            commands::room_key_files::choose_room_key_export_destination,
+            commands::room_key_files::choose_room_key_import_source,
             commands::history_export::export_history,
             commands::history_export::stop_history_export,
             commands::history_export::retry_history_export,
@@ -1669,7 +1787,6 @@ pub fn run() {
             commands::navigation::observe_timeline_viewport,
             commands::timeline::ensure_timeline_subscribed,
             commands::timeline::paginate_timeline_backwards,
-            commands::timeline::restore_timeline_anchor,
             commands::timeline::paginate_thread_timeline_backwards,
             commands::timeline::send_text,
             commands::timeline::schedule_send,
@@ -1721,7 +1838,6 @@ pub fn run() {
             commands::room::remove_room_tag,
             commands::room::pin_event,
             commands::room::unpin_event,
-            commands::room::refresh_pinned_events,
             commands::room::load_room_settings,
             commands::room::load_space_members,
             commands::room::load_space_children,
@@ -1742,6 +1858,8 @@ pub fn run() {
             commands::views::open_threads_list,
             commands::views::close_threads_list,
             commands::views::paginate_threads_list,
+            commands::views::open_scheduled_sends_list,
+            commands::views::close_scheduled_sends_list,
             commands::views::open_thread,
             commands::views::close_thread,
             commands::views::subscribe_receipt_reader,
@@ -1757,12 +1875,18 @@ pub fn run() {
             commands::search::stop_room_crawl,
             commands::directory::query_directory,
             commands::room::preview_room_address,
+            commands::room::set_room_access_draft,
+            commands::room::preview_room_access,
+            commands::room::preview_create_room_access,
             commands::room::create_room,
             commands::room::create_space,
             commands::directory::join_directory_room,
             commands::directory::preview_join_target,
             commands::directory::dismiss_directory_preview,
             commands::room::set_space_child,
+            commands::room::set_space_child_suggested,
+            commands::room::join_suggested_space_rooms,
+            commands::room::dismiss_suggested_space_rooms,
             commands::room::check_room_address_availability,
             commands::room::clear_room_address_availability,
             commands::room::join_room,
@@ -1783,7 +1907,6 @@ pub fn run() {
             commands::timeline::cancel_composer_reply,
             commands::timeline::set_composer_draft,
             commands::timeline::set_thread_composer_draft,
-            commands::timeline::toggle_reaction,
             commands::timeline::send_reaction,
             commands::timeline::redact_reaction,
             commands::timeline::send_reply,

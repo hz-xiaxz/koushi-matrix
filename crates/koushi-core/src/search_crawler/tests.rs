@@ -13,7 +13,14 @@ use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
 #[test]
 fn crawler_page_producer_records_typed_progress_without_environment_switch() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    trace_crawler_page(DiagnosticLevel::Debug, "test_progress", 12, 9, 4);
+    trace_crawler_page(
+        DiagnosticLevel::Debug,
+        "test_progress",
+        CrawlHistorySource::Store,
+        12,
+        9,
+        4,
+    );
     let record = koushi_diagnostics::snapshot()
         .records
         .into_iter()
@@ -102,7 +109,7 @@ async fn crawler_page_is_visible_to_the_normal_room_event_cache() {
             .to_string(),
         authentication_method: SessionAuthenticationMethod::Unknown,
     };
-    let session = Arc::new(MatrixClientSession::from_client_for_testing(
+    let _session = Arc::new(MatrixClientSession::from_client_for_testing(
         client.clone(),
         session_info,
     ));
@@ -113,20 +120,23 @@ async fn crawler_page_is_visible_to_the_normal_room_event_cache() {
         true,
     );
 
-    let result = run_history_crawl_page(session, AccountWorkScheduler::default(), checkpoint).await;
-    let HistoryCrawlPageResult::Success { messages, .. } = result else {
-        panic!("crawler page should complete through SDK pagination");
-    };
+    let (checkpoint, messages, _) = drain_crawl_pages(
+        session_for(&client, &server),
+        AccountWorkScheduler::default(),
+        checkpoint,
+        2,
+    )
+    .await;
+    assert_eq!(
+        checkpoint.history_source,
+        CrawlHistorySource::Network,
+        "the persisted walk found the gap and handed the rest to pagination"
+    );
     // #996: the newest event arrived by sync and was already cached before the
-    // crawl; backward pagination never returns it, so the first page must
-    // index the cached events too.
-    let indexed_ids = messages
-        .iter()
-        .filter_map(|message| match message {
-            SearchIndexMessage::Upsert { event_id, .. } => Some(event_id.as_str()),
-            _ => None,
-        })
-        .collect::<Vec<_>>();
+    // crawl, so the first page indexes the cached events too. The persisted walk
+    // covers the cached window and finds the gap behind it, which is why this
+    // room continues through SDK back-pagination.
+    let indexed_ids = upserted_ids(&messages);
     assert_eq!(
         indexed_ids.len(),
         3,
@@ -135,6 +145,8 @@ async fn crawler_page_is_visible_to_the_normal_room_event_cache() {
     assert!(indexed_ids.contains(&"$crawler-latest"));
     assert!(indexed_ids.contains(&"$crawler-older-1"));
 
+    // History the store did not hold is fetched through pagination, which is the
+    // one path that still inserts into the shared linked chunk.
     let room = client.get_room(room_id).expect("joined room");
     let (cache, _drop_handles) = room.event_cache().await.expect("room event cache");
     let visible = cache.events().await.expect("cached timeline events");
@@ -144,6 +156,235 @@ async fn crawler_page_is_visible_to_the_normal_room_event_cache() {
         .collect::<Vec<_>>();
     assert!(visible_ids.iter().any(|id| id == "$crawler-older-1"));
     assert!(visible_ids.iter().any(|id| id == "$crawler-older-2"));
+}
+
+/// A room the local store already holds completely is crawled from persisted
+/// chunks alone: no `/messages` request, and no growth of the resident room
+/// timeline.
+///
+/// This is the property that keeps indexing from hydrating history. The room is
+/// backfilled once through pagination, and the next crawl must complete from the
+/// stored chunks without touching the network.
+#[tokio::test]
+async fn crawler_page_reads_persisted_history_without_hydrating_the_room_cache() {
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room_id = room_id!("!store-only:example.invalid");
+    let f = EventFactory::new()
+        .room(room_id)
+        .sender(user_id!("@crawler:test.invalid"));
+    client
+        .event_cache()
+        .subscribe()
+        .expect("event cache subscription");
+    server
+        .mock_sync()
+        .ok_and_run(&client, |builder| {
+            builder.add_joined_room(
+                JoinedRoomBuilder::new(room_id)
+                    .set_timeline_limited()
+                    .set_timeline_prev_batch("store-prev")
+                    .add_timeline_event(f.text_msg("newest").event_id(event_id!("$store-newest"))),
+            );
+        })
+        .await;
+    // Serves the one backfill page that closes the local gap. `mock_once` means a
+    // crawl that asks for history a second time fails instead of completing.
+    server
+        .mock_room_messages()
+        .match_from("store-prev")
+        .ok(RoomMessagesResponseTemplate::default().events(vec![
+            f.text_msg("older").event_id(event_id!("$store-older")),
+        ]))
+        .mock_once()
+        .mount()
+        .await;
+
+    let session = session_for(&client, &server);
+    let first = HistoryCrawlCheckpoint::new(
+        room_id.to_string(),
+        SearchCrawlerSettings::default(),
+        1,
+        true,
+    );
+    // A persisted page, then the paginated page that closes the gap.
+    let (.., first_messages, _) =
+        drain_crawl_pages(session.clone(), AccountWorkScheduler::default(), first, 2).await;
+    let mut first_ids = upserted_ids(&first_messages);
+    first_ids.sort_unstable();
+    assert_eq!(first_ids, ["$store-newest", "$store-older"]);
+
+    let room = client.get_room(room_id).expect("joined room");
+    let (cache, _drop_handles) = room.event_cache().await.expect("room event cache");
+    let resident_before = client.event_cache().memory_diagnostics().await;
+    let visible_before = cache.events().await.expect("cached timeline events").len();
+
+    let second = HistoryCrawlCheckpoint::new(
+        room_id.to_string(),
+        SearchCrawlerSettings::default(),
+        1,
+        true,
+    );
+    let (checkpoint, second_messages, second_completed) =
+        drain_crawl_pages(session, AccountWorkScheduler::default(), second, 1).await;
+    assert!(
+        second_completed,
+        "the stored chunks now hold the whole history, so the walk reaches its start"
+    );
+    assert_eq!(
+        checkpoint.history_source,
+        CrawlHistorySource::Store,
+        "a complete local store must not need the network"
+    );
+    let mut second_ids = upserted_ids(&second_messages);
+    second_ids.sort_unstable();
+    assert_eq!(
+        second_ids,
+        ["$store-newest", "$store-older"],
+        "the persisted walk covers the same history"
+    );
+
+    let resident_after = client.event_cache().memory_diagnostics().await;
+    let visible_after = cache.events().await.expect("cached timeline events").len();
+    assert_eq!(
+        resident_after.events, resident_before.events,
+        "indexing must not add resident history to the room timeline"
+    );
+    assert_eq!(
+        visible_after, visible_before,
+        "indexing must not grow the resident room window"
+    );
+}
+
+/// Stage A acceptance: the decided history is on disk but outside the resident
+/// window, and indexing it adds nothing back to that window.
+///
+/// A crawl that also hydrated the chunks it read would pass the earlier
+/// store-only test, because that fixture was small enough to stay resident. This
+/// one spans several linked chunks (the SDK chunk capacity is 128), drops the
+/// older chunks from the resident window through the public subscriber-release
+/// path, and then requires the crawl to reach every stored document without the
+/// network and without growing the resident counters.
+#[tokio::test]
+async fn crawler_page_indexes_history_that_is_not_resident() {
+    const FETCHED_EVENTS: usize = 300;
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room_id = room_id!("!nonresident:example.invalid");
+    let f = EventFactory::new()
+        .room(room_id)
+        .sender(user_id!("@crawler:test.invalid"));
+    client
+        .event_cache()
+        .subscribe()
+        .expect("event cache subscription");
+    let fetched = (0..FETCHED_EVENTS)
+        .map(|index| {
+            let id = matrix_sdk::ruma::OwnedEventId::try_from(format!(
+                "$nonresident{index}:example.invalid"
+            ))
+            .expect("event id");
+            f.text_msg(format!("history body {index}")).event_id(&id)
+        })
+        .collect::<Vec<_>>();
+    server
+        .mock_sync()
+        .ok_and_run(&client, |builder| {
+            builder.add_joined_room(
+                JoinedRoomBuilder::new(room_id)
+                    .set_timeline_limited()
+                    .set_timeline_prev_batch("nonresident-prev")
+                    .add_timeline_event(
+                        f.text_msg("newest")
+                            .event_id(event_id!("$nonresident-newest")),
+                    ),
+            );
+        })
+        .await;
+    // `mock_once`: the second crawl must reach every document from the store, so
+    // a second `/messages` request would fail it instead of completing.
+    server
+        .mock_room_messages()
+        .match_from("nonresident-prev")
+        .ok(RoomMessagesResponseTemplate::default().events(fetched))
+        .mock_once()
+        .mount()
+        .await;
+
+    let session = session_for(&client, &server);
+    let first = HistoryCrawlCheckpoint::new(
+        room_id.to_string(),
+        SearchCrawlerSettings::default(),
+        1,
+        true,
+    );
+    let (.., first_messages, first_completed) =
+        drain_crawl_pages(session.clone(), AccountWorkScheduler::default(), first, 4).await;
+    assert!(
+        first_completed,
+        "the backfill crawl should reach the start of the room"
+    );
+    assert_eq!(
+        upserted_ids(&first_messages).len(),
+        FETCHED_EVENTS + 1,
+        "the backfill indexes the persisted window and the paginated history"
+    );
+
+    // Release the room's resident window through the public subscriber path. The
+    // store keeps every chunk; only the in-memory window shrinks to the newest
+    // chunk, which is what makes the second crawl's evidence meaningful.
+    let room = client.get_room(room_id).expect("joined room");
+    let (cache, _drop_handles) = room.event_cache().await.expect("room event cache");
+    let (_events, subscriber) = cache.subscribe().await.expect("room subscription");
+    drop(subscriber);
+    let mut resident_after_release = client.event_cache().memory_diagnostics().await;
+    for _ in 0..100 {
+        if resident_after_release.events < (FETCHED_EVENTS + 1) as u64 {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+        resident_after_release = client.event_cache().memory_diagnostics().await;
+    }
+    assert!(
+        resident_after_release.events < (FETCHED_EVENTS + 1) as u64,
+        "the resident window should have shrunk below the stored history: {resident_after_release:?}"
+    );
+    let visible_before = cache.events().await.expect("cached timeline events").len();
+
+    let second = HistoryCrawlCheckpoint::new(
+        room_id.to_string(),
+        SearchCrawlerSettings::default(),
+        1,
+        true,
+    );
+    let (checkpoint, second_messages, second_completed) =
+        drain_crawl_pages(session, AccountWorkScheduler::default(), second, 4).await;
+    assert!(
+        second_completed,
+        "the stored chunks hold the whole history, so the walk reaches its start"
+    );
+    assert_eq!(
+        checkpoint.history_source,
+        CrawlHistorySource::Store,
+        "a complete local store must not need the network"
+    );
+    assert_eq!(
+        upserted_ids(&second_messages).len(),
+        FETCHED_EVENTS + 1,
+        "every stored document is reachable from the persisted walk"
+    );
+
+    let resident_after = client.event_cache().memory_diagnostics().await;
+    let visible_after = cache.events().await.expect("cached timeline events").len();
+    assert_eq!(
+        resident_after.events, resident_after_release.events,
+        "indexing must not add resident history to the room timeline"
+    );
+    assert_eq!(
+        visible_after, visible_before,
+        "indexing must not grow the resident room window"
+    );
 }
 
 fn session_for(client: &matrix_sdk::Client, server: &MatrixMockServer) -> Arc<MatrixClientSession> {
@@ -170,6 +411,47 @@ fn upserted_ids(messages: &[SearchIndexMessage]) -> Vec<&str> {
             _ => None,
         })
         .collect()
+}
+
+/// Drive one crawl for at most `max_pages` pages, accumulating what it indexed.
+///
+/// A room whose persisted history has a gap is crawled in two steps now: the
+/// first page walks the persisted chunks, and the rest continues through SDK
+/// back-pagination, which is the path that reaches `/messages`.
+async fn drain_crawl_pages(
+    session: Arc<MatrixClientSession>,
+    scheduler: AccountWorkScheduler,
+    checkpoint: HistoryCrawlCheckpoint,
+    max_pages: usize,
+) -> (HistoryCrawlCheckpoint, Vec<SearchIndexMessage>, bool) {
+    let mut messages = Vec::new();
+    let mut current = checkpoint;
+    for _ in 0..max_pages {
+        let result = run_history_crawl_page(session.clone(), scheduler.clone(), current).await;
+        match result {
+            HistoryCrawlPageResult::Success {
+                checkpoint: next,
+                messages: page_messages,
+                completed,
+                ..
+            } => {
+                messages.extend(page_messages);
+                current = next;
+                if completed {
+                    return (current, messages, true);
+                }
+            }
+            HistoryCrawlPageResult::Failed { checkpoint, .. } => {
+                current = checkpoint;
+                break;
+            }
+            HistoryCrawlPageResult::Preempted { checkpoint } => {
+                current = checkpoint;
+                break;
+            }
+        }
+    }
+    (current, messages, false)
 }
 
 /// #996: a completed room whose cache still holds the recorded boundary is
@@ -230,11 +512,12 @@ async fn catch_up_page_indexes_only_events_newer_than_the_boundary_from_the_cach
     assert_eq!((checkpoint.processed, checkpoint.indexed), (11, 8));
 }
 
-/// #996: after a limited sync the cache holds only the newest event behind a
-/// gap; the catch-up pages backwards and stops at the page holding the
-/// boundary instead of walking the whole room.
+/// #996: a boundary the persisted walk only reaches across a gap is not proof of
+/// catch-up. The events inside that gap were never delivered locally, so the walk
+/// must not acknowledge completion; the crawl repairs the gap through
+/// back-pagination and only then stops at the boundary.
 #[tokio::test]
-async fn catch_up_page_resolves_a_limited_sync_gap_and_stops_at_the_boundary() {
+async fn catch_up_page_repairs_a_gap_before_accepting_the_boundary() {
     let server = MatrixMockServer::new().await;
     let client = server.client_builder().build().await;
     let room_id = room_id!("!catchup-gap:example.invalid");
@@ -287,34 +570,98 @@ async fn catch_up_page_resolves_a_limited_sync_gap_and_stops_at_the_boundary() {
         0,
         0,
     );
-    let result = run_history_crawl_page(
+    let (checkpoint, messages, completed) = drain_crawl_pages(
         session_for(&client, &server),
         AccountWorkScheduler::default(),
         checkpoint,
+        2,
     )
     .await;
-    let HistoryCrawlPageResult::Success {
-        messages,
-        completed,
-        ..
-    } = result
-    else {
-        panic!("catch-up should page through the gap");
-    };
-    assert!(completed, "the page reached the boundary");
+    assert_eq!(
+        checkpoint.history_source,
+        CrawlHistorySource::Network,
+        "a boundary behind a gap must hand the rest to back-pagination"
+    );
+    assert!(completed, "the fetched page holds the boundary");
     let mut ids = upserted_ids(&messages);
     ids.sort_unstable();
     assert_eq!(
         ids,
         ["$gap-middle", "$gap-newest"],
+        "the gap's event is indexed and the boundary is not re-indexed"
+    );
+}
+
+/// #996: when the boundary is older than anything the store holds, the catch-up
+/// continues through back-pagination and stops on the page that holds it.
+#[tokio::test]
+async fn catch_up_page_continues_through_pagination_to_reach_the_boundary() {
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room_id = room_id!("!catchup-network:example.invalid");
+    let f = EventFactory::new()
+        .room(room_id)
+        .sender(user_id!("@catchup:test.invalid"));
+    client
+        .event_cache()
+        .subscribe()
+        .expect("event cache subscription");
+    server
+        .mock_sync()
+        .ok_and_run(&client, |builder| {
+            builder.add_joined_room(
+                JoinedRoomBuilder::new(room_id)
+                    .set_timeline_limited()
+                    .set_timeline_prev_batch("net-token")
+                    .add_timeline_event(f.text_msg("newest").event_id(event_id!("$net-newest"))),
+            );
+        })
+        .await;
+    server
+        .mock_room_messages()
+        .match_from("net-token")
+        .ok(RoomMessagesResponseTemplate::default()
+            .events(vec![
+                f.text_msg("middle").event_id(event_id!("$net-middle")),
+                f.text_msg("boundary").event_id(event_id!("$net-boundary")),
+            ])
+            .end_token("net-older"))
+        .mock_once()
+        .mount()
+        .await;
+
+    let checkpoint = HistoryCrawlCheckpoint::catch_up(
+        room_id.to_string(),
+        SearchCrawlerSettings::default(),
+        1,
+        "$net-boundary".to_owned(),
+        0,
+        0,
+    );
+    let (.., messages, completed) = drain_crawl_pages(
+        session_for(&client, &server),
+        AccountWorkScheduler::default(),
+        checkpoint,
+        2,
+    )
+    .await;
+    assert!(
+        completed,
+        "the crawl reached the boundary in the fetched page"
+    );
+    let mut ids = upserted_ids(&messages);
+    ids.sort_unstable();
+    assert_eq!(
+        ids,
+        ["$net-middle", "$net-newest"],
         "boundary is not re-indexed"
     );
 }
 
-/// A page preempted by user-visible pagination keeps its first-page work, so
-/// the re-run still indexes cached events and honours the catch-up boundary.
+/// A page preempted by user-visible pagination keeps its checkpoint, so the
+/// re-run resumes where it stopped and still honours the catch-up boundary.
 #[tokio::test]
-async fn preempted_first_page_keeps_its_first_page_work() {
+async fn preempted_page_keeps_its_checkpoint() {
     let server = MatrixMockServer::new().await;
     let client = server.client_builder().build().await;
     let room_id = room_id!("!catchup-preempt:example.invalid");
@@ -356,6 +703,16 @@ async fn preempted_first_page_keeps_its_first_page_work() {
         0,
         0,
     );
+    // The room has a gap, so the first page walks the persisted chunks and hands
+    // the rest to back-pagination. Preemption is about a page that waits on the
+    // shared gate, which is the paginated one.
+    let HistoryCrawlPageResult::Success { checkpoint, .. } =
+        run_history_crawl_page(session_for(&client, &server), scheduler.clone(), checkpoint).await
+    else {
+        panic!("the persisted page should succeed");
+    };
+    assert_eq!(checkpoint.history_source, CrawlHistorySource::Network);
+
     let page = tokio::spawn(run_history_crawl_page(
         session_for(&client, &server),
         scheduler.clone(),
@@ -376,9 +733,10 @@ async fn preempted_first_page_keeps_its_first_page_work() {
     let HistoryCrawlPageResult::Preempted { checkpoint } = result else {
         panic!("a waiting timeline pagination should preempt the crawler page");
     };
-    assert!(
-        checkpoint.first_page,
-        "preemption must not consume the first page"
+    assert_eq!(
+        checkpoint.history_source,
+        CrawlHistorySource::Network,
+        "a preempted page must not lose the source it had reached"
     );
     assert_eq!(checkpoint.catch_up_after.as_deref(), Some("$slow-boundary"));
     waiting_pagination.await.expect("pagination admitted");

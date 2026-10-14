@@ -347,6 +347,8 @@ export interface TimelineItem {
   link_ranges?: TimelineLinkRange[];
   /** User ids this message's `m.mentions` named (#874). Absent when none. */
   mentioned_user_ids?: string[];
+  /** The message's `m.mentions.room` flag (#1123). Absent when not set. */
+  mentions_room?: boolean;
   reactions: ReactionGroup[];
   can_react: boolean;
   is_redacted: boolean;
@@ -401,6 +403,8 @@ export interface ThreadSummaryDto {
   latest_sender_label?: string | null;
   latest_body_preview: string | null;
   latest_timestamp_ms: number | null;
+  /** #1259: replies since this client last read the thread; 0 when read. */
+  unread_count?: number;
 }
 
 export type TimelineDisplayKind =
@@ -473,13 +477,6 @@ export interface TimelineNavigationSnapshot {
   read_state_sync: TimelineReadStateSync;
 }
 
-export type TimelineAnchorRestoreStatus =
-  | "Found"
-  | "EndReached"
-  | "BudgetExhausted"
-  | "Superseded"
-  | { Failed: { kind: TimelineFailureKind } };
-
 export interface TimelineGapId {
   topology_revision: string;
   ordinal: number;
@@ -533,13 +530,6 @@ export type TimelineEvent =
         state: PaginationState;
         /** Whether an accepted backward page structurally changed the oldest edge. */
         prepend_expected?: boolean | null;
-      };
-    }
-  | {
-      AnchorRestoreFinished: {
-        request_id: RequestId;
-        key: TimelineKey;
-        status: TimelineAnchorRestoreStatus;
       };
     }
   | {
@@ -799,6 +789,9 @@ export interface ReplyQuote {
   sender_label?: string | null;
   body_preview: string | null;
   formatted?: TimelineFormattedBody | null;
+  // #1328: the quoted message's `m.mentions` facts, so the preview pills the
+  // same anchors the quoted row does.
+  mentioned_user_ids?: string[];
   state: ReplyQuoteState;
 }
 
@@ -1312,6 +1305,14 @@ type StateDeltaDomainChangedSlices = Partial<AppDomainState> & {
   live_signals_receipts_by_room_event?: Record<
     string,
     Record<string, LiveEventReceiptSummary | null>
+  >;
+  live_signals_focused_receipts_by_room_event?: Record<
+    string,
+    Record<string, Record<string, LiveEventReceiptSummary | null>>
+  >;
+  live_signals_thread_receipts_by_room_event?: Record<
+    string,
+    Record<string, Record<string, LiveEventReceiptSummary | null>>
   >;
   live_signals_room_metadata_by_id?: Record<string, RoomLiveSignalMetadata | null>;
   live_signals_presence_by_user?: Record<string, PresenceKind | null>;

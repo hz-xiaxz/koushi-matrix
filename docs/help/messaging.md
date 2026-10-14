@@ -15,6 +15,30 @@ are **Enter sends** and the platform modifier plus Enter. The keyboard page
 lists the current platform's shortcuts. Confirming an IME candidate is separate
 from sending the composed message.
 
+## Schedule a message
+
+Use **Send later** in the message composer to send the message at a chosen
+time. The composer shows a time field and buttons that move it by 10 minutes or
+an hour; choose **Schedule send** to save the reservation, or **Cancel** to
+close without scheduling.
+
+Scheduled messages appear in the room where you created them and behind the
+**Scheduled messages** clock button in the header. That panel shows the
+reservations for **Home** (the whole account) or for the Space that was selected
+when you opened it. Each entry shows its time, message text, destination room,
+and a **Thread reply** marker when it sends into a thread. **Edit** changes the
+time or text; **Cancel scheduled send** removes the reservation.
+
+Two limits matter:
+
+- Koushi lists only the scheduled messages this device created. Reservations
+  made in another Matrix client, or before you reinstalled the app, do not
+  appear, so the panel is not a server-wide view of your scheduled sends.
+- Delivery depends on your server and the panel labels it: with **Server
+  scheduled** the server holds the reservation and still sends it while Koushi
+  is closed; with **Local fallback** Koushi holds it and it sends only while the
+  app is running.
+
 ## Reply or open a thread
 
 Use a message's actions to choose **Reply to message** for a reply in the room,
@@ -34,13 +58,28 @@ on ownership, permissions, and whether the message has been sent.
 previously read or saved it. A pending or failed local send has different actions
 from a sent message. Read the confirmation before removing anything.
 
+## Copy or search selected text
+
+Select text inside a message, then open the message's context menu. When a
+selection is present, **Copy selected text** and **Search selected text on
+DuckDuckGo** appear above the other actions. **Copy selected text** copies
+exactly the selected characters. **Search selected text on DuckDuckGo** opens
+the selection as a search query in your default browser, using the fixed
+DuckDuckGo provider rather than the browser's own default search engine. Both
+actions need only the selection, so they also work on a message you cannot edit
+and on a not-yet-sent local message.
+
 ## Send files and images
 
 1. Choose **Attach file**, or drop a file onto the composer.
 2. Review the staged attachment. If an image compression choice appears, choose
    the desired image quality.
-3. Add a caption if needed, then send. Remove an unwanted staged file with
-   **Remove attachment** before sending.
+3. Add or edit a caption if needed, then send. When no attachment is staged yet,
+   adding one file starts its caption with whatever the composer already held, so
+   text and file can go out as one message. If that caption is still the composer's
+   text when you send the only attachment, the composer is cleared with it;
+   otherwise your text stays. Remove an unwanted staged file with **Remove
+   attachment** before sending.
 
 An attachment appearing in the composer is not yet an uploaded message. Server
 upload limits and network failures can prevent a send. Open an attachment from

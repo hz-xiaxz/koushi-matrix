@@ -50,9 +50,7 @@ const orders: Array<{
   { sort: { kind: "normalLocale" }, label: t("roomList.sortName"),
     names: ["A", "B", "C"], rooms: [roomA, roomB, roomC], dms: [dmA, dmB, dmC] },
   { sort: { kind: "recentFirst" }, label: t("roomList.sortRecent"),
-    names: ["B", "C", "A"], rooms: [roomB, roomC, roomA], dms: [dmB, dmC, dmA] },
-  { sort: { kind: "activity" }, label: t("roomList.sortAttention"),
-    names: ["C", "B", "A"], rooms: [roomC, roomB, roomA], dms: [dmC, dmB, dmA] }
+    names: ["B", "C", "A"], rooms: [roomB, roomC, roomA], dms: [dmB, dmC, dmA] }
 ];
 
 async function push(page: Page, update: StateUpdateEnvelope): Promise<void> {
@@ -75,15 +73,41 @@ async function expectSection(page: Page, section: Section, collapsed: boolean, n
   await expect(region.locator(".room-name")).toHaveText(collapsed ? [] : names);
 }
 
+// #1369: the sort menu renders in the shared body-level floating layer, so it is
+// no longer a descendant of its section region. Its own accessible name keeps
+// the assertion scoped to this section's menu.
+function sectionMenu(page: Page, section: Section) {
+  return page.getByRole("menu", {
+    name: t("roomList.sectionOptions", { section: labels[section] }), exact: true
+  });
+}
+
+// #542: the attention-first sort is legacy-only. A section that still carries a
+// persisted `activity` value keeps the attention projection but offers no
+// selected radio, because the selector only lists Recent and Name.
+async function expectNoSortSelected(page: Page, section: Section) {
+  const region = page.getByRole("region", { name: labels[section], exact: true });
+  const trigger = region.getByRole("button", {
+    name: t("roomList.sectionOptions", { section: labels[section] }), exact: true
+  });
+  await trigger.click();
+  const menu = sectionMenu(page, section);
+  await expect(menu.getByRole("menuitemradio")).toHaveCount(2);
+  await expect(menu.getByRole("menuitemradio", { checked: true })).toHaveCount(0);
+  await trigger.click();
+  await expect(trigger).toHaveAttribute("aria-expanded", "false");
+}
+
 async function expectSort(page: Page, section: Section, label: string) {
   const region = page.getByRole("region", { name: labels[section], exact: true });
   const trigger = region.getByRole("button", {
     name: t("roomList.sectionOptions", { section: labels[section] }), exact: true
   });
   await trigger.click();
-  await expect(region.getByRole("menuitemradio", { name: label, exact: true }))
+  const menu = sectionMenu(page, section);
+  await expect(menu.getByRole("menuitemradio", { name: label, exact: true }))
     .toHaveAttribute("aria-checked", "true");
-  await expect(region.getByRole("menuitemradio", { checked: true })).toHaveCount(1);
+  await expect(menu.getByRole("menuitemradio", { checked: true })).toHaveCount(1);
   await trigger.click();
   await expect(trigger).toHaveAttribute("aria-expanded", "false");
 }
@@ -146,6 +170,8 @@ for (const activeSpace of [null, SPACE]) {
       });
       await expectSection(page, "rooms", false, ["C", "B", "A"]);
       await expectSection(page, "dms", false, ["C", "B", "A"]);
+      await expectNoSortSelected(page, "rooms");
+      await expectNoSortSelected(page, "dms");
       await page.evaluate(() =>
         (window as unknown as { __harness: Harness }).__harness.clearInvocations());
 
@@ -173,9 +199,14 @@ for (const activeSpace of [null, SPACE]) {
             changed: { sidebar, state: { domain: { settings } } } });
           await expectSection(page, target, collapsed, order.names);
           await expectSection(page, untouched, false, ["C", "B", "A"]);
-          const selected = orders.find((candidate) => candidate.sort.kind === sort.kind)!;
-          await expectSort(page, target, selected.label);
-          await expectSort(page, untouched, t("roomList.sortAttention"));
+          if (sort.kind === "activity") {
+            // A persisted legacy value renders attention order with no radio.
+            await expectNoSortSelected(page, target);
+          } else {
+            const selected = orders.find((candidate) => candidate.sort.kind === sort.kind)!;
+            await expectSort(page, target, selected.label);
+          }
+          await expectNoSortSelected(page, untouched);
         }
       }
 
@@ -193,9 +224,15 @@ for (const activeSpace of [null, SPACE]) {
       await push(page, { protocol_version: 1, kind: "delta", generation: ++generation,
         changed: { state: { domain: { settings } } } });
       for (const section of ["rooms", "dms"] as const) {
-        await expectSection(page, section, false, ["C", "B", "A"]);
-        await expectSort(page, section, t("roomList.sortAttention"));
+        await expectSection(
+          page,
+          section,
+          false,
+          section === target ? ["B", "C", "A"] : ["C", "B", "A"]
+        );
       }
+      await expectSort(page, target, t("roomList.sortRecent"));
+      await expectNoSortSelected(page, untouched);
       // A snapshot recovery could mask a broken delta lane. No navigation or
       // preference command is needed to render any of the pushed transitions.
       const commands = await page.evaluate(() => {

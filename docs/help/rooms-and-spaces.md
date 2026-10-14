@@ -7,21 +7,26 @@
 A room contains a conversation. A Space groups rooms; joining a Space does not
 necessarily join every room it lists.
 
-Choose **Home** in the left rail to see your account-level navigation, including
-**Invites** and **Explore**. Choose a Space to see its rooms. If a conversation
-is absent from a Space view, return to Home before assuming it has disappeared.
+Choose **Home** in the left rail to see your account-level navigation. Home's
+header row carries **Activity**, **Explore**, and **Invites** at the start and
+**Threads**, **Scheduled messages**, and **Info** at the end. A Space replaces
+the start of that row with **Members** and keeps the same **Threads**,
+**Scheduled messages**, and **Info** actions at the end. Choose a Space to see
+its rooms. If a conversation is absent from a Space view, return to Home before
+assuming it has disappeared. The clock button opens the
+[scheduled messages panel](messaging.md#schedule-a-message).
 
 ## Join a room
 
 If you received an invitation:
 
-1. Open **Home → Invites**.
+1. Open **Home**, then choose **Invites** in the header.
 2. Select the invitation and check the room and inviter.
 3. Choose **Accept** to join, or **Decline** to reject it.
 
 If you have a room address:
 
-1. Open **Home → Explore**.
+1. Open **Home**, then choose **Explore** in the header.
 2. Enter the room address or Matrix link in the address field and choose
    **Preview**.
 3. Review the preview and choose the available join action. Invite-only rooms
@@ -30,49 +35,63 @@ If you have a room address:
 Explore also lets you search a server's public room directory. This searches
 rooms to join, whereas the top search field [searches messages](search.md).
 
+## Suggested rooms in a Space
+
+A Space can mark some of its rooms as suggested. In the Space's **Not joined**
+section, suggested rooms come first and show a sparkle icon before the name;
+hover over the row to see "Suggested by this Space".
+
+When you join a Space that suggests rooms you can join, Koushi asks once:
+**Join the suggested rooms in *Space*?** The dialog lists the rooms. Choose
+**Join all** to join them, or **Skip** to join none. The question is not asked
+again for that Space. Invite-only rooms are never offered, and nothing is joined
+unless you choose **Join all**. If some rooms cannot be joined, the dialog lists
+which ones were joined and why the others were not.
+
+If your role allows it, **Space info** shows a **Suggest to *Space* members**
+checkbox beside each room in **Rooms**. It changes only whether that room is
+suggested; the room's place in the Space and its access are unchanged.
+
 ## Create a room or Space
 
-Use **Create room** in the sidebar header, optionally enter a name, and review
-the privacy and encryption choices before creating it. When the selected Space
-is public, the dialog starts with **Public room** selected; otherwise it starts
-with **Private room**. You can switch before creating. A public room is never
-encrypted. Review the final options rather than assuming every new room is
-encrypted.
+Use **Create room** in the sidebar header, optionally enter a name, and choose
+**Who can join**:
+
+- **Members of *Space*** (only when a Space is selected): anyone in that Space
+  can find and join the room. You can also allow members of your other Spaces.
+- **Only people you invite**.
+- **Anyone**: a public room. Anyone, including people outside your Spaces, can
+  find it in the public room directory and join it. A public room is never
+  encrypted.
+
+A room created from **Home** is not part of any Space, so it offers only
+**Only people you invite** and **Anyone**. When the selected Space is public,
+the dialog starts with **Anyone** selected.
+
+Under **Earlier messages**, choose whether new members can read messages sent
+before they arrived, or only messages from when they were invited. For a public
+room you can also let people read the room without joining. Private rooms are
+encrypted unless you turn encryption off. A one-line summary above the buttons
+says what your choices mean.
 
 If you leave the room name empty, the room shows a name worked out from its
 address or its members instead; a room with only you in it can show as
 **Empty Room**. You can set or change the name later in the room's settings.
 
-A named public room also needs a **Room address**, shown in full (for example
-`#research-group-papers:example.org`) before you create it. The room name may
-repeat, but the address must be unique on your server, and every Space on that
-server shares the same addresses: a Space does not have addresses of its own.
-When you create a public room while a Space is selected, Koushi suggests an
-address that starts with the Space name, such as `research-group-papers` for
-the room `papers` in the Space `research-group`. This makes a conflict less
-likely but does not reserve the address. The suggestion follows the room name
-until you edit the address yourself. A public room created in a Space is listed
-in the public room directory, and anyone, including people outside the Space,
-can find and join it.
+A public room also has an **address**, such as `#research-group-3fa9c2:example.org`.
+The name is what people see in their room list; the address is the link
+that opens the room, for example in a message or on a web page. Koushi starts with a random
+address that begins with the Space name (or `room` at Home). Choose
+**Change** to replace it with one that is easier to read, such as
+`#research-group-papers`. The address must be unique on your server, and every
+Space on that server shares the same addresses.
 
-A public room without a name has no address to suggest, so it can be created
-without one. It is still public and listed in the directory, where people can
-find and join it. If you enter an address for an unnamed room, the
-room shows the name part of that address (for example `lobby`) until you give
-it a name.
-
-While you type, Koushi checks whether the address is already used and shows
-the result under the address field. This check is only advice: an address that
-was free when checked can still be taken before you create the room, and the
-check never reserves it. If the address is in use, Koushi shows a suggestion,
-marked as not checked yet; choose **Use this address** to put it in the address
-field, where it is checked in turn. If the check cannot be completed, you can
-still create the room.
-
-If the address is already in use, the dialog keeps everything you entered,
-names the address that was taken, and moves you to the address field. Keep the
-room name and change only the address, for example by adding a project name or
-a number. Availability is decided when the room is created.
+Koushi checks the address as you type. If it is already in use, **Create**
+stays disabled, the dialog says so, and it offers an alternative you can use
+with **Use this address**. If the check cannot be completed, you can still
+create the room; the server decides when the room is created. If the address
+was taken in the meantime, the dialog keeps everything you entered and moves
+you to the address field.
 
 Use **Create space**, the plus button near the bottom of the left rail, to
 create a Space. Room and Space administration actions depend on your role.
@@ -116,18 +135,67 @@ an invitation before participating.
 If the action is unavailable, your role or the current room state may not allow
 it. Room history visibility and room entry rules are separate settings.
 **Since invite**, **Since join**, and **Shared history** describe different
-history access. In encrypted rooms, reading older history also requires the
-appropriate encryption keys. Changing a setting does not revoke events or keys
-already shared.
+history access. In an encrypted room with shared history, past room keys may be
+shared with the invitee automatically, but the share needs verification on both
+sides and may be skipped, so some or all earlier messages can stay unreadable
+until a key becomes available another way. Changing a setting does not revoke
+events or keys already shared.
 
 ## Conversation list sections
 
 The conversation list shows **Rooms** above **DMs**. Each heading can be
-collapsed and sorted from its own menu. The number to the right of a heading is
+collapsed and sorted from its own menu. The menu closes when you choose an
+option, press anywhere outside it, or press Escape, and only one section's menu
+is open at a time. The number to the right of a heading is
 its unread total for the current Home or Space view; it turns into a red badge
 when there is something unread, shows `99+` above 99, and disappears at zero. It
 stays on the Rust-reported total for the whole view, so filtering the list or
 collapsing the section does not change it.
+
+Long sections show their first five conversations, followed by a **Show N more**
+control at the end of the section. That control only expands the section; to
+bound it again, use the fold button in the section heading, which Rooms and DMs
+place between the create (+) and section options (⋯) buttons. The choice is
+remembered per Home or Space and per section, and it is separate from collapsing:
+a collapsed section hides every row and both controls, and neither control
+changes whether the section is collapsed. While the filter box has text, every
+matching conversation is shown and the controls disappear until you clear the
+filter. An open conversation past the first five keeps its section expanded so
+its row is always visible; while that is what holds the section open it offers
+no fold control. A conversation opened from a notification shows its section
+even when you had collapsed it, until you collapse that section yourself
+(changing the five-row bound does not re-collapse it).
+
+A conversation's own unread badge counts unread replies in its threads as well as
+messages in the main timeline, so a room can show unread while the main timeline
+has nothing new; reading the thread clears its share. Read markers, the
+first-unread position and event navigation stay on the main timeline and ignore
+thread replies.
+
+Red numbers count messages the app has observed as unread. The Home and Space
+numbers add the eligible room and DM numbers; invitations use a separate green
+badge. A muted conversation keeps its red number on its own row but does not add
+to Home, Space, or section totals. Hover over a conversation number to see its
+main-timeline and thread parts. The room's **Threads** button shows the thread
+part, and each counted thread can be opened from the Threads list. The Space
+number appears at the upper right of its icon; its access symbol stays at the
+lower right. If thread metadata fails to load, already counted threads remain
+openable by their known root IDs.
+
+Activity's **Unread conversations** tab lists rooms with a confirmed local
+unread count. It opens the room without naming an unverified message. **Recent**
+shows observed history; it does not claim those messages are unread. Activity
+does not offer a bulk read action because a room count cannot identify the
+right event IDs to acknowledge. A failure to load older Recent history does
+not hide the confirmed room entries in Unread conversations.
+
+The context-menu action **Mark room timeline as read** applies to the main
+timeline only. It appears only when the app has a current main-timeline event
+to mark. Open a thread to read its visible replies; a reply already on screen
+is marked read without requiring an extra scroll. A manually marked unread room
+uses a red dot on its row, not an invented numeric message count.
+Leaving a room discards its cached thread counts; rejoining starts a fresh
+read of those threads.
 
 A **Low priority** section appears below **DMs** when any conversation in the
 current view carries the low-priority tag. Low-priority rooms and DMs are listed
@@ -141,6 +209,49 @@ badge, the Home and Space rail counts, and the **Rooms** and **DMs** heading
 badges, mentions included. The conversation's own row still shows its real
 unread count, nothing is marked as read, and removing the tag restores its
 contribution without replaying old notifications.
+
+## See who can join a room or Space
+
+Two separate facts are reported, and neither is used to mean the other: **who
+may join** and **whether the conversation is encrypted**. Every conversation
+row, the room header, the Space rail, the Space header, and **Room info** show
+the participation indicator; the conversation header and **Room info** also
+show the encryption indicator.
+
+The participation indicator is one icon with one label. Hover it to read what it
+means for that room or Space; the icon, the short label beside it, and the
+control's accessible name state the kind without the longer explanation.
+
+- **Public** (globe): anyone can join without an invitation.
+- **Invite only** (person with a plus): an invitation is required to join.
+- **Space members can join** (two people): the members of the Space named in the
+  explanation can join without an invitation.
+- **Conditions apply** (two people): members of the listed Spaces or rooms can
+  join without an invitation, and everyone else needs one. When Koushi has read
+  their names, the explanation lists the Spaces or rooms.
+- **Can request** (raised hand): you can ask for an invitation, but joining
+  still requires one.
+- **Space / request** (raised hand): membership follows the Space named in the
+  explanation, and everyone else can ask for an invitation.
+- **Not joinable** (question mark): the room keeps a join rule with no ordinary
+  way in, and an invitation alone may not be enough.
+- **Checking** (spinner) or **Unknown** (question mark): Koushi has not read the
+  join conditions yet, or it does not recognize the rule the server reports.
+
+The encryption indicator is separate: **Encrypted** (closed padlock) or **Not
+encrypted** (open padlock), with its own explanation. A padlock never means that
+an invitation is required, and an invitation is never shown with a padlock.
+
+In the conversation list only the participation icon is shown, as the row's
+accessible name, because a list row has room for one. Direct messages show
+neither indicator in the list; the header and **Room info** report both facts for
+the open conversation.
+
+Neither indicator is a confidentiality or history-visibility signal: an
+invite-only room can still hold unencrypted messages, and a public room can be
+encrypted. History visibility and the other properties are shown and changed in
+**Change room details, access, and history** and in **Space names and access**
+below.
 
 ## Room information and notifications
 
@@ -162,13 +273,27 @@ Open **Room info**. Each property is shown, changed, and confirmed in one card:
   choose **Save** (or **Cancel**, or press **Esc**). Saving an empty value
   removes the topic or avatar. The avatar card shows the room's picture and its
   `mxc://` address.
-- **Access and history**: **Join rule** and **History visibility**. Choose
-  **Change**, pick a value, and choose **Save**. The explanation under the choice
-  describes the value you are about to save, including when history becomes
-  visible to anyone and that a change does not apply to messages already sent.
+- **Access and history**: **Join rule** and **History visibility** each show a
+  list of choices and, below it, what the current selection means: who can
+  join, who can read which history, whether the room is encrypted, and whether
+  it is listed in the public directory. The selected choice is marked, and the
+  details say whether they describe the saved values
+  or unsaved changes. Choose a value and then **Save** (or **Cancel**, or press
+  **Esc**) to restore the saved value. Changing the join rule needs permission
+  to change join rules, which is separate from permission to rename the room,
+  so an account that may change access but not the room name can still change
+  it. Choosing **Members of a Space** lists the Spaces you belong to; pick the
+  ones whose members may join. A restricted rule is summarised by its
+  people-facing access condition (**Conditions apply**, or **Space members can
+  join** when exactly one Space is verified) rather than as **Not joinable**, and a
+  rule the app cannot rewrite is shown disabled with the reason. The details
+  keep server eligibility and key availability separate, note when history
+  becomes visible to anyone, and state that a change does not apply to messages
+  already sent. The same editor is used while creating a room.
 
-The badges at the top of **Room info**, such as **Public** or **Anyone can see
-history**, move to the matching card. A card shows **Saving…** while the change
+The summary at the top of **Room info**, such as **Encrypted**, **Invite only**
+or **Anyone can see history**, moves to the matching card when chosen; the
+encryption summary is a statement of fact and does not open a card. A card shows **Saving…** while the change
 is sent and **Saved** once the room reports the new value; if the change fails,
 the reason is shown in the same card and the old value stays. If your role cannot
 change a property, its card shows the current value and says so. The room name is

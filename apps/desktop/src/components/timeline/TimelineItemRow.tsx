@@ -15,6 +15,7 @@ import {
   XCircle
 } from "lucide-react";
 import {
+  Fragment,
   useCallback,
   useEffect,
   useRef,
@@ -30,8 +31,9 @@ import {
   type MentionCandidate,
   type OpenContextMenu
 } from "../../app/uiShared";
+import type { MediaSaveNameFacts } from "../../backend/linkMediaPort";
 import { contextMenuItems } from "../../domain/contextMenus";
-import { getActiveLocale, t } from "../../i18n/messages";
+import { MESSAGE_PLACEHOLDER_PATTERN, getActiveLocale, t, type MessageId } from "../../i18n/messages";
 import { onMenuKeyDown } from "../ContextMenuSurface";
 import { LazyEmojiPicker } from "../LazyEmojiPicker";
 import { Tooltip } from "../Tooltip";
@@ -136,6 +138,73 @@ export interface TimelineRowActionHandlers {
   onOpenSenderProfile?: (roomId: string, userId: string) => void;
 }
 
+/// The visible message text the user selected inside this row (#1155).
+///
+/// Returns the exact selection text, or `null` when there is nothing to act on:
+/// a collapsed or whitespace-only selection, a selection that leaves the
+/// right-clicked row (another row, another account, a previous room, or a
+/// selection crossing rows), or a selection inside an editable surface such as
+/// the row's own inline edit composer.
+function messageSelectionWithin(element: HTMLElement): string | undefined {
+  if (typeof window === "undefined") {
+    return undefined;
+  }
+  const selection = window.getSelection();
+  if (!selection || selection.isCollapsed || selection.rangeCount === 0) {
+    return undefined;
+  }
+  const text = selectedRangeText(selection);
+  if (!text.trim()) {
+    return undefined;
+  }
+  const editableSurfaces = element.querySelectorAll(
+    "input, textarea, [contenteditable='true'], [contenteditable='']"
+  );
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    const range = selection.getRangeAt(index);
+    if (!element.contains(range.commonAncestorContainer)) {
+      return undefined;
+    }
+    // Draft text is not message text: reject a range that intersects any
+    // editable surface in this row, whether it sits inside it or encloses it
+    // (selecting the whole inline edit form has a common ancestor outside the
+    // editor and would otherwise pass).
+    for (const editable of editableSurfaces) {
+      if (range.intersectsNode(editable)) {
+        return undefined;
+      }
+    }
+  }
+  return text;
+}
+
+/// The rendered plain text of a selection, with the message body's line breaks.
+///
+/// The body renders a newline as a `<br>` and formatted messages render
+/// paragraphs and list items as block elements; `Range.toString()` concatenates
+/// text nodes only, so it would drop every line break and Copy would not
+/// reproduce what the user sees. Both boundaries become "\n" on a detached
+/// clone, the live DOM is never touched, and no trailing newline is invented:
+/// a boundary is inserted only before a block that has something preceding it.
+function selectedRangeText(selection: Selection): string {
+  const parts: string[] = [];
+  for (let index = 0; index < selection.rangeCount; index += 1) {
+    const fragment = selection.getRangeAt(index).cloneContents();
+    fragment.querySelectorAll("br").forEach((lineBreak) => {
+      lineBreak.replaceWith(document.createTextNode("\n"));
+    });
+    fragment
+      .querySelectorAll("p, li, pre, blockquote, h1, h2, h3, h4, h5, h6, tr")
+      .forEach((block) => {
+        if (block.previousSibling) {
+          block.before(document.createTextNode("\n"));
+        }
+      });
+    parts.push(fragment.textContent ?? "");
+  }
+  return parts.join("\n");
+}
+
 function reactionPickerBoundaryElement(anchor: Element): Element | null {
   return anchor.closest(".timeline-view") ?? anchor.closest(".main-pane");
 }
@@ -233,6 +302,8 @@ export function TimelineItemRow({
   resolveComposerKeyAction = ignoreComposerKeyAction,
   recentEmojis = [],
   onRecentEmojisChange,
+  mathModeEnabled = true,
+  onMathModeChange = () => undefined,
   mediaUploadProgress = null,
   onSendReaction,
   onRedactReaction,
@@ -278,7 +349,6 @@ export function TimelineItemRow({
   currentUserId,
   ignoredUserIds = [],
   onOpenContextMenu,
-  threadAttention = null,
   mediaDownload,
   keyRequestPending = false
 }: {
@@ -303,6 +373,8 @@ export function TimelineItemRow({
   resolveComposerKeyAction?: ResolveComposerKeyAction;
   recentEmojis?: string[];
   onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
+  mathModeEnabled?: boolean;
+  onMathModeChange?: (enabled: boolean) => void | Promise<void>;
   mediaUploadProgress?: MediaTransferProgress | null;
   onSendReaction: TimelineRowActionHandlers["onSendReaction"];
   onRedactReaction: TimelineRowActionHandlers["onRedactReaction"];
@@ -356,7 +428,6 @@ export function TimelineItemRow({
   /** Shared shell contract (#1100): a message target may carry the requesting
    * row's own inline-edit action. */
   onOpenContextMenu?: OpenContextMenu;
-  threadAttention?: TimelineThreadAttention | null;
   mediaDownload?: TimelineMediaDownloadState;
 }) {
   const itemDomId = timelineItemDomId(item.id);
@@ -377,6 +448,14 @@ export function TimelineItemRow({
   const itemEventId = "Event" in item.id ? item.id.Event.event_id : null;
   const eventId = contentEventId ?? itemEventId;
   const activityId = activityEventId ?? eventId;
+  // #1135: the save-name policy distinguishes images from other attachments, and
+  // timestamps a generic image name from the event's own time.
+  const mediaSaveName: MediaSaveNameFacts | null = item.media
+    ? {
+        kind: item.media.kind === "Image" ? "image" : "file",
+        timestampMs: item.timestamp_ms
+      }
+    : null;
   const isRedacted = item.is_redacted;
   // Render only cards with content; pending requests still load through the effect below.
   const visibleLinkPreviews = item.link_previews?.filter((preview) =>
@@ -685,7 +764,7 @@ export function TimelineItemRow({
           originalDisplayLabel: senderOriginalLabel
         }
       : null;
-  const threadSummaryText = item.thread_summary
+  const threadSummary = item.thread_summary
     ? formatThreadSummary(
         item.thread_summary.reply_count,
         item.thread_summary.latest_sender
@@ -694,14 +773,14 @@ export function TimelineItemRow({
         item.thread_summary.latest_body_preview,
         item.thread_summary.latest_timestamp_ms
       )
-    : "";
-  const threadNotificationCount =
-    eventId && threadAttention?.rootEventId === eventId
-      ? threadAttention.notificationCount
-      : 0;
+    : null;
+  const threadSummaryText = threadSummary ? formatThreadSummaryText(threadSummary) : "";
+  // The SDK thread-cache count is the per-root term in the room badge. A
+  // server notification counter cannot replace it while the pane is open.
+  const threadUnreadCount = item.thread_summary?.unread_count ?? 0;
   const threadNotificationsText =
-    threadNotificationCount > 0
-      ? t("timeline.threadNotificationCount", { count: threadNotificationCount })
+    threadUnreadCount > 0
+      ? t("timeline.threadNotificationCount", { count: threadUnreadCount })
       : "";
   const spoilerState = { revealed: revealedSpoilers, reveal: revealSpoiler };
   const displayBody = localizedTimelineItemBody(item);
@@ -715,8 +794,12 @@ export function TimelineItemRow({
   ]
     .filter(Boolean)
     .join(" ");
-  // #874: the message's own `m.mentions` decides which text may render as a pill.
-  const mentionedUserIds = new Set(item.mentioned_user_ids ?? []);
+  // #874/#1123: the message's own `m.mentions` decides which text may render as
+  // a pill: the user ids it named, and whether it flagged the whole room.
+  const mentions = {
+    userIds: new Set(item.mentioned_user_ids ?? []),
+    room: item.mentions_room === true
+  };
   const messageBodyContent = item.formatted
     ? renderFormattedBody(
         item.formatted,
@@ -726,7 +809,7 @@ export function TimelineItemRow({
         searchHighlights,
         spoilerState,
         onOpenMatrixTarget,
-        mentionedUserIds
+        mentions
       )
     : renderPlainTextBody(
         displayBody,
@@ -736,7 +819,7 @@ export function TimelineItemRow({
         mentionProfileUsers,
         spoilerState,
         onOpenMatrixTarget,
-        mentionedUserIds
+        mentions
       );
   const emotePrefix =
     messageKind === "emote" ? (
@@ -761,7 +844,15 @@ export function TimelineItemRow({
                 onCopyText,
                 [],
                 spoilerState,
-                onOpenMatrixTarget
+                onOpenMatrixTarget,
+                // #1328: a quote previews the quoted message, so it pills that
+                // message's mentions instead of rendering bare matrix.to links.
+                {
+                  userIds: new Set(item.reply_quote.mentioned_user_ids ?? []),
+                  // A formatted body pills only `matrix.to` anchors, so a quote
+                  // has no room-mention form to mark.
+                  room: false
+                }
               )
             : replyQuoteBody(item.reply_quote)}
         </div>
@@ -782,6 +873,8 @@ export function TimelineItemRow({
         document={editDocument}
         draftKey={`edit:${eventId ?? "no-event"}`}
         isSending={false}
+        mathModeEnabled={mathModeEnabled}
+        onMathModeChange={onMathModeChange}
         mentionCandidates={mentionCandidates}
         mentionCandidatesLoading={mentionCandidatesLoading}
         resolveComposerKeyAction={resolveComposerKeyAction}
@@ -846,6 +939,7 @@ export function TimelineItemRow({
         onDownload={submitDownloadMedia}
         onOpenMediaViewer={onOpenMediaViewer}
         onSaveMediaFile={onSaveMediaFile}
+        saveName={mediaSaveName}
         viewerActions={{
           canForward,
           forwardDestinations,
@@ -858,20 +952,24 @@ export function TimelineItemRow({
       />
     ) : null;
   function handleContextMenu(event: MouseEvent<HTMLElement>) {
-    if (!onOpenContextMenu || !eventId || !item.sender) {
+    if (!onOpenContextMenu) {
       return;
     }
+    // #1155: capture the selection synchronously, before the menu takes focus,
+    // and only when it is text this row actually renders.
+    const selectedText = messageSelectionWithin(event.currentTarget);
     const items = contextMenuItems({
       kind: "message",
       canManage: currentUserId === item.sender,
       canEdit: item.can_edit,
       canReply: canShowReply,
       hasThread: item.thread_summary != null && canComposeReply,
-      senderUserId: item.sender,
+      senderUserId: item.sender ?? "",
       currentUserId: currentUserId ?? "",
       roomId,
-      eventId,
-      isIgnored: ignoredUserIds.includes(item.sender)
+      eventId: eventId ?? "",
+      isIgnored: item.sender ? ignoredUserIds.includes(item.sender) : false,
+      selectedText
     });
     if (items.length === 0) {
       return;
@@ -881,13 +979,14 @@ export function TimelineItemRow({
     onOpenContextMenu(event, {
       kind: "message",
       message: {
-        sender: item.sender,
+        sender: item.sender ?? "",
         room_id: roomId,
-        event_id: eventId,
+        event_id: eventId ?? "",
         body: item.body ?? "",
         reply_count: item.thread_summary?.reply_count ?? 0
       },
-      onOpenEdit: openEditForm
+      onOpenEdit: openEditForm,
+      selectedText
     }, items);
   }
 
@@ -901,17 +1000,25 @@ export function TimelineItemRow({
     />
   );
   const avatarElement = canStartDirectMessage ? (
-    <button
-      className="avatar avatar-button"
-      type="button"
-      aria-label={t("room.messageMember", { name: senderDisplayLabel })}
-      onClick={(event) => {
-        event.stopPropagation();
-        onStartDirectMessage?.(item.sender!);
-      }}
+    <Tooltip
+      label={t("room.messageMember", { name: senderDisplayLabel })}
+      placement="below"
     >
-      {avatar}
-    </button>
+      {(tooltipProps) => (
+        <button
+          className="avatar avatar-button"
+          type="button"
+          aria-label={t("room.messageMember", { name: senderDisplayLabel })}
+          onClick={(event) => {
+            event.stopPropagation();
+            onStartDirectMessage?.(item.sender!);
+          }}
+          {...tooltipProps}
+        >
+          {avatar}
+        </button>
+      )}
+    </Tooltip>
   ) : (
     <div className="avatar" aria-hidden="true">
       {avatar}
@@ -933,6 +1040,15 @@ export function TimelineItemRow({
       data-reply={item.in_reply_to_event_id ? "true" : undefined}
       data-message-kind={messageKind}
       onContextMenu={handleContextMenu}
+      onMouseDown={(event) => {
+        // #1155: a right-button mousedown collapses the DOM selection before
+        // `contextmenu` reaches us, so the selected-text actions would lose the
+        // text the user aimed at. Suppress the default only for that case, and
+        // only when the selection is this row's own message text.
+        if (event.button === 2 && messageSelectionWithin(event.currentTarget)) {
+          event.preventDefault();
+        }
+      }}
     >
       {avatarElement}
       <div className="message-main">
@@ -1075,7 +1191,7 @@ export function TimelineItemRow({
             )}
           </p>
         ) : null}
-        {threadNotificationCount > 0 ? (
+        {threadUnreadCount > 0 ? (
           <button
             className="thread-summary-chip thread-new-replies-chip"
             type="button"
@@ -1094,7 +1210,17 @@ export function TimelineItemRow({
             onClick={submitOpenThread}
           >
             <MessageCircle size={13} />
-            <span>{threadSummaryText}</span>
+            <span>
+              {threadSummary && threadSummary.template ? (
+                <ThreadSummaryTemplateText
+                  template={threadSummary.template}
+                  values={threadSummary.values}
+                />
+              ) : (
+                threadSummary?.count
+              )}
+              {threadSummary?.timestamp ? <> · {threadSummary.timestamp}</> : null}
+            </span>
           </button>
         ) : null}
         {canShowReactions || receiptTotalCount > 0 ? (
@@ -1122,7 +1248,7 @@ export function TimelineItemRow({
                         key={pillKey}
                       >
                         <span className="reaction-pill-key" dir="auto">
-                          {reaction.key}
+                          {reactionKeyDisplayText(reaction.key)}
                         </span>
                         <span className="reaction-pill-count">{reaction.count}</span>
                         {reactionTooltip ? (
@@ -1157,7 +1283,7 @@ export function TimelineItemRow({
                       }}
                     >
                       <span className="reaction-pill-key" dir="auto">
-                        {reaction.key}
+                        {reactionKeyDisplayText(reaction.key)}
                       </span>
                       <span className="reaction-pill-count">{reaction.count}</span>
                       {reactionTooltip ? (
@@ -1186,17 +1312,22 @@ export function TimelineItemRow({
       <div className="message-actions message-actions-floating">
         {!isEditing && canShowActionButtons && item.can_react ? (
           <div className="reaction-control">
-            <button
-              ref={reactionTriggerRef}
-              className="message-action"
-              type="button"
-              aria-label={t("timeline.addReaction")}
-              aria-expanded={isReactionPickerOpen}
-              aria-haspopup="dialog"
-              onClick={toggleReactionPicker}
-            >
-              <SmilePlus size={14} />
-            </button>
+            <Tooltip label={t("timeline.addReaction")} placement="below" align="end">
+              {(tooltipProps) => (
+                <button
+                  ref={reactionTriggerRef}
+                  className="message-action"
+                  type="button"
+                  aria-label={t("timeline.addReaction")}
+                  aria-expanded={isReactionPickerOpen}
+                  aria-haspopup="dialog"
+                  onClick={toggleReactionPicker}
+                  {...tooltipProps}
+                >
+                  <SmilePlus size={14} />
+                </button>
+              )}
+            </Tooltip>
             {isReactionPickerOpen ? (
               <LazyEmojiPicker
                   anchorRef={reactionTriggerRef}
@@ -1213,7 +1344,7 @@ export function TimelineItemRow({
           </div>
         ) : null}
         {!isEditing && canShowReply ? (
-          <Tooltip label={replyLabel}>
+          <Tooltip label={replyLabel} placement="below" align="end">
             {(tooltipProps) => (
               <button
                 {...tooltipProps}
@@ -1232,7 +1363,7 @@ export function TimelineItemRow({
           </Tooltip>
         ) : null}
         {!isEditing && canShowReplyInThread ? (
-          <Tooltip label={replyInThreadLabel}>
+          <Tooltip label={replyInThreadLabel} placement="below" align="end">
             {(tooltipProps) => (
               <button
                 {...tooltipProps}
@@ -1251,39 +1382,58 @@ export function TimelineItemRow({
           </Tooltip>
         ) : null}
         {!isEditing && canShowActionButtons && item.can_edit ? (
-          <button
-            className="message-action"
-            type="button"
-            aria-label={t("timeline.editMessage")}
-            onClick={openEditForm}
-          >
-            <Edit3 size={14} />
-          </button>
+          <Tooltip label={t("timeline.editMessage")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="message-action"
+                type="button"
+                aria-label={t("timeline.editMessage")}
+                onClick={openEditForm}
+                {...tooltipProps}
+              >
+                <Edit3 size={14} />
+              </button>
+            )}
+          </Tooltip>
         ) : null}
         {!isEditing && canShowActionButtons ? (
-          <button
-            className="message-action"
-            type="button"
-            aria-label={isPinned ? t("timeline.unpinMessage") : t("timeline.pinMessage")}
-            aria-pressed={isPinned}
-            onClick={isPinned ? submitUnpin : submitPin}
+          <Tooltip
+            label={isPinned ? t("timeline.unpinMessage") : t("timeline.pinMessage")}
+            placement="below"
+            align="end"
           >
-            {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
-          </button>
+            {(tooltipProps) => (
+              <button
+                className="message-action"
+                type="button"
+                aria-label={isPinned ? t("timeline.unpinMessage") : t("timeline.pinMessage")}
+                aria-pressed={isPinned}
+                onClick={isPinned ? submitUnpin : submitPin}
+                {...tooltipProps}
+              >
+                {isPinned ? <PinOff size={14} /> : <Pin size={14} />}
+              </button>
+            )}
+          </Tooltip>
         ) : null}
         {!isEditing && canShowMessageActionMenu ? (
           <div className="message-action-menu-control" ref={actionMenuControlRef}>
-            <button
-              ref={actionMenuTriggerRef}
-              className="message-action"
-              type="button"
-              aria-label={t("timeline.messageActions")}
-              aria-expanded={isActionMenuOpen}
-              aria-haspopup="menu"
-              onClick={openActionMenu}
-            >
-              <MoreHorizontal size={14} />
-            </button>
+            <Tooltip label={t("timeline.messageActions")} placement="below" align="end">
+              {(tooltipProps) => (
+                <button
+                  ref={actionMenuTriggerRef}
+                  className="message-action"
+                  type="button"
+                  aria-label={t("timeline.messageActions")}
+                  aria-expanded={isActionMenuOpen}
+                  aria-haspopup="menu"
+                  onClick={openActionMenu}
+                  {...tooltipProps}
+                >
+                  <MoreHorizontal size={14} />
+                </button>
+              )}
+            </Tooltip>
             {isActionMenuOpen ? (
               <div
                 className={`message-action-menu is-${actionMenuPlacement}`}
@@ -1408,14 +1558,19 @@ export function TimelineItemRow({
           </div>
         ) : null}
         {!isEditing && canShowActionButtons && item.can_redact ? (
-          <button
-            className="message-action"
-            type="button"
-            aria-label={t("timeline.redactMessage")}
-            onClick={submitRedaction}
-          >
-            <Trash2 size={14} />
-          </button>
+          <Tooltip label={t("timeline.redactMessage")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="message-action"
+                type="button"
+                aria-label={t("timeline.redactMessage")}
+                onClick={submitRedaction}
+                {...tooltipProps}
+              >
+                <Trash2 size={14} />
+              </button>
+            )}
+          </Tooltip>
         ) : null}
       </div>
     </article>
@@ -1426,6 +1581,36 @@ export function aliasTargetIsActive(target: TimelineAliasTarget): boolean {
   const displayLabel = target.displayLabel.trim();
   const originalDisplayLabel = target.originalDisplayLabel.trim();
   return Boolean(displayLabel && originalDisplayLabel && displayLabel !== originalDisplayLabel);
+}
+
+/** U+FE0F (emoji presentation) and U+FE0E (text presentation) selectors. */
+const EMOJI_VARIATION_SELECTORS = /[\uFE0E\uFE0F]/g;
+
+/**
+ * Bases the bundled Twemoji COLR font (#1380) carries only in their `*_fe0f`
+ * form: its cmap and `unicode-range` omit the bare U+00A9, U+00AE, U+2122 and
+ * U+24C2, so the bare code point falls back to the system emoji font.
+ */
+const TWEMOJI_FE0F_ONLY_BASES = new Set(["\u00A9", "\u00AE", "\u2122", "\u24C2"]);
+
+/**
+ * A reaction key as `--font-emoji` can paint it (#1380). Display only: the key
+ * stays verbatim for matching, sending, redacting and the accessible name,
+ * because Matrix treats `👍` (U+1F44D) and `👍️` (U+1F44D U+FE0F) as two
+ * different reactions.
+ *
+ * The bundled Twemoji build declares a cmap format-14 subtable for exactly four
+ * variation sequences (U+00A9, U+00AE, U+2122 and U+24C2 with U+FE0F). WebKit
+ * treats any other `base + U+FE0F` cluster as unsupported by that font and falls
+ * back to the next family in the stack for the whole cluster, so the thumb-up
+ * that Koushi's own emoji picker sends (517 of its 1,940 entries contain U+FE0F)
+ * painted the system artwork next to a bare `👍` pill that painted Twemoji.
+ * Dropping the selector selects the glyph the font does have; the four inverted
+ * bases get the selector they are missing.
+ */
+export function reactionKeyDisplayText(reactionKey: string): string {
+  const base = reactionKey.replace(EMOJI_VARIATION_SELECTORS, "");
+  return TWEMOJI_FE0F_ONLY_BASES.has(base) ? `${base}\uFE0F` : base;
 }
 
 function formatReactionTooltip(
@@ -1571,38 +1756,132 @@ function localizedTimelineItemBody(item: TimelineItem): string {
   }
 }
 
+/**
+ * A thread summary chip's composed parts (#1378).
+ *
+ * The chip interpolates the latest sender's display name and the latest reply
+ * preview into a catalog template. Rendered as one string, an RTL sender name
+ * ending in a neutral (its trailing `!`) resolves against the LTR template
+ * instead of against the name, and an RTL preview drags the trailing timestamp
+ * into its own run. Those values are therefore kept out of the string: the chip
+ * renders each of them in its own `dir="auto"` element (i18n "Remote/user text …
+ * is rendered with dir=auto at the UI boundary"), and the accessible name wraps
+ * them in FSI…PDI because an attribute cannot carry elements.
+ */
+interface ThreadSummaryParts {
+  /** Catalog template holding the separators; null when only the count shows. */
+  template: MessageId | null;
+  /** Template values, by placeholder name. */
+  values: Record<string, string>;
+  count: string;
+  timestamp: string | null;
+}
+
+/** Template values that carry remote/user text and need their own direction. */
+const THREAD_SUMMARY_USER_TEXT_PLACEHOLDERS = new Set(["sender", "preview"]);
+
+/**
+ * Splits a catalog template such as `"{count} · {sender}: {preview}"` into its
+ * literal text and its `{placeholder}` tokens, in order. The template keeps
+ * owning the wording and its separators; the caller decides how each value is
+ * rendered.
+ */
+function catalogTemplateParts(template: string): Array<{ placeholder: string | null; text: string }> {
+  const parts: Array<{ placeholder: string | null; text: string }> = [];
+  let cursor = 0;
+  for (const match of template.matchAll(MESSAGE_PLACEHOLDER_PATTERN)) {
+    const index = match.index ?? 0;
+    if (index > cursor) {
+      parts.push({ placeholder: null, text: template.slice(cursor, index) });
+    }
+    parts.push({ placeholder: match[1] ?? null, text: "" });
+    cursor = index + match[0].length;
+  }
+  if (cursor < template.length) {
+    parts.push({ placeholder: null, text: template.slice(cursor) });
+  }
+  return parts;
+}
+
+/** A catalog template with its user text isolated in `dir="auto"` elements. */
+function ThreadSummaryTemplateText({
+  template,
+  values
+}: {
+  template: MessageId;
+  values: Record<string, string>;
+}) {
+  return (
+    <>
+      {catalogTemplateParts(t(template)).map((part, index) => {
+        if (part.placeholder === null) {
+          return <Fragment key={index}>{part.text}</Fragment>;
+        }
+        const value = values[part.placeholder] ?? `{${part.placeholder}}`;
+        return THREAD_SUMMARY_USER_TEXT_PLACEHOLDERS.has(part.placeholder) ? (
+          <span dir="auto" key={index}>
+            {value}
+          </span>
+        ) : (
+          <Fragment key={index}>{value}</Fragment>
+        );
+      })}
+    </>
+  );
+}
+
+/** The chip's plain text, for the accessible name (`aria-label` takes a string). */
+function formatThreadSummaryText(parts: ThreadSummaryParts): string {
+  const summary = parts.template
+    ? catalogTemplateParts(t(parts.template))
+        .map((part) =>
+          part.placeholder === null
+            ? part.text
+            : THREAD_SUMMARY_USER_TEXT_PLACEHOLDERS.has(part.placeholder)
+              ? `\u2068${parts.values[part.placeholder] ?? `{${part.placeholder}}`}\u2069`
+              : parts.values[part.placeholder] ?? `{${part.placeholder}}`
+        )
+        .join("")
+    : parts.count;
+  return parts.timestamp ? `${summary} · ${parts.timestamp}` : summary;
+}
+
 function formatThreadSummary(
   replyCount: number,
   latestSender: string | null,
   latestPreview: string | null,
   latestTimestampMs: number | null
-): string {
-  const countText = t(
+): ThreadSummaryParts {
+  const count = t(
     replyCount === 1 ? "timeline.threadReplyCountOne" : "timeline.threadReplyCountMany",
     { count: replyCount }
   );
-  let summary: string;
-  if (latestSender && latestPreview) {
-    summary = t("timeline.threadSummaryWithPreview", {
-      count: countText,
-      sender: latestSender,
-      preview: latestPreview
-    });
-  } else if (latestPreview) {
-    summary = t("timeline.threadSummaryWithBody", {
-      count: countText,
-      preview: latestPreview
-    });
-  } else if (latestSender) {
-    summary = t("timeline.threadSummaryWithSender", {
-      count: countText,
-      sender: latestSender
-    });
-  } else {
-    summary = countText;
-  }
   const timestamp = formatMessageTimestamp(latestTimestampMs);
-  return timestamp ? `${summary} · ${timestamp}` : summary;
+  if (latestSender && latestPreview) {
+    return {
+      template: "timeline.threadSummaryWithPreview",
+      values: { count, sender: latestSender, preview: latestPreview },
+      count,
+      timestamp
+    };
+  }
+  if (latestPreview) {
+    return {
+      template: "timeline.threadSummaryWithBody",
+      values: { count, preview: latestPreview },
+      count,
+      timestamp
+    };
+  }
+  if (latestSender) {
+    return {
+      template: "timeline.threadSummaryWithSender",
+      values: { count, sender: latestSender },
+      count,
+      timestamp
+    };
+  }
+  return { template: null, values: { count }, count, timestamp };
 }
 
 function recoveryStageText(

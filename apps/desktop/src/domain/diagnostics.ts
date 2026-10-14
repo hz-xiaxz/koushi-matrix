@@ -202,6 +202,22 @@ export interface SecurityDiagnostics {
   avatarBrokenImages: number;
 }
 
+/**
+ * Renderer context sampled once when a diagnostic export is requested (#1344).
+ * Primitive counts and dimensions only: no URL, DOM text, room id, or account
+ * content, and no retained DOM reference.
+ */
+export interface RendererContextDiagnostics {
+  viewportWidth: number;
+  viewportHeight: number;
+  devicePixelRatio: number;
+  visibility: string;
+  mountedImages: number;
+  mountedTimelineRows: number;
+  jsHeapUsedBytes: number | null;
+  jsHeapTotalBytes: number | null;
+}
+
 export function createDiagnosticLogBuffer(
   limit = DEFAULT_DIAGNOSTIC_LOG_LIMIT
 ): {
@@ -245,6 +261,7 @@ export interface DiagnosticReportInput {
   jsErrors?: readonly CapturedJsError[];
   logEntries?: readonly DiagnosticLogEntry[];
   securityDiagnostics?: SecurityDiagnostics;
+  rendererContextDiagnostics?: RendererContextDiagnostics;
   droppedLogEntries?: number;
   slidingSyncDiagnostics?: SlidingSyncDiagnostics;
 }
@@ -261,6 +278,7 @@ export function diagnosticReport({
   jsErrors,
   logEntries = [],
   securityDiagnostics,
+  rendererContextDiagnostics,
   droppedLogEntries,
   slidingSyncDiagnostics
 }: DiagnosticReportInput): string {
@@ -323,6 +341,7 @@ export function diagnosticReport({
         ]
       : []),
     ...securityDiagnosticLog,
+    ...formatRendererContextDiagnostics(rendererContextDiagnostics),
     ...formatSlidingSyncDiagnostics(slidingSyncDiagnostics),
     `Diagnostic records dropped: ${normalizeDroppedLogEntries(droppedLogEntries)}`,
     ...diagnosticLog,
@@ -428,6 +447,43 @@ function formatSecurityDiagnostics(security: SecurityDiagnostics | undefined): s
     `security.avatar_src_schemes=${formatSchemeCounts(security.avatarImageSchemes)}`,
     `security.avatar_broken_images=${Math.max(0, Math.trunc(security.avatarBrokenImages))}`
   ];
+}
+
+function formatRendererContextDiagnostics(
+  context: RendererContextDiagnostics | undefined
+): string[] {
+  if (!context) {
+    return [];
+  }
+
+  // The JS heap figures cover engine-managed JavaScript only, are reported by
+  // the engine itself rather than measured here, and are not WebContent/GPU
+  // footprint; they never add to the native process measurements.
+  const jsHeapAvailable = context.jsHeapUsedBytes !== null;
+  const jsHeapSource = jsHeapAvailable ? "performance_memory" : "unavailable";
+  return [
+    "Renderer context (sampled when the export was requested):",
+    `renderer.viewport_width_px=${normalizedCount(context.viewportWidth)}`,
+    `renderer.viewport_height_px=${normalizedCount(context.viewportHeight)}`,
+    `renderer.device_pixel_ratio=${normalizedRatio(context.devicePixelRatio)}`,
+    `renderer.visibility=${safeLogToken(context.visibility)}`,
+    `renderer.mounted_images=${normalizedCount(context.mountedImages)}`,
+    `renderer.mounted_timeline_rows=${normalizedCount(context.mountedTimelineRows)}`,
+    `renderer.js_heap_source=${jsHeapSource}`,
+    `renderer.js_heap_status=${jsHeapAvailable ? "available" : "unavailable"}`,
+    `renderer.js_heap_accuracy=${jsHeapAvailable ? "engine_reported_approximate" : "unavailable"}`,
+    `renderer.js_heap_used_bytes=${formatOptionalBytes(context.jsHeapUsedBytes)}`,
+    `renderer.js_heap_total_bytes=${formatOptionalBytes(context.jsHeapTotalBytes)}`,
+    "renderer.js_heap_scope=javascript_heap_only_excludes_webkit_gpu_and_native"
+  ];
+}
+
+function formatOptionalBytes(value: number | null): string {
+  return value === null ? "unavailable" : String(normalizedCount(value));
+}
+
+function normalizedRatio(value: number): number {
+  return Number.isFinite(value) && value > 0 ? value : 0;
 }
 
 function normalizeDroppedLogEntries(value: number | undefined): number {

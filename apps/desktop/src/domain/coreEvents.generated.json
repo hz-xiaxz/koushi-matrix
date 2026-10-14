@@ -734,7 +734,7 @@
             }
           }
         },
-        "schema_version": 7
+        "schema_version": 9
       }
     },
     "generation": 1,
@@ -764,26 +764,6 @@
       "room_id": "!room:example.test"
     },
     "kind": "ThreadsList"
-  },
-  "timelineAnchorRestoreFinished": {
-    "event": {
-      "AnchorRestoreFinished": {
-        "key": {
-          "account_key": "@u:example.test",
-          "kind": {
-            "Room": {
-              "room_id": "!r:example.test"
-            }
-          }
-        },
-        "request_id": {
-          "connection_id": 3,
-          "sequence": 7
-        },
-        "status": "BudgetExhausted"
-      }
-    },
-    "kind": "Timeline"
   },
   "timelineDisplayLabelsUpdated": {
     "event": {
@@ -921,6 +901,7 @@
             "mentioned_user_ids": [
               "@mentioned:example.test"
             ],
+            "mentions_room": false,
             "message_kind": "emote",
             "reactions": [
               {
@@ -956,7 +937,8 @@
               "latest_sender": "@thread:example.test",
               "latest_sender_label": null,
               "latest_timestamp_ms": 124,
-              "reply_count": 2
+              "reply_count": 2,
+              "unread_count": 0
             },
             "timestamp_ms": 123
           },
@@ -1022,6 +1004,7 @@
             "mentioned_user_ids": [
               "@mentioned:example.test"
             ],
+            "mentions_room": false,
             "message_kind": "emote",
             "notice_i18n": {
               "key": "timeline.notice.roomUpgraded",
@@ -1062,7 +1045,8 @@
               "latest_sender": "@thread:example.test",
               "latest_sender_label": null,
               "latest_timestamp_ms": 124,
-              "reply_count": 2
+              "reply_count": 2,
+              "unread_count": 0
             },
             "timestamp_ms": 123
           }
@@ -1152,6 +1136,7 @@
                 "mentioned_user_ids": [
                   "@mentioned:example.test"
                 ],
+                "mentions_room": false,
                 "message_kind": "emote",
                 "reactions": [
                   {
@@ -1187,7 +1172,8 @@
                   "latest_sender": "@thread:example.test",
                   "latest_sender_label": null,
                   "latest_timestamp_ms": 124,
-                  "reply_count": 2
+                  "reply_count": 2,
+                  "unread_count": 0
                 },
                 "timestamp_ms": 123
               }
@@ -1266,6 +1252,7 @@
                 "url": "https://example.invalid/page"
               }
             ],
+            "mentions_room": false,
             "message_kind": "text",
             "reactions": [],
             "sender": "@u:example.test",
@@ -1415,6 +1402,7 @@
               },
               "width": 2
             },
+            "mentions_room": false,
             "message_kind": "text",
             "reactions": [],
             "sender": "@u:example.test",
@@ -1622,6 +1610,7 @@
             "is_edited": false,
             "is_hidden": false,
             "is_redacted": false,
+            "mentions_room": false,
             "message_kind": "text",
             "reactions": [],
             "reply_quote": {
@@ -1637,6 +1626,9 @@
                 "html": "<p>quoted <strong>preview</strong></p><pre><code class=\"language-rust\">fn main() {}</code></pre>",
                 "plain_text": "quoted previewfn main() {}"
               },
+              "mentioned_user_ids": [
+                "@quoted:example.test"
+              ],
               "sender": "@other:example.test",
               "sender_label": null,
               "state": "ready"
@@ -1709,6 +1701,7 @@
             "is_edited": false,
             "is_hidden": false,
             "is_redacted": false,
+            "mentions_room": false,
             "message_kind": "text",
             "reactions": [],
             "send_state": {

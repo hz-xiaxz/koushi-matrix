@@ -1,3 +1,4 @@
+import type { MessageId } from "../i18n/messages";
 import type { LinkPreview } from "./linkPreview";
 
 export type SearchScopeKind = "currentRoom" | "currentSpace" | "allRooms";
@@ -8,9 +9,6 @@ export interface RoomAddressPreview {
   error: "empty" | "invalid" | "notReady" | null;
   /** The server whose alias namespace every Space on it shares (#1006). */
   server_name: string | null;
-  /** The room is created without an address (#1023): its name offers no
-   * suggestion and none was entered. `error` is then null. */
-  without_address?: boolean;
 }
 
 export interface CreateRoomRequest {
@@ -21,6 +19,19 @@ export interface CreateRoomRequest {
   invitedOnly: boolean;
   visibility: CreateRoomVisibility;
   parentSpace?: CreateRoomParentSpace | null;
+  /** An explicit access policy (#1177); omitted keeps the legacy presets. An
+   * explicitly selected allow Space need not be the attachment and never
+   * writes `m.space.child`. */
+  accessPolicy?: RoomAccessPolicy | null;
+  /** An explicit history visibility (#1177); omitted keeps the legacy
+   * private-in-Space `invited` default. */
+  history?: RoomHistoryVisibility | null;
+}
+
+/** A settable access policy: a join rule plus its canonical allow Space ids (#1177). */
+export interface RoomAccessPolicy {
+  rule: RoomJoinRule;
+  allowTargets: string[];
 }
 
 export type CreateRoomVisibility = "private" | "public";
@@ -65,6 +76,7 @@ export interface AccountTabSummary {
   avatarSourceRef: string | null;
   status: AccountTabStatus;
   unreadCount: number;
+  inviteCount?: number;
 }
 
 export interface AccountTabsSnapshot {
@@ -83,9 +95,11 @@ export type ComposerDraftAccountOwner = SavedSessionInfo;
 
 /**
  * IPC snapshot contract version. Must match `dto.rs`'s `SNAPSHOT_SCHEMA_VERSION`.
- * Version 7 adds the desktop update preference.
+ * Version 9 adds the persisted sidebar section bound
+ * (`SidebarSectionSettings.expanded`) and its projection
+ * (`SidebarModel.section_bounds`).
  */
-export const SNAPSHOT_SCHEMA_VERSION = 7;
+export const SNAPSHOT_SCHEMA_VERSION = 9;
 
 /**
  * Snapshot state. #87 Phase 4 sectioned this into domain (Matrix/product, Rust-owned,
@@ -151,6 +165,8 @@ export interface AppUiState {
   files_view: FilesViewState;
   history_export: HistoryExportState;
   threads_list: ThreadsListState;
+  /** #1160: the explicitly opened Home/Space scheduled-sends projection. */
+  scheduled_sends_list: ScheduledSendsListState;
   basic_operation: BasicOperationState;
   /** Rust-owned advisory address check of the create-room dialog (#1006). */
   room_address_availability: RoomAddressAvailabilityState;
@@ -316,6 +332,11 @@ export interface SidebarScopeSettings {
 export interface SidebarSectionSettings {
   collapsed: boolean;
   sort: RoomListSort;
+  /**
+   * #1366: whether this scope's section shows every row. A bounded section
+   * shows at most `SidebarSectionBound.visible_limit` rows.
+   */
+  expanded: boolean;
 }
 
 export type SidebarSectionKind = "rooms" | "dms" | "lowPriority";
@@ -325,6 +346,7 @@ export interface SidebarSectionPatch {
   section: SidebarSectionKind;
   collapsed?: boolean;
   sort?: RoomListSort;
+  expanded?: boolean;
 }
 
 export interface NotificationSettings {
@@ -357,7 +379,7 @@ export type DesktopUpdateState =
   | { kind: "idle" }
   | { kind: "up_to_date"; version: string }
   | { kind: "checking" }
-  | { kind: "available"; version: string; generation: number }
+  | { kind: "available"; version: string; generation: number; notification_only: boolean; release_url: string | null; ignored: boolean; check_failed: boolean }
   | { kind: "downloading"; version: string }
   | { kind: "ready"; version: string }
   | { kind: "failed"; stage: "check" | "download_or_verify" | "install" }
@@ -524,8 +546,14 @@ export type AuthFailureKind =
   | "unsupported"
   | "cancelled"
   | "forbidden"
+  | "rateLimited"
+  | "invalidCredentials"
+  | "store"
   | "timeout"
   | "sdk";
+
+/** The user's bounded chosen method for a browser sign-in start (#1267). */
+export type DelegatedAuthMethod = "oauth" | "sso";
 
 export type AccountManagementState =
   | { kind: "idle" }
@@ -742,7 +770,45 @@ export type SecureBackupGateFailureKind =
   | "artifactDelivery"
   | "forbidden"
   | "timeout"
-  | "sdk";
+  | "sdk"
+  | "serverResponse"
+  | "unauthorized";
+
+/** Mirror of the Rust `SecureBackupFailureStage` vocabulary. */
+export type SecureBackupFailureStage =
+  | "inspectServerTrust"
+  | "roomKeyCounts"
+  | "recoveryKeyDelivery"
+  | "crossSigningStatus"
+  | "inspectionDeadline"
+  | "unknown";
+
+/** Mirror of the Rust `SecureBackupFailureTransport` vocabulary. */
+export type SecureBackupFailureTransport =
+  | "noResponse"
+  | "httpResponse"
+  | "timeout"
+  | "local";
+
+/** Mirror of the Rust `SecureBackupMatrixErrorKind` allowlist. */
+export type SecureBackupMatrixErrorKind =
+  | "forbidden"
+  | "unknownToken"
+  | "missingToken"
+  | "limitExceeded"
+  | "unrecognized"
+  | "badJson"
+  | "notFound"
+  | "unknown";
+
+/** Bounded, privacy-safe Secure Backup failure facts (Rust-owned). */
+export interface SecureBackupFailureDetail {
+  stage: SecureBackupFailureStage;
+  transport: SecureBackupFailureTransport;
+  httpStatus?: number | null;
+  matrixErrorKind?: SecureBackupMatrixErrorKind | null;
+  retryable: boolean;
+}
 
 export type PendingKeyCountBucket =
   | "zero"
@@ -765,8 +831,16 @@ export type SecureBackupGateState =
   | { kind: "creatingBackup" }
   | { kind: "recoveryKeyDeliveryRequired" }
   | { kind: "uploadingExistingKeys"; pending: PendingKeyCountBucket }
-  | { kind: "degradedRetrying"; failure: SecureBackupGateFailureKind }
-  | { kind: "blockedFailed"; failure: SecureBackupGateFailureKind }
+  | {
+      kind: "degradedRetrying";
+      failure: SecureBackupGateFailureKind;
+      detail?: SecureBackupFailureDetail | null;
+    }
+  | {
+      kind: "blockedFailed";
+      failure: SecureBackupGateFailureKind;
+      detail?: SecureBackupFailureDetail | null;
+    }
   | { kind: "ready" };
 
 export type VerificationMethodCapability = "existingDeviceSas" | "recoveryKey" | "securityPhrase" | "bootstrap";
@@ -819,7 +893,6 @@ interface SessionStateFields {
   method?: VerificationMethod;
   flow_id?: number;
   sas_emojis?: SasEmoji[];
-  destination_written?: boolean;
   reason?: "existingIdentityWithoutProof" | "userRejected";
   recovery_methods?: RecoveryMethod[];
   failure?: "unsupported" | "unreachable" | "invalidResponse";
@@ -865,7 +938,7 @@ export type SessionState =
     >
   | ExactSessionState<
       "awaitingBootstrapConfirmation",
-      "homeserver" | "user_id" | "device_id" | "gate" | "flow_id" | "destination_written"
+      "homeserver" | "user_id" | "device_id" | "gate" | "flow_id"
     >
   | ExactSessionState<"rejecting", "homeserver" | "user_id" | "device_id" | "reason">
   | SessionAccountState<"ready">
@@ -1168,6 +1241,8 @@ export interface SpaceChildSummary {
   can_join: boolean;
   is_space: boolean;
   joined_members: number;
+  /** Issue #1410: a Space admin suggests this child to members. */
+  suggested?: boolean;
 }
 
 export type SpaceChildrenLoadState =
@@ -1181,7 +1256,43 @@ export interface SpaceChildrenState {
   generation: number;
   children: SpaceChildSummary[];
   load: SpaceChildrenLoadState;
+  /** Issue #1410: whether this account may change the suggested flags. */
+  can_edit_suggested?: boolean;
+  suggested_edit?: SpaceChildSuggestedEditState;
+  /** Issue #1410: the one-time offer; it outlives the Space selection. */
+  suggested_offer?: SuggestedRoomsOffer;
 }
+
+/** Issue #1410: the admin toggle of one child's suggested flag. */
+export type SpaceChildSuggestedEditState =
+  | { kind: "idle" }
+  | { kind: "saving"; request_id: number; child_room_id: string; suggested: boolean }
+  | {
+      kind: "failed";
+      child_room_id: string;
+      suggested: boolean;
+      failure: OperationFailureKind;
+    };
+
+export interface SuggestedRoomCandidate {
+  room_id: string;
+  display_name: string;
+  display_name_placeholder?: RoomNamePlaceholder | null;
+}
+
+export interface SuggestedRoomJoinResult {
+  room_id: string;
+  display_name: string;
+  display_name_placeholder?: RoomNamePlaceholder | null;
+  failure?: OperationFailureKind | null;
+}
+
+/** Issue #1410: the one-time offer to join a newly joined Space's suggested rooms. */
+export type SuggestedRoomsOffer =
+  | { kind: "none" }
+  | { kind: "offered"; space_id: string; rooms: SuggestedRoomCandidate[] }
+  | { kind: "joining"; request_id: number; space_id: string; rooms: SuggestedRoomCandidate[] }
+  | { kind: "completed"; space_id: string; results: SuggestedRoomJoinResult[] };
 
 export interface SpaceMembersState {
   selected_space_id: string | null;
@@ -1339,6 +1450,10 @@ export interface RoomSummary {
   unread_count: number;
   notification_count?: number;
   highlight_count?: number;
+  /** #1238: summed per-root SDK thread-cache unread replies; `unread_count` stays main-only navigation state. */
+  thread_unread_count?: number;
+  /** #1238: summed per-root SDK thread-cache unread mentions, so a thread mention renders mention styling. */
+  thread_highlight_count?: number;
   marked_unread?: boolean;
   recency_stamp?: number | null;
   conversation_activity?: ConversationActivity | null;
@@ -1553,7 +1668,11 @@ export type OperationFailureKind =
   | "network"
   | "timeout"
   | "invalid"
-  | "sdk";
+  | "sdk"
+  /** The current join-rule content has allow conditions this client does not model (#1177). */
+  | "unsupportedPolicyCondition"
+  /** The current join-rule policy could not be read before the write (#1177). */
+  | "policyNotVerified";
 
 export interface MediaTransferProgress {
   current: number;
@@ -1761,7 +1880,107 @@ export interface DirectoryRoomSummary {
 export interface RoomManagementState {
   selected_room_id: string | null;
   settings: RoomSettingsSnapshot | null;
+  /**
+   * The Rust-owned access/history draft (#1177). React keeps only DOM/focus
+   * state; every rule, target and history selection lives here.
+   */
+  draft?: RoomAccessDraft | null;
   operation: RoomManagementOperationState;
+}
+
+/** The scope a Rust-owned access/history draft belongs to (#1177). */
+export type RoomAccessDraftScope =
+  | { kind: "room"; roomId: string }
+  | { kind: "create"; sessionId: number };
+
+export interface RoomAccessDraft {
+  scope: RoomAccessDraftScope;
+  revision: number;
+  rule?: RoomJoinRule | null;
+  /** The renderable subset of the selected allow targets (#1177): only joined
+   * Spaces the picker offers. Unrenderable confirmed identities stay in Rust. */
+  allowTargets?: string[];
+  history?: RoomHistoryVisibility | null;
+  /** Whether the user made an explicit choice; an untouched create draft keeps
+   * the legacy preset path to Create. */
+  touched?: boolean;
+}
+
+/** The create dialog facts that seed an opened create editor (#1177). */
+export interface CreateRoomAccessSeed {
+  visibility: CreateRoomVisibility;
+  invitedOnly?: boolean;
+  parentSpaceId?: string | null;
+}
+
+/** A typed mutation of the Rust-owned access/history draft (#1177). */
+export type RoomAccessDraftCommand =
+  | { kind: "rule"; scope: RoomAccessDraftScope; rule?: RoomJoinRule | null }
+  | { kind: "allowTargets"; scope: RoomAccessDraftScope; allowTargets: string[] }
+  | {
+      kind: "toggleAllowTarget";
+      scope: RoomAccessDraftScope;
+      target: string;
+      selected: boolean;
+    }
+  | { kind: "history"; scope: RoomAccessDraftScope; history?: RoomHistoryVisibility | null }
+  | { kind: "reset"; scope: RoomAccessDraftScope }
+  | { kind: "open"; scope: RoomAccessDraftScope; create?: CreateRoomAccessSeed };
+
+/** Which property a Rust access preview describes (#1177). */
+export type RoomAccessPreviewContext = "access" | "history";
+
+/** One resolved outcome line: a catalog id plus ordered substitutions. */
+export interface RoomAccessOutcomeLine {
+  messageId: MessageId;
+  substitutions?: string[];
+}
+
+export interface RoomAccessOutcome {
+  join: RoomAccessOutcomeLine;
+  joinRequest?: RoomAccessOutcomeLine;
+  history: RoomAccessOutcomeLine;
+  encryption: RoomAccessOutcomeLine;
+  directory: RoomAccessOutcomeLine;
+  historyKeyCaveat?: RoomAccessOutcomeLine;
+  nonRetroactive: RoomAccessOutcomeLine;
+}
+
+/** A stateless Rust preview of one Room Info panel (#1177). */
+export interface RoomAccessPreview {
+  scope: RoomAccessDraftScope;
+  context: RoomAccessPreviewContext;
+  confirmed: boolean;
+  outcome: RoomAccessOutcome;
+  /** The canonical key of the effective access policy, Rust-owned (#1177). */
+  canonicalPolicyKey?: string;
+}
+
+/** Why a create proposal cannot be submitted (#1177). */
+export type CreateRoomAccessRejection =
+  | "publicWithRestrictedAccess"
+  | "explicitPolicyWithInvitedOnly"
+  | "emptyAccessTargets"
+  | "publicWithInvitedOnly";
+
+/** Effective create inputs the Rust preview normalizes with Create's rules. */
+export interface CreateRoomAccessPreviewInput {
+  visibility: CreateRoomVisibility;
+  invitedOnly: boolean;
+  encrypted: boolean;
+  parentSpaceId?: string | null;
+}
+
+export interface CreateRoomAccessPreview {
+  scope: RoomAccessDraftScope;
+  confirmed: boolean;
+  outcome: RoomAccessOutcome;
+  /** The effective join rule Create would submit (legacy preset included). */
+  effectiveRule: RoomJoinRule | null;
+  /** The effective history visibility Create would submit. */
+  effectiveHistory: RoomHistoryVisibility;
+  rejection?: CreateRoomAccessRejection;
+  roomVersionPinned: boolean;
 }
 
 export type RoomManagementOperationState =
@@ -1850,6 +2069,7 @@ export type RoomSettingChange =
   | { topic: string | null }
   | { avatarUrl: string | null }
   | { joinRule: RoomJoinRule }
+  | { accessPolicy: RoomAccessPolicy }
   | { historyVisibility: RoomHistoryVisibility };
 
 export type RoomModerationAction = "kick" | "ban" | "unban";
@@ -2059,6 +2279,12 @@ export interface SubmissionResponse {
   settlement: CommandSettlement;
 }
 
+/** Prepared-upload send settlement; the flag is the one case where Core consumed the
+ * composer draft into the message caption (#1204). */
+export interface PreparedUploadSendResponse extends CommandSettlement {
+  consumedDraft: boolean;
+}
+
 export interface ComposerDraftAcceptanceResponse {
   acceptedRevision: ComposerDraftRevision;
   settlement: CommandSettlement;
@@ -2111,6 +2337,8 @@ export interface RoomLiveSignalMetadata {
 
 export interface RoomLiveSignals {
   receipts_by_event: Record<string, LiveEventReceiptSummary>;
+  focused_receipts_by_event: Record<string, Record<string, LiveEventReceiptSummary>>;
+  thread_receipts_by_event: Record<string, Record<string, LiveEventReceiptSummary>>;
   fully_read_event_id: string | null;
   typing_user_ids: string[];
   typing_users: LiveTypingUser[];
@@ -2442,6 +2670,8 @@ export interface ThreadsListItem {
   latest_body_preview: string | null;
   latest_timestamp_ms: number | null;
   reply_count: number;
+  /** #1259: unread replies from the SDK thread cache, the same value the chip shows. */
+  unread_count: number;
 }
 
 export type ThreadsListScope =
@@ -2465,6 +2695,20 @@ export type ThreadsListState =
       room_id: string;
       request_id: number;
       failure_kind: OperationFailureKind;
+      items: ThreadsListItem[];
+    };
+
+export type ScheduledSendsScope =
+  | { kind: "home" }
+  | { kind: "space"; space_id: string };
+
+export type ScheduledSendsListState =
+  | { kind: "closed" }
+  | {
+      kind: "open";
+      scope: ScheduledSendsScope;
+      capability: ScheduledSendCapability;
+      items: ScheduledSendItem[];
     };
 
 export type FocusedContextState =
@@ -2725,6 +2969,8 @@ export interface AppError {
   code: string;
   message: string;
   recoverable: boolean;
+  /** Bounded, Rust-classified cause for visible guidance (#1268). */
+  reason?: AuthFailureKind;
 }
 
 export interface SidebarModel {
@@ -2745,6 +2991,12 @@ export interface SidebarModel {
   dms_collapsed?: boolean;
   low_priority_collapsed?: boolean;
   sections: SidebarSections;
+  /**
+   * #1363/#1366: Rust-projected row bound for each visible section. The
+   * renderer slices the matching `sections` list and shows the control; it
+   * never computes the bound itself.
+   */
+  section_bounds?: SidebarSectionBounds | null;
   /** Rust-projected Add existing room rows for the active Space (#1007). */
   space_add_rooms?: SpaceAddRoomsModel | null;
   /** Rust-projected create-room dialog defaults for the active scope (#1023). */
@@ -2781,6 +3033,30 @@ export interface SidebarSections {
   not_joined: RoomListItem[];
 }
 
+/**
+ * #1363/#1366: Rust-projected bound for one visible sidebar section.
+ *
+ * `expanded` is the effective bound state: `expanded_by_active_room` marks the
+ * case where the open conversation sits past the bound, so the bound cannot
+ * hide it. `shows_expand_control` is false while that override applies, because
+ * collapsing the section could not change what is visible.
+ */
+export interface SidebarSectionBound {
+  visible_limit: number;
+  total_count: number;
+  visible_count: number;
+  hidden_count: number;
+  expanded: boolean;
+  expanded_by_active_room: boolean;
+  shows_expand_control: boolean;
+}
+
+export interface SidebarSectionBounds {
+  rooms?: SidebarSectionBound | null;
+  dms?: SidebarSectionBound | null;
+  low_priority?: SidebarSectionBound | null;
+}
+
 export interface AccountHomeItem {
   display_name: string;
   /** Unread messages only; invites are counted separately (#330). */
@@ -2801,6 +3077,22 @@ export interface SpaceRailItem {
   unread_count: number;
   highlight_count: number;
   is_active: boolean;
+  /** The Space's own access condition (#1166); absent means not yet projected. */
+  access_join_rule?: RoomJoinRule | null;
+  /**
+   * Restricted-rule allow-condition facts; absent when the rule is not
+   * restricted or has not been projected.
+   */
+  access_restricted_conditions?: RestrictedConditions | null;
+  /** Resolved labels of the rooms/Spaces a restricted rule names (#1166). */
+  access_allowed_room_names?: string[];
+  /**
+   * The verified single-Space membership route (#1220): present only when the
+   * rule names exactly one distinct target whose create event proves it is a
+   * Space and whose name resolves. This is the tooltip substitution for the
+   * specific sentence.
+   */
+  access_space_members_route?: string | null;
   /**
    * Joined, non-DM rooms this Space shows, which a Space leave may take with
    * it. Rust projection; the `leave_space` command re-admits against it.
@@ -2818,6 +3110,19 @@ export interface SpaceLeaveCandidate {
   in_other_space: boolean;
 }
 
+/**
+ * What the client could determine about a `restricted`/`knock_restricted`
+ * rule's allow conditions (#1220). Mirrors the Rust `RestrictedConditions`:
+ * an allow-rule type the client does not model is never reported as a confirmed
+ * empty set, and an unavailable rule is never reported as inspected.
+ */
+export type RestrictedConditions =
+  | "notInspected"
+  | "confirmedEmpty"
+  | "membershipOnly"
+  | "membershipPlusUnsupported"
+  | "unsupportedOnly";
+
 export interface RoomListItem {
   room_id: string;
   /**
@@ -2828,6 +3133,26 @@ export interface RoomListItem {
   membership?: SpaceChildMembership;
   /** Whether this row offers a join. Always false for a joined room. */
   can_join?: boolean;
+  /** Issue #1410: a suggested not-joined Space child. Never true for a joined room. */
+  suggested?: boolean;
+  /**
+   * The room's own authoritative access condition (#1166), from its
+   * `m.room.join_rules`. Absent means not yet projected, never a guessed rule;
+   * independent of encryption, DM status, membership and `can_join`.
+   */
+  access_join_rule?: RoomJoinRule | null;
+  /**
+   * Restricted-rule allow-condition facts; absent when the rule is not
+   * restricted or has not been projected. Never inferred here.
+   */
+  access_restricted_conditions?: RestrictedConditions | null;
+  /** Resolved labels of the rooms/Spaces a restricted rule names (#1166). */
+  access_allowed_room_names?: string[];
+  /**
+   * The verified single-Space membership route (#1220), or absent for every
+   * other restricted shape.
+   */
+  access_space_members_route?: string | null;
   display_name: string;
   /** Mirrors `RoomSummary.display_label_placeholder`; render via `roomListItemLabel`. */
   display_name_placeholder?: RoomNamePlaceholder | null;
@@ -2837,8 +3162,11 @@ export interface RoomListItem {
   highlight_count: number;
   /** Rust-owned notification count selected for the row's display mode. */
   notification_count?: number;
-  /** Numeric badge value; zero means the row may render the unread dot. */
+  /** Verified numeric unread badge; manual markers remain nonnumeric. */
   display_count?: number;
+  /** Rust-owned parts of the numeric badge; their sum is `display_count`. */
+  main_unread_count?: number;
+  thread_unread_count?: number;
   has_unread_content?: boolean;
   is_attention_highlighted?: boolean;
   has_unread_mention?: boolean;

@@ -4,7 +4,7 @@ use std::sync::Arc;
 
 use tokio::sync::mpsc;
 
-use koushi_protocol::command::TimelineCommand;
+use koushi_protocol::command::{InitialBackfillPolicy, TimelineCommand};
 
 #[cfg(any(test, feature = "test-hooks"))]
 use koushi_protocol::ids::AccountKey;
@@ -13,8 +13,64 @@ use koushi_protocol::ids::{TimelineKey, TimelineKind};
 use super::super::actor::{TimelineActorHandle, TimelineActorMessage};
 use super::super::test_support::{fake_rid, live_tail_test_manager};
 use super::{
-    MembershipOperationGate, SubscriptionReconcileTrigger, TimelineSubscriptionResidencyHandle,
+    MembershipOperationGate, RoomLeaveState, RoomMembershipTransition,
+    RoomMembershipTransitionKind, SubscriptionReconcileTrigger,
+    TimelineSubscriptionResidencyHandle,
 };
+
+#[tokio::test]
+async fn observed_leave_quiesces_timeline_and_tombstones_room() {
+    let room_id = matrix_sdk::ruma::room_id!("!left:test").to_owned();
+    let key = TimelineKey::room(AccountKey("@a:test".to_owned()), room_id.as_str());
+    let mut manager =
+        live_tail_test_manager(HashMap::from([(key.clone(), placeholder_actor_handle())]));
+    manager.current_core_generation = Some(7);
+    manager.session_subscribed_rooms.insert(room_id.clone());
+    manager.lease_room(room_id.clone());
+
+    manager
+        .handle_room_membership_observed(
+            7,
+            vec![RoomMembershipTransition {
+                room_id: room_id.clone(),
+                kind: RoomMembershipTransitionKind::Left,
+            }],
+        )
+        .await;
+
+    assert!(!manager.timelines.contains_key(&key));
+    assert!(!manager.session_subscribed_rooms.contains(&room_id));
+    assert!(!manager.subscribed_room_leases.contains_key(&room_id));
+    assert_eq!(
+        manager.room_leave_states.get(&room_id),
+        Some(&RoomLeaveState::LeftObserved)
+    );
+
+    // A room selection queued before the leave must not restore a subscriber.
+    manager
+        .handle_subscribe(
+            fake_rid(60_004),
+            key.clone(),
+            false,
+            false,
+            InitialBackfillPolicy::Disabled,
+        )
+        .await;
+    assert!(!manager.timelines.contains_key(&key));
+    assert!(!manager.session_subscribed_rooms.contains(&room_id));
+
+    manager
+        .handle_room_membership_observed(
+            7,
+            vec![RoomMembershipTransition {
+                room_id: room_id.clone(),
+                kind: RoomMembershipTransitionKind::Joined,
+            }],
+        )
+        .await;
+    assert!(!manager.room_leave_states.contains_key(&room_id));
+    assert!(manager.session_subscribed_rooms.contains(&room_id));
+}
 
 #[cfg(any(test, feature = "test-hooks"))]
 #[tokio::test]

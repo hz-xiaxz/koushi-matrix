@@ -9,7 +9,7 @@ use koushi_state::{
 use tokio::sync::mpsc;
 
 use crate::composer_draft_lifecycle::ForwardedComposerDraftPermit;
-use crate::timeline::composer::build_room_message_content_from_composer_body;
+use crate::timeline::composer::build_room_message_content_from_composer_body_with_options;
 use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 use koushi_protocol::ids::RequestId;
 
@@ -64,12 +64,16 @@ pub(super) async fn admit_secure_backup_user_content(
 fn build_scheduled_message_content(
     body: &str,
     thread_root_event_id: Option<&str>,
+    formatting_options: koushi_state::ComposerFormattingOptions,
 ) -> Result<matrix_sdk::ruma::events::room::message::RoomMessageEventContent, TimelineFailureKind> {
     use matrix_sdk::ruma::events::{relation::Thread, room::message::Relation};
 
-    let mut content = build_room_message_content_from_composer_body(
+    // #1348: scheduled content is admitted under the composer's own formatting
+    // options (math mode), exactly like an immediate send.
+    let mut content = build_room_message_content_from_composer_body_with_options(
         body,
         koushi_state::MentionIntent::default(),
+        formatting_options,
     )?;
     if let Some(root_event_id) = thread_root_event_id {
         let root_event_id = matrix_sdk::ruma::EventId::parse(root_event_id)
@@ -109,6 +113,7 @@ impl AccountActor {
         send_at_ms: u64,
         draft_revision: ComposerDraftRevision,
         composer_permit: ForwardedComposerDraftPermit,
+        formatting_options: koushi_state::ComposerFormattingOptions,
     ) {
         if self.session_key_id.as_ref() != Some(&expected_account) {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
@@ -140,6 +145,7 @@ impl AccountActor {
                     thread_root_event_id.as_deref(),
                     &body,
                     send_at_ms,
+                    formatting_options,
                 )
                 .await
         {
@@ -192,6 +198,10 @@ impl AccountActor {
         .await;
     }
 
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "actor message handler: parameters are the destructured message fields"
+    )]
     pub(super) async fn handle_dispatch_local_scheduled_send(
         &self,
         request_id: RequestId,
@@ -200,6 +210,7 @@ impl AccountActor {
         room_id: String,
         thread_root_event_id: Option<String>,
         body: String,
+        formatting_options: koushi_state::ComposerFormattingOptions,
     ) {
         let retry_at_ms = crate::scheduled_send::local_scheduled_send_retry_at_ms();
         if !scheduled_dispatch_targets_active_session(
@@ -224,8 +235,11 @@ impl AccountActor {
                 return;
             }
         };
-        let content = match build_scheduled_message_content(&body, thread_root_event_id.as_deref())
-        {
+        let content = match build_scheduled_message_content(
+            &body,
+            thread_root_event_id.as_deref(),
+            formatting_options,
+        ) {
             Ok(content) => content,
             Err(kind) => {
                 self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
@@ -308,6 +322,7 @@ impl AccountActor {
         body: String,
         delay_id: String,
         send_at_ms: u64,
+        formatting_options: koushi_state::ComposerFormattingOptions,
     ) {
         let Some(session) = &self.session else {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
@@ -362,6 +377,7 @@ impl AccountActor {
                 thread_root_event_id.as_deref(),
                 &body,
                 send_at_ms,
+                formatting_options,
             )
             .await
         {
@@ -398,6 +414,7 @@ impl AccountActor {
         thread_root_event_id: Option<&str>,
         body: &str,
         send_at_ms: u64,
+        formatting_options: koushi_state::ComposerFormattingOptions,
     ) -> Result<String, ()> {
         use matrix_sdk::ruma::TransactionId;
         use matrix_sdk::ruma::api::client::delayed_events::{
@@ -406,7 +423,8 @@ impl AccountActor {
 
         let room_id = matrix_sdk::ruma::RoomId::parse(room_id).map_err(|_| ())?;
         let content =
-            build_scheduled_message_content(body, thread_root_event_id).map_err(|_| ())?;
+            build_scheduled_message_content(body, thread_root_event_id, formatting_options)
+                .map_err(|_| ())?;
         let request = delayed_message_event::unstable::Request::new(
             room_id,
             TransactionId::new(),

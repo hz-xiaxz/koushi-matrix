@@ -269,7 +269,10 @@ impl ReplyQuoteHydration {
                 OperationFailureKind::NotFound | OperationFailureKind::Forbidden,
             ) => Some(placeholder_quote(event_id, ReplyQuoteState::Missing)),
             OriginalLookupOutcome::Failed(
-                OperationFailureKind::Invalid | OperationFailureKind::Sdk,
+                OperationFailureKind::Invalid
+                | OperationFailureKind::Sdk
+                | OperationFailureKind::UnsupportedPolicyCondition
+                | OperationFailureKind::PolicyNotVerified,
             ) => Some(placeholder_quote(event_id, ReplyQuoteState::Unsupported)),
             OriginalLookupOutcome::Failed(
                 OperationFailureKind::Network | OperationFailureKind::Timeout,
@@ -415,6 +418,7 @@ pub(super) fn placeholder_quote(event_id: &str, state: ReplyQuoteState) -> Reply
         sender_label: None,
         body_preview: None,
         formatted: None,
+        mentioned_user_ids: Vec::new(),
         state,
     }
 }
@@ -717,16 +721,7 @@ impl TimelineActor {
     /// resolved from a committed original or a settled ledger entry, including
     /// already-resolved quotes whose original changed in the retained refresh
     /// set.
-    ///
-    /// While an anchor restore is buffering its coalesced emission, the
-    /// republish is deferred: emitting item sets now would overtake
-    /// `restore_emit_buffer` and reorder the UI's settled update.
     pub(super) fn republish_reply_quote_dependents(&mut self) {
-        if self.restore_anchor.is_some() {
-            self.reply_quote_republish_pending = true;
-            return;
-        }
-        self.reply_quote_republish_pending = false;
         let refresh = std::mem::take(&mut self.reply_quote_refresh);
         let refresh = &refresh;
         let targets = quote_targets(self.navigation_items.iter())

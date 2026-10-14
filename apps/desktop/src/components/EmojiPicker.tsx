@@ -18,6 +18,7 @@ import {
 } from "./floatingLayer";
 import { t } from "../i18n/messages";
 import { ImeTextField } from "./ImeTextControl";
+import { Tooltip } from "./Tooltip";
 import {
   EMOJI_BY_CATEGORY,
   EMOJI_CATEGORIES,
@@ -229,50 +230,66 @@ export function EmojiPicker({
             onChange={(event) => setQuery(event.currentTarget.value)}
           />
         </div>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("mediaGallery.close")}
-          onClick={onClose}
-        >
-          <X size={14} />
-        </button>
+        <Tooltip label={t("mediaGallery.close")} placement="below" align="end">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("mediaGallery.close")}
+              onClick={onClose}
+              {...tooltipProps}
+            >
+              <X size={14} />
+            </button>
+          )}
+        </Tooltip>
       </div>
 
       {!searching && (
         <div className="emoji-picker-tabs" role="tablist">
           {recentEntries.length > 0 && (
-            <button
-              className={`emoji-picker-tab ${activeCategory === "recent" ? "active" : ""}`}
-              type="button"
-              role="tab"
-              aria-selected={activeCategory === "recent"}
-              aria-label={t("composer.emojiRecent")}
-              title={t("composer.emojiRecent")}
-              onClick={() => {
-                setActiveCategory("recent");
-                scrollToCategory("recent");
-              }}
-            >
-              <span aria-hidden="true">🕒</span>
-            </button>
+            <Tooltip label={t("composer.emojiRecent")} placement="below">
+              {(tooltipProps) => (
+                <button
+                  className={`emoji-picker-tab ${activeCategory === "recent" ? "active" : ""}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeCategory === "recent"}
+                  aria-label={t("composer.emojiRecent")}
+                  onClick={() => {
+                    setActiveCategory("recent");
+                    scrollToCategory("recent");
+                  }}
+                  {...tooltipProps}
+                >
+                  <span aria-hidden="true">🕒</span>
+                </button>
+              )}
+            </Tooltip>
           )}
           {EMOJI_CATEGORIES.map((category) => (
-            <button
+            <Tooltip
               key={category}
-              className={`emoji-picker-tab ${activeCategory === category ? "active" : ""}`}
-              type="button"
-              role="tab"
-              aria-selected={activeCategory === category}
-              aria-label={t(`emoji.category.${category}` as const)}
-              title={t(`emoji.category.${category}` as const)}
-              onClick={() => {
-                setActiveCategory(category);
-                scrollToCategory(category);
-              }}
+              label={t(`emoji.category.${category}` as const)}
+              placement="below"
             >
-              <span aria-hidden="true">{EMOJI_CATEGORY_ICONS[category]}</span>
-            </button>
+              {(tooltipProps) => (
+                <button
+                  className={`emoji-picker-tab ${activeCategory === category ? "active" : ""}`}
+                  type="button"
+                  role="tab"
+                  aria-selected={activeCategory === category}
+                  aria-label={t(`emoji.category.${category}` as const)}
+                  onClick={() => {
+                    setActiveCategory(category);
+                    scrollToCategory(category);
+                  }}
+                  {...tooltipProps}
+                >
+                  <span aria-hidden="true">{EMOJI_CATEGORY_ICONS[category]}</span>
+                </button>
+              )}
+            </Tooltip>
           ))}
         </div>
       )}

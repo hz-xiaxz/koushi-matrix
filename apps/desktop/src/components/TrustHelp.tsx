@@ -3,6 +3,8 @@ import { FloatingLayer, floatingPlacementStyle, useFloatingPlacement } from "./f
 import { HelpCircle } from "lucide-react";
 
 import { t } from "../i18n/messages";
+import { useOutsidePressDismissal } from "./popupDismissal";
+import { Tooltip } from "./Tooltip";
 import type { UserTrustState } from "../domain/types";
 
 export function TrustHelpButton({
@@ -17,22 +19,35 @@ export function TrustHelpButton({
 
   return (
     <span className="trust-help">
-      <button
-        ref={trigger}
-        className="trust-help-button"
-        type="button"
-        aria-label={t("help.userTrust.explain")}
-        title={t("help.userTrust.explain")}
-        aria-expanded={open}
-        onKeyDown={(event) => {
-          if (event.key === "Escape" && open && !event.nativeEvent.isComposing) {
-            event.preventDefault(); event.stopPropagation(); setOpen(false);
-          }
+      <Tooltip label={t("help.userTrust.explain")} placement="above">
+        {(tooltipProps) => {
+          // The trigger owns Escape (close the popup) and the tooltip owns
+          // Escape (dismiss the bubble), so merge instead of letting the spread
+          // overwrite the popup handler.
+          const { onKeyDown: onTooltipKeyDown, ...triggerProps } = tooltipProps;
+          return (
+            <button
+              ref={trigger}
+              className="trust-help-button"
+              type="button"
+              aria-label={t("help.userTrust.explain")}
+              aria-expanded={open}
+              onKeyDown={(event) => {
+                onTooltipKeyDown(event);
+                if (event.key === "Escape" && open && !event.nativeEvent.isComposing) {
+                  event.preventDefault();
+                  event.stopPropagation();
+                  setOpen(false);
+                }
+              }}
+              onClick={() => setOpen((value) => !value)}
+              {...triggerProps}
+            >
+              <HelpCircle size={13} aria-hidden="true" />
+            </button>
+          );
         }}
-        onClick={() => setOpen((value) => !value)}
-      >
-        <HelpCircle size={13} aria-hidden="true" />
-      </button>
+      </Tooltip>
       {open ? (
         <TrustHelpPopup trigger={trigger} title={title} body={body} onClose={() => setOpen(false)} />
       ) : null}
@@ -44,7 +59,19 @@ function TrustHelpPopup({ trigger, title, body, onClose }: {
   trigger: RefObject<HTMLButtonElement | null>; title: string; body: string; onClose: () => void;
 }) {
   const placement = useFloatingPlacement({ anchorRef: trigger, placement: "below", align: "start", inlineSize: 300, blockSize: 220 });
+  const popupRef = useRef<HTMLSpanElement>(null);
+  // #1368: the popover renders in the body-level floating layer with no
+  // backdrop, so the shared owner dismisses it on an outside press and keeps
+  // one trust help popup open at a time.
+  useOutsidePressDismissal({
+    open: true,
+    kind: "trust-help",
+    contentRef: popupRef,
+    triggerRef: trigger,
+    onDismiss: onClose
+  });
   return <FloatingLayer><span className="trust-help-popover" role="dialog" aria-label={title}
+    ref={popupRef}
     style={floatingPlacementStyle(placement)}
     onKeyDown={(event) => {
       if (event.key === "Escape" && !event.nativeEvent.isComposing) {

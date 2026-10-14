@@ -219,6 +219,7 @@ pub(super) fn decrypt_retry_backup_result_for_error(
         | koushi_sdk::E2eeTrustError::SecureBackupReenableConfirmationRequired
         | koushi_sdk::E2eeTrustError::SecureBackupUploadFailed
         | koushi_sdk::E2eeTrustError::SecureBackupRecoveryKeyDeliveryFailed
+        | koushi_sdk::E2eeTrustError::SecureBackupInspection(_)
         | koushi_sdk::E2eeTrustError::Sdk(_) => DecryptRetryBackupResult::Sdk,
     }
 }
@@ -836,6 +837,42 @@ pub(super) fn record_thread_projection(
                 projected_diff_count as u64,
             ))
             .field(DiagnosticField::count("items", projected_item_count as u64)),
+    );
+}
+
+/// Record the content-free work counters of one completed room-timeline gap
+/// inspection.
+///
+/// `continuity` classifies the inspected chain (`unknown`, `gapped`, or
+/// `complete`); the generation is room-local and must not be used to
+/// correlate across rooms. Aggregate counts only: no room or event
+/// identifiers, pagination tokens, message content, or local paths.
+pub(super) fn record_timeline_gap_inspection_work(
+    trigger: &'static str,
+    generation: u64,
+    continuity: &'static str,
+    scanned_chunks: usize,
+    event_bodies_decoded: usize,
+    duration_ms: u64,
+) {
+    koushi_diagnostics::record_and_stderr(
+        DiagnosticEvent::new(
+            DiagnosticLevel::Info,
+            "core.timeline_gap_inspection",
+            "finished",
+        )
+        .field(DiagnosticField::token("trigger", trigger))
+        .field(DiagnosticField::count("generation", generation))
+        .field(DiagnosticField::token("continuity", continuity))
+        .field(DiagnosticField::count(
+            "scanned_chunks",
+            scanned_chunks as u64,
+        ))
+        .field(DiagnosticField::count(
+            "event_bodies_decoded",
+            event_bodies_decoded as u64,
+        ))
+        .field(DiagnosticField::count("duration_ms", duration_ms)),
     );
 }
 
@@ -1769,6 +1806,15 @@ fn event_cache_item_diagnostic_event(
         event_id_present,
     ))
     .field(DiagnosticField::boolean("sender_present", sender_present))
+    .field(DiagnosticField::boolean(
+        "redaction_event",
+        item.raw()
+            .get_field::<String>("type")
+            .ok()
+            .flatten()
+            .as_deref()
+            == Some("m.room.redaction"),
+    ))
     .field(DiagnosticField::boolean(
         "redacted",
         item.raw()

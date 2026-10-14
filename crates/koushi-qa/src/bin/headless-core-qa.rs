@@ -56,9 +56,9 @@ use koushi_protocol::command::{
 use koushi_protocol::event::{
     AccountEvent, ActivityEvent, CoreEvent, E2eeTrustEvent, LinkPreviewState, LiveSignalsEvent,
     LocalEncryptionEvent, PaginationDirection, PaginationState, RoomEvent, SearchEvent, SyncEvent,
-    TimelineAnchorRestoreStatus, TimelineBottomArrival, TimelineDiff, TimelineEvent, TimelineGapId,
-    TimelineGapPosition, TimelineItem, TimelineItemId, TimelineMessageActions,
-    TimelineReadStateSync, TimelineSendState, TimelineUnreadPosition, TimelineViewportObservation,
+    TimelineBottomArrival, TimelineDiff, TimelineEvent, TimelineGapId, TimelineGapPosition,
+    TimelineItem, TimelineItemId, TimelineMessageActions, TimelineReadStateSync, TimelineSendState,
+    TimelineUnreadPosition, TimelineViewportObservation,
 };
 use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
 use koushi_protocol::ids::{AccountKey, RequestId, TimelineKey, TimelineKind};
@@ -96,6 +96,8 @@ mod event_wait;
 mod fixtures;
 #[path = "headless_core_qa/orchestrator.rs"]
 mod orchestrator;
+#[path = "common/pagination_waiter.rs"]
+mod pagination_waiter;
 #[path = "headless_core_qa/participants.rs"]
 mod participants;
 #[path = "headless_core_qa/registry.rs"]
@@ -110,6 +112,8 @@ mod scenario_hidden_state_acl;
 mod scenario_history_export;
 #[path = "headless_core_qa/scenarios/identity.rs"]
 mod scenario_identity;
+#[path = "headless_core_qa/scenarios/idle_sync_gap_inspection.rs"]
+mod scenario_idle_sync_gap_inspection;
 #[path = "headless_core_qa/scenarios/read_state.rs"]
 mod scenario_read_state;
 #[path = "headless_core_qa/scenarios/rooms.rs"]

@@ -88,7 +88,7 @@ use koushi_state::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-fn scripted_connection(
+pub(super) fn scripted_connection(
     event_capacity: usize,
 ) -> (
     CoreConnection,
@@ -959,11 +959,13 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
                 sender_label: None,
                 body_preview: Some("quoted".to_owned()),
                 formatted: None,
+                mentioned_user_ids: Vec::new(),
                 state: koushi_state::ReplyQuoteState::Ready,
             }),
             thread_root: None,
             thread_summary: Some(ThreadSummaryDto {
                 reply_count: 1,
+                unread_count: 0,
                 latest_event_id: Some("$latest:example.invalid".to_owned()),
                 latest_sender: Some("@carol:example.invalid".to_owned()),
                 latest_sender_label: None,
@@ -974,6 +976,7 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
             link_previews: None,
             link_ranges: Vec::new(),
             mentioned_user_ids: Vec::new(),
+            mentions_room: false,
             reactions: vec![koushi_protocol::event::ReactionGroup {
                 key: "👍".to_owned(),
                 count: 1,
@@ -1052,6 +1055,7 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
                 link_previews: None,
                 link_ranges: Vec::new(),
                 mentioned_user_ids: Vec::new(),
+                mentions_room: false,
                 reactions: Vec::new(),
                 can_react: false,
                 is_redacted: false,

@@ -18,6 +18,8 @@ pub(super) fn private_room_options(name: impl Into<String>, encrypted: bool) -> 
         invited_only: false,
         visibility: CreateRoomVisibility::Private,
         parent_space: None,
+        access_policy: None,
+        history: None,
     }
 }
 
@@ -419,6 +421,8 @@ pub(super) fn native_attention_room(
         unread_count,
         notification_count,
         highlight_count,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,

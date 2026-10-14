@@ -15,9 +15,9 @@ use crate::executor;
 use crate::live_tail_freshness::LiveTailSchedulerAction;
 use crate::startup_trace::{self};
 use koushi_protocol::event::{
-    CoreEvent, PaginationDirection, PaginationState, TimelineAnchorRestoreStatus, TimelineDiff,
-    TimelineEvent, TimelineItem, TimelineItemId, TimelineNavigationSnapshot, TimelineReadStateSync,
-    TimelineUnreadPosition, TimelineViewportObservation,
+    CoreEvent, PaginationDirection, PaginationState, TimelineDiff, TimelineEvent, TimelineItem,
+    TimelineItemId, TimelineNavigationSnapshot, TimelineReadStateSync, TimelineUnreadPosition,
+    TimelineViewportObservation,
 };
 use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 use koushi_protocol::ids::{
@@ -32,7 +32,7 @@ use super::diagnostics::{
     timeline_key_trace_kind, trace_timeline_items, trace_timeline_paginate,
 };
 use super::display_projection::DisplayProjectionState;
-use super::gap_repair::{LIVE_TAIL_CANCELLATION_DEADLINE, RestoreCausalProjectionBuffer};
+use super::gap_repair::LIVE_TAIL_CANCELLATION_DEADLINE;
 use super::item_projection::{
     eligible_activity_preview, has_user_visible_content, is_attention_eligible_event,
     is_unread_navigation_item, item_index_for_event_id, timeline_item_event_id,
@@ -43,25 +43,14 @@ use super::thread_projection::{ThreadAttentionObservation, ThreadAttentionTracke
 
 pub(super) const INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT: u16 = 100;
 
+/// #1125: upper bound on the guarded backward passes a fresh subscription takes
+/// while its projected window still holds no displayed row. One pass is not
+/// always enough, because the window can be entirely hidden technical state
+/// events; the round budget keeps a hidden-event burst from paginating without
+/// end.
+pub(super) const INITIAL_EMPTY_ROOM_HYDRATION_MAX_ROUNDS: u8 = 8;
+
 pub(super) const ROOM_REPLAY_INITIAL_ITEMS_MAX: usize = 120;
-
-/// Backstop tick count for the anchor-relay wait. After the SDK signals
-/// `anchor_present == true`, the anchor's diff has been broadcast through the
-/// 3-hop relay (conclude_backwards_pagination_from_disk → event-cache task →
-/// timeline observable → relay → DiffBatch actor msg) and WILL arrive in the
-/// actor's `timeline_contains` check within the next few ticks. This backstop
-/// guards against a genuinely stuck relay; under normal load the anchor lands
-/// well before the count reaches zero.
-const RESTORE_ANCHOR_RELAY_WAIT_TICKS: u8 = 40;
-
-/// Delay between anchor-relay-wait ticks (milliseconds). The relay pipeline
-/// is a 3-hop async path: conclude_backwards_pagination_from_disk →
-/// room_event_cache_updates_task → handle_remote_events_with_diffs →
-/// observable → relay task → DiffBatch actor message. Without a pause, all
-/// 40 backstop ticks can drain before any relay task gets CPU time.
-/// 50 ms is deliberately conservative (well within the 2 000 ms total
-/// budget); under normal conditions the anchor lands on tick 1.
-const RESTORE_ANCHOR_RELAY_WAIT_TICK_MS: u64 = 50;
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct FocusedProjectionCommitted {
@@ -450,13 +439,6 @@ fn next_timeline_actor_generation(_state: &mut TimelineActorGenerationGateState)
     NEXT_TIMELINE_ACTOR_GENERATION.fetch_add(1, Ordering::Relaxed)
 }
 
-pub(super) fn replay_projection_request_id(
-    projection_request_id: RequestId,
-    initial_projection_committed: bool,
-) -> Option<RequestId> {
-    (!initial_projection_committed).then_some(projection_request_id)
-}
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) struct InitialItemsRequestIdentity {
     projection_request_id: Option<RequestId>,
@@ -473,14 +455,12 @@ impl InitialItemsRequestIdentity {
 
     pub(super) fn replay(
         projection_request_id: RequestId,
-        initial_projection_committed: bool,
         cause_request_id: Option<RequestId>,
     ) -> Self {
         Self {
-            projection_request_id: replay_projection_request_id(
-                projection_request_id,
-                initial_projection_committed,
-            ),
+            // This is the actor-owned view-source identity. The command that
+            // requested this replay is correlated separately below.
+            projection_request_id: Some(projection_request_id),
             cause_request_id,
         }
     }
@@ -641,64 +621,6 @@ pub(super) fn emit_initial_items_for_generation(
         }],
     );
     true
-}
-
-pub(super) struct RestoreSettlement {
-    pub(super) navigation_snapshot: Option<TimelineNavigationSnapshot>,
-    pub(super) terminal: Option<(RequestId, TimelineAnchorRestoreStatus)>,
-}
-
-#[expect(
-    clippy::too_many_arguments,
-    reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
-)]
-pub(super) fn publish_restore_settlement_for_generation(
-    restore_emit_buffer: &mut Vec<TimelineDiff>,
-    force_items_updated: bool,
-    next_batch_id: &mut TimelineBatchId,
-    event_tx: &broadcast::Sender<CoreEvent>,
-    timeline_actor_generations: &Arc<TimelineActorGenerationGate>,
-    key: &TimelineKey,
-    actor_generation: u64,
-    generation: TimelineGeneration,
-    navigation_items: &[TimelineItem],
-    display_items: &[TimelineItem],
-    settlement: RestoreSettlement,
-) -> Option<bool> {
-    let lease = timeline_actor_generations.try_acquire(key, actor_generation)?;
-    let published_items = force_items_updated || !restore_emit_buffer.is_empty();
-    if published_items {
-        let batch_id = *next_batch_id;
-        let diffs = std::mem::take(restore_emit_buffer);
-        emit_timeline_events_with_lease(
-            event_tx,
-            &lease,
-            vec![TimelineEvent::ItemsUpdated {
-                key: key.clone(),
-                generation,
-                batch_id,
-                diffs,
-            }],
-        );
-        *next_batch_id = TimelineBatchId(batch_id.0 + 1);
-    }
-    let mut terminal_events = Vec::with_capacity(2);
-    if let Some(snapshot) = settlement.navigation_snapshot {
-        terminal_events.push(TimelineEvent::NavigationUpdated {
-            key: key.clone(),
-            snapshot,
-        });
-    }
-    if let Some((request_id, status)) = settlement.terminal {
-        terminal_events.push(TimelineEvent::AnchorRestoreFinished {
-            request_id,
-            key: key.clone(),
-            status,
-        });
-    }
-    emit_timeline_events_with_lease(event_tx, &lease, terminal_events);
-    let _ = (navigation_items, display_items);
-    Some(published_items)
 }
 
 pub(super) struct PreparedInitialWindow {
@@ -985,35 +907,6 @@ pub(super) struct PaginationCompletion {
     prepend_expected: Option<bool>,
 }
 
-impl PaginationCompletion {
-    fn into_result(self) -> Result<bool, TimelineFailureKind> {
-        match self.state {
-            PaginationState::EndReached => Ok(true),
-            PaginationState::Idle | PaginationState::Paginating => Ok(false),
-            PaginationState::Failed { kind } => Err(kind),
-        }
-    }
-}
-
-#[derive(Clone, Debug)]
-pub(super) struct RestoreTimelineAnchorState {
-    pub(super) request_id: RequestId,
-    pub(super) event_id: String,
-    pub(super) max_batches_remaining: u16,
-    pub(super) event_count: u16,
-    pub(super) in_flight: bool,
-    pub(super) awaiting_diff_batch: bool,
-    pub(super) continuation_scheduled: bool,
-    pub(super) continuation_serial: Option<u64>,
-    /// Set to `Some(RESTORE_ANCHOR_RELAY_WAIT_TICKS)` after the SDK confirms
-    /// `anchor_present == true` (load-until-anchor found the anchor in a loaded
-    /// chunk; its broadcast has been fired and WILL propagate through the 3-hop
-    /// relay). While non-zero, each tick re-checks `timeline_contains(anchor)`
-    /// and re-ticks until Found or the backstop runs out. `None` during the
-    /// normal walk.
-    pub(super) anchor_relay_wait: Option<u8>,
-}
-
 fn backward_pagination_changed_oldest_edge(
     oldest_before: Option<&str>,
     oldest_after: Option<&str>,
@@ -1155,27 +1048,6 @@ impl TimelineActor {
             task,
         });
     }
-    async fn paginate_once(
-        &mut self,
-        request_id: RequestId,
-        direction: PaginationDirection,
-        event_count: u16,
-    ) -> Result<bool, TimelineFailureKind> {
-        let completion = Self::paginate_once_for(
-            request_id,
-            self.key.clone(),
-            self.timeline.clone(),
-            self.event_tx.clone(),
-            self.timeline_actor_generations.clone(),
-            self.actor_generation,
-            self.account_work.clone(),
-            direction,
-            event_count,
-        )
-        .await;
-        self.emit_pagination_completion(request_id, direction, completion);
-        completion.into_result()
-    }
     #[expect(
         clippy::too_many_arguments,
         reason = "pre-existing internal signature; grouping its inputs is a separate refactor"
@@ -1228,15 +1100,15 @@ impl TimelineActor {
             );
             let paginate_started = Some(startup_trace::now());
             let trace_started = Some(std::time::Instant::now());
-            let outcome = match direction {
-                PaginationDirection::Backward => timeline.paginate_backwards(event_count).await,
-                PaginationDirection::Forward => timeline.paginate_forwards(event_count).await,
-            };
-            let outcome_token = match &outcome {
-                Ok(true) => "end_reached",
-                Ok(false) => "idle",
-                Err(_) => "failed",
-            };
+            // #1239: bound the SDK await so a stalled relationship request can
+            // never leave the pane in `Paginating` for the life of the timeline.
+            let outcome = bounded_paginate_with(TIMELINE_PAGINATION_TIMEOUT, async {
+                match direction {
+                    PaginationDirection::Backward => timeline.paginate_backwards(event_count).await,
+                    PaginationDirection::Forward => timeline.paginate_forwards(event_count).await,
+                }
+            })
+            .await;
             trace_timeline_paginate(
                 "sdk_finish",
                 request_id,
@@ -1245,9 +1117,13 @@ impl TimelineActor {
                 event_count,
                 trace_started.map(|started| started.elapsed().as_millis()),
                 gate_ms,
-                Some(outcome_token),
+                Some(outcome.trace_token()),
             );
-            startup_trace::trace_paginate(paginate_started, gate_wait, matches!(outcome, Ok(true)));
+            startup_trace::trace_paginate(
+                paginate_started,
+                gate_wait,
+                matches!(&outcome, PaginationAttempt::ReachedEnd),
+            );
             outcome
         };
         drop(permit);
@@ -1261,14 +1137,7 @@ impl TimelineActor {
             None
         };
 
-        let next_state = match result {
-            Ok(true) => PaginationState::EndReached,
-            Ok(false) => PaginationState::Idle,
-            Err(err) => {
-                let kind = classify_pagination_error(&err);
-                PaginationState::Failed { kind }
-            }
-        };
+        let next_state = result.into_state();
 
         PaginationCompletion {
             state: next_state,
@@ -1313,374 +1182,6 @@ impl TimelineActor {
             prepend_expected: None,
         }));
     }
-    pub(super) async fn handle_restore_timeline_anchor(
-        &mut self,
-        request_id: RequestId,
-        event_id: String,
-        max_batches: u16,
-        event_count: u16,
-    ) {
-        if !matches!(self.key.kind, TimelineKind::Room { .. }) {
-            self.emit_timeline_failure(request_id, TimelineFailureKind::NotSubscribed);
-            return;
-        }
-        if self.gap_repair.active_serial.is_some()
-            || self.gap_projection_correlation.is_pending()
-            || self.pending_gap_projection.is_some()
-        {
-            self.finish_anchor_restore(request_id, TimelineAnchorRestoreStatus::Superseded);
-            return;
-        }
-        if event_id.trim().is_empty() || max_batches == 0 || event_count == 0 {
-            // Invalid request: reject it without touching any active restore's
-            // buffer. Using raw emit_anchor_restore_finished (NOT finish_anchor_restore)
-            // prevents flushing a different restore's restore_emit_buffer here.
-            self.emit_anchor_restore_finished(
-                request_id,
-                TimelineAnchorRestoreStatus::BudgetExhausted,
-            );
-            return;
-        }
-        if self.timeline_contains_event_id(&event_id) {
-            self.restore_anchor = None;
-            self.finish_anchor_restore(request_id, TimelineAnchorRestoreStatus::Found);
-            return;
-        }
-        if let Some(mut existing) = self.restore_anchor.take() {
-            if existing.event_id == event_id {
-                existing.request_id = request_id;
-                existing.max_batches_remaining = existing.max_batches_remaining.max(max_batches);
-                existing.event_count = event_count;
-                if existing.in_flight
-                    || existing.awaiting_diff_batch
-                    || existing.continuation_scheduled
-                {
-                    self.restore_anchor = Some(existing);
-                } else {
-                    self.schedule_restore_anchor_continue(existing).await;
-                }
-                return;
-            }
-            self.finish_anchor_restore(
-                existing.request_id,
-                TimelineAnchorRestoreStatus::Superseded,
-            );
-        }
-
-        let restore = RestoreTimelineAnchorState {
-            request_id,
-            event_id,
-            max_batches_remaining: max_batches,
-            event_count,
-            in_flight: false,
-            awaiting_diff_batch: false,
-            continuation_scheduled: false,
-            continuation_serial: None,
-            anchor_relay_wait: None,
-        };
-
-        self.schedule_restore_anchor_continue(restore).await;
-    }
-    pub(super) async fn handle_restore_timeline_anchor_continue(&mut self, serial: u64) {
-        let Some(mut restore) = self.restore_anchor.take() else {
-            return;
-        };
-        if restore.continuation_serial != Some(serial) {
-            self.restore_anchor = Some(restore);
-            return;
-        }
-        if restore.in_flight {
-            self.restore_anchor = Some(restore);
-            return;
-        }
-        restore.awaiting_diff_batch = false;
-        restore.continuation_scheduled = false;
-        restore.continuation_serial = None;
-
-        // Anchor-relay wait: entered after the SDK's authoritative
-        // `anchor_present == true` signal. All cache events are in memory and
-        // their diffs are in flight through the 3-hop relay
-        // (conclude_backwards_pagination_from_disk → event-cache task →
-        // timeline observable → relay task → DiffBatch actor msg). Re-tick
-        // until `timeline_contains` confirms, or the backstop expires.
-        //
-        // A bounded sleep between ticks is necessary: without it all 40
-        // backstop ticks drain before the relay task gets CPU time, because
-        // the actor processes its own messages before yielding to other tasks.
-        if let Some(remaining) = restore.anchor_relay_wait {
-            if self.timeline_contains_event_id(&restore.event_id) {
-                self.finish_anchor_restore(restore.request_id, TimelineAnchorRestoreStatus::Found);
-                return;
-            }
-            if remaining > 0 {
-                restore.anchor_relay_wait = Some(remaining - 1);
-                // Yield to the runtime so the relay pipeline can deliver the
-                // anchor diff before we check again. Without this pause, all
-                // 40 ticks complete before any relay task is scheduled.
-                tokio::time::sleep(std::time::Duration::from_millis(
-                    RESTORE_ANCHOR_RELAY_WAIT_TICK_MS,
-                ))
-                .await;
-                self.schedule_restore_anchor_continue(restore).await;
-                return;
-            }
-            // Backstop: relay genuinely stuck. EndReached is the safest
-            // fallback (anchor not confirmed in items; the caller can retry).
-            self.finish_anchor_restore(restore.request_id, TimelineAnchorRestoreStatus::EndReached);
-            return;
-        }
-
-        if self.timeline_contains_event_id(&restore.event_id) {
-            self.finish_anchor_restore(restore.request_id, TimelineAnchorRestoreStatus::Found);
-            return;
-        }
-        if restore.max_batches_remaining == 0 {
-            self.finish_anchor_restore(
-                restore.request_id,
-                TimelineAnchorRestoreStatus::BudgetExhausted,
-            );
-            return;
-        }
-
-        restore.in_flight = true;
-        let request_id = restore.request_id;
-        let event_count = restore.event_count;
-
-        // First try a cache-only bulk backward load in a single call
-        // instead of looping one chunk at a time through `paginate_once`.
-        // The SDK stops as soon as the anchor event is found (load-until-anchor),
-        // or when it reaches a gap or the start of the on-disk timeline.
-        //
-        // Pass the UI-provided chunk budget directly as max_chunks. Room entry
-        // must fail fast for stale/deep anchors instead of turning into a long
-        // history walk; the event count `n` is a secondary cap.
-        let chunk_budget = restore.max_batches_remaining;
-        let bulk_n = (chunk_budget as u32)
-            .saturating_mul(event_count as u32)
-            .min(u16::MAX as u32) as u16;
-        let cache_result = self
-            .timeline
-            .live_restore_from_cache(bulk_n, &restore.event_id, chunk_budget)
-            .await;
-        restore.in_flight = false;
-
-        match cache_result {
-            Ok(outcome) => {
-                // The bulk load fired `RoomEventCacheUpdate::UpdateTimelineEvents`
-                // broadcasts for every disk chunk, which are ingested by the
-                // live Timeline's tasks loop and arrive as actor `DiffBatch`
-                // messages. Those are buffered into `restore_emit_buffer` while
-                // `restore_anchor.is_some()`, so we still get a single coalesced
-                // `ItemsUpdated` flush at the terminal.
-                // Deduct the actual number of cache chunks consumed from the
-                // budget (each chunk ≈ one paginate batch). Clamp minimum to 1
-                // so partial loads always advance the budget counter.
-                restore.max_batches_remaining = restore
-                    .max_batches_remaining
-                    .saturating_sub(outcome.chunks_loaded.max(1) as u16);
-
-                // Fast path: anchor already in timeline items (shallow-anchor case
-                // where the lazy in-memory reveal made it visible immediately).
-                if self.timeline_contains_event_id(&restore.event_id) {
-                    self.finish_anchor_restore(request_id, TimelineAnchorRestoreStatus::Found);
-                    return;
-                }
-
-                if outcome.anchor_present {
-                    // SDK authoritative signal: anchor was found in a loaded disk
-                    // chunk; its diff broadcast is already in flight through the
-                    // 3-hop relay. Enter the relay-wait loop; do NOT conclude
-                    // EndReached/BudgetExhausted while anchor_present is true.
-                    restore.anchor_relay_wait = Some(RESTORE_ANCHOR_RELAY_WAIT_TICKS);
-                    self.schedule_restore_anchor_continue(restore).await;
-                    return;
-                }
-
-                if outcome.hit_gap {
-                    // The cache is not contiguous up to the anchor depth.
-                    // Fall back to the per-chunk paginate_once loop, which can
-                    // resolve gaps via the network for non-contiguous caches.
-                    restore.in_flight = true;
-                    restore.max_batches_remaining = restore.max_batches_remaining.saturating_sub(1);
-
-                    let result = self
-                        .paginate_once(request_id, PaginationDirection::Backward, event_count)
-                        .await;
-                    restore.in_flight = false;
-
-                    if self.timeline_contains_event_id(&restore.event_id) {
-                        self.finish_anchor_restore(request_id, TimelineAnchorRestoreStatus::Found);
-                        return;
-                    }
-
-                    let end_reached = match result {
-                        Ok(end_reached) => end_reached,
-                        Err(kind) => {
-                            self.finish_anchor_restore(
-                                request_id,
-                                TimelineAnchorRestoreStatus::Failed { kind },
-                            );
-                            return;
-                        }
-                    };
-                    if end_reached {
-                        if self.timeline_contains_event_id(&restore.event_id) {
-                            self.finish_anchor_restore(
-                                request_id,
-                                TimelineAnchorRestoreStatus::Found,
-                            );
-                            return;
-                        }
-                        self.finish_anchor_restore(
-                            request_id,
-                            TimelineAnchorRestoreStatus::EndReached,
-                        );
-                        return;
-                    }
-                    if restore.max_batches_remaining == 0 {
-                        if self.timeline_contains_event_id(&restore.event_id) {
-                            self.finish_anchor_restore(
-                                request_id,
-                                TimelineAnchorRestoreStatus::Found,
-                            );
-                            return;
-                        }
-                        self.finish_anchor_restore(
-                            request_id,
-                            TimelineAnchorRestoreStatus::BudgetExhausted,
-                        );
-                        return;
-                    }
-                    restore.awaiting_diff_batch = true;
-                    self.schedule_restore_anchor_continue(restore).await;
-                    return;
-                }
-
-                // No gap, anchor not present: cache-only bulk load completed
-                // without finding the anchor.
-                if outcome.reached_start {
-                    // Loaded to the start of the on-disk cache; anchor is
-                    // genuinely absent — conclude EndReached immediately
-                    // (authoritative; no timing wait needed).
-                    self.finish_anchor_restore(request_id, TimelineAnchorRestoreStatus::EndReached);
-                    return;
-                }
-
-                // Cap case: the bulk load stopped because it reached the u16
-                // per-call cap, not because it reached a gap or start. More
-                // budget remains; issue another bulk load immediately.
-                if restore.max_batches_remaining > 0 {
-                    restore.awaiting_diff_batch = true;
-                    self.schedule_restore_anchor_continue(restore).await;
-                    return;
-                }
-
-                // Budget exhausted without finding the anchor.
-                self.finish_anchor_restore(
-                    request_id,
-                    TimelineAnchorRestoreStatus::BudgetExhausted,
-                );
-            }
-
-            Err(_) => {
-                // Cache load error — fall back to the per-chunk paginate_once
-                // path for a single attempt, treating the error as transient.
-                restore.in_flight = true;
-                restore.max_batches_remaining = restore.max_batches_remaining.saturating_sub(1);
-
-                let result = self
-                    .paginate_once(request_id, PaginationDirection::Backward, event_count)
-                    .await;
-                restore.in_flight = false;
-
-                if self.timeline_contains_event_id(&restore.event_id) {
-                    self.finish_anchor_restore(request_id, TimelineAnchorRestoreStatus::Found);
-                    return;
-                }
-
-                let end_reached = match result {
-                    Ok(end_reached) => end_reached,
-                    Err(kind) => {
-                        self.finish_anchor_restore(
-                            request_id,
-                            TimelineAnchorRestoreStatus::Failed { kind },
-                        );
-                        return;
-                    }
-                };
-                if end_reached {
-                    if self.timeline_contains_event_id(&restore.event_id) {
-                        self.finish_anchor_restore(request_id, TimelineAnchorRestoreStatus::Found);
-                        return;
-                    }
-                    self.finish_anchor_restore(request_id, TimelineAnchorRestoreStatus::EndReached);
-                    return;
-                }
-                if restore.max_batches_remaining == 0 {
-                    if self.timeline_contains_event_id(&restore.event_id) {
-                        self.finish_anchor_restore(request_id, TimelineAnchorRestoreStatus::Found);
-                        return;
-                    }
-                    self.finish_anchor_restore(
-                        request_id,
-                        TimelineAnchorRestoreStatus::BudgetExhausted,
-                    );
-                    return;
-                }
-                restore.awaiting_diff_batch = true;
-                self.schedule_restore_anchor_continue(restore).await;
-            }
-        }
-    }
-    pub(super) async fn maybe_continue_restore_anchor_after_diff(&mut self) {
-        let Some(mut restore) = self.restore_anchor.take() else {
-            return;
-        };
-        if restore.in_flight {
-            self.restore_anchor = Some(restore);
-            return;
-        }
-        // Anchor-relay wait: the queued Continue tick handles polling
-        // `timeline_contains` each tick until Found or backstop. Put restore
-        // back so the queued tick does its check on the next iteration.
-        if restore.anchor_relay_wait.is_some() {
-            self.restore_anchor = Some(restore);
-            return;
-        }
-        if !restore.awaiting_diff_batch {
-            self.restore_anchor = Some(restore);
-            return;
-        }
-        if self.timeline_contains_event_id(&restore.event_id) {
-            self.finish_anchor_restore(restore.request_id, TimelineAnchorRestoreStatus::Found);
-            return;
-        }
-        if restore.max_batches_remaining == 0 {
-            self.finish_anchor_restore(
-                restore.request_id,
-                TimelineAnchorRestoreStatus::BudgetExhausted,
-            );
-            return;
-        }
-        if restore.continuation_scheduled {
-            self.restore_anchor = Some(restore);
-            return;
-        }
-
-        restore.awaiting_diff_batch = false;
-        self.schedule_restore_anchor_continue(restore).await;
-    }
-    async fn schedule_restore_anchor_continue(&mut self, mut restore: RestoreTimelineAnchorState) {
-        self.next_restore_anchor_serial = self.next_restore_anchor_serial.wrapping_add(1);
-        let serial = self.next_restore_anchor_serial;
-        restore.continuation_scheduled = true;
-        restore.continuation_serial = Some(serial);
-        self.restore_anchor = Some(restore);
-        let _ = self
-            .msg_tx
-            .send(TimelineActorMessage::RestoreTimelineAnchorContinue { serial })
-            .await;
-    }
     /// Re-emit `navigation_items` as `InitialItems` without touching the SDK
     /// subscription or tearing down the actor. Idempotent Subscribe supplies
     /// an exact cause; internal replay recovery does not. The projection ACK
@@ -1705,11 +1206,7 @@ impl TimelineActor {
             &self.timeline_actor_generations,
             &self.key,
             self.actor_generation,
-            InitialItemsRequestIdentity::replay(
-                self.projection_request_id,
-                self.initial_projection_committed,
-                cause_request_id,
-            ),
+            InitialItemsRequestIdentity::replay(self.projection_request_id, cause_request_id),
             self.generation,
             Vec::new(),
             PreparedInitialWindow {
@@ -1784,64 +1281,8 @@ impl TimelineActor {
         self.last_navigation_snapshot = Some(snapshot.clone());
         self.emit(CoreEvent::Timeline(TimelineEvent::NavigationUpdated {
             key: self.key.clone(),
-            snapshot,
+            snapshot: Box::new(snapshot),
         }));
-    }
-    fn emit_anchor_restore_finished(
-        &self,
-        request_id: RequestId,
-        status: TimelineAnchorRestoreStatus,
-    ) {
-        self.emit(CoreEvent::Timeline(TimelineEvent::AnchorRestoreFinished {
-            request_id,
-            key: self.key.clone(),
-            status,
-        }));
-    }
-    /// Publish the deferred display batch, changed navigation projection, and
-    /// optional restore terminal under one actor-generation lease.  Returning
-    /// `None` means a replacement actor won the generation fence; in that case
-    /// the buffer and all actor-owned mirrors remain untouched.
-    fn publish_restore_settlement(
-        &mut self,
-        terminal: Option<(RequestId, TimelineAnchorRestoreStatus)>,
-    ) -> Option<bool> {
-        let navigation_snapshot = self.current_navigation_snapshot();
-        let changed_navigation = (self.last_navigation_snapshot.as_ref()
-            != Some(&navigation_snapshot))
-        .then_some(navigation_snapshot);
-        let published_batch_id = self.next_batch_id;
-        let published_items = publish_restore_settlement_for_generation(
-            &mut self.restore_emit_buffer,
-            !self.restore_causal_projections.projections.is_empty(),
-            &mut self.next_batch_id,
-            &self.event_tx,
-            &self.timeline_actor_generations,
-            &self.key,
-            self.actor_generation,
-            self.generation,
-            &self.navigation_items,
-            self.display_projection.display_items(),
-            RestoreSettlement {
-                navigation_snapshot: changed_navigation.clone(),
-                terminal,
-            },
-        )?;
-
-        if let Some(snapshot) = changed_navigation {
-            self.last_navigation_snapshot = Some(snapshot);
-        }
-        if published_items {
-            let observation = self.restore_causal_projections.observe_after_publication(
-                &mut self.gap_projection_correlation,
-                &mut self.live_tail_projection_correlation,
-                published_batch_id,
-            );
-            self.ready_restore_gap_projection_batch = observation.historical_gap_batch_id;
-        } else {
-            self.restore_causal_projections = RestoreCausalProjectionBuffer::default();
-        }
-        Some(published_items)
     }
     /// Emit one display-relative batch through the current actor generation.
     pub(super) fn emit_items_updated(&mut self, diffs: Vec<TimelineDiff>) -> bool {
@@ -1887,22 +1328,6 @@ impl TimelineActor {
             true
         } else {
             false
-        }
-    }
-    /// Terminate a restore walk: flush the buffered diffs (Change 2) then emit
-    /// `AnchorRestoreFinished`. Call this at every terminal restore path in
-    /// place of `emit_anchor_restore_finished` when the diff buffer may be
-    /// non-empty.
-    pub(super) fn finish_anchor_restore(
-        &mut self,
-        request_id: RequestId,
-        status: TimelineAnchorRestoreStatus,
-    ) {
-        if self
-            .publish_restore_settlement(Some((request_id, status)))
-            .unwrap_or(false)
-        {
-            self.hydrate_after_restore_flush = true;
         }
     }
 }
@@ -2027,25 +1452,20 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
     let confirmed_position = server_confirmed_read_event_id
         .as_deref()
         .and_then(|event_id| item_index_for_event_id(items, event_id));
-    let display_marker = match (local_position, confirmed_position) {
-        (Some(local), Some(confirmed)) if confirmed > local => {
-            // A stored local observation may predate a successful receipt from
-            // this or another view. Never place the divider behind that receipt.
-            // Hidden edits remain boundaries but are not rendered divider rows.
-            items[local..=confirmed]
-                .iter()
-                .rev()
-                .find(|item| {
-                    !item.is_hidden
-                        && navigation_item_in_scope(kind, item)
-                        && timeline_item_event_id(item).is_some()
-                })
-                .and_then(timeline_item_event_id)
-                .map(ToOwned::to_owned)
-        }
-        (Some(_), _) => local_viewed_event_id.clone(),
-        _ => None,
-    };
+    // Resolve all loaded boundaries once, before unread processing can return.
+    // Hidden edits and out-of-scope replies are ordering facts, not divider rows.
+    let display_marker = local_position.max(confirmed_position).and_then(|position| {
+        items[..=position]
+            .iter()
+            .rev()
+            .find(|item| {
+                !item.is_hidden
+                    && navigation_item_in_scope(kind, item)
+                    && timeline_item_event_id(item).is_some()
+            })
+            .and_then(timeline_item_event_id)
+            .map(ToOwned::to_owned)
+    });
     let mut snapshot = TimelineNavigationSnapshot {
         read_marker_event_id: server_confirmed_read_event_id.clone(),
         read_marker_display_event_id: display_marker,
@@ -2093,15 +1513,16 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
     // No remote unread events after the marker. Advance the display anchor to the
     // current user's latest visible own message at or after the marker so the
     // "Read up to here" separator is rendered after it, not before.
-    if snapshot.read_marker_display_event_id.is_none() {
-        snapshot.read_marker_display_event_id = items
+    if local_position.is_none()
+        && let Some(own_event_id) = items
             .iter()
-            .enumerate()
             .skip(read_marker_index)
-            .rfind(|(_, item)| {
+            .rfind(|item| {
                 navigation_item_in_scope(kind, item) && is_own_visible_event(item, own_user_id)
             })
-            .and_then(|(_, item)| timeline_item_event_id(item).map(ToOwned::to_owned));
+            .and_then(timeline_item_event_id)
+    {
+        snapshot.read_marker_display_event_id = Some(own_event_id.to_owned());
     }
     snapshot
 }
@@ -2490,6 +1911,58 @@ fn unread_position_for_index(
     }
 }
 
+/// #1239: the upper bound for one SDK pagination. A thread backfill must reach a
+/// terminal state (Idle / EndReached / Failed) within this window even when the
+/// SDK request never returns; the timeout surfaces as a retryable failure.
+const TIMELINE_PAGINATION_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(30);
+
+/// One bounded SDK pagination outcome (#1239).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+enum PaginationAttempt {
+    ReachedEnd,
+    Idle,
+    Failed(TimelineFailureKind),
+}
+
+impl PaginationAttempt {
+    /// A terminal-state token for the pagination diagnostics.
+    fn trace_token(self) -> &'static str {
+        match self {
+            PaginationAttempt::ReachedEnd => "end_reached",
+            PaginationAttempt::Idle => "idle",
+            PaginationAttempt::Failed(TimelineFailureKind::Timeout) => "timeout",
+            PaginationAttempt::Failed(_) => "failed",
+        }
+    }
+
+    fn is_ok(self) -> bool {
+        !matches!(self, PaginationAttempt::Failed(_))
+    }
+
+    fn into_state(self) -> PaginationState {
+        match self {
+            PaginationAttempt::ReachedEnd => PaginationState::EndReached,
+            PaginationAttempt::Idle => PaginationState::Idle,
+            PaginationAttempt::Failed(kind) => PaginationState::Failed { kind },
+        }
+    }
+}
+
+/// The timeout/classification half of one bounded pagination (#1239). The SDK
+/// call itself stays at the `paginate_once_for` call site, after scheduler
+/// admission; this wraps it in the deadline and classifies the outcome.
+async fn bounded_paginate_with<F>(deadline: std::time::Duration, paginate: F) -> PaginationAttempt
+where
+    F: std::future::Future<Output = Result<bool, matrix_sdk_ui::timeline::Error>>,
+{
+    match executor::timeout(deadline, paginate).await {
+        Ok(Ok(true)) => PaginationAttempt::ReachedEnd,
+        Ok(Ok(false)) => PaginationAttempt::Idle,
+        Ok(Err(err)) => PaginationAttempt::Failed(classify_pagination_error(&err)),
+        Err(_) => PaginationAttempt::Failed(TimelineFailureKind::Timeout),
+    }
+}
+
 fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFailureKind {
     use matrix_sdk_ui::timeline::{Error, PaginationError};
     match err {
@@ -2503,3 +1976,11 @@ fn classify_pagination_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFa
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+#[path = "navigation/read_marker_reentry_tests.rs"]
+mod read_marker_reentry_tests;
+
+#[cfg(test)]
+#[path = "navigation/replay_identity_tests.rs"]
+mod replay_identity_tests;

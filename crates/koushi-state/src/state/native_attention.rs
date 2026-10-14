@@ -8,13 +8,12 @@ use serde::{Deserialize, Serialize};
 use crate::locale_profile::DisplayPlatform;
 
 use super::errors::OperationFailureKind;
-use super::room::{RoomAttentionKind, RoomLatestEventSummary, RoomSummary, room_attention_summary};
+#[cfg(test)]
+use super::room::RoomLatestEventSummary;
+use super::room::{
+    RoomAttentionKind, RoomSummary, room_activity_unread_count, room_attention_summary,
+};
 
-/// Longest preview the desktop adapter may render in an OS notification body.
-///
-/// The preview is remote content; a bound keeps one notification from turning
-/// into an unbounded banner. Truncation happens on character boundaries.
-const NATIVE_NOTIFICATION_PREVIEW_MAX_CHARS: usize = 200;
 use super::settings::RoomNotificationMode;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -184,8 +183,8 @@ pub struct NativeAttentionProjectionInput<'a> {
     pub window_focused: bool,
     pub observation: NativeAttentionObservationKind,
     pub previous_candidate: Option<&'a NativeAttentionCandidate>,
-    /// `SettingsValues.notifications.message_previews`. Device-local and OFF
-    /// by default; when OFF the notification body carries counts only.
+    /// Retained device setting; room-level alerts cannot show an event preview
+    /// until the exact unread event has been verified.
     pub message_previews: bool,
     pub capabilities: NativeAttentionCapabilities,
 }
@@ -202,7 +201,6 @@ pub struct NativeAttentionProjection {
 struct NativeAttentionCandidateEntry<'a> {
     room_id: &'a str,
     candidate: NativeAttentionCandidate,
-    latest_event: Option<&'a RoomLatestEventSummary>,
 }
 
 pub fn native_attention_state_from_rooms(
@@ -213,6 +211,16 @@ pub fn native_attention_state_from_rooms(
 
 pub fn native_attention_projection_from_rooms(
     input: NativeAttentionProjectionInput<'_>,
+) -> NativeAttentionProjection {
+    native_attention_projection_from_rooms_with_live_room(input, None, false)
+}
+
+/// Production projection: a transient alert may only target the room whose
+/// SDK-local unread count increased in this room-list observation.
+pub(crate) fn native_attention_projection_from_rooms_with_live_room(
+    input: NativeAttentionProjectionInput<'_>,
+    live_room_id: Option<&str>,
+    require_live_room: bool,
 ) -> NativeAttentionProjection {
     let mut unread_count = 0;
     let mut highlight_count = 0;
@@ -249,9 +257,9 @@ pub fn native_attention_projection_from_rooms(
             continue;
         }
         badge_room_count += 1;
-        badge_count += room.unread_count;
+        badge_count += room_activity_unread_count(room);
 
-        // An ignored-user DM keeps its raw Dock contribution and is excluded
+        // An ignored-user DM keeps its shared Dock contribution and is excluded
         // from transient candidates and attention totals only.
         let ignored_user_dm = room.is_dm
             && room
@@ -262,9 +270,12 @@ pub fn native_attention_projection_from_rooms(
             continue;
         }
 
-        let activity_unread_count = room_notification_unread_count(room);
+        let highlight_total = room
+            .highlight_count
+            .saturating_add(room.thread_highlight_count);
+        let activity_unread_count = room_activity_unread_count(room);
         let effective_unread_count =
-            if mode == RoomNotificationMode::Mentions && room.highlight_count == 0 {
+            if mode == RoomNotificationMode::Mentions && highlight_total == 0 {
                 0
             } else {
                 activity_unread_count
@@ -277,17 +288,26 @@ pub fn native_attention_projection_from_rooms(
 
         unread_count += effective_unread_count;
         notification_count += effective_notification_count;
-        highlight_count += room.highlight_count;
+        highlight_count += highlight_total;
 
-        if mode == RoomNotificationMode::Mentions && room.highlight_count == 0 {
+        if activity_unread_count == 0
+            // A room-level highlight counter cannot identify which unread
+            // event is the mention, so Mentions-only cannot raise a banner.
+            || mode == RoomNotificationMode::Mentions
+            || (require_live_room && live_room_id != Some(room.room_id.as_str()))
+            || !room
+                .latest_event
+                .as_ref()
+                .is_some_and(|event| !event.event_id.is_empty() && !event.is_redacted)
+        {
             continue;
         }
 
         if let Some(summary) = room_attention_summary(
             room.display_label.clone(),
             room.is_dm,
-            effective_notification_count,
-            room.highlight_count,
+            0,
+            0,
             effective_unread_count,
         ) {
             candidates.push(NativeAttentionCandidateEntry {
@@ -296,9 +316,8 @@ pub fn native_attention_projection_from_rooms(
                     room_display_name: summary.room_display_name,
                     kind: summary.kind,
                     unread_count: summary.unread_count,
-                    highlight_count: summary.highlight_count,
+                    highlight_count: 0,
                 },
-                latest_event: room.latest_event.as_ref(),
             });
         }
     }
@@ -342,11 +361,7 @@ pub fn native_attention_projection_from_rooms(
     // the payload is derived after suppression, from the same entry that won
     // the candidate selection.
     let notification = match (candidate_entry, candidate.as_ref()) {
-        (Some(entry), Some(candidate)) => Some(native_notification_payload(
-            entry,
-            candidate,
-            input.message_previews,
-        )),
+        (Some(entry), Some(candidate)) => Some(native_notification_payload(entry, candidate)),
         _ => None,
     };
 
@@ -376,34 +391,20 @@ pub fn native_attention_projection_from_rooms(
 
 /// Compose the OS notification the adapter may show for the selected candidate.
 ///
-/// With previews OFF the body carries counts only and no message content ever
-/// leaves Rust. With previews ON the body is the triggering event's sanitized
-/// plain-text preview, which the room projection already reduced to
-/// `Unable to decrypt message`, `Message deleted`, or the event type for
-/// non-text and redacted events. A candidate without a usable preview falls
-/// back to the count body, so enabling previews never turns a notification into
-/// an empty banner.
+/// A room-level unread count proves the number, but does not prove that the
+/// room's latest event is itself unread. Keep the alert generic and navigate
+/// to the room, never to an unverified event or thread.
 fn native_notification_payload(
     entry: &NativeAttentionCandidateEntry<'_>,
     candidate: &NativeAttentionCandidate,
-    message_previews: bool,
 ) -> NativeNotificationPayload {
-    let latest_event = entry.latest_event;
-    let body = if message_previews {
-        latest_event
-            .and_then(native_notification_preview)
-            .unwrap_or_else(|| native_notification_count_body(candidate))
-    } else {
-        native_notification_count_body(candidate)
-    };
-
     NativeNotificationPayload {
         title: native_notification_title(&candidate.room_display_name, candidate.kind),
-        body,
+        body: native_notification_count_body(candidate),
         target: NativeNotificationTarget {
             room_id: entry.room_id.to_owned(),
-            event_id: latest_event.map(|event| event.event_id.clone()),
-            thread_root_event_id: latest_event.and_then(|event| event.thread_root_event_id.clone()),
+            event_id: None,
+            thread_root_event_id: None,
         },
     }
 }
@@ -439,53 +440,6 @@ fn format_notification_count(count: u64, singular: &str, plural: &str) -> String
         0 => String::new(),
         1 => format!("1 {singular}"),
         count => format!("{count} {plural}"),
-    }
-}
-
-/// Plain-text preview line for one room's latest event.
-///
-/// Returns `None` when the projection has no preview to show, which keeps
-/// undecrypted or content-free events on the count body instead of an empty
-/// notification.
-fn native_notification_preview(latest_event: &RoomLatestEventSummary) -> Option<String> {
-    let preview = latest_event.preview.as_deref()?;
-    let collapsed = preview.split_whitespace().collect::<Vec<_>>().join(" ");
-    if collapsed.is_empty() {
-        return None;
-    }
-
-    let line = match latest_event
-        .sender_label
-        .as_deref()
-        .map(str::trim)
-        .filter(|sender| !sender.is_empty())
-    {
-        Some(sender) => format!("{sender}: {collapsed}"),
-        None => collapsed,
-    };
-    Some(truncate_notification_preview(line))
-}
-
-fn truncate_notification_preview(text: String) -> String {
-    if text.chars().count() <= NATIVE_NOTIFICATION_PREVIEW_MAX_CHARS {
-        return text;
-    }
-    let mut truncated: String = text
-        .chars()
-        .take(NATIVE_NOTIFICATION_PREVIEW_MAX_CHARS)
-        .collect();
-    truncated.push('…');
-    truncated
-}
-
-fn room_notification_unread_count(room: &RoomSummary) -> u64 {
-    let count = room.notification_count.max(room.highlight_count);
-    if count > 0 {
-        count
-    } else if room.marked_unread {
-        1
-    } else {
-        0
     }
 }
 
@@ -676,10 +630,23 @@ mod tests {
             unread_count: 2,
             notification_count: 2,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: Some(42),
             conversation_activity: None,
-            latest_event: None,
+            latest_event: Some(RoomLatestEventSummary {
+                event_id: "$observed:example.invalid".to_owned(),
+                relation_type: None,
+                relation_event_id: None,
+                thread_root_event_id: None,
+                sender_id: None,
+                sender_label: None,
+                sender_avatar: None,
+                preview: None,
+                timestamp_ms: 42,
+                is_redacted: false,
+            }),
             parent_space_ids: Vec::new(),
             dm_space_ids: Vec::new(),
             is_encrypted: false,

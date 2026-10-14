@@ -13,6 +13,7 @@ import type {
   ResolveComposerKeyAction
 } from "../domain/types";
 import { readClipboardImageFile } from "../backend/clipboardImageRuntime";
+import { t } from "../i18n/messages";
 import {
   claimNativeDroppedFiles,
   subscribeNativeFileDrops,
@@ -436,6 +437,74 @@ describe("Composer", () => {
 
     expect(textarea.textContent).toBe("**world**");
     expect(onValueChange).toHaveBeenLastCalledWith("**world**");
+  });
+
+  it("keeps the scheduled-send persistence warning alongside a transient notice (#1159)", () => {
+    render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("")}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+        notice="This command is not available in this composer."
+        scheduledSendPersistenceFailed
+      />
+    );
+
+    // A transient notice must never hide a failure that is still true.
+    expect(
+      screen.getByText("This command is not available in this composer.")
+    ).toBeTruthy();
+    expect(
+      screen.getByText(
+        "Local scheduled-send changes could not be saved; they may not survive restarting the app."
+      )
+    ).toBeTruthy();
+  });
+
+  it("badges the send-later clock with this room's pending reservation count", () => {
+    const { container, rerender } = render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("sendable")}
+        scheduledSendCount={3}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+        onScheduleSend={() => undefined}
+      />
+    );
+
+    // The count is part of the accessible name, not only the badge: the badge
+    // itself is presentation-only.
+    const clock = screen.getByRole("button", {
+      name: t("scheduled.sendLaterWithCount", { count: 3 })
+    });
+    expect(clock.getAttribute("data-count")).toBe("3");
+    expect(container.querySelector(".composer-schedule-badge")?.textContent).toBe("3");
+
+    rerender(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        roomName="Direct room"
+        document={documentFromText("sendable")}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+        onScheduleSend={() => undefined}
+      />
+    );
+
+    // An empty queue keeps the plain label and renders no badge.
+    expect(screen.getByRole("button", { name: t("scheduled.sendLater") })).toBeTruthy();
+    expect(container.querySelector(".composer-schedule-badge")).toBeNull();
+    expect(container.querySelector(".composer-schedule-button")?.getAttribute("data-count")).toBeNull();
   });
 
   it("renders a localized notice for rejected slash commands and hides it without one", () => {
@@ -1803,5 +1872,63 @@ describe("Composer", () => {
       const refreshedPopup = mockOverflowingPopup(container);
       expect(activeOptionVisible(refreshedPopup)).toBe(true);
     });
+  });
+});
+
+// #1368: the mention listbox renders without a backdrop, so a press outside the
+// composer must dismiss it instead of leaving it over the timeline.
+describe("mention autocomplete dismissal", () => {
+  const candidates: MentionCandidate[] = [
+    {
+      key: "@alice:example.invalid",
+      label: "Alice",
+      target: { kind: "user", user_id: "@alice:example.invalid", display_label: "Alice" }
+    }
+  ];
+
+  function renderComposer() {
+    return render(
+      <Composer
+        surface="main"
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        mentionCandidates={candidates}
+        roomName="Direct room"
+        document={documentFromText("@a")}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={textChange(() => undefined)}
+      />
+    );
+  }
+
+  it("dismisses mention suggestions on a press outside the composer", () => {
+    const { container } = renderComposer();
+    expect(container.querySelector(".composer-autocomplete")).not.toBeNull();
+
+    fireEvent.pointerDown(document.body);
+
+    expect(container.querySelector(".composer-autocomplete")).toBeNull();
+  });
+
+  it("offers the same query again when the editor is focused again", () => {
+    const { container } = renderComposer();
+
+    fireEvent.pointerDown(document.body);
+    expect(container.querySelector(".composer-autocomplete")).toBeNull();
+
+    fireEvent.focus(container.querySelector(".composer-inline-editor")!);
+
+    expect(container.querySelector(".composer-autocomplete")).not.toBeNull();
+  });
+
+  it("keeps mention suggestions while the press stays inside the composer", () => {
+    const { container } = renderComposer();
+    const composer = container.querySelector(".composer")!;
+
+    fireEvent.pointerDown(composer);
+    fireEvent.pointerDown(container.querySelector(".composer-inline-editor")!);
+
+    expect(container.querySelector(".composer-autocomplete")).not.toBeNull();
   });
 });

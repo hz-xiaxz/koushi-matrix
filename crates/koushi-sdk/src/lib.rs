@@ -34,6 +34,7 @@ mod qa_reports;
 
 mod room_operations;
 
+mod retention;
 mod room_projection;
 
 mod space_children;
@@ -90,19 +91,20 @@ pub use e2ee::{
     accept_sas_verification, accept_verification_request, account_management_capabilities,
     bootstrap_cross_signing, bootstrap_secure_backup, cancel_own_user_sas_verification,
     cancel_sas_verification, cancel_verification_request, change_password,
-    change_secure_backup_passphrase, cleanup_current_device, complete_identity_reset,
-    confirm_sas_verification, cross_signing_status, deactivate_account,
-    discover_current_session_verification_methods, download_joined_room_keys_from_backup,
-    download_room_key_from_backup, enable_key_backup, ensure_device_display_name,
-    has_inbound_group_session, incoming_verification_request_protection_counters,
-    late_decryption_report_stream, map_backup_state_to_desktop,
-    map_cross_signing_status_to_desktop, map_identity_reset_auth_type_to_desktop,
-    map_sdk_sas_emojis_to_desktop, mismatch_sas_verification,
-    observe_incoming_verification_requests, recover_e2ee, recover_e2ee_blocking,
-    request_device_verification, request_late_decryption, request_own_user_sas_verification,
-    request_room_key_for_event, reset_identity, restore_key_backup, room_key_receive_diagnostics,
-    room_key_rotation_reason, room_key_withheld_codes, room_key_withheld_stream,
-    start_own_user_sas_verification, start_sas_verification, write_recovery_key_material,
+    change_secure_backup_passphrase, classify_secure_backup_inspection_failure,
+    cleanup_current_device, complete_identity_reset, confirm_sas_verification,
+    cross_signing_status, deactivate_account, discover_current_session_verification_methods,
+    download_joined_room_keys_from_backup, download_room_key_from_backup, enable_key_backup,
+    ensure_device_display_name, has_inbound_group_session,
+    incoming_verification_request_protection_counters, late_decryption_report_stream,
+    map_backup_state_to_desktop, map_cross_signing_status_to_desktop,
+    map_identity_reset_auth_type_to_desktop, map_sdk_sas_emojis_to_desktop,
+    mismatch_sas_verification, observe_incoming_verification_requests, recover_e2ee,
+    recover_e2ee_blocking, request_device_verification, request_late_decryption,
+    request_own_user_sas_verification, request_room_key_for_event, reset_identity,
+    restore_key_backup, room_key_receive_diagnostics, room_key_rotation_reason,
+    room_key_withheld_codes, room_key_withheld_stream, start_own_user_sas_verification,
+    start_sas_verification, write_recovery_key_material,
 };
 
 pub use matrix_sdk_base::crypto::IncomingVerificationRequestProtectionCounters;
@@ -132,48 +134,63 @@ pub use qa_reports::{
 };
 
 pub use room_operations::{
-    MatrixCreateRoomOptions, MatrixCreateRoomParentSpace, MatrixCreateRoomVisibility,
-    MatrixJoinTarget, MatrixPreviewJoinability, MatrixPreviewMembership,
-    MatrixPublicRoomDirectoryQuery, MatrixPublicRoomDirectoryResult, MatrixPublicRoomDirectoryRoom,
-    MatrixRoomAliasAvailability, MatrixRoomHistoryVisibility, MatrixRoomJoinRule,
-    MatrixRoomMemberRole, MatrixRoomModerationAction, MatrixRoomOperationError,
-    MatrixRoomOperationFailureKind, MatrixRoomPermissionFacts, MatrixRoomPreview,
-    MatrixRoomSettingChange, MatrixRoomSettingsSnapshot, MatrixSpaceChildLinkOutcome,
-    MatrixSpaceInviteCancellationOutcome, MatrixSpaceMemberRoleFailureKind,
-    MatrixSpaceMemberRoleUpdateResult, MatrixSpaceParentLinkOutcome, MatrixUserTrustState,
-    accept_invited_room, cancel_space_invite, check_room_alias_availability,
-    create_public_directory_room, create_room, create_space, discard_outbound_room_key,
-    fetch_room_notification_mode, forget_room, get_room_settings_snapshot, invite_user_to_room,
+    MatrixCreateRoomAccessPolicy, MatrixCreateRoomOptions, MatrixCreateRoomParentSpace,
+    MatrixCreateRoomVisibility, MatrixJoinTarget, MatrixPreviewJoinability,
+    MatrixPreviewMembership, MatrixPublicRoomDirectoryQuery, MatrixPublicRoomDirectoryResult,
+    MatrixPublicRoomDirectoryRoom, MatrixRoomAliasAvailability, MatrixRoomDirectoryVisibility,
+    MatrixRoomHistoryVisibility, MatrixRoomJoinRule, MatrixRoomMemberRole,
+    MatrixRoomModerationAction, MatrixRoomOperationError, MatrixRoomOperationFailureKind,
+    MatrixRoomPermissionFacts, MatrixRoomPreview, MatrixRoomSettingChange,
+    MatrixRoomSettingsSnapshot, MatrixSpaceChildLinkOutcome, MatrixSpaceInviteCancellationOutcome,
+    MatrixSpaceMemberRoleFailureKind, MatrixSpaceMemberRoleUpdateResult,
+    MatrixSpaceParentLinkOutcome, MatrixUserTrustState, accept_invited_room, cancel_space_invite,
+    check_room_alias_availability, create_public_directory_room, create_room, create_space,
+    discard_outbound_room_key, fetch_room_notification_mode, forget_room,
+    get_room_directory_visibility, get_room_settings_snapshot, invite_user_to_room,
     join_room_by_id, join_room_target, leave_room, load_pinned_event_ids, mark_room_as_read,
     mark_room_as_unread, moderate_room_member, pin_event, preview_join_target,
-    preview_room_address, query_public_room_directory, remove_room_tag, room_can_send_text_message,
-    room_has_active_member_no_sync, room_is_joined, set_room_notification_mode, set_room_tag,
-    set_space_child, start_direct_message, unpin_event, update_room_member_power_level,
-    update_room_setting, update_space_member_power_level,
+    preview_room_address, query_public_room_directory, random_room_address_suffix, remove_room_tag,
+    room_can_send_text_message, room_has_active_member_no_sync, room_is_joined,
+    set_room_notification_mode, set_room_tag, set_space_child, set_space_child_suggested,
+    start_direct_message, unpin_event, update_room_member_power_level, update_room_setting,
+    update_space_member_power_level,
 };
 
 pub use space_children::{
-    MatrixSpaceChildEntry, MatrixSpaceChildMembership, matrix_space_children_projection,
+    MatrixSpaceChildEntry, MatrixSpaceChildMembership, matrix_space_can_edit_children,
+    matrix_space_children_projection,
 };
 
 pub use room_projection::{
-    MatrixCachedDirectAccountData, MatrixConversationActivity, MatrixConversationActivitySource,
-    MatrixDirectTargetsByRoom, MatrixInvitePreview, MatrixJoinedMemberSnapshot,
-    MatrixRoomLatestEventSummary, MatrixRoomListError, MatrixRoomListRoom, MatrixRoomListSnapshot,
-    MatrixRoomListSpace, MatrixRoomMemberRoleOption, MatrixRoomMemberSummary, MatrixRoomTagInfo,
-    MatrixRoomTagKind, MatrixRoomTags, MatrixSpaceMemberEntry, MatrixSpaceMemberRoleOption,
-    MatrixSpaceMembersProjection, MatrixUserProfile, cached_direct_account_data_targets_by_room,
-    direct_account_data_targets_by_room, matrix_invite_previews_from_rooms, matrix_room_is_dm,
-    matrix_space_members_projection, room_attention_summary_from_counts,
-    room_attention_summary_from_room, room_list_snapshot, room_list_snapshot_blocking,
-    room_list_snapshot_from_sdk_rooms, room_list_snapshot_from_sdk_rooms_with_direct_targets,
+    MatrixAllowTarget, MatrixAllowTargetKind, MatrixCachedDirectAccountData,
+    MatrixConversationActivity, MatrixConversationActivitySource, MatrixDirectTargetsByRoom,
+    MatrixInvitePreview, MatrixJoinedMemberSnapshot, MatrixRestrictedCompleteness,
+    MatrixRoomAccessFacts, MatrixRoomLatestEventSummary, MatrixRoomListError, MatrixRoomListRoom,
+    MatrixRoomListSnapshot, MatrixRoomListSpace, MatrixRoomMemberRoleOption,
+    MatrixRoomMemberSummary, MatrixRoomTagInfo, MatrixRoomTagKind, MatrixRoomTags,
+    MatrixSpaceMemberEntry, MatrixSpaceMemberRoleOption, MatrixSpaceMembersProjection,
+    MatrixUserProfile, cached_direct_account_data_targets_by_room,
+    direct_account_data_targets_by_room, matrix_invite_previews_from_rooms,
+    matrix_is_joined_verified_space, matrix_room_access_facts, matrix_room_is_dm,
+    matrix_room_join_rule_or_default, matrix_space_members_projection,
+    room_attention_summary_from_counts, room_attention_summary_from_room, room_list_snapshot,
+    room_list_snapshot_blocking, room_list_snapshot_from_sdk_rooms,
+    room_list_snapshot_from_sdk_rooms_with_direct_targets,
     room_list_snapshot_from_sdk_rooms_with_invites,
 };
 
+pub use retention::{
+    MatrixEventCacheDiagnostics, MatrixRetentionDiagnostics, MatrixSearchIndexDiagnostics,
+    retention_diagnostics,
+};
+
 pub use search::{
-    MatrixSearchCandidate, MatrixSearchError, MatrixSearchIndexKey, MatrixSearchIndexStoreConfig,
-    MatrixSearchScope, search_message_candidates, search_message_candidates_blocking,
-    search_message_candidates_scoped,
+    MatrixLiteralCandidate, MatrixLiteralSearchPager, MatrixPersistedEventCursor,
+    MatrixPersistedEventPage, MatrixResolvedMessage, MatrixSearchCandidate, MatrixSearchCursor,
+    MatrixSearchError, MatrixSearchIndexKey, MatrixSearchIndexStoreConfig, MatrixSearchScope,
+    cached_invalid_replacement_ids, cached_redacted_event_ids, index_room_events_now,
+    persisted_room_event_page, resolve_cached_message, search_message_candidates,
+    search_message_candidates_blocking, search_message_candidates_scoped,
 };
 
 pub use sync::{
@@ -194,11 +211,12 @@ pub use timeline::{
     MatrixLiveTailRefreshDiagnostics, MatrixLiveTailRefreshOutcome, MatrixLiveTailRefreshResult,
     MatrixRoomSubscriptionCheckpoint, MatrixTimelineContinuity, MatrixTimelineError,
     MatrixTimelineGapError, MatrixTimelineGapHandle, MatrixTimelineGapInspection,
-    MatrixTimelineGapRepairBudget, MatrixTimelineGapRepairOutcome, MatrixTimelineGapRepairResult,
-    MatrixTimelineItem, MatrixTimelinePaginationHandle, MatrixTimelineSubscription,
-    MatrixTimelineUpdate, MatrixTimelineUpdateStream, edit_text_message, redact_message,
-    room_timeline_visible_items, room_timeline_visible_items_blocking, send_text_message,
-    subscribe_room_timeline, subscribe_room_timeline_blocking,
+    MatrixTimelineGapInspectionDiagnostics, MatrixTimelineGapRepairBudget,
+    MatrixTimelineGapRepairOutcome, MatrixTimelineGapRepairResult, MatrixTimelineItem,
+    MatrixTimelinePaginationHandle, MatrixTimelineSubscription, MatrixTimelineUpdate,
+    MatrixTimelineUpdateStream, edit_text_message, redact_message, room_timeline_visible_items,
+    room_timeline_visible_items_blocking, send_text_message, subscribe_room_timeline,
+    subscribe_room_timeline_blocking,
 };
 
 pub use sliding_sync_discovery::{

@@ -29,7 +29,7 @@ use crate::threads_list::{
     ThreadRootProjectionService,
 };
 use koushi_protocol::command::{InitialBackfillPolicy, TimelineCommand};
-use koushi_protocol::event::{CoreEvent, TimelineAnchorRestoreStatus, TimelineEvent, TimelineItem};
+use koushi_protocol::event::{CoreEvent, TimelineEvent, TimelineItem};
 use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 use koushi_protocol::ids::{RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
 
@@ -42,6 +42,10 @@ use super::composer::validate_composer_body_for_timeline_send;
 use super::diagnostics::{
     record_subscribe_stage, record_timeline_gap_repair, timeline_subscription_failed_action,
     trace_timeline_route,
+};
+use super::focused_build::{
+    FocusedBuildCompletion, FocusedBuildFailure, FocusedBuildSupervisor, PreparedFocusedTimeline,
+    record_focused_build, record_focused_build_settled,
 };
 use super::gap_repair::{
     GlobalResponseCommit, LIVE_TAIL_CANCELLATION_DEADLINE, TimelineGapRepairTrigger,
@@ -71,8 +75,60 @@ use super::thread_projection::{
 /// Bounded diff queue capacity per subscribed timeline (overview.md, Async rule 10).
 pub const TIMELINE_DIFF_QUEUE_CAPACITY: usize = 128;
 
+/// Export-time snapshot of the resident Room timeline set (#1394).
+///
+/// Counts only: no Room, thread, event or user identifiers and no message
+/// content. `resident_event_items` sums the position-evidence entry count of
+/// every resident actor, so it measures distinct event-ID-backed canonical
+/// depth; transaction-backed local echoes, date separators and receipt-only
+/// items are not part of that evidence.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct TimelineResidencyDiagnostics {
+    /// Session-resident desired Room subscriptions.
+    pub session_resident_rooms: u64,
+    /// Room subscriptions actually held by the SDK Sliding Sync session, which
+    /// expiry can empty while the logical subscription set is unchanged.
+    pub actual_room_subscriptions: u64,
+    /// Resident timeline actors, and their split by timeline kind.
+    pub resident_actors: u64,
+    pub resident_room_actors: u64,
+    pub resident_thread_actors: u64,
+    pub resident_focused_actors: u64,
+    /// Canonical event items held by all resident actors, and the deepest one.
+    pub resident_event_items: u64,
+    pub deepest_actor_event_items: u64,
+}
+
 fn initial_thread_backfill_is_authoritative(end_reached: bool, item_count: usize) -> bool {
     end_reached || item_count > 0
+}
+
+/// Fold one `(kind, canonical event-item count)` row per resident actor into a
+/// [`TimelineResidencyDiagnostics`] snapshot (#1394). An actor without position
+/// evidence contributes an actor but no depth.
+pub(super) fn fold_residency_actors<'a>(
+    session_resident_rooms: usize,
+    actual_room_subscriptions: usize,
+    actors: impl IntoIterator<Item = (&'a TimelineKind, Option<usize>)>,
+) -> TimelineResidencyDiagnostics {
+    let mut diagnostics = TimelineResidencyDiagnostics {
+        session_resident_rooms: session_resident_rooms as u64,
+        actual_room_subscriptions: actual_room_subscriptions as u64,
+        ..TimelineResidencyDiagnostics::default()
+    };
+    for (kind, event_items) in actors {
+        diagnostics.resident_actors += 1;
+        match kind {
+            TimelineKind::Room { .. } => diagnostics.resident_room_actors += 1,
+            TimelineKind::Thread { .. } => diagnostics.resident_thread_actors += 1,
+            TimelineKind::Focused { .. } => diagnostics.resident_focused_actors += 1,
+        }
+        let event_items = event_items.unwrap_or(0) as u64;
+        diagnostics.resident_event_items += event_items;
+        diagnostics.deepest_actor_event_items =
+            diagnostics.deepest_actor_event_items.max(event_items);
+    }
+    diagnostics
 }
 
 async fn await_initial_thread_projection<S>(end_reached: bool, counts: S) -> bool
@@ -176,6 +232,12 @@ pub(crate) enum TimelineMessage {
         composer_permit: ForwardedComposerDraftPermit,
         formatting_options: ComposerFormattingOptions,
     },
+    /// #1259: a thread read advanced the shared thread-unread marker; ask the room's
+    /// timeline actor to re-overlay its root items. Best-effort: a key without a
+    /// retained timeline is a no-op.
+    RefreshThreadUnread {
+        key: TimelineKey,
+    },
     /// Sync started: carries the one live `RoomListService`. Subscribing a timeline must also
     /// subscribe its room with the live service so the server streams that
     /// room's new timeline events (canon: TimelineActor description; without
@@ -222,6 +284,11 @@ pub(crate) enum TimelineMessage {
         requested_limit: u16,
         returned_events: usize,
         duration_ms: u128,
+    },
+    #[cfg(test)]
+    TestFocusedBuildProbe {
+        key: TimelineKey,
+        response: oneshot::Sender<super::focused_build::FocusedBuildProbe>,
     },
     #[cfg(test)]
     TestLiveTailDispatchState {
@@ -304,6 +371,12 @@ pub(super) enum TimelineManagerControl {
     },
     Shutdown {
         acknowledged: oneshot::Sender<()>,
+    },
+    /// #1394: answer an export-time resident-set sample. The caller forwards the
+    /// reply channel, so the manager never awaits and a dropped request settles
+    /// the caller's bounded wait as unavailable.
+    ResidencyDiagnostics {
+        response: oneshot::Sender<Option<TimelineResidencyDiagnostics>>,
     },
 }
 
@@ -434,6 +507,18 @@ impl TimelineManagerHandle {
         acknowledgement.await.is_ok()
     }
 
+    /// #1394: request an export-time resident-set snapshot. Enqueued without
+    /// waiting; a full control mailbox drops the reply channel, which settles
+    /// the caller's bounded wait as unavailable instead of blocking the export.
+    pub(crate) fn residency_diagnostics(
+        &self,
+        response: oneshot::Sender<Option<TimelineResidencyDiagnostics>>,
+    ) {
+        let _ = self
+            .control_tx
+            .try_send(TimelineManagerControl::ResidencyDiagnostics { response });
+    }
+
     pub(crate) async fn shutdown(&self) -> bool {
         self.close_membership_operations().await;
         let (acknowledged, acknowledgement) = oneshot::channel();
@@ -524,6 +609,8 @@ pub struct TimelineManagerActor {
     pub(super) thread_root_projection_fetches: ThreadRootProjectionFetchRegistry,
     pub(super) timeline_actor_generations: Arc<TimelineActorGenerationGate>,
     pub(super) live_tail_refreshes: LiveTailRefreshCoordinator<TimelineKey>,
+    /// #1146: focused SDK builds in flight, polled by the manager loop.
+    pub(super) focused_builds: FocusedBuildSupervisor,
     #[cfg(any(test, feature = "test-hooks"))]
     pub(super) test_session_available: bool,
 }
@@ -536,6 +623,7 @@ impl Drop for TimelineManagerActor {
         self.terminal_ingress.stop_accepting();
         self.read_workers.cancel_all();
         self.send_enqueue_workers.cancel_all();
+        self.focused_builds.abort_all();
         self.global_send_completion_observer_future.take();
     }
 }
@@ -603,6 +691,7 @@ impl TimelineManagerActor {
                 TimelineActorGenerationGate::with_focused_projection_commits(focused_projection_tx),
             ),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
+            focused_builds: Default::default(),
             #[cfg(any(test, feature = "test-hooks"))]
             test_session_available: false,
         };
@@ -704,6 +793,7 @@ impl TimelineManagerActor {
                 TimelineActorGenerationGate::with_focused_projection_commits(focused_projection_tx),
             ),
             live_tail_refreshes: LiveTailRefreshCoordinator::new(),
+            focused_builds: Default::default(),
             #[cfg(any(test, feature = "test-hooks"))]
             test_session_available: false,
         };
@@ -763,6 +853,10 @@ impl TimelineManagerActor {
                             let _ = acknowledged.send(());
                             continue;
                         }
+                        Some(TimelineManagerControl::ResidencyDiagnostics { response }) => {
+                            let _ = response.send(Some(self.residency_diagnostics()));
+                            continue;
+                        }
                         Some(TimelineManagerControl::Shutdown { acknowledged }) => {
                             shutdown_acknowledgement = Some(acknowledged);
                             break;
@@ -780,6 +874,13 @@ impl TimelineManagerActor {
                                 Some(live_tail_completion_dispatches);
                         }
                         self.handle_navigation_projection(projection).await;
+                    }
+                    continue;
+                }
+                completion = self.focused_builds.tasks.next(),
+                    if !self.focused_builds.tasks.is_empty() => {
+                    if let Some(completion) = completion {
+                        self.handle_focused_build_completion(completion).await;
                     }
                     continue;
                 }
@@ -937,6 +1038,10 @@ impl TimelineManagerActor {
                         navigation_projection_completion_dispatches,
                     ));
                 }
+                #[cfg(test)]
+                TimelineMessage::TestFocusedBuildProbe { key, response } => {
+                    let _ = response.send(self.focused_build_probe(&key));
+                }
                 TimelineMessage::IgnoredUsersUpdated { user_ids } => {
                     self.handle_ignored_users_updated(user_ids).await;
                 }
@@ -1010,6 +1115,16 @@ impl TimelineManagerActor {
                     self.handle_local_read_boundary_observed(key, actor_generation, target)
                         .await;
                 }
+                TimelineMessage::RefreshThreadUnread { key } => {
+                    if let Some(handle) = self.timelines.get(&key) {
+                        let deadline = executor::Instant::now() + LIVE_TAIL_CANCELLATION_DEADLINE;
+                        let _ = executor::timeout_at(
+                            deadline,
+                            handle.send_control(TimelineActorControl::RefreshThreadUnread),
+                        )
+                        .await;
+                    }
+                }
                 TimelineMessage::Command(command) => {
                     self.handle_command(command).await;
                 }
@@ -1050,6 +1165,7 @@ impl TimelineManagerActor {
         // Stop accepting commands, then join session-owned enqueue workers
         // while the sole global terminal observer remains live. A worker may
         // still bind a durably saved SDK transaction during this phase.
+        self.focused_builds.cancel_all().await;
         self.read_workers.cancel_all();
         self.read_workers.publish_persistence();
         let abandoned_read_waiters = self
@@ -1200,35 +1316,6 @@ impl TimelineManagerActor {
                     let _ = handle
                         .send(TimelineActorMessage::CancelLinkPreviews { request_id })
                         .await;
-                }
-            }
-            TimelineCommand::RestoreTimelineAnchor {
-                request_id,
-                key,
-                event_id,
-                max_batches,
-                event_count,
-            } => {
-                if matches!(&key.kind, TimelineKind::Room { .. }) {
-                    self.route_to_actor_or_fail(
-                        request_id,
-                        &key,
-                        TimelineActorMessage::RestoreTimelineAnchor {
-                            request_id,
-                            event_id,
-                            max_batches,
-                            event_count,
-                        },
-                    )
-                    .await;
-                } else {
-                    self.emit(CoreEvent::Timeline(TimelineEvent::AnchorRestoreFinished {
-                        request_id,
-                        key,
-                        status: TimelineAnchorRestoreStatus::Failed {
-                            kind: TimelineFailureKind::NotSubscribed,
-                        },
-                    }));
                 }
             }
             TimelineCommand::ObserveViewport {
@@ -1510,6 +1597,10 @@ impl TimelineManagerActor {
                 event_id,
                 document,
             } => {
+                // Edits format their replacement body, so they must carry the
+                // same composer formatting options the send path uses. Without
+                // this an edit re-formatted the body with the defaults and math
+                // mode OFF was silently ignored.
                 self.route_to_actor_or_fail(
                     request_id,
                     &key,
@@ -1517,6 +1608,7 @@ impl TimelineManagerActor {
                         request_id,
                         event_id,
                         document,
+                        formatting_options: self.composer_formatting_options,
                     },
                 )
                 .await;
@@ -1532,23 +1624,6 @@ impl TimelineManagerActor {
                     TimelineActorMessage::Redact {
                         request_id,
                         event_id,
-                    },
-                )
-                .await;
-            }
-            TimelineCommand::ToggleReaction {
-                request_id,
-                key,
-                event_id,
-                reaction_key,
-            } => {
-                self.route_to_actor_or_fail(
-                    request_id,
-                    &key,
-                    TimelineActorMessage::ToggleReaction {
-                        request_id,
-                        event_id,
-                        reaction_key,
                     },
                 )
                 .await;
@@ -1694,6 +1769,17 @@ impl TimelineManagerActor {
     /// cleanup, and actor-resource lease release. Session residency is
     /// intentionally independent and is never removed here.
     pub(super) async fn unsubscribe_timeline(&mut self, key: &TimelineKey) {
+        // #1146: cancel and settle SDK construction before rolling back its
+        // lease/activation, without publishing a cancellation failure terminal.
+        if let Some(pending) = self.focused_builds.cancel(key).await {
+            if pending.lease_added
+                && let Some(room_id) = &pending.lease_room_id
+            {
+                self.release_room_lease(room_id);
+            }
+            self.timeline_actor_generations
+                .restore_failed_activation(key, pending.activation);
+        }
         // Drop the actor handle, which cancels its relay task and drops
         // the SDK Timeline handle — no dedicated success event per spec.
         if matches!(key.kind, TimelineKind::Room { .. }) {
@@ -1728,13 +1814,19 @@ impl TimelineManagerActor {
         &mut self,
         desired: Option<&TimelineKey>,
     ) {
-        let obsolete = self
+        let mut obsolete = self
             .timelines
             .keys()
             .filter(|key| matches!(key.kind, TimelineKind::Focused { .. }))
             .filter(|key| Some(*key) != desired)
             .cloned()
             .collect::<Vec<_>>();
+        // #1146: an in-flight focused build is retired with its owner.
+        for key in self.focused_builds.pending_keys() {
+            if Some(key) != desired && !obsolete.contains(key) {
+                obsolete.push(key.clone());
+            }
+        }
         for key in obsolete {
             self.unsubscribe_timeline(&key).await;
         }
@@ -1766,6 +1858,31 @@ impl TimelineManagerActor {
             .await;
             return;
         };
+        // A selection command may already be queued when a leave is acknowledged.
+        // Do not let it recreate an actor or room subscription until rejoin.
+        if key
+            .room_id()
+            .parse::<OwnedRoomId>()
+            .ok()
+            .is_some_and(|room_id| self.room_leave_states.contains_key(&room_id))
+        {
+            self.emit_subscription_failure(
+                request_id,
+                &key,
+                TimelineFailureKind::NotSubscribed,
+                emit_failure_terminal,
+            )
+            .await;
+            return;
+        }
+        // #1146: a repeated subscribe while the focused SDK build is in flight
+        // adopts the newest request instead of restarting the build.
+        if self
+            .focused_builds
+            .coalesce(&key, request_id, emit_failure_terminal)
+        {
+            return;
+        }
 
         // Issue #518: the retained actor's room must be proven present in the
         // live Sliding Sync room-subscription set before the cheap replay path
@@ -1880,10 +1997,37 @@ impl TimelineManagerActor {
             }
         });
         self.reconcile_subscriptions(reconcile_trigger).await;
-        let subscription_generation = self
-            .room_list_service
-            .as_ref()
-            .map(|service| service.subscription_generation().get());
+        // #1146: a focused SDK build may wait on remote context or the
+        // focused-cache lock; the manager waits for it only through a bounded,
+        // fenced completion handled in `handle_focused_build_completion`.
+        if matches!(key.kind, TimelineKind::Focused { .. }) {
+            match self.focused_build_future(&key, activation.generation) {
+                Ok(build) => self.focused_builds.start(
+                    key,
+                    activation,
+                    request_id,
+                    emit_failure_terminal,
+                    lease_room_id,
+                    lease_added,
+                    reconcile_trigger,
+                    build,
+                ),
+                Err(kind) => {
+                    self.roll_back_failed_subscribe(
+                        request_id,
+                        &key,
+                        activation,
+                        lease_added.then_some(lease_room_id).flatten(),
+                        reconcile_trigger,
+                        kind,
+                        emit_failure_terminal,
+                    )
+                    .await;
+                }
+            }
+            return;
+        }
+        let subscription_generation = self.current_subscription_generation();
         match self
             .build_timeline_actor_handle(
                 request_id,
@@ -1918,6 +2062,266 @@ impl TimelineManagerActor {
             }
         }
     }
+
+    /// #1394: content-free snapshot of the resident timeline set, sampled by
+    /// the diagnostics export. Reads the manager's own handles only and never
+    /// awaits an actor, so a busy mailbox cannot hold the export.
+    pub(super) fn residency_diagnostics(&self) -> TimelineResidencyDiagnostics {
+        fold_residency_actors(
+            self.session_subscribed_rooms.len(),
+            self.room_list_service
+                .as_ref()
+                .map_or(0, |service| service.actual_subscribed_rooms().len()),
+            self.timelines.iter().map(|(key, handle)| {
+                (
+                    &key.kind,
+                    handle
+                        .position_rx
+                        .as_ref()
+                        .map(|position| position.borrow().ranks.len()),
+                )
+            }),
+        )
+    }
+
+    fn current_subscription_generation(&self) -> Option<u64> {
+        self.room_list_service
+            .as_ref()
+            .map(|service| service.subscription_generation().get())
+    }
+
+    /// The focused-build counterpart of `handle_subscribe`'s success arm.
+    async fn install_subscribed_actor(&mut self, key: &TimelineKey, handle: TimelineActorHandle) {
+        self.emit_timeline_subscribed_action(key).await;
+        if let Some(previous) = self.timelines.insert(key.clone(), handle) {
+            previous.stop().await;
+        }
+        self.replay_retained_room_subscription_checkpoint(key).await;
+        self.retry_pending_send_hydrations(key);
+        record_subscribe_stage("subscribed_done", None);
+    }
+
+    /// The focused-build counterpart of `handle_subscribe`'s failure arm.
+    #[expect(
+        clippy::too_many_arguments,
+        reason = "the admitted subscribe state is rolled back as one unit"
+    )]
+    async fn roll_back_failed_subscribe(
+        &mut self,
+        request_id: RequestId,
+        key: &TimelineKey,
+        activation: super::navigation::TimelineActorGenerationActivation,
+        added_lease_room_id: Option<OwnedRoomId>,
+        reconcile_trigger: SubscriptionReconcileTrigger,
+        kind: TimelineFailureKind,
+        emit_failure_terminal: bool,
+    ) {
+        if let Some(room_id) = &added_lease_room_id {
+            self.release_room_lease(room_id);
+        }
+        // Keep session residency after a failed actor build; only the
+        // actor-resource lease is rolled back.
+        self.reconcile_subscriptions(reconcile_trigger).await;
+        self.timeline_actor_generations
+            .restore_failed_activation(key, activation);
+        self.emit_subscription_failure(request_id, key, kind, emit_failure_terminal)
+            .await;
+    }
+
+    /// Prepare the SDK `TimelineFocus::Event` build as an owned future. Only
+    /// synchronous validation happens here; the SDK work runs in the
+    /// supervised task.
+    fn focused_build_future(
+        &self,
+        key: &TimelineKey,
+        actor_generation: u64,
+    ) -> Result<
+        futures_util::future::BoxFuture<
+            'static,
+            Result<PreparedFocusedTimeline, FocusedBuildFailure>,
+        >,
+        TimelineFailureKind,
+    > {
+        let (room_id, focus) = focused_timeline_focus(key)?;
+        #[cfg(any(test, feature = "test-hooks"))]
+        if self.session.is_none() {
+            #[cfg(test)]
+            let gate = self.focused_builds.test_gate.clone();
+            return Ok(Box::pin(async move {
+                #[cfg(test)]
+                if let Some(gate) = gate {
+                    gate().await.map_err(|_| FocusedBuildFailure::Sdk)?;
+                }
+                Ok(PreparedFocusedTimeline::TestActor)
+            }));
+        }
+        let Some(session) = &self.session else {
+            return Err(TimelineFailureKind::NotSubscribed);
+        };
+        let Some(room) = session.client().get_room(&room_id) else {
+            return Err(TimelineFailureKind::Sdk);
+        };
+        Ok(Box::pin(async move {
+            record_subscribe_stage("build_begin", None);
+            let build_started = Some(startup_trace::now());
+            let sdk_started = executor::Instant::now();
+            let timeline_result = koushi_timeline_builder(&room, focus).build().await;
+            startup_trace::trace_phase(StartupPhase::TimelineBuild, build_started);
+            record_subscribe_stage("build_done", None);
+            // The actual SDK-internal wait for a completed build. Cancellation
+            // is recorded by the supervisor when the underlying future is dropped.
+            record_focused_build(
+                if timeline_result.is_ok() {
+                    "sdk_build_done"
+                } else {
+                    "sdk_build_failed"
+                },
+                actor_generation,
+                Some(sdk_started.elapsed().as_millis()),
+            );
+            timeline_result
+                .map(|timeline| PreparedFocusedTimeline::Sdk(Arc::new(timeline)))
+                .map_err(|_| FocusedBuildFailure::Sdk)
+        }))
+    }
+
+    /// Finish or roll back one focused build. Only the build still pending
+    /// for its exact activation may install; anything else is discarded.
+    pub(super) async fn handle_focused_build_completion(
+        &mut self,
+        completion: FocusedBuildCompletion,
+    ) {
+        let Some(pending) = self.focused_builds.take_current(&completion).await else {
+            return;
+        };
+        let key = completion.key;
+        if self.timeline_actor_generations.current_generation(&key)
+            != Some(pending.activation.generation)
+        {
+            // Defensive: ownership moved without cancelling this build.
+            if pending.lease_added
+                && let Some(room_id) = &pending.lease_room_id
+            {
+                self.release_room_lease(room_id);
+            }
+            record_focused_build("stale_discarded", pending.activation.generation, None);
+            return;
+        }
+        let result = match completion.result {
+            Ok(PreparedFocusedTimeline::Sdk(timeline)) => match self.session.clone() {
+                Some(session) => {
+                    let subscription_generation = self.current_subscription_generation();
+                    Ok(self
+                        .spawn_timeline_actor(
+                            session,
+                            pending.request_id,
+                            &key,
+                            timeline,
+                            pending.activation.generation,
+                            subscription_generation,
+                        )
+                        .await)
+                }
+                None => Err(FocusedBuildFailure::Sdk),
+            },
+            #[cfg(any(test, feature = "test-hooks"))]
+            Ok(PreparedFocusedTimeline::TestActor) => {
+                Ok(Self::room_subscription_residency_test_actor_handle())
+            }
+            Err(failure) => Err(failure),
+        };
+        record_focused_build_settled(&pending, result.as_ref().map(|_| ()).map_err(|f| *f));
+        match result {
+            Ok(handle) => self.install_subscribed_actor(&key, handle).await,
+            Err(failure) => {
+                self.roll_back_failed_subscribe(
+                    pending.request_id,
+                    &key,
+                    pending.activation,
+                    pending
+                        .lease_added
+                        .then_some(pending.lease_room_id)
+                        .flatten(),
+                    pending.reconcile_trigger,
+                    failure.timeline_failure_kind(),
+                    pending.emit_failure_terminal,
+                )
+                .await;
+            }
+        }
+    }
+    /// Await `future` inline while still polling every manager-owned worker
+    /// set.
+    ///
+    /// Send-enqueue workers, focused-build completions, read workers and their
+    /// retry wakes, and the global send-completion observer have no poller
+    /// other than this manager. Some take SDK locks (send-enqueue workers reach
+    /// the event cache through `load_or_fetch_event`). Tokio locks hand a
+    /// released permit to the next queued waiter even when nobody polls it, so
+    /// an inline manager await on the same lock would wait forever on a permit
+    /// owned by a parked worker. Any inline manager await that can block on an
+    /// SDK lock must go through this helper. Completions are applied after
+    /// `future` settles, in arrival order.
+    pub(super) async fn await_driving_manager_workers<F: std::future::Future>(
+        &mut self,
+        future: F,
+    ) -> F::Output {
+        #[expect(
+            clippy::large_enum_variant,
+            reason = "short-lived value moved once; boxing would add an allocation per completion"
+        )]
+        enum Driven {
+            SendEnqueue(super::outbound_send::SendEnqueueWorkerCompletion),
+            FocusedBuild(super::focused_build::FocusedBuildCompletion),
+            Read(super::read_state::ReadWorkerCompletion),
+        }
+        // Boxed: the wrapped SDK futures (timeline build, actor spawn) are large,
+        // and nesting them inline in this state machine overflows the stack.
+        let mut future = Box::pin(future);
+        let mut driven = Vec::new();
+        let output = loop {
+            tokio::select! {
+                biased;
+                output = &mut future => break output,
+                worker = self.send_enqueue_workers.tasks.next(),
+                    if !self.send_enqueue_workers.tasks.is_empty() => {
+                    driven.extend(worker.map(Driven::SendEnqueue));
+                }
+                completion = self.focused_builds.tasks.next(),
+                    if !self.focused_builds.tasks.is_empty() => {
+                    driven.extend(completion.map(Driven::FocusedBuild));
+                }
+                completion = self.read_workers.tasks.next(),
+                    if !self.read_workers.tasks.is_empty() => {
+                    driven.extend(completion.map(Driven::Read));
+                }
+                retry = self.read_workers.retry_tasks.next(),
+                    if !self.read_workers.retry_tasks.is_empty() => {
+                    driven.extend(retry.map(Driven::Read));
+                }
+                _ = super::outbound_send::poll_global_send_completion_observer(
+                    &mut self.global_send_completion_observer_future,
+                ) => {
+                    self.global_send_completion_observer_future = None;
+                }
+            }
+        };
+        for completion in driven {
+            match completion {
+                Driven::SendEnqueue(completion) => {
+                    self.handle_send_enqueue_worker_completion(completion).await;
+                }
+                Driven::FocusedBuild(completion) => {
+                    // Installing a focused build spawns its actor through this
+                    // helper again; box the cycle.
+                    Box::pin(self.handle_focused_build_completion(completion)).await;
+                }
+                Driven::Read(completion) => self.handle_read_worker_completion(completion).await,
+            }
+        }
+        output
+    }
+
     pub(super) async fn build_timeline_actor_handle(
         &mut self,
         request_id: RequestId,
@@ -1957,19 +2361,7 @@ impl TimelineManagerActor {
                     Err(_) => return Err(TimelineFailureKind::Sdk),
                 }
             }
-            TimelineKind::Focused { event_id, .. } => {
-                match matrix_sdk::ruma::EventId::parse(event_id.as_str()) {
-                    Ok(eid) => TimelineFocus::Event {
-                        target: eid,
-                        num_context_events: 20,
-                        thread_mode:
-                            matrix_sdk_ui::timeline::TimelineEventFocusThreadMode::Automatic {
-                                hide_threaded_events: false,
-                            },
-                    },
-                    Err(_) => return Err(TimelineFailureKind::Sdk),
-                }
-            }
+            TimelineKind::Focused { .. } => focused_timeline_focus(key)?.1,
         };
 
         #[cfg(any(test, feature = "test-hooks"))]
@@ -1977,7 +2369,7 @@ impl TimelineManagerActor {
             return Ok(Self::room_subscription_residency_test_actor_handle());
         }
 
-        let Some(session) = &self.session else {
+        let Some(session) = self.session.clone() else {
             return Err(TimelineFailureKind::NotSubscribed);
         };
         let client = session.client();
@@ -1988,7 +2380,9 @@ impl TimelineManagerActor {
 
         trace("build_begin");
         let build_started = Some(startup_trace::now());
-        let timeline_result = koushi_timeline_builder(&room, focus).build().await;
+        let timeline_result = self
+            .await_driving_manager_workers(koushi_timeline_builder(&room, focus).build())
+            .await;
         startup_trace::trace_phase(StartupPhase::TimelineBuild, build_started);
         trace("build_done");
 
@@ -2002,7 +2396,9 @@ impl TimelineManagerActor {
             InitialBackfillPolicy::RequiredForExistingThread
         ) && matches!(key.kind, TimelineKind::Thread { .. })
         {
-            let (initial_items, _) = timeline.subscribe().await;
+            let (initial_items, _) = self
+                .await_driving_manager_workers(timeline.subscribe())
+                .await;
             if initial_items.is_empty() {
                 let _permit = self
                     .account_work
@@ -2013,17 +2409,47 @@ impl TimelineManagerActor {
                 };
                 let root_event_id = matrix_sdk::ruma::EventId::parse(root_event_id)
                     .map_err(|_| TimelineFailureKind::Sdk)?;
-                if !hydrate_initial_thread(&timeline, &client, &room_id, &root_event_id).await? {
+                if !self
+                    .await_driving_manager_workers(hydrate_initial_thread(
+                        &timeline,
+                        &client,
+                        &room_id,
+                        &root_event_id,
+                    ))
+                    .await?
+                {
                     return Err(TimelineFailureKind::Sdk);
                 }
             }
         }
 
-        trace("spawn_begin");
-        let handle = TimelineActor::spawn(
+        Ok(self
+            .spawn_timeline_actor(
+                session,
+                request_id,
+                key,
+                timeline,
+                actor_generation,
+                subscription_generation,
+            )
+            .await)
+    }
+
+    async fn spawn_timeline_actor(
+        &mut self,
+        session: Arc<MatrixClientSession>,
+        request_id: RequestId,
+        key: &TimelineKey,
+        timeline: Arc<matrix_sdk_ui::timeline::Timeline>,
+        actor_generation: u64,
+        subscription_generation: Option<u64>,
+    ) -> TimelineActorHandle {
+        record_subscribe_stage("spawn_begin", None);
+        // The actor's initial load subscribes the event cache and may paginate.
+        let spawn = TimelineActor::spawn(
             key.clone(),
             timeline,
-            session.clone(),
+            session,
             request_id,
             self.read_workers.send_read_receipts_enabled(),
             self.action_tx.clone(),
@@ -2042,11 +2468,10 @@ impl TimelineManagerActor {
             Arc::clone(&self.send_completion),
             self.terminal_ingress.clone(),
             self.msg_tx.clone(),
-        )
-        .await;
-        trace("spawn_done");
-
-        Ok(handle)
+        );
+        let handle = self.await_driving_manager_workers(spawn).await;
+        record_subscribe_stage("spawn_done", None);
+        handle
     }
     async fn route_to_actor_or_fail(
         &mut self,
@@ -2119,12 +2544,41 @@ impl TimelineManagerActor {
     }
 }
 
+/// Parse a Focused key's room and SDK event focus without touching the
+/// session.
+fn focused_timeline_focus(
+    key: &TimelineKey,
+) -> Result<(OwnedRoomId, TimelineFocus), TimelineFailureKind> {
+    let TimelineKind::Focused { room_id, event_id } = &key.kind else {
+        return Err(TimelineFailureKind::Sdk);
+    };
+    let room_id = OwnedRoomId::try_from(room_id.as_str()).map_err(|_| TimelineFailureKind::Sdk)?;
+    let target = matrix_sdk::ruma::EventId::parse(event_id.as_str())
+        .map_err(|_| TimelineFailureKind::Sdk)?;
+    Ok((
+        room_id,
+        TimelineFocus::Event {
+            target,
+            num_context_events: 20,
+            thread_mode: matrix_sdk_ui::timeline::TimelineEventFocusThreadMode::Automatic {
+                hide_threaded_events: false,
+            },
+        },
+    ))
+}
+
 pub(super) fn internal_timeline_request_id() -> RequestId {
     RequestId {
         connection_id: RuntimeConnectionId(0),
         sequence: 0,
     }
 }
+
+#[cfg(test)]
+mod edit_text_formatting_tests;
+
+#[cfg(test)]
+mod thread_mention_projection_tests;
 
 #[cfg(test)]
 mod tests {

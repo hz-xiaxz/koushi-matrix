@@ -391,6 +391,7 @@ describe("TimelinePane render isolation", () => {
 
   test("shows thread attention counts on the timeline header threads button", () => {
     const snapshot = makeSnapshot();
+    snapshot.state.domain.rooms[0].thread_unread_count = 3;
     snapshot.state.domain.thread_attention = {
       kind: "tracking",
       room_id: "!room-alpha:example.invalid",
@@ -442,15 +443,15 @@ describe("TimelinePane render isolation", () => {
 
     const threadsButton = screen.getByRole("button", { name: "Threads" });
     expect(threadsButton.getAttribute("data-count")).toBe("3");
-    expect(threadsButton.getAttribute("data-live-count")).toBe("2");
-    expect(threadsButton.getAttribute("data-mention-count")).toBe("1");
+    expect(threadsButton.hasAttribute("data-live-count")).toBe(false);
+    expect(threadsButton.hasAttribute("data-mention-count")).toBe(false);
   });
 });
 
 function makeSnapshot(): DesktopSnapshot {
   return {
     state: {
-      schema_version: 7,
+      schema_version: 8,
       domain: {
         session_lock_reason: null,
         session: {
@@ -722,6 +723,7 @@ function makeSnapshot(): DesktopSnapshot {
         focused_context: { kind: "closed" },
         files_view: { kind: "closed" }, history_export: { kind: "idle" },
         threads_list: { kind: "closed" },
+        scheduled_sends_list: { kind: "closed" },
         errors: [],
         basic_operation: { kind: "idle" },
         room_address_availability: { kind: "idle" }

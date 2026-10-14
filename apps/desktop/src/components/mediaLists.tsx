@@ -36,7 +36,8 @@ import {
   type TimelineRowActionHandlers
 } from "./TimelineView";
 import { ImeSafeForm } from "./ImeTextControl";
-import { Composer } from "./composer";
+import { Composer, ScheduledSendTimeAdjustments } from "./composer";
+import { Tooltip } from "./Tooltip";
 import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
 import {
   ICON_SIZE,
@@ -160,9 +161,19 @@ function MediaViewer({
               {item.media.size !== null ? ` - ${formatUploadBytes(item.media.size)}` : ""}
             </p>
           </div>
-          <button className="icon-button" type="button" aria-label={t("mediaGallery.close")} onClick={onClose}>
-            <X size={ICON_SIZE.small} />
-          </button>
+          <Tooltip label={t("mediaGallery.close")} placement="below" align="end">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("mediaGallery.close")}
+                onClick={onClose}
+                {...tooltipProps}
+              >
+                <X size={ICON_SIZE.small} />
+              </button>
+            )}
+          </Tooltip>
         </header>
         <div className="media-viewer-stage">
           {sourceUrl ? (
@@ -184,46 +195,66 @@ function MediaViewer({
         </div>
         <footer className="media-viewer-actions">
           {showNavigation ? (
-            <button
-              className="icon-button"
-              type="button"
-              aria-label={t("mediaGallery.previous")}
-              onClick={() => {
-                setZoom(1);
-                onSelectIndex(previousIndex);
-              }}
-            >
-              <ChevronLeft size={ICON_SIZE.control} />
-            </button>
+            <Tooltip label={t("mediaGallery.previous")} placement="above">
+              {(tooltipProps) => (
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label={t("mediaGallery.previous")}
+                  onClick={() => {
+                    setZoom(1);
+                    onSelectIndex(previousIndex);
+                  }}
+                  {...tooltipProps}
+                >
+                  <ChevronLeft size={ICON_SIZE.control} />
+                </button>
+              )}
+            </Tooltip>
           ) : null}
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("mediaGallery.zoomOut")}
-            onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}
-          >
-            <ZoomOut size={ICON_SIZE.control} />
-          </button>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("mediaGallery.zoomIn")}
-            onClick={() => setZoom((value) => Math.min(3, value + 0.25))}
-          >
-            <ZoomIn size={ICON_SIZE.control} />
-          </button>
+          <Tooltip label={t("mediaGallery.zoomOut")} placement="above">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("mediaGallery.zoomOut")}
+                onClick={() => setZoom((value) => Math.max(0.5, value - 0.25))}
+                {...tooltipProps}
+              >
+                <ZoomOut size={ICON_SIZE.control} />
+              </button>
+            )}
+          </Tooltip>
+          <Tooltip label={t("mediaGallery.zoomIn")} placement="above">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("mediaGallery.zoomIn")}
+                onClick={() => setZoom((value) => Math.min(3, value + 0.25))}
+                {...tooltipProps}
+              >
+                <ZoomIn size={ICON_SIZE.control} />
+              </button>
+            )}
+          </Tooltip>
           {showNavigation ? (
-            <button
-              className="icon-button"
-              type="button"
-              aria-label={t("mediaGallery.next")}
-              onClick={() => {
-                setZoom(1);
-                onSelectIndex(nextIndex);
-              }}
-            >
-              <ChevronRight size={ICON_SIZE.control} />
-            </button>
+            <Tooltip label={t("mediaGallery.next")} placement="above">
+              {(tooltipProps) => (
+                <button
+                  className="icon-button"
+                  type="button"
+                  aria-label={t("mediaGallery.next")}
+                  onClick={() => {
+                    setZoom(1);
+                    onSelectIndex(nextIndex);
+                  }}
+                  {...tooltipProps}
+                >
+                  <ChevronRight size={ICON_SIZE.control} />
+                </button>
+              )}
+            </Tooltip>
           ) : null}
         </footer>
       </div>
@@ -235,12 +266,22 @@ function ScheduledMessagesList({
   capability,
   items,
   onCancel,
-  onReschedule
+  onReschedule,
+  mathModeEnabled = true,
+  onMathModeChange = () => undefined,
+  renderItemMeta
 }: {
   capability: ScheduledSendCapability;
   items: ScheduledSendItem[];
   onCancel: (scheduledId: string) => void;
   onReschedule: (scheduledId: string, body: string, sendAtMs: number) => void;
+  /**
+   * Optional per-item context (destination room label, thread-reply flag). The
+   * selected-room pane omits it; the scoped right panel supplies it.
+   */
+  renderItemMeta?: (item: ScheduledSendItem) => ReactNode;
+  mathModeEnabled?: boolean;
+  onMathModeChange?: (enabled: boolean) => void | Promise<void>;
 }) {
   const [editingId, setEditingId] = useState<string | null>(null);
   const [editBody, setEditBody] = useState("");
@@ -295,6 +336,7 @@ function ScheduledMessagesList({
                 <span className="scheduled-message-body" dir="auto">
                   {item.body}
                 </span>
+                {renderItemMeta ? renderItemMeta(item) : null}
               </div>
               {isEditing ? (
                 <ImeSafeForm
@@ -307,6 +349,8 @@ function ScheduledMessagesList({
                     composerMode={{ kind: "plain" }}
                     draftKey={`scheduled:${item.scheduled_id}`}
                     isSending={false}
+                    mathModeEnabled={mathModeEnabled}
+                    onMathModeChange={onMathModeChange}
                     document={documentFromText(editBody)}
                     roomName={t("scheduled.title")}
                     onCancelReply={() => undefined}
@@ -322,6 +366,7 @@ function ScheduledMessagesList({
                       onChange={(event) => setEditValue(event.currentTarget.value)}
                     />
                   </label>
+                  <ScheduledSendTimeAdjustments value={editValue} onChange={setEditValue} />
                   <div className="scheduled-message-actions">
                     <button
                       className="timeline-send-bar-action"
@@ -445,14 +490,19 @@ function PinnedEventsList({
               ) : null}
               </span>
             </button>
-            <button
-              className="pinned-event-action"
-              type="button"
-              aria-label={t("timeline.unpinMessage")}
-              onClick={() => onUnpin(roomId, event.event_id)}
-            >
-              <PinOff size={ICON_SIZE.micro} aria-hidden="true" />
-            </button>
+            <Tooltip label={t("timeline.unpinMessage")} placement="below" align="end">
+              {(tooltipProps) => (
+                <button
+                  className="pinned-event-action"
+                  type="button"
+                  aria-label={t("timeline.unpinMessage")}
+                  onClick={() => onUnpin(roomId, event.event_id)}
+                  {...tooltipProps}
+                >
+                  <PinOff size={ICON_SIZE.micro} aria-hidden="true" />
+                </button>
+              )}
+            </Tooltip>
           </div>
           );
         })}
@@ -621,14 +671,19 @@ function MessageArticle({
           <span className="time">{formatTime(message.timestamp_ms)}</span>
           {canManage ? (
             <span className="message-actions">
-              <button
-                className="message-action"
-                type="button"
-                aria-label={t("timeline.redactMessage")}
-                onClick={() => onRedactMessage(message.room_id, message.event_id)}
-              >
-                <X size={ICON_SIZE.micro} />
-              </button>
+              <Tooltip label={t("timeline.redactMessage")} placement="below" align="end">
+                {(tooltipProps) => (
+                  <button
+                    className="message-action"
+                    type="button"
+                    aria-label={t("timeline.redactMessage")}
+                    onClick={() => onRedactMessage(message.room_id, message.event_id)}
+                    {...tooltipProps}
+                  >
+                    <X size={ICON_SIZE.micro} />
+                  </button>
+                )}
+              </Tooltip>
             </span>
           ) : null}
         </div>

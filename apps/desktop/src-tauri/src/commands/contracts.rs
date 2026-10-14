@@ -308,36 +308,6 @@ fn tauri_command_routes_build_expected_core_commands() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    match build_restore_timeline_anchor_command(
-        fake_request_id(10),
-        active_account_key.clone(),
-        koushi_core::TimelineKey::room(active_account_key.clone(), room_id.clone()),
-        "$anchor:example.invalid".to_owned(),
-        TIMELINE_RESTORE_ANCHOR_MAX_BATCHES,
-        TIMELINE_BACKWARDS_PAGE_EVENT_COUNT,
-    ) {
-        CoreCommand::Timeline(TimelineCommand::RestoreTimelineAnchor {
-            request_id,
-            key,
-            event_id,
-            max_batches,
-            event_count,
-        }) => {
-            assert_eq!(request_id, fake_request_id(10));
-            assert_eq!(key.account_key, active_account_key);
-            assert_eq!(
-                key.kind,
-                koushi_protocol::TimelineKind::Room {
-                    room_id: room_id.clone()
-                }
-            );
-            assert_eq!(event_id, "$anchor:example.invalid");
-            assert_eq!(max_batches, TIMELINE_RESTORE_ANCHOR_MAX_BATCHES);
-            assert_eq!(event_count, TIMELINE_BACKWARDS_PAGE_EVENT_COUNT);
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-
     match build_send_text_command(
         fake_request_id(11),
         active_account_key.clone(),
@@ -725,46 +695,6 @@ fn tauri_command_routes_build_expected_core_commands() {
                 }
             );
             assert_eq!(event_id, "$event");
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-
-    match build_toggle_reaction_command(
-        fake_request_id(13),
-        active_account_key.clone(),
-        room_id.clone(),
-        "$event".to_owned(),
-        "👍".to_owned(),
-    )
-    .expect("toggle_reaction should build a command")
-    {
-        CoreCommand::Timeline(TimelineCommand::ToggleReaction {
-            request_id,
-            key,
-            event_id,
-            reaction_key,
-        }) => {
-            assert_eq!(request_id, fake_request_id(13));
-            assert_eq!(key.account_key, active_account_key);
-            assert_eq!(
-                key.kind,
-                koushi_protocol::TimelineKind::Room {
-                    room_id: room_id.clone()
-                }
-            );
-            assert_eq!(event_id, "$event");
-            assert_eq!(reaction_key, "👍");
-            let debug = format!(
-                "{:?}",
-                CoreCommand::Timeline(TimelineCommand::ToggleReaction {
-                    request_id: fake_request_id(13),
-                    key,
-                    event_id,
-                    reaction_key,
-                })
-            );
-            assert!(!debug.contains("👍"), "{debug}");
-            assert!(!debug.contains("$event"), "{debug}");
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -1320,6 +1250,11 @@ fn tauri_command_routes_build_expected_core_commands() {
             parent_space: Some(CreateRoomParentSpace {
                 space_id: "!space:example.org".to_owned(),
             }),
+            access_policy: Some(koushi_state::RoomAccessPolicy::new(
+                RoomJoinRule::Invite,
+                Vec::new(),
+            )),
+            history: Some(RoomHistoryVisibility::Joined),
         },
     ) {
         CoreCommand::Room(RoomCommand::CreateRoom {
@@ -1339,6 +1274,14 @@ fn tauri_command_routes_build_expected_core_commands() {
                     .map(|parent| parent.space_id.as_str()),
                 Some("!space:example.org")
             );
+            assert_eq!(
+                options.access_policy,
+                Some(koushi_state::RoomAccessPolicy::new(
+                    RoomJoinRule::Invite,
+                    Vec::new(),
+                ))
+            );
+            assert_eq!(options.history, Some(RoomHistoryVisibility::Joined));
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -1364,6 +1307,57 @@ fn tauri_command_routes_build_expected_core_commands() {
             assert_eq!(request_id, fake_request_id(18));
             assert_eq!(space_id, "!space:example.org");
             assert_eq!(child_room_id, "!room:example.org");
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    match build_set_space_child_suggested_command(
+        fake_request_id(18),
+        "!space:example.org".to_owned(),
+        "!room:example.org".to_owned(),
+        true,
+    ) {
+        CoreCommand::Room(RoomCommand::SetSpaceChildSuggested {
+            request_id,
+            space_id,
+            child_room_id,
+            suggested,
+        }) => {
+            assert_eq!(request_id, fake_request_id(18));
+            assert_eq!(space_id, "!space:example.org");
+            assert_eq!(child_room_id, "!room:example.org");
+            assert!(suggested);
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    // #1410: the GUI never names the rooms to join; Core uses its offer.
+    match build_join_suggested_space_rooms_command(
+        fake_request_id(18),
+        "!space:example.org".to_owned(),
+    ) {
+        CoreCommand::Room(RoomCommand::JoinSuggestedSpaceRooms {
+            request_id,
+            space_id,
+            room_ids,
+        }) => {
+            assert_eq!(request_id, fake_request_id(18));
+            assert_eq!(space_id, "!space:example.org");
+            assert!(room_ids.is_empty());
+        }
+        other => panic!("unexpected command: {other:?}"),
+    }
+
+    match build_dismiss_suggested_space_rooms_command(
+        fake_request_id(18),
+        "!space:example.org".to_owned(),
+    ) {
+        CoreCommand::Room(RoomCommand::DismissSuggestedSpaceRooms {
+            request_id,
+            space_id,
+        }) => {
+            assert_eq!(request_id, fake_request_id(18));
+            assert_eq!(space_id, "!space:example.org");
         }
         other => panic!("unexpected command: {other:?}"),
     }
@@ -1585,6 +1579,13 @@ fn tauri_command_routes_build_expected_core_commands() {
             RoomSettingChange::AvatarUrl(Some("mxc://example.org/private".to_owned())),
         ),
         (34, RoomSettingChange::JoinRule(RoomJoinRule::Invite)),
+        (
+            137,
+            RoomSettingChange::AccessPolicy(koushi_state::RoomAccessPolicy::new(
+                RoomJoinRule::Restricted,
+                vec!["!space:example.org".to_owned()],
+            )),
+        ),
         (
             35,
             RoomSettingChange::HistoryVisibility(RoomHistoryVisibility::Shared),

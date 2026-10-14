@@ -28,6 +28,8 @@ fn room(room_id: &str) -> RoomSummary {
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -74,6 +76,7 @@ fn thread_item(root_event_id: &str) -> ThreadsListItem {
         latest_body_preview: Some("Latest preview".to_owned()),
         latest_timestamp_ms: Some(1_700_000_100_000),
         reply_count: 3,
+        unread_count: 0,
     }
 }
 
@@ -355,7 +358,7 @@ fn home_threads_list_resolves_all_rooms_in_rust() {
 }
 
 #[test]
-fn space_threads_list_resolves_child_and_parent_rooms_in_rust() {
+fn space_threads_list_uses_the_same_child_membership_as_the_space_badge() {
     let mut state = ready_state();
     state.navigation.active_space_id = Some("space-a".to_owned());
     state.spaces = vec![SpaceSummary {
@@ -382,7 +385,7 @@ fn space_threads_list_resolves_child_and_parent_rooms_in_rust() {
         scope: koushi_state::ThreadsListScope::Space {
             space_id: "space-a".to_owned(),
         },
-        room_ids: vec!["room-a".to_owned(), "room-b".to_owned()],
+        room_ids: vec!["room-a".to_owned()],
     }));
 }
 
@@ -551,6 +554,7 @@ fn threads_list_failed_transitions_to_failed() {
             room_id: "room-a".to_owned(),
             request_id: 11,
             failure_kind: OperationFailureKind::Network,
+            items: Vec::new(),
         }
     );
     assert_eq!(

@@ -22,6 +22,10 @@ mod channel_policy;
 mod macos_backend;
 #[cfg(target_os = "macos")]
 use macos_backend::{Candidate, MacosBackend as PlatformBackend};
+#[cfg(windows)]
+mod windows_backend;
+#[cfg(windows)]
+use windows_backend::{Candidate, WindowsBackend as PlatformBackend};
 
 pub const DESKTOP_UPDATE_EVENT_NAME: &str = "koushi-desktop://update";
 const UPDATE_INTERVAL: std::time::Duration = std::time::Duration::from_secs(24 * 60 * 60);
@@ -40,6 +44,15 @@ pub enum DesktopUpdateState {
     Available {
         version: String,
         generation: u64,
+        notification_only: bool,
+        release_url: Option<String>,
+        /// The user explicitly chose to ignore this exact version, so automatic
+        /// reminders stay suppressed while the offer remains available.
+        ignored: bool,
+        /// The most recent feed refresh failed; the previous undownloaded offer
+        /// is retained so it stays downloadable and is still presented. `false`
+        /// after a successful check or a legitimate empty-feed withdrawal.
+        check_failed: bool,
     },
     Downloading {
         version: String,
@@ -81,6 +94,8 @@ pub enum DesktopUpdateFailureStage {
 
 struct PendingUpdate<C> {
     version: String,
+    notification_only: bool,
+    release_url: Option<String>,
     // Read only by an install backend; unused where no backend is compiled.
     #[cfg_attr(not(koushi_updater_backend), allow(dead_code))]
     update: C,
@@ -110,6 +125,16 @@ struct Lifecycle<C> {
     state: DesktopUpdateState,
     pending: Option<PendingUpdate<C>>,
     generation: u64,
+    /// Exact version the user asked to stop automatic reminders for. It does
+    /// not stop feed checks and never hides a newer eligible release. It is
+    /// only ever set for the version currently offered, so the stored marker
+    /// and the published `ignored` projection cannot diverge.
+    ///
+    /// ponytail: adapter-local, so it lasts one process lifetime and there is
+    /// deliberately no in-app undo; persist it (for example in
+    /// `UpdatesSettings`) and add an un-ignore command when restart-durable
+    /// ignore is required.
+    ignored_version: Option<String>,
     settings_generation: Option<u64>,
     settings: UpdatesSettings,
     claimed: bool,
@@ -124,6 +149,7 @@ impl<C> Lifecycle<C> {
             state,
             pending: None,
             generation: 0,
+            ignored_version: None,
             settings_generation: None,
             settings: UpdatesSettings {
                 auto_check: false,
@@ -164,13 +190,57 @@ impl<C> Lifecycle<C> {
                 DesktopUpdateState::Idle
                     | DesktopUpdateState::UpToDate { .. }
                     | DesktopUpdateState::Failed { .. }
+                    | DesktopUpdateState::Available { .. }
             )
         {
             return false;
         }
+        // A refresh from `available` keeps the pending candidate so a transient
+        // feed failure can retain the offer (#1205); the advanced generation
+        // still fences off a stale download click. Every other admitted state
+        // has no candidate to retain.
+        let retain = matches!(self.state, DesktopUpdateState::Available { .. });
         self.advance();
-        self.pending = None;
+        if !retain {
+            self.pending = None;
+        }
         self.state = DesktopUpdateState::Checking;
+        true
+    }
+
+    /// Records the user's explicit decision to stop automatic reminders for one
+    /// exact version. The request is only honored while that version is the
+    /// current offer, so a stale click (for a version replaced by a refresh)
+    /// cannot overwrite the live decision and desynchronize the projection. The
+    /// feed keeps running, an already-offered candidate stays downloadable, and
+    /// any newer eligible release is announced normally. Returns `false` when
+    /// the request is rejected.
+    fn ignore(&mut self, version: &str) -> bool {
+        if self.stopping {
+            return false;
+        }
+        // Honor the request only for the offer the user is acting on: the
+        // `available` candidate, or the same candidate while a refresh of it is
+        // in flight (a click may race the scheduled check). A stale request for
+        // any other version is rejected so the stored marker and the published
+        // `ignored` projection cannot diverge.
+        let is_current_offer = match &self.state {
+            DesktopUpdateState::Available {
+                version: offered, ..
+            } => offered == version,
+            DesktopUpdateState::Checking => self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| pending.version == version),
+            _ => false,
+        };
+        if !is_current_offer {
+            return false;
+        }
+        if let DesktopUpdateState::Available { ignored, .. } = &mut self.state {
+            *ignored = true;
+        }
+        self.ignored_version = Some(version.to_owned());
         true
     }
 
@@ -207,7 +277,9 @@ impl<C> Lifecycle<C> {
             if self.settings.auto_check {
                 self.begin_check();
             }
-        } else if enable_check {
+        } else if enable_check && !matches!(self.state, DesktopUpdateState::Available { .. }) {
+            // Enabling the setting must not discard an offer the user can still
+            // download; a scheduled or manual check refreshes it instead (#1205).
             self.begin_check();
         }
         true
@@ -236,11 +308,17 @@ impl<C> Lifecycle<C> {
         let DesktopUpdateState::Available {
             version,
             generation,
+            ..
         } = &self.state
         else {
             return Err(());
         };
-        if *generation != expected_generation || self.pending.is_none() {
+        if *generation != expected_generation
+            || self
+                .pending
+                .as_ref()
+                .is_none_or(|pending| pending.notification_only)
+        {
             return Err(());
         }
         let version = version.clone();
@@ -268,6 +346,29 @@ impl<C> Lifecycle<C> {
         self.advance();
         self.state = DesktopUpdateState::Installing { version };
         Ok(())
+    }
+
+    #[cfg(any(windows, test))]
+    fn take_install_for_shutdown(
+        &mut self,
+        claim_shutdown: impl FnOnce() -> bool,
+    ) -> Result<PendingUpdate<C>, ()> {
+        if self.stopping
+            || !matches!(self.state, DesktopUpdateState::Ready { .. })
+            || !self
+                .pending
+                .as_ref()
+                .is_some_and(|pending| !pending.notification_only && pending.bytes.is_some())
+        {
+            return Err(());
+        }
+        if !claim_shutdown() {
+            return Err(());
+        }
+        self.begin_install()?;
+        let pending = self.pending.take().ok_or(())?;
+        self.stop();
+        Ok(pending)
     }
 
     fn claim_work(&mut self) -> Option<(Operation, Work<C>)> {
@@ -304,19 +405,48 @@ impl<C> Lifecycle<C> {
         self.claimed = false;
         match (operation.phase, completion) {
             (Phase::Check, Completion::Check(Ok(Some(pending)))) => {
+                let ignored = self.ignored_version.as_deref() == Some(pending.version.as_str());
                 self.state = DesktopUpdateState::Available {
                     version: pending.version.clone(),
                     generation: operation.generation,
+                    notification_only: pending.notification_only,
+                    release_url: pending.release_url.clone(),
+                    ignored,
+                    check_failed: false,
                 };
                 self.pending = Some(pending);
             }
             (Phase::Check, Completion::Check(Ok(None))) => {
+                // An eligible feed with no release is a legitimate withdrawal:
+                // drop a previously retained undownloaded offer instead of
+                // treating the empty response like a transient error.
+                self.pending = None;
                 self.state = no_update_state(current_version.to_owned());
             }
             (Phase::Check, Completion::Check(Err(()))) => {
-                self.state = DesktopUpdateState::Failed {
-                    stage: DesktopUpdateFailureStage::Check,
-                };
+                // A transient feed/network failure must not silently destroy an
+                // undownloaded offer the user can still install. Retain it
+                // under the refreshed generation (so a stale click cannot
+                // authorize a replacement) and report that the check failed.
+                match self.pending.as_ref() {
+                    Some(pending) => {
+                        let ignored =
+                            self.ignored_version.as_deref() == Some(pending.version.as_str());
+                        self.state = DesktopUpdateState::Available {
+                            version: pending.version.clone(),
+                            generation: operation.generation,
+                            ignored,
+                            check_failed: true,
+                            notification_only: pending.notification_only,
+                            release_url: pending.release_url.clone(),
+                        };
+                    }
+                    None => {
+                        self.state = DesktopUpdateState::Failed {
+                            stage: DesktopUpdateFailureStage::Check,
+                        };
+                    }
+                }
             }
             (Phase::Download, Completion::Download(Ok(pending))) => {
                 self.state = DesktopUpdateState::Ready {
@@ -458,12 +588,16 @@ impl Backend<Candidate> for PlatformBackend {
 
 pub struct DesktopUpdateManager {
     shared: Arc<Shared<Candidate>>,
+    #[cfg(windows)]
+    install_owner: Mutex<Option<tauri::async_runtime::JoinHandle<()>>>,
 }
 
 impl DesktopUpdateManager {
     pub fn new() -> Self {
         Self {
             shared: Arc::new(Shared::new(initial_state())),
+            #[cfg(windows)]
+            install_owner: Mutex::new(None),
         }
     }
 
@@ -628,7 +762,9 @@ fn initial_state_for(marker: Option<&Path>) -> DesktopUpdateState {
         DesktopUpdateState::Unsupported {
             reason: DesktopUpdateUnsupportedReason::PackageManaged,
         }
-    } else if cfg!(koushi_updater_backend) && configured_updater_public_key().is_some() {
+    } else if cfg!(target_os = "windows")
+        || (cfg!(koushi_updater_backend) && configured_updater_public_key().is_some())
+    {
         DesktopUpdateState::Idle
     } else {
         DesktopUpdateState::Unsupported {
@@ -657,7 +793,7 @@ pub fn spawn_auto_update_loop(
     app: AppHandle,
     mut settings_updates: watch::Receiver<AppSettingsValues>,
 ) {
-    if configured_updater_public_key().is_none() {
+    if configured_updater_public_key().is_none() && !cfg!(target_os = "windows") {
         return;
     }
     let shared = app.state::<DesktopUpdateManager>().shared.clone();
@@ -708,6 +844,22 @@ pub async fn check_for_update(
     );
 }
 
+/// Records an explicit user decision to stop automatic reminders for one exact
+/// version. Feed checks continue and a newer eligible release is still
+/// announced; the decision is scoped to that exact version and lasts until
+/// Koushi exits. A request for any version that is not the current offer is
+/// ignored so it cannot overwrite the live decision.
+pub fn ignore_update(app: &AppHandle, version: String) {
+    app.state::<DesktopUpdateManager>().shared.transition(
+        |state| {
+            let _ = app.emit(DESKTOP_UPDATE_EVENT_NAME, state);
+        },
+        |lifecycle| {
+            lifecycle.ignore(&version);
+        },
+    );
+}
+
 fn no_update_state(version: String) -> DesktopUpdateState {
     DesktopUpdateState::UpToDate { version }
 }
@@ -717,6 +869,9 @@ pub async fn download_and_prepare(
     snapshot: koushi_protocol::state_update::VersionedAppStateSnapshot,
     expected_generation: u64,
 ) -> Result<(), ()> {
+    if cfg!(target_os = "windows") && configured_updater_public_key().is_none() {
+        return Err(());
+    }
     app.state::<DesktopUpdateManager>().shared.transition(
         |state| {
             let _ = app.emit(DESKTOP_UPDATE_EVENT_NAME, state);
@@ -734,6 +889,35 @@ pub async fn download_and_prepare(
 }
 
 pub fn install_and_restart(app: &AppHandle) -> Result<(), ()> {
+    #[cfg(windows)]
+    {
+        if configured_updater_public_key().is_none() {
+            return Err(());
+        }
+        let shared = app.state::<DesktopUpdateManager>().shared.clone();
+        let pending = shared.transition(
+            |state| {
+                let _ = app.emit(DESKTOP_UPDATE_EVENT_NAME, state);
+            },
+            |lifecycle| {
+                lifecycle.take_install_for_shutdown(|| crate::claim_windows_update_shutdown(app))
+            },
+        )?;
+        let app = app.clone();
+        let owner = crate::begin_windows_update_shutdown(
+            app.clone(),
+            async move {
+                shared.shutdown().await;
+            },
+            move || windows_backend::install_verified(pending),
+        );
+        *app.state::<DesktopUpdateManager>()
+            .install_owner
+            .lock()
+            .expect("Windows install owner mutex") = Some(owner);
+        Ok(())
+    }
+    #[cfg(not(windows))]
     app.state::<DesktopUpdateManager>().shared.transition(
         |state| {
             let _ = app.emit(DESKTOP_UPDATE_EVENT_NAME, state);
@@ -746,3 +930,5 @@ pub fn install_and_restart(app: &AppHandle) -> Result<(), ()> {
 mod package_managed_tests;
 #[cfg(test)]
 mod regression_tests;
+#[cfg(test)]
+mod windows_install_tests;

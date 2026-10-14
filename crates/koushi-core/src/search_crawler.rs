@@ -1,5 +1,18 @@
-//! Search history crawler: pages older room events through `/rooms/{roomId}/messages`,
-//! decrypts them locally, and feeds searchable text into the document store.
+//! Search history crawler: pages older room events through the room's persisted
+//! event chunks, decrypts them locally, indexes them in the encrypted ngram
+//! index, and forwards Files metadata to the body-free document store.
+//!
+//! Reading persisted chunks instead of driving shared cache pagination is what
+//! keeps indexing from hydrating history: `run_backwards_once` inserts every
+//! page it reads into the shared room-timeline linked chunk, which left every
+//! crawled room's whole history resident. A room whose persisted history has a
+//! gap still falls back to SDK back-pagination, which is the path that reaches
+//! `/messages`, because that history is not local yet.
+//!
+//! Each page awaits its index commit before being reported successful. A crawl
+//! checkpoint is in-session only: what survives a restart is the committed
+//! *completion* of a room (see `crate::store::search_progress`), not an
+//! interrupted walk's position.
 //!
 //! Media file bytes are never fetched; only MXC URIs, filenames, captions and
 //! metadata are indexed. This keeps the crawler a text-only backfill worker.
@@ -23,6 +36,19 @@ const BATCH_SIZE_FAST: u32 = 200;
 const BATCH_SIZE_STANDARD: u32 = 100;
 const BATCH_SIZE_SLOW: u32 = 50;
 
+/// Where one crawl reads its history from.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(crate) enum CrawlHistorySource {
+    /// The room's persisted event chunks, walked newest chunk first. Never
+    /// inserts into the shared room-timeline linked chunk and never reaches the
+    /// network.
+    Store,
+    /// SDK back-pagination. Reaches `/messages` at a gap and inserts what it
+    /// reads into the shared linked chunk, which is the only way to index
+    /// history the local store does not hold.
+    Network,
+}
+
 #[derive(Clone)]
 pub(crate) struct HistoryCrawlCheckpoint {
     pub room_id: String,
@@ -41,6 +67,15 @@ pub(crate) struct HistoryCrawlCheckpoint {
     /// The room's latest event id (from the room list) when the first page
     /// started; recorded as the room's catch-up boundary on completion.
     pub latest_event_id_at_start: Option<String>,
+    /// Where this crawl is reading from.
+    pub history_source: CrawlHistorySource,
+    /// Next persisted chunk to read, while the source is
+    /// [`CrawlHistorySource::Store`].
+    pub persisted_cursor: Option<koushi_sdk::MatrixPersistedEventCursor>,
+    /// Whether the store walk has crossed a gap chunk, i.e. the local store does
+    /// not hold the whole history between the newest event and the oldest chunk
+    /// walked so far.
+    pub crossed_store_gap: bool,
 }
 
 impl HistoryCrawlCheckpoint {
@@ -61,6 +96,9 @@ impl HistoryCrawlCheckpoint {
             first_page: true,
             catch_up_after: None,
             latest_event_id_at_start: None,
+            history_source: CrawlHistorySource::Store,
+            persisted_cursor: None,
+            crossed_store_gap: false,
         }
     }
 
@@ -99,21 +137,39 @@ pub(crate) enum HistoryCrawlPageResult {
     Preempted { checkpoint: HistoryCrawlCheckpoint },
 }
 
+/// One page of history plus what the caller needs to continue the crawl.
+struct CrawlPage {
+    /// Events the crawl's first page reads from the resident cache (#996); empty
+    /// after the first page.
+    cached: Vec<matrix_sdk::deserialized_responses::TimelineEvent>,
+    /// Events the source returned, newest first.
+    events: Vec<matrix_sdk::deserialized_responses::TimelineEvent>,
+    /// Persisted cursor to resume from, when the source walks the store.
+    next: Option<koushi_sdk::MatrixPersistedEventCursor>,
+    /// Position in `events` at which the persisted walk crossed a gap chunk,
+    /// i.e. where the page stops being contiguous with the previous one.
+    gap_at: Option<usize>,
+    /// Whether the source reached the start of the room's known history.
+    reached_start: bool,
+}
+
 fn trace_crawler_page(
     level: DiagnosticLevel,
     outcome: &'static str,
+    source: CrawlHistorySource,
     processed: u64,
     indexed: u64,
     page_items: u64,
 ) {
+    let (history_source, timeline_reuse) = match source {
+        CrawlHistorySource::Store => ("persisted_chunks", "not_hydrated"),
+        CrawlHistorySource::Network => ("sdk_back_pagination", "shared_pagination"),
+    };
     record(
         DiagnosticEvent::new(level, "core.startup", "crawler_page")
             .field(DiagnosticField::token("outcome", outcome))
-            .field(DiagnosticField::token("history_source", "sdk_event_cache"))
-            .field(DiagnosticField::token(
-                "timeline_reuse",
-                "shared_pagination",
-            ))
+            .field(DiagnosticField::token("history_source", history_source))
+            .field(DiagnosticField::token("timeline_reuse", timeline_reuse))
             .field(DiagnosticField::token("persistence", "sdk_linked_chunks"))
             .field(DiagnosticField::count("processed", processed))
             .field(DiagnosticField::count("indexed", indexed))
@@ -168,12 +224,17 @@ async fn run_history_crawl_page(
     // its first-page work (cached events, catch-up boundary) again.
     let first_page = checkpoint.first_page;
     let catch_up_after = checkpoint.catch_up_after.clone();
-    // Search history must use the SDK-owned room event cache. Calling
-    // `Room::messages` here would populate only the search index and leave
-    // linked chunks untouched, forcing the normal timeline to fetch the same
-    // history again when the room is opened after restart.
+    let history_source = checkpoint.history_source;
+    let persisted_cursor = checkpoint.persisted_cursor;
+    let crossed_store_gap = checkpoint.crossed_store_gap;
+    // History comes from the room's persisted chunks, which the SDK owns and
+    // which the encrypted store keeps on disk. Reading them does not insert
+    // anything into the shared linked chunk, so indexing does not leave the
+    // room's history resident. History the local store does not hold (a gap) is
+    // still fetched through SDK back-pagination, which is what reaches
+    // `/messages`.
     let work_permit = account_work.acquire(AccountWorkKind::SearchCrawl).await;
-    let messages = {
+    let page = {
         let page_started = Some(startup_trace::now());
         let page_result = tokio::select! {
             biased;
@@ -184,32 +245,65 @@ async fn run_history_crawl_page(
                 return HistoryCrawlPageResult::Preempted { checkpoint };
             }
             result = async {
-                let (event_cache, _drop_handles) = room.event_cache().await
-                    .map_err(|_| ())?;
-                // #996: events that sync already put in the cache (at least the
-                // newest one) are never returned by backward pagination, so the
-                // first page of a crawl indexes them too.
+                // #996: events that sync already put in the cache are never
+                // returned by backward pagination, so the first page of a crawl
+                // indexes them too. Reading them does not load anything new.
                 let mut cached = if first_page {
+                    let (event_cache, _drop_handles) =
+                        room.event_cache().await.map_err(|_| ())?;
                     event_cache.events().await.map_err(|_| ())?
                 } else {
                     Vec::new()
                 };
-                // #996 catch-up: when the cache still holds the boundary event,
-                // everything newer is already local; no pagination needed.
-                if let Some(boundary) = catch_up_after.as_deref()
-                    && let Some(position) = cached.iter().position(|event| {
-                        event.event_id().is_some_and(|id| id.as_str() == boundary)
-                    })
-                {
-                    cached.drain(..=position);
-                    return Ok::<_, ()>((cached, None));
+                // The resident read above cannot prove the boundary is
+                // contiguous with the newest event: it flattens the linked
+                // chunk, so a gap between resident chunks is invisible, and it
+                // cannot be sliced safely for a catch-up. The persisted page
+                // reports that topology, so a catch-up decides from pages only.
+                if catch_up_after.is_some() {
+                    cached.clear();
                 }
-                let page = event_cache
-                    .pagination()
-                    .run_backwards_once(batch_size as u16)
-                    .await
-                    .map_err(|_| ())?;
-                Ok::<_, ()>((cached, Some(page)))
+                match history_source {
+                    CrawlHistorySource::Network => {
+                        let (event_cache, _drop_handles) =
+                            room.event_cache().await.map_err(|_| ())?;
+                        let page = event_cache
+                            .pagination()
+                            .run_backwards_once(batch_size as u16)
+                            .await
+                            .map_err(|_| ())?;
+                        Ok::<_, ()>(CrawlPage {
+                            cached,
+                            events: page.events,
+                            next: None,
+                            gap_at: None,
+                            reached_start: page.reached_start,
+                        })
+                    }
+                    CrawlHistorySource::Store => {
+                        let page = koushi_sdk::persisted_room_event_page(
+                            &session,
+                            &checkpoint.room_id,
+                            persisted_cursor,
+                            batch_size as usize,
+                        )
+                        .await
+                        .map_err(|_| ())?;
+                        // The persisted walk is complete only when it reaches
+                        // the oldest stored chunk without crossing a gap. A gap
+                        // proves the store does not hold the history in between,
+                        // so the crawl must continue through the network.
+                        let gap_seen = crossed_store_gap || page.gap_at.is_some();
+                        let reached_start = page.next.is_none() && !gap_seen;
+                        Ok::<_, ()>(CrawlPage {
+                            cached,
+                            events: page.events,
+                            next: page.next,
+                            gap_at: page.gap_at,
+                            reached_start,
+                        })
+                    }
+                }
             } => result,
         };
         startup_trace::trace_phase(StartupPhase::CrawlerPage, page_started);
@@ -219,6 +313,7 @@ async fn run_history_crawl_page(
                 trace_crawler_page(
                     DiagnosticLevel::Warn,
                     "failed",
+                    history_source,
                     checkpoint.processed,
                     checkpoint.indexed,
                     0,
@@ -231,28 +326,79 @@ async fn run_history_crawl_page(
         }
     };
 
-    let (cached, messages) = messages;
+    let CrawlPage {
+        cached,
+        events: page_events_owned,
+        next,
+        gap_at,
+        reached_start,
+    } = page;
     checkpoint.first_page = false;
-    let page_events = messages
-        .as_ref()
-        .map(|page| page.events.as_slice())
-        .unwrap_or_default();
+    if checkpoint.history_source == CrawlHistorySource::Store {
+        checkpoint.persisted_cursor = next;
+        checkpoint.crossed_store_gap = crossed_store_gap || gap_at.is_some();
+    }
+    let page_events = page_events_owned.as_slice();
     let chunk_len = page_events.len() as u64;
-    // Catch-up completes when it reaches the boundary: found in the cache
-    // (no page was fetched) or inside the fetched page. Page events are newest
-    // first, so the boundary and everything older were indexed before.
+    // Catch-up completes when a page holds the boundary and the range from the
+    // newest event down to it is continuous. Page events are newest first, so
+    // the boundary and everything older were indexed before.
     let boundary_in_page = catch_up_after.as_deref().and_then(|boundary| {
         page_events
             .iter()
             .position(|event| event.event_id().is_some_and(|id| id.as_str() == boundary))
     });
-    let reached_catch_up_boundary =
-        catch_up_after.is_some() && (messages.is_none() || boundary_in_page.is_some());
+    // A boundary found in a page is only proof of catch-up when the range from
+    // the tail down to it is continuous. A persisted page can cross a gap chunk,
+    // in which case the events inside that gap were never delivered locally and
+    // must not be skipped: the crawl continues through back-pagination, which
+    // repairs the gap, instead of acknowledging catch-up. A fetched page is
+    // continuous by construction.
+    let boundary_is_continuous = match boundary_in_page {
+        None => false,
+        Some(position) => {
+            if checkpoint.history_source == CrawlHistorySource::Network {
+                true
+            } else {
+                !crossed_store_gap && gap_at.is_none_or(|gap| position < gap)
+            }
+        }
+    };
+    let reached_catch_up_boundary = catch_up_after.is_some() && boundary_is_continuous;
     let page_events = match boundary_in_page {
         Some(position) => &page_events[..position],
         None => page_events,
     };
-    let reached_start = messages.as_ref().is_some_and(|page| page.reached_start);
+    let completed = reached_catch_up_boundary || reached_start;
+    if !completed && checkpoint.history_source == CrawlHistorySource::Network && chunk_len == 0 {
+        // A fetched page with no events that did not report the start of the
+        // room is not evidence of completion: the SDK can hold that token and
+        // still have older history behind it. Marking the room done here would
+        // skip that history durably.
+        trace_crawler_page(
+            DiagnosticLevel::Warn,
+            "empty_page",
+            checkpoint.history_source,
+            checkpoint.processed,
+            checkpoint.indexed,
+            chunk_len,
+        );
+        return HistoryCrawlPageResult::Failed {
+            checkpoint,
+            kind: SearchCrawlerFailureKind::Sdk,
+        };
+    }
+    let boundary_blocks_completion =
+        catch_up_after.is_some() && boundary_in_page.is_some() && !reached_catch_up_boundary;
+    if !completed
+        && checkpoint.history_source == CrawlHistorySource::Store
+        && (next.is_none() || boundary_blocks_completion)
+    {
+        // Either the local store is exhausted with a gap behind it, or the
+        // catch-up boundary sits beyond a gap: both mean the rest of this crawl
+        // must come from back-pagination, which is the path that repairs gaps.
+        checkpoint.history_source = CrawlHistorySource::Network;
+    }
     let mut seen_event_ids = HashSet::new();
     let events = cached
         .iter()
@@ -266,10 +412,14 @@ async fn run_history_crawl_page(
     checkpoint.processed += events.len() as u64;
 
     let mut index_messages = Vec::new();
+    let mut index_events = Vec::new();
     for timeline_event in events {
         if timeline_event.kind.is_utd() {
             continue;
         }
+        // The same page is written to the persistent index below; keep the
+        // owned events for that write.
+        index_events.push(timeline_event.clone());
 
         let raw = timeline_event.kind.raw();
         let json = raw.json().get();
@@ -296,15 +446,30 @@ async fn run_history_crawl_page(
         index_messages.push(message);
     }
 
-    let completed =
-        reached_catch_up_boundary || reached_start || (messages.is_some() && chunk_len == 0);
     trace_crawler_page(
         DiagnosticLevel::Debug,
         if completed { "completed" } else { "progress" },
+        checkpoint.history_source,
         checkpoint.processed,
         checkpoint.indexed,
         chunk_len,
     );
+
+    // A completed crawl may only advance its in-session checkpoint once the index
+    // has committed this page. The SDK's own indexing runs in a background
+    // subscriber that can lag or drop failures, so a room marked done without
+    // this acknowledgement can lose its history for search permanently.
+    if let Err(kind) = index_page_events(&session, &checkpoint.room_id, index_events).await {
+        trace_crawler_page(
+            DiagnosticLevel::Warn,
+            "index_failed",
+            checkpoint.history_source,
+            checkpoint.processed,
+            checkpoint.indexed,
+            chunk_len,
+        );
+        return HistoryCrawlPageResult::Failed { checkpoint, kind };
+    }
 
     HistoryCrawlPageResult::Success {
         checkpoint,
@@ -312,6 +477,30 @@ async fn run_history_crawl_page(
         completed,
         work_permit: Some(work_permit),
     }
+}
+
+/// Commit one crawled page's events to the persistent index, or say why not.
+///
+/// The caller must not advance its in-session crawl checkpoint unless this returns
+/// `Ok`.
+async fn index_page_events(
+    session: &Arc<koushi_sdk::MatrixClientSession>,
+    room_id: &str,
+    events: Vec<matrix_sdk::deserialized_responses::TimelineEvent>,
+) -> Result<(), SearchCrawlerFailureKind> {
+    if events.is_empty() {
+        return Ok(());
+    }
+
+    koushi_sdk::index_room_events_now(session, room_id, events)
+        .await
+        .map_err(|error| match error {
+            koushi_sdk::MatrixSearchError::IndexUnavailable => {
+                SearchCrawlerFailureKind::IndexUnavailable
+            }
+            koushi_sdk::MatrixSearchError::Query => SearchCrawlerFailureKind::RoomNotFound,
+            koushi_sdk::MatrixSearchError::Internal => SearchCrawlerFailureKind::Sdk,
+        })
 }
 
 /// The shared scheduler controls work rate; this controls one admitted page's
@@ -324,13 +513,16 @@ fn crawl_batch_size(speed: SearchCrawlerSpeed) -> u32 {
     }
 }
 
-fn event_json_to_index_message(
+pub(crate) fn event_json_to_index_message(
     room_id: &str,
     json: &str,
     settings: &SearchCrawlerSettings,
     pending_redactions: &mut HashSet<String>,
 ) -> Option<SearchIndexMessage> {
     let value: Value = serde_json::from_str(json).ok()?;
+    if value.get("state_key").is_some() {
+        return None; // State events are not room messages or replacements.
+    }
     let event_id = value.get("event_id")?.as_str()?.to_owned();
     let sender = value.get("sender")?.as_str()?.to_owned();
     let timestamp_ms = value.get("origin_server_ts")?.as_u64()?;
@@ -367,10 +559,10 @@ fn event_json_to_index_message(
                 let body = replacement_content.get("body")?.as_str()?;
                 let (text_body, attachment_filename, attachment) =
                     project_message_content(msgtype, body, replacement_content, settings)?;
-                if text_body.is_none() && attachment_filename.is_none() {
-                    return None;
-                }
+                // Even an opted-out text replacement can remove an existing
+                // Files attachment. Only identity/provenance is forwarded then.
                 return Some(SearchIndexMessage::Edit {
+                    room_id: room_id.to_owned(),
                     edit_event_id: event_id,
                     target_event_id,
                     sender,
@@ -378,6 +570,9 @@ fn event_json_to_index_message(
                     body: text_body,
                     attachment_filename,
                     attachment,
+                    // A crawl reports what history showed, not the current
+                    // visible content.
+                    canonical: false,
                 });
             }
             let msgtype = content.get("msgtype")?.as_str()?;
@@ -395,6 +590,8 @@ fn event_json_to_index_message(
                 body: text_body,
                 attachment_filename,
                 attachment,
+                canonical: false,
+                edit: None,
             })
         }
         "m.sticker" => {
@@ -417,13 +614,15 @@ fn event_json_to_index_message(
                 body: text_body,
                 attachment_filename,
                 attachment,
+                canonical: false,
+                edit: None,
             })
         }
         _ => None,
     }
 }
 
-fn is_edit_event(content: &Value) -> bool {
+pub(crate) fn is_edit_event(content: &Value) -> bool {
     content
         .get("m.relates_to")
         .or_else(|| content.get("relates_to"))
@@ -432,7 +631,7 @@ fn is_edit_event(content: &Value) -> bool {
         == Some("m.replace")
 }
 
-fn edit_target_event_id(content: &Value) -> Option<String> {
+pub(crate) fn edit_target_event_id(content: &Value) -> Option<String> {
     content
         .get("m.relates_to")
         .or_else(|| content.get("relates_to"))

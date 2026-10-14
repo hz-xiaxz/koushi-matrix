@@ -34,6 +34,11 @@ as the desktop session. Keep Koushi running until the provider redirects to
 the registered callback scheme. If Koushi shows a browser-launch error, fix
 the default-browser configuration and select **Single sign-on** again.
 
+Finish one browser sign-in at a time. When two account tabs are both waiting on
+**Single sign-on**, Koushi cannot tell which tab an incoming callback belongs to
+and ignores it. Complete or cancel the other unfinished sign-in, then select
+**Single sign-on** again in the tab you want.
+
 An expired or revoked session requires signing in again. A verification screen
 requires the [session verification flow](security-and-recovery.md#verify-a-session-after-sign-in),
 not repeated password attempts.
@@ -82,21 +87,34 @@ Check **Room info** for **Mute** or **Mentions only**, then check **Account
 Settings → Notifications** for desktop notifications and **App Settings →
 Notifications** for sounds and badges. Also check the operating system's
 notification permission for Koushi. An unread badge and a desktop notification
-are different signals.
+are different signals. A red badge counts locally observed unread messages;
+server-only notification counts do not create a red number or a desktop alert.
+Desktop alerts state the verified room count and open the room; they do not show
+an unverified message preview or jump to an unverified event.
+The message-preview setting is hidden while exact unread event verification is
+unavailable.
 
 ## Ask for help or report a bug
 
 You can [ask an AI assistant](README.md#ask-an-ai-assistant) using the public
 repository and your version. If the issue persists, open a
-[GitHub issue](https://github.com/shinaoka/koushi-matrix/issues/new) with:
+[GitHub issue](https://github.com/shinaoka/koushi-matrix/issues/new/choose) with:
 
-- Koushi version, operating system, and whether the problem began after updating.
+- Koushi version (**About Koushi** in the application menu, or **Check for
+  updates** in **App Settings → Software update**), operating system, and
+  whether the problem began after updating.
 - The steps you took, what you expected, and what happened instead.
 - Whether the affected room is encrypted and whether the issue affects one room
   or several, without disclosing private room IDs or messages.
-- A sanitized error description. Review any screenshot or diagnostic attachment
-  before sharing it.
+- A sanitized error description. Review any screenshot before sharing it.
+
+When the problem involves sign-in, startup, sync, encryption, or a crash,
+attach the diagnostics report as a file. Select **Open diagnostics** at the top
+right of the window, select **Save to file…**, and attach the saved
+`koushi-diagnostics.txt`. The report is too long to paste, and the dialog notes
+that it omits private data: no message text, room or member names, Matrix IDs,
+email addresses, or file paths.
 
 Never include passwords, recovery keys, access tokens, private messages, or
-key export files. If you are unsure what a diagnostic file contains, describe
-the visible symptom first.
+key export files. If you are unsure what a diagnostics file contains, open it
+before attaching it or describe the visible symptom first.

@@ -2,6 +2,7 @@ import { TauriDesktopApi } from "../backend/client";
 import type { DesktopApi } from "../backend/desktopApi";
 import type { DesktopSnapshot } from "../domain/types";
 import { TauriIpcMock, defaultSnapshotResponse } from "./tauriIpcMock";
+import { sidebarSectionBoundsForFake } from "./sidebarSectionBoundsFixture";
 
 export interface DesktopApiFixture extends DesktopApi {
   readonly ipc: TauriIpcMock;
@@ -170,7 +171,15 @@ export function readyDesktopSnapshotFixture(): DesktopSnapshot {
       people: [dmItem],
       low_priority: [],
       not_joined: []
-    }
+    },
+    // #1363/#1366: the packaged DTO projects a bound for every visible section.
+    // The fixture's settings leave every scope bounded, so the rows come from
+    // the Rust-authored cases for these section lengths.
+    section_bounds: sidebarSectionBoundsForFake({
+      sections: { rooms: [roomItem], people: [dmItem], low_priority: [] },
+      expanded: { rooms: false, dms: false, lowPriority: false },
+      activeRoomId: "!room-alpha:example.invalid"
+    })
   };
   return snapshot;
 }

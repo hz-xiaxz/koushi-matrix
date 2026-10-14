@@ -4,12 +4,15 @@ use super::cleanup::{
 };
 use super::diagnostics::room_list_summary;
 use super::event_wait::{
-    find_timeline_item_with_body, wait_for_bodies_and_pagination_settle, wait_for_initial_items,
-    wait_for_item_with_body, wait_for_logged_in, wait_for_logged_out,
-    wait_for_operation_failed_and_signed_out, wait_for_ready_snapshot, wait_for_room_created,
-    wait_for_room_joined, wait_for_send_completed, wait_for_send_flow_completion,
-    wait_for_session_restored, wait_for_space_child_set, wait_for_space_created,
-    wait_for_sync_started_and_running, wait_for_sync_stopped, wait_for_user_invited,
+    find_timeline_item_with_body, print_room_badge_private_summary,
+    send_main_timeline_read_receipt, settle_room_badge_unread_count,
+    wait_for_bodies_and_pagination_settle, wait_for_initial_items, wait_for_item_with_body,
+    wait_for_logged_in, wait_for_logged_out, wait_for_operation_failed_and_signed_out,
+    wait_for_ready_snapshot, wait_for_room_badge_unread_count, wait_for_room_created,
+    wait_for_room_joined, wait_for_root_thread_unread, wait_for_send_completed,
+    wait_for_send_flow_completion, wait_for_session_restored, wait_for_space_child_set,
+    wait_for_space_created, wait_for_sync_started_and_running, wait_for_sync_stopped,
+    wait_for_user_invited,
 };
 use super::fixtures::private_room_options;
 use super::participants::{
@@ -42,13 +45,12 @@ use super::scenario_search::{
 use super::scenario_thread_late_joiner::run_thread_late_joiner_scenario;
 use super::scenario_timeline::{
     assert_thread_reply_relation, observe_reply_quote_lifecycle, run_activity_stage,
-    run_cache_restore_scenario, run_composer_stage, run_focused_send_queue_scenario,
-    run_link_preview_stage, run_live_signals_stage, run_media_stage, run_scheduled_send_stage,
-    run_send_queue_stage, run_timeline_reconnect_scenario, run_timeline_stress_replay_stage,
-    run_timeline_stress_stage, thread_initial_items_need_paginate_backfill, wait_for_edit_diff,
-    wait_for_redact_diff, wait_for_room_timeline_thread_summary,
-    wait_for_thread_panel_and_room_summary, wait_for_thread_reply_item,
-    wait_for_timeline_navigation,
+    run_composer_stage, run_focused_send_queue_scenario, run_link_preview_stage,
+    run_live_signals_stage, run_media_stage, run_scheduled_send_stage, run_send_queue_stage,
+    run_timeline_reconnect_scenario, run_timeline_stress_replay_stage, run_timeline_stress_stage,
+    thread_initial_items_need_paginate_backfill, wait_for_edit_diff, wait_for_redact_diff,
+    wait_for_room_timeline_thread_summary, wait_for_thread_panel_and_room_summary,
+    wait_for_thread_reply_item, wait_for_timeline_navigation,
 };
 use super::scenario_user_verification::run_user_verification_stage;
 use super::{
@@ -86,12 +88,6 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
         return Ok(scenario_report(&config.server_kind, scenario));
     }
 
-    if scenario == QaScenario::CacheRestore {
-        println!("safety=ok");
-        run_cache_restore_scenario(&config).await?;
-        return Ok(scenario_report(&config.server_kind, scenario));
-    }
-
     if scenario == QaScenario::TimelineReconnect {
         println!("safety=ok");
         run_timeline_reconnect_scenario(&config).await?;
@@ -120,6 +116,12 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
     if scenario == QaScenario::ThreadLateJoiner {
         println!("safety=ok");
         run_thread_late_joiner_scenario(&config).await?;
+        return Ok(scenario_report(&config.server_kind, scenario));
+    }
+    if scenario == QaScenario::IdleSyncGapInspection {
+        println!("safety=ok");
+        super::scenario_idle_sync_gap_inspection::run_idle_sync_gap_inspection_scenario(&config)
+            .await?;
         return Ok(scenario_report(&config.server_kind, scenario));
     }
     if scenario == QaScenario::GateNoProof {
@@ -186,8 +188,7 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
     // completing the gate unconditionally here cannot reach them. The helper
     // returns `Ok(None)` when the session is already `Ready`.
     let bootstrap_recovery_secret_a =
-        complete_new_identity_gate_for_qa(&mut conn_a, &config.password_a, "gate-bootstrap-a")
-            .await?;
+        complete_new_identity_gate_for_qa(&mut conn_a, &config.password_a).await?;
     println!("gate_new_identity_bootstrap=ok");
 
     let mut account_key_a = wait_for_logged_in(&mut conn_a, login_a_id, "login A").await?;
@@ -938,6 +939,43 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
         )
         .await?;
 
+        // #1238 diagnostic: A keeps the room subscribed, as a resident room is in the
+        // app, so B's thread reply reaches A's room timeline as a live diff and the
+        // delivery diagnostic can measure that boundary.
+        let pre_thread_room_subscribe_id = conn_a.next_request_id();
+        conn_a
+            .command(CoreCommand::Timeline(TimelineCommand::Subscribe {
+                request_id: pre_thread_room_subscribe_id,
+                key: key_a.clone(),
+                initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
+            }))
+            .await
+            .map_err(|e| format!("submit pre-thread room subscribe A: {e}"))?;
+        let _ = wait_for_initial_items(
+            &mut conn_a,
+            &key_a,
+            pre_thread_room_subscribe_id,
+            "pre-thread room subscribe A",
+        )
+        .await?;
+        // #1238: anchor A's own main-timeline read receipt before the remote thread
+        // reply. With a client receipt anchored in the loaded timeline the SDK's room
+        // counters are authoritative, and those are computed by
+        // `RoomReadReceiptEventFilter`, which excludes thread replies and matches only
+        // unthreaded/main receipts. A later badge rise can therefore only come from the
+        // thread-cache decomposition, not from a thread-inclusive homeserver counter.
+        send_main_timeline_read_receipt(
+            &mut conn_a,
+            &key_a,
+            &event1_id,
+            "A main read receipt before B thread reply",
+        )
+        .await?;
+        let thread_badge_before =
+            settle_room_badge_unread_count(&mut conn_a, &room_id, "room badge before B reply")
+                .await?;
+        print_room_badge_private_summary(&conn_a, &room_id, "before_thread_reply");
+
         let txn_b_thread_reply = "qa-phase11-txn-b-thread-reply".to_owned();
         let send_b_thread_reply_id = conn_b.next_request_id();
         conn_b
@@ -1000,6 +1038,95 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
         println!("thread_projection_lifecycle=stable");
         println!("thread_summary=ok");
 
+        // #1238 diagnostic (temporary): name the boundary where an unopened
+        // thread's replies stop being delivered, rather than inferring it from a
+        // room badge. Private-data-free: booleans and counts only.
+        let delivery = conn_a.snapshot().thread_delivery;
+        let tri = |value: Option<bool>| match value {
+            Some(true) => "yes",
+            Some(false) => "no",
+            None => "unknown",
+        };
+        println!(
+            "thread_delivery_detail capability={} subscribe={} subscribed={} cache_read={} unread={} notifications={} mentions={}",
+            tri(delivery.capability_advertised),
+            if delivery.subscribe_attempted {
+                "yes"
+            } else {
+                "no"
+            },
+            tri(delivery.subscribe_succeeded),
+            if delivery.thread_cache_read {
+                "yes"
+            } else {
+                "no"
+            },
+            delivery.thread_cache_unread,
+            delivery.thread_cache_notifications,
+            delivery.thread_cache_mentions,
+        );
+        println!("thread_delivery=recorded");
+
+        // #1259: an unopened thread with a new remote reply must show the chip dot.
+        let _chip_unread = wait_for_root_thread_unread(
+            &mut conn_a,
+            &key_a,
+            &refreshed_room_items,
+            &event1_id,
+            "chip dot after B thread reply",
+            |unread| unread > 0,
+        )
+        .await?;
+        println!("thread_chip_dot=ok");
+
+        // #1238: the unopened thread's reply must also raise the room badge by exactly
+        // one, so a room whose only unread activity is thread replies stops looking
+        // fully read in the room list, the Home total, the Space rail and native
+        // attention. `unread_count` itself stays main-only navigation state.
+        let thread_badge_after_reply = wait_for_room_badge_unread_count(
+            &mut conn_a,
+            &room_id,
+            "room badge after B thread reply",
+            |badge| badge > thread_badge_before,
+        )
+        .await
+        .map_err(|error| format!("thread_room_badge failed: {error}"))?;
+        if thread_badge_after_reply != thread_badge_before + 1 {
+            return Err(format!(
+                "thread_room_badge failed: badge moved from {thread_badge_before} to \
+                 {thread_badge_after_reply}, expected exactly one thread contribution"
+            ));
+        }
+        print_room_badge_private_summary(&conn_a, &room_id, "after_thread_reply");
+        println!("thread_room_badge=ok");
+
+        // #1238: A now reads only the main timeline, while the thread is still
+        // unopened and unsubscribed. A room-scoped receipt must never clear the
+        // thread's unread, so the badge has to survive it. This deliberately sends no
+        // extra reply: the thread stage's reply count feeds later scenario stages that
+        // assert their own counts.
+        send_main_timeline_read_receipt(
+            &mut conn_a,
+            &key_a,
+            &event1_id,
+            "A main read receipt after B thread reply",
+        )
+        .await?;
+        let settled_badge = settle_room_badge_unread_count(
+            &mut conn_a,
+            &room_id,
+            "room badge after main read receipt",
+        )
+        .await?;
+        if settled_badge != thread_badge_before + 1 {
+            return Err(format!(
+                "thread_room_badge_main_read_kept failed: badge settled at {settled_badge}, \
+                 expected the thread contribution to survive a main-timeline read"
+            ));
+        }
+        print_room_badge_private_summary(&conn_a, &room_id, "after_main_read");
+        println!("thread_room_badge_main_read_kept=ok");
+
         let thread_key_a = TimelineKey {
             account_key: account_key_a.clone(),
             kind: TimelineKind::Thread {
@@ -1044,6 +1171,52 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
         };
         assert_thread_reply_relation(&thread_item, &event1_id)?;
         println!("thread_recv=ok");
+
+        // #1259: reading the thread must clear the dot without waiting for new room
+        // activity, so the room window is re-read until it settles.
+        let reply_event_id = match &thread_item.id {
+            super::TimelineItemId::Event { event_id } => event_id.clone(),
+            _ => {
+                return Err(
+                    "thread_chip_dot failed: the thread reply carried no event id".to_owned(),
+                );
+            }
+        };
+        let thread_read_id = conn_a.next_request_id();
+        conn_a
+            .command(CoreCommand::Timeline(TimelineCommand::SendReadReceipt {
+                request_id: thread_read_id,
+                key: thread_key_a.clone(),
+                event_id: reply_event_id,
+            }))
+            .await
+            .map_err(|e| format!("submit threaded read receipt: {e}"))?;
+        // An empty window: only a diff that actually carries the root can satisfy this,
+        // so a stale window cannot make the clear assertion pass vacuously.
+        wait_for_root_thread_unread(
+            &mut conn_a,
+            &key_a,
+            &[],
+            &event1_id,
+            "chip dot after threaded read",
+            |unread| unread == 0,
+        )
+        .await
+        .map_err(|error| format!("thread_chip_dot failed: {error}"))?;
+        println!("thread_chip_dot_cleared=ok");
+
+        // #1238: the threaded read must take the room badge back to its pre-reply
+        // value, so the thread term is the only thing the reply added.
+        wait_for_room_badge_unread_count(
+            &mut conn_a,
+            &room_id,
+            "room badge after threaded read",
+            |badge| badge == thread_badge_before,
+        )
+        .await
+        .map_err(|error| format!("thread_room_badge_cleared failed: {error}"))?;
+        print_room_badge_private_summary(&conn_a, &room_id, "after_threaded_read");
+        println!("thread_room_badge_cleared=ok");
 
         if scenario.should_run_stage(QaStage::RedactEditConvergence) {
             const LIVE_THREAD_BODY: &str = "Phase 11 QA live thread reply B";

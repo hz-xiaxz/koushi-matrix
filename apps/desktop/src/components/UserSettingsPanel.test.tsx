@@ -5,7 +5,12 @@ import { cleanup, fireEvent, render, screen, within } from "@testing-library/rea
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { UserSettingsPanel } from "./UserSettingsPanel";
-import type { E2eeTrustState, ProfileState, RoomSummary } from "../domain/types";
+import type {
+  E2eeTrustState,
+  ProfileState,
+  RoomSummary,
+  SecureBackupGateState
+} from "../domain/types";
 import { t } from "../i18n/messages";
 
 describe("UserSettingsPanel", () => {
@@ -234,7 +239,7 @@ describe("UserSettingsPanel", () => {
     expect(notificationsSection).toContain("Desktop notifications");
     expect(notificationsSection).not.toContain("Sound");
     expect(notificationsSection).not.toContain("Badges");
-    expect(notificationsSection).toContain("Show message content in notifications");
+    expect(notificationsSection).not.toContain("Show message content in notifications");
     expect(notificationsSection).not.toContain("Send read receipts");
     expect(notificationsSection).not.toContain("Send typing notifications");
     expect(messagingPrivacySection).toContain("Send read receipts");
@@ -1382,6 +1387,43 @@ describe("UserSettingsPanel", () => {
     expect(screen.queryByText("synthetic-settings-changed-key")).toBeNull();
   });
 
+  test("secure backup row follows the account gate, not this session's setup request (#1201)", () => {
+    const renderWithGate = (gate: SecureBackupGateState) =>
+      renderToStaticMarkup(
+        <UserSettingsPanel
+          currentSession={{
+            homeserver: "https://matrix.org",
+            user_id: "@demo-user:example.invalid",
+            device_id: "FAKEDEVICE"
+          }}
+          e2eeTrust={idleE2eeTrust}
+          secureBackupGate={gate}
+          localEncryption={{ kind: "healthy" }}
+          platform="linux"
+          accountManagement={idleAccountManagement}
+          accountManagementCapabilities={idleAccountManagementCapabilities}
+          savedSessions={[]}
+          profile={profile}
+          settings={settings}
+          {...handlers}
+        />
+      );
+
+    // The account already has secure backup; this session never ran a setup.
+    const ready = renderWithGate({ kind: "ready" });
+    expect(ready).toContain(
+      `<small data-testid="secure-backup-state">${t("settings.secureBackupEnabled")}</small>`
+    );
+    expect(ready).not.toContain(t("settings.setupSecureBackup"));
+
+    // A sign-in on an account without backup still offers the setup form.
+    const setup = renderWithGate({ kind: "setupRequired" });
+    expect(setup).toContain(
+      `<small data-testid="secure-backup-state">${t("settings.secureBackupIdle")}</small>`
+    );
+    expect(setup).toContain(t("settings.setupSecureBackup"));
+  });
+
   test("does not render Koushi-owned remote device management", () => {
     const markup = renderToStaticMarkup(
       <UserSettingsPanel
@@ -1619,9 +1661,9 @@ describe("UserSettingsPanel", () => {
     expect(onSubmitAccountManagementUia).toHaveBeenCalledWith(9, "synthetic-secret");
     expect(password.value).toBe("");
   });
-  test("toggles message previews through the Rust-owned notifications setting", () => {
+  test("does not offer message previews before notification events can be verified", () => {
     const onUpdateSettings = vi.fn();
-    const { rerender } = render(
+    render(
       <UserSettingsPanel
         currentSession={{
           homeserver: "https://matrix.org",
@@ -1642,45 +1684,8 @@ describe("UserSettingsPanel", () => {
     );
     fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
 
-    const toggle = screen.getByRole("switch", {
-      name: "Show message content in notifications"
-    });
-    expect(toggle.getAttribute("aria-checked")).toBe("true");
-    fireEvent.click(toggle);
-    expect(onUpdateSettings).toHaveBeenCalledWith({
-      notifications: { ...settings.values.notifications, message_previews: false }
-    });
-
-    rerender(
-      <UserSettingsPanel
-        currentSession={{
-          homeserver: "https://matrix.org",
-          user_id: "@demo-user:example.invalid",
-          device_id: "FAKEDEVICE"
-        }}
-        e2eeTrust={idleE2eeTrust}
-        localEncryption={{ kind: "healthy" }}
-        platform="linux"
-        accountManagement={idleAccountManagement}
-        accountManagementCapabilities={idleAccountManagementCapabilities}
-        savedSessions={[]}
-        profile={profile}
-        settings={{
-          ...settings,
-          values: {
-            ...settings.values,
-            notifications: { ...settings.values.notifications, message_previews: false }
-          }
-        }}
-        {...handlers}
-        onUpdateSettings={onUpdateSettings}
-      />
-    );
-    expect(
-      screen
-        .getByRole("switch", { name: "Show message content in notifications" })
-        .getAttribute("aria-checked")
-    ).toBe("false");
+    expect(screen.queryByRole("switch", { name: "Show message content in notifications" })).toBeNull();
+    expect(onUpdateSettings).not.toHaveBeenCalled();
   });
   test("opening the Notifications page performs one read-only account notifications load", () => {
     const load = vi.fn();

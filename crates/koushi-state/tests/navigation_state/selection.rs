@@ -254,6 +254,8 @@ fn selecting_space_restores_last_non_dm_room_for_that_space() {
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -523,7 +525,7 @@ fn account_home_lists_all_non_dm_rooms_and_keeps_dms_global() {
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["room-a", "global-room"]
+        vec!["global-room", "room-a"]
     );
     assert_eq!(
         sidebar
