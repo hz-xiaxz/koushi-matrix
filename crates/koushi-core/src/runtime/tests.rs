@@ -1091,7 +1091,7 @@ async fn local_alias_clear_command_emits_target_display_label_update() {
 }
 
 #[test]
-fn only_room_settings_reads_allow_correlated_progress_at_the_baseline_generation() {
+fn room_settings_reads_and_dm_starts_allow_correlated_progress_at_the_baseline_generation() {
     let expectation = |operation| RequestOutcomeExpectation::RoomOperation {
         request_id: RequestId {
             connection_id: RuntimeConnectionId(1),
@@ -1109,6 +1109,25 @@ fn only_room_settings_reads_allow_correlated_progress_at_the_baseline_generation
     assert!(super::request_outcome::progress_generation_is_eligible(
         &expectation(RoomOperationKind::RoomSettingsLoaded),
         request_id,
+        10,
+        10,
+    ));
+    let dm_expectation = RequestOutcomeExpectation::DirectMessageStarted {
+        request_id,
+        account_key: AccountKey("@alice:example.invalid".to_owned()),
+    };
+    assert!(super::request_outcome::progress_generation_is_eligible(
+        &dm_expectation,
+        request_id,
+        10,
+        10,
+    ));
+    assert!(!super::request_outcome::progress_generation_is_eligible(
+        &dm_expectation,
+        RequestId {
+            sequence: 8,
+            ..request_id
+        },
         10,
         10,
     ));

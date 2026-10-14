@@ -88,7 +88,7 @@ use koushi_state::{
 };
 use std::collections::{BTreeMap, BTreeSet};
 
-fn scripted_connection(
+pub(super) fn scripted_connection(
     event_capacity: usize,
 ) -> (
     CoreConnection,

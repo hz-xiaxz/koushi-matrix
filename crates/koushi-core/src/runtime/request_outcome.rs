@@ -1835,12 +1835,16 @@ pub(super) fn progress_generation_is_eligible(
     snapshot_generation: u64,
     baseline_generation: u64,
 ) -> bool {
+    // An existing DM already occupies the same-account room projection. Its
+    // correlated completion event is new, but reusing it need not publish a
+    // StateDelta. The later room-membership check still guards this exception.
     snapshot_generation > baseline_generation
         || (snapshot_generation == baseline_generation
             && expectation.request_id() == progress_request_id
             && matches!(
                 expectation,
                 RequestOutcomeExpectation::InviteWorkflow { .. }
+                    | RequestOutcomeExpectation::DirectMessageStarted { .. }
             ))
         || (expectation.request_id() == progress_request_id
             && matches!(

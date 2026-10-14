@@ -1539,10 +1539,15 @@ stateDiagram-v2
   membership state machine.
 - `AcceptInvite` joins the invited room/space and emits
   `RoomEvent::InviteAccepted`; `DeclineInvite` leaves/forgets the invite and
-  emits `RoomEvent::InviteDeclined`; `StartDirectMessage` creates a direct room
-  through the SDK and emits `RoomEvent::DirectMessageStarted`. These commands
-  carry normal request ids; GUI pending/settle feedback must come from Rust
-  events/snapshots.
+  emits `RoomEvent::InviteDeclined`; `StartDirectMessage` reuses an existing
+  joined DM or creates one through the SDK, then emits the request-correlated
+  `RoomEvent::DirectMessageStarted`. The start outcome requires that event and
+  the same-account room in the current Core snapshot. An already projected DM
+  may settle at the command's baseline `StateDelta` generation; a newly created
+  DM waits until its room appears in the projection. A room in the snapshot
+  alone, without the matching event, never completes the request. These
+  commands carry normal request ids; GUI pending/settle feedback must come from
+  Rust events/snapshots.
 - `RoomActor` owns projection from the single live `SyncService` and its
   `RoomListService`. The entries adapter uses the non-left filter so
   visible invited-room diffs wake projection. A bounded entries head is not a
