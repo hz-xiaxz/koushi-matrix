@@ -438,9 +438,18 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   are Rust state, and the dwell timer runs on the core executor's clock. React
   renders that DTO and dispatches typed commands; it must not decide whether a
   delivery happens, start or reset a timer, assemble a body, or read a sink secret.
+  Whether a stored credential still belongs to a sink is Rust's answer as well: the
+  binding it was saved under, and the `secret_retired` flag that says this device
+  deleted it, are core facts, so React must not compare endpoints or hosts to guess
+  them or keep its own list of which credentials it has seen. The keyword list is not
+  local settings at all: it is the account's own `content` push rules, read and
+  written through the account notification surface, so a rule another client wrote is
+  visible here and a failed write is never shown as saved. The plaintext prefix's
+  source is the message body the room list already holds, marked never to be
+  serialized, and it reaches the send request without passing through any DTO.
   The same attention projection that drives the badge and the unread marks is the
-  only source of what is delivered, so a mail or WeChat message cannot describe a
-  state the badge does not show.
+  only source of what is delivered, so a delivered message cannot describe a state
+  the badge does not show.
 - Candidate projection uses private-data-minimized room labels and counts only.
   Native attention uses `RoomSummary.display_label` for its safe room label, but
   serialized candidates still must not carry room IDs, sender IDs, event IDs, or
