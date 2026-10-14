@@ -3452,6 +3452,17 @@ dependencies = [
 ]
 
 [[package]]
+name = "koushi-notify"
+version = "0.1.0"
+dependencies = [
+ "koushi-key",
+ "reqwest",
+ "serde_json",
+ "tokio",
+ "wiremock",
+]
+
+[[package]]
 name = "koushi-protocol"
 version = "0.1.0"
 dependencies = [

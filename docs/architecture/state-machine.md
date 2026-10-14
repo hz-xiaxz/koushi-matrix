@@ -6130,6 +6130,70 @@ Email notifications:
   account-management destination; `m.3pid_changes: false` projects
   `Unsupported`. Neither offers the add flow.
 
+## Local Notification Delivery
+
+Delivering a notification from this device (#1427) is a separate channel from the
+server-owned pusher above. It is device-local product state, and it is the default
+implementation of email notification in Koushi. Delivery goes through sinks that all
+consume the same selected candidate, so the channel is not tied to one transport or to
+one country's infrastructure:
+
+- **Sinks.** Mail is one sink: a provider API such as Resend, or a generic SMTP relay,
+  which covers the cheap relays (Amazon SES, Brevo, Mailjet, Elastic Email) and the
+  Chinese providers (Aliyun DirectMail, Tencent Cloud SES). A mailbox preset is the
+  practical route inside China: QQ Mail is the same SMTP sink with its host, port and
+  authorization-code field filled in, and because the mailbox's own new-mail reminder
+  can surface the message in WeChat, that one sink reaches both destinations. A WeChat
+  relay is the other kind of sink: a WeCom group-robot webhook, with a WeCom self-built
+  app or a third-party relay (ServerChan, PushPlus, WxPusher) behind the same boundary.
+  Every sink is individually enabled and carries its own non-secret configuration plus
+  a `configured` secret flag.
+- **Settings.** The enabled sinks, their addresses and endpoints, the dwell, the
+  minimum interval, the focus suppression, the optional plaintext prefix and its
+  consent live in `SettingsValues.notifications` at app scope. The Matrix account is
+  never consulted for a destination, so the channel works on a homeserver that supports
+  neither email 3PIDs nor pushers.
+- **Secrets.** Every sink secret - provider API key, SMTP password, webhook key, relay
+  send key - is held only by the credential store. Settings and diagnostics carry a
+  `configured` flag and never a value, and a secret is read when the sink is configured
+  or the delivery actor starts, never on the settings or dispatch hot path.
+- **One authority.** The channel reads the same Rust-owned attention projection that
+  drives the badge and the unread/mention marks; the transient candidate feeds the
+  toast. Both derive from one `RoomAttentionKind` and count authority, so a mail can
+  never describe a state the badge does not show.
+- **Triggers.** Direct messages, mentions, and the user's own keywords, each
+  individually enabled. Keywords are Matrix `kind: content` push rules written
+  only on explicit user action; the SDK evaluates them into the highlight
+  counter, so a hit ranks as a mention-kind candidate and raises the badge exactly
+  as it does in Element. Opening the settings screen writes nothing.
+- **Dwell.** A room becomes deliverable only when its qualifying attention state
+  persists for the configured dwell. The timer is anchored on the transition into
+  that state, so a room that keeps receiving messages still comes due, while a room
+  that is read, muted, or (under the focus option) focused before the dwell expires
+  is cancelled and re-armed on the next transition. Rust owns the timer, it uses the
+  core executor's clock, and it restarts after a restart rather than being persisted.
+- **Delivery.** At send time the body is recomputed from the current projection, so
+  the message matches the badge at that moment: a digest of the rooms that came due,
+  with each room's safe display label, kind, and counts, and nothing else. A
+  channel-level minimum interval coalesces further mail, the queue is in-memory and
+  bounded and is discarded on exit, and there is no durable outbox. A failed delivery
+  never leaves a sink reading as ON: the last outcome
+  is projected to React per sink, an invalid key, a suspended account, or a rejected
+  webhook is its own typed state, and only a rate limit or a transport failure is
+  retried.
+- **Plaintext prefix.** OFF by default, added only when a stored consent matches
+  the current sink and destination. Changing either clears the consent and
+  turns the option off. It is independent of the OS notification preview switch,
+  is bounded and trimmed at a grapheme boundary, and adds no room, event, sender,
+  or transaction identifiers. The consent copy is provider-agnostic: it states
+  that the text leaves the device unencrypted, that whether and how long the
+  configured service stores it depends on that service's own terms, and that the
+  user must check those terms before enabling the option. The app asserts no
+  provider-specific retention as fact.
+- **Server surface unchanged.** The pusher surface above keeps its own meaning and
+  is only labelled as the server's, so two controls for one channel are not read
+  as one.
+
 ## Contact Security Details
 
 User info shows two independent facts about another person (#1024), held in
