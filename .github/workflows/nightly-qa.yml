@@ -2,16 +2,22 @@ name: Nightly aggregate QA
 
 # The full aggregate headless lane (every Core QA scenario against a real
 # disposable homeserver) is too long for PR CI and is a required local gate, so
-# run it nightly per server. A failure opens one issue per server/stage
-# signature labelled `nightly-qa`; a repeated failure comments on that open
-# issue instead of creating a duplicate. Different servers cannot collide on a
-# signature, and the workflow concurrency group serialises runs.
+# run it nightly per server. A failure opens one issue per server labelled
+# `nightly-qa`; a repeated failure comments on that open issue instead of
+# creating a duplicate. Different servers cannot collide on a signature, and the
+# workflow concurrency group serialises runs.
 #
 # The `focused` job runs the scenarios that `all` does not cover (the nightly
 # list in scripts/lib/headless-qa-lanes.mjs), each in its own homeserver. Every
-# failing scenario files or updates its own issue titled
-# `nightly-qa: <scenario> failed (<server>/<stage>)`; one failure does not stop
-# the remaining scenarios.
+# failing scenario files or updates its own issue; one failure does not stop the
+# remaining scenarios.
+#
+# An issue's identity is its signature label, never its title:
+# `nightly-qa/<server>/<scenario>`, or `nightly-qa/<server>/aggregate` for the
+# aggregate job. The scraped failure stage is diagnostic detail carried by the
+# body and the comments, because it varies run to run ("unknown" when the log
+# line is missing) and a title that carried it filed a fresh issue for every
+# recurrence of the same failure.
 on:
   schedule:
     - cron: "0 18 * * *"
@@ -114,12 +120,18 @@ jobs:
             .local-secrets/headless-local-qa/*/core-core-stderr.log 2>/dev/null \
             | tail -1 | sed -E 's/^Headless core QA failed: ([^: ]+).*/\1/')
           [ -n "$stage" ] || stage="unknown"
-          title="nightly-qa: aggregate headless lane failed (${SERVER}/${stage})"
-          # One issue per server/stage signature. The two matrix jobs cannot
-          # produce the same signature, so this check-then-act cannot race.
-          number=$(gh issue list --label nightly-qa --state open --limit 100 \
-            --json number,title --jq '.[] | "\(.number)\t\(.title)"' \
-            | awk -F '\t' -v title="$title" '$2 == title { print $1; exit }')
+          title="nightly-qa: aggregate headless lane failed (${SERVER})"
+          # Identity is the signature label, never the title: the stage above is
+          # scraped from a log and varies run to run ("unknown" when the line is
+          # missing), so a title that carried it filed a fresh issue for every
+          # recurrence of the same failure.
+          signature="nightly-qa/${SERVER}/aggregate"
+          # The two matrix jobs cannot produce the same signature, so this
+          # check-then-act cannot race.
+          gh label create nightly-qa --description "Nightly aggregate headless QA lane failure" --color 1D76DB 2>/dev/null || true
+          gh label create "$signature" --description "Open nightly failure: aggregate headless lane on ${SERVER}" --color BFD4F2 2>/dev/null || true
+          number=$(gh issue list --label nightly-qa --label "$signature" --state open \
+            --limit 100 --json number --jq '.[0].number // ""')
           if [ -n "$number" ]; then
             gh issue comment "$number" --body \
               "The nightly aggregate lane failed again on \`${SERVER}\` (stage \`${stage}\`): ${RUN_URL}"
@@ -136,8 +148,7 @@ jobs:
           Filed automatically by \`.github/workflows/nightly-qa.yml\`.
           EOF
           )
-          gh label create nightly-qa --description "Nightly aggregate headless QA lane failure" --color 1D76DB 2>/dev/null || true
-          gh issue create --title "$title" --label nightly-qa --body "$body"
+          gh issue create --title "$title" --label nightly-qa --label "$signature" --body "$body"
 
   focused:
     name: Focused scenarios outside all (${{ matrix.server }})
@@ -231,12 +242,14 @@ jobs:
           fi
           gh label create nightly-qa --description "Nightly aggregate headless QA lane failure" --color 1D76DB 2>/dev/null || true
           jq -r '.[] | "\(.scenario)\t\(.stage)"' "$failures" | while IFS=$'\t' read -r scenario stage; do
-            title="nightly-qa: ${scenario} failed (${SERVER}/${stage})"
-            # One issue per scenario/server/stage signature. The two matrix
-            # jobs cannot produce the same signature, so this cannot race.
-            number=$(gh issue list --label nightly-qa --state open --limit 100 </dev/null \
-              --json number,title --jq '.[] | "\(.number)\t\(.title)"' \
-              | awk -F '\t' -v title="$title" '$2 == title { print $1; exit }')
+            title="nightly-qa: ${scenario} failed (${SERVER})"
+            # Identity is the signature label, never the title; the stage is
+            # diagnostic detail that varies run to run. The two matrix jobs
+            # cannot produce the same signature, so this cannot race.
+            signature="nightly-qa/${SERVER}/${scenario}"
+            gh label create "$signature" --description "Open nightly failure: ${scenario} on ${SERVER}" --color BFD4F2 2>/dev/null || true
+            number=$(gh issue list --label nightly-qa --label "$signature" --state open \
+              --limit 100 </dev/null --json number --jq '.[0].number // ""')
             if [ -n "$number" ]; then
               gh issue comment "$number" </dev/null --body \
                 "The nightly \`${scenario}\` scenario failed again on \`${SERVER}\` (stage \`${stage}\`): ${RUN_URL}"
@@ -251,5 +264,5 @@ jobs:
               "- Validated QA logs are attached to the run as \`nightly-focused-qa-${SERVER}-logs\`." \
               "" \
               "Filed automatically by \`.github/workflows/nightly-qa.yml\`.")
-            gh issue create --title "$title" --label nightly-qa --body "$body" </dev/null
+            gh issue create --title "$title" --label nightly-qa --label "$signature" --body "$body" </dev/null
           done

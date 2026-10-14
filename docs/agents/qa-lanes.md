@@ -167,8 +167,12 @@ is the single source for which automation runs each scenario:
   `core-invites` job on both servers.
 - `NIGHTLY_SCENARIOS`: focused scenarios outside `all`, run by the nightly
   `focused` job one at a time; a failure does not stop the rest, and each
-  failing scenario files or comments on one open `nightly-qa` issue titled
-  `nightly-qa: <scenario> failed (<server>/<stage>)`.
+  failing scenario files or comments on one open `nightly-qa` issue. That
+  issue's identity is its signature label, `nightly-qa/<server>/<scenario>`
+  (the aggregate job uses `nightly-qa/<server>/aggregate`), alongside the
+  umbrella `nightly-qa` label; the title is only a readable summary. A
+  recurrence that scrapes a different failure stage therefore comments on the
+  same issue instead of filing another one.
 - `EXCLUDED_SCENARIOS`: scenarios in no lane, each with a written reason.
 
 `node scripts/headless-qa-lane.mjs --lane=pr|nightly --server=<server>` runs a
