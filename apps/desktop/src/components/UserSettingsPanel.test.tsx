@@ -1746,7 +1746,9 @@ describe("UserSettingsPanel", () => {
           submitUia: noop,
           cancelEmail: noop,
           enableEmail: noop,
-          disableEmail: noop
+          disableEmail: noop,
+          addKeyword: noop,
+          removeKeyword: noop
         }}
       />
     );

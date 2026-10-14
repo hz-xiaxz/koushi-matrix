@@ -3339,7 +3339,13 @@ function AccountContent({
       runInBackground(
         settleCommand(api.enableEmailNotifications(address, notificationLangRef.current))
       ),
-    disableEmail: () => runInBackground(settleCommand(api.disableEmailNotifications()))
+    disableEmail: () => runInBackground(settleCommand(api.disableEmailNotifications())),
+    // #1427: keyword rules are account state. The field text goes to Rust as
+    // typed; Rust trims, validates, and mints the rule id.
+    addKeyword: (pattern) =>
+      runInBackground(settleCommand(api.addNotificationKeyword(pattern))),
+    removeKeyword: (ruleId) =>
+      runInBackground(settleCommand(api.removeNotificationKeyword(ruleId)))
   }), []);
 
   // Device-local notification delivery (#1427). The delivery block always travels as a

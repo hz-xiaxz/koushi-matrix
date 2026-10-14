@@ -84,6 +84,8 @@ describe("DesktopApi command contract", () => {
         "setNotificationDeliverySecret",
         "clearNotificationDeliverySecret",
         "testNotificationDelivery",
+        "addNotificationKeyword",
+        "removeNotificationKeyword",
         "addAccountTab",
         "cancelAddAccountTab",
         "listAccountTabs",

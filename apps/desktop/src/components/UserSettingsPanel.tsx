@@ -691,6 +691,15 @@ export function UserSettingsPanel({
                 rooms={rooms}
                 spaces={spaces}
                 actions={notificationDeliveryActions}
+                // #1427: the keyword rules are account state the page already
+                // loads, so the device tab renders that projection. No account
+                // snapshot (the app-scoped dialog) means no editor.
+                keywordRules={accountNotifications.snapshot?.keywords}
+                keywordOperation={accountNotifications.operation}
+                keywordActions={{
+                  add: accountNotificationActions.addKeyword,
+                  remove: accountNotificationActions.removeKeyword
+                }}
               />
             </div>
             {notificationSourceTabs && currentSession ? (

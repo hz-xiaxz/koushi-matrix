@@ -203,6 +203,13 @@ export interface DesktopApi {
   enableEmailNotifications(address: string, lang: string): Promise<CommandAdmission>;
   disableEmailNotifications(): Promise<CommandAdmission>;
   /**
+   * #1427 keyword push rules. `add` carries the raw field text; Rust trims and
+   * validates it, then owns the deterministic rule id. Both are account state
+   * writes and settle through the account notification operation state.
+   */
+  addNotificationKeyword(pattern: string): Promise<CommandAdmission>;
+  removeNotificationKeyword(ruleId: string): Promise<CommandAdmission>;
+  /**
    * Device-local notification delivery (#1427). The secret is written straight to the OS
    * credential store; the value is never echoed back in a snapshot, an event, or a receipt.
    */

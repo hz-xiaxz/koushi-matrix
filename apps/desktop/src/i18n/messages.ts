@@ -1031,6 +1031,16 @@ export type MessageId =
   | "settings.notificationDeliverySecretHint.qqMail"
   | "settings.notificationDeliverySecretHint.gmail"
   | "settings.notificationDeliverySecretHint.icloud"
+  | "settings.notificationKeywordHeading"
+  | "settings.notificationKeywordEmpty"
+  | "settings.notificationKeywordAdd"
+  | "settings.notificationKeywordRemove"
+  | "settings.notificationKeywordHint"
+  | "settings.notificationKeywordErrorEmpty"
+  | "settings.notificationKeywordErrorTooLong"
+  | "settings.notificationKeywordErrorDuplicate"
+  | "settings.notificationKeywordErrorLimit"
+  | "settings.notificationKeywordErrorUnknownRule"
   | "settings.sendReadReceipts"
   | "settings.sendTypingNotifications"
   | "settings.notifications"
@@ -3083,6 +3093,21 @@ const en: Catalog = {
     "Gmail expects a Google app password, which Google only issues while 2-Step Verification is on.",
   "settings.notificationDeliverySecretHint.icloud":
     "iCloud Mail expects an app-specific password created for this app in your Apple Account.",
+  // #1427: the rules are the account's own push rules on the homeserver, while
+  // the switch next to them is about what this device mails.
+  "settings.notificationKeywordHeading": "Keywords on your homeserver",
+  "settings.notificationKeywordEmpty": "No keywords yet.",
+  "settings.notificationKeywordAdd": "Add a keyword",
+  "settings.notificationKeywordRemove": "Remove {keyword}",
+  "settings.notificationKeywordHint":
+    "Keywords are saved on your homeserver, so this app and your other devices highlight them too. The switch above decides what this device sends mail about. A keyword matches a whole word, ignoring case.",
+  "settings.notificationKeywordErrorEmpty": "Enter a keyword.",
+  "settings.notificationKeywordErrorTooLong": "That keyword is too long.",
+  "settings.notificationKeywordErrorDuplicate": "That keyword is already in the list.",
+  "settings.notificationKeywordErrorLimit":
+    "Your keyword list is full. Remove one to add another.",
+  "settings.notificationKeywordErrorUnknownRule":
+    "That keyword is no longer on the server. Reopen this page and try again.",
   "settings.sendReadReceipts": "Send read receipts",
   "settings.sendTypingNotifications": "Send typing notifications",
   "settings.notifications": "Notifications",
@@ -5025,6 +5050,19 @@ const ja: Catalog = {
     "Gmail では Google のアプリパスワードを使用します。2段階認証を有効にしている場合のみ発行できます。",
   "settings.notificationDeliverySecretHint.icloud":
     "iCloud Mail では、Apple Account でこのアプリ用に発行したアプリ用パスワードを使用します。",
+  "settings.notificationKeywordHeading": "ホームサーバー上のキーワード",
+  "settings.notificationKeywordEmpty": "キーワードはまだありません。",
+  "settings.notificationKeywordAdd": "キーワードを追加",
+  "settings.notificationKeywordRemove": "{keyword}を削除",
+  "settings.notificationKeywordHint":
+    "キーワードはホームサーバーに保存されるため、このアプリでも他の端末でも強調表示されます。上のスイッチは、この端末がメールで通知する対象を決めます。キーワードは大文字小文字を区別せず、単語単位で一致します。",
+  "settings.notificationKeywordErrorEmpty": "キーワードを入力してください。",
+  "settings.notificationKeywordErrorTooLong": "キーワードが長すぎます。",
+  "settings.notificationKeywordErrorDuplicate": "そのキーワードはすでに一覧にあります。",
+  "settings.notificationKeywordErrorLimit":
+    "キーワードの一覧がいっぱいです。追加するには1件削除してください。",
+  "settings.notificationKeywordErrorUnknownRule":
+    "そのキーワードはサーバー上にありません。このページを開き直してからお試しください。",
   "settings.sendReadReceipts": "既読を送信",
   "settings.sendTypingNotifications": "入力通知を送信",
   "settings.notifications": "通知",

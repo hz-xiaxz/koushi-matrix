@@ -1,9 +1,13 @@
-import { useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type FormEvent } from "react";
 import { Bell, KeyRound, Plus, Send, Trash2 } from "lucide-react";
 
 import { t } from "../../i18n/messages";
-import { ImeTextField, SecureImeTextField } from "../ImeTextControl";
+import { ImeSafeForm, ImeTextField, SecureImeTextField } from "../ImeTextControl";
 import { ModalDialog } from "../ModalDialog";
+import {
+  accountNotificationsFailureMessage,
+  isKeywordOperation
+} from "./AccountNotificationsSections";
 import { roomDisplayLabel } from "../../domain/roomDisplayLabel";
 import {
   DEFAULT_NOTIFICATION_DELIVERY_PREFIX_CHARS,
@@ -25,11 +29,13 @@ import {
   type NotificationSinkDraft
 } from "../../domain/notificationDelivery";
 import type {
+  AccountNotificationsOperationState,
   NotificationDeliveryPresetState,
   NotificationDeliverySettings,
   NotificationDeliverySinkState,
   NotificationDeliveryState,
   NotificationDeliveryTarget,
+  NotificationKeywordRule,
   NotificationSinkSettings,
   RoomSummary,
   SmtpTls,
@@ -58,6 +64,22 @@ export const noopNotificationDeliveryActions: NotificationDeliveryActions = {
 };
 
 /**
+ * The write half of the keyword editor (#1427). The rules themselves are the
+ * account's server state, so they are read from `AccountNotificationsSnapshot`
+ * and dispatched through the account notification action surface; this device
+ * section only borrows the switch that delivers for them.
+ */
+export interface NotificationKeywordActions {
+  add: (pattern: string) => void;
+  remove: (ruleId: string) => void;
+}
+
+export const noopNotificationKeywordActions: NotificationKeywordActions = {
+  add: () => undefined,
+  remove: () => undefined
+};
+
+/**
  * Settings -> Notifications, "Notify me from this device".
  *
  * Everything shown is Rust state: `delivery` is the settings block, `state` is the
@@ -70,13 +92,24 @@ export function NotificationDeliverySection({
   state,
   rooms = [],
   spaces = [],
-  actions
+  actions,
+  keywordRules,
+  keywordOperation,
+  keywordActions = noopNotificationKeywordActions
 }: {
   delivery: NotificationDeliverySettings;
   state: NotificationDeliveryState;
   rooms?: RoomSummary[];
   spaces?: SpaceSummary[];
   actions: NotificationDeliveryActions;
+  /**
+   * #1427: the account's own `content` rules and the account notification
+   * operation state they settle through. Undefined means this surface has no
+   * account (the app-scoped settings dialog), so the editor is not rendered.
+   */
+  keywordRules?: readonly NotificationKeywordRule[];
+  keywordOperation?: AccountNotificationsOperationState;
+  keywordActions?: NotificationKeywordActions;
 }) {
   const [addOpen, setAddOpen] = useState(false);
   const [draft, setDraft] = useState<NotificationSinkDraft>(emptyNotificationSinkDraft);
@@ -217,6 +250,14 @@ export function NotificationDeliverySection({
         <p className="profile-settings-hint" data-testid="notification-delivery-keywords-hint">
           {t("settings.notificationDeliveryKeywordsHint")}
         </p>
+
+        {keywordRules !== undefined && keywordOperation !== undefined ? (
+          <NotificationKeywordEditor
+            rules={keywordRules}
+            operation={keywordOperation}
+            actions={keywordActions}
+          />
+        ) : null}
 
         <div className="settings-toggle-list">
           <ToggleRow
@@ -677,6 +718,130 @@ export function NotificationDeliverySection({
         </ModalDialog>
       ) : null}
     </>
+  );
+}
+
+/**
+ * The account's keyword rules, next to the switch that delivers for them
+ * (#1427).
+ *
+ * Every row is the last server projection: the component never appends or
+ * removes locally, so a write Rust refuses leaves the list exactly as it was
+ * and only the failure line changes. The field is the shared IME-safe text
+ * entry, and the text it holds is the raw entry; Rust trims and validates.
+ */
+function NotificationKeywordEditor({
+  rules,
+  operation,
+  actions
+}: {
+  rules: readonly NotificationKeywordRule[];
+  operation: AccountNotificationsOperationState;
+  actions: NotificationKeywordActions;
+}) {
+  const [draft, setDraft] = useState("");
+  // Bumped when Rust confirms an add, so the shared control re-syncs from the
+  // acknowledged (empty) value rather than keeping the typed text.
+  const [draftEpoch, setDraftEpoch] = useState(0);
+  // Mirrors the DOM value so the confirmation effect is idempotent: once the
+  // field is already empty it changes nothing, however often `operation`
+  // re-identifies.
+  const draftRef = useRef("");
+  const busy = operation.kind === "working" && isKeywordOperation(operation.operation);
+  const failure =
+    operation.kind === "failed" && isKeywordOperation(operation.operation)
+      ? operation.failureKind
+      : null;
+
+  useEffect(() => {
+    if (
+      operation.kind === "succeeded" &&
+      operation.operation.kind === "addNotificationKeyword" &&
+      draftRef.current !== ""
+    ) {
+      draftRef.current = "";
+      setDraft("");
+      setDraftEpoch((epoch) => epoch + 1);
+    }
+  }, [operation]);
+
+  function submitKeyword(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const pattern = draft.trim();
+    if (!pattern || busy) {
+      return;
+    }
+    actions.add(pattern);
+  }
+
+  return (
+    <section
+      className="settings-keyword-editor"
+      aria-label={t("settings.notificationKeywordHeading")}
+      data-testid="notification-keywords"
+    >
+      <h4 className="settings-subheading">{t("settings.notificationKeywordHeading")}</h4>
+      {rules.length > 0 ? (
+        <ul className="settings-detail-list" data-testid="notification-keyword-list">
+          {rules.map((rule) => (
+            <li
+              className="settings-detail-row"
+              key={rule.rule_id}
+              data-testid="notification-keyword-row"
+            >
+              <span dir="auto">{rule.pattern}</span>
+              <button
+                className="profile-settings-action"
+                type="button"
+                aria-label={t("settings.notificationKeywordRemove", { keyword: rule.pattern })}
+                data-testid="notification-keyword-remove"
+                disabled={busy}
+                onClick={() => actions.remove(rule.rule_id)}
+              >
+                {t("settings.notificationDeliverySinkRemove")}
+              </button>
+            </li>
+          ))}
+        </ul>
+      ) : (
+        <p className="settings-status-text" data-testid="notification-keyword-empty">
+          {t("settings.notificationKeywordEmpty")}
+        </p>
+      )}
+      <ImeSafeForm className="profile-settings-form" onSubmit={submitKeyword}>
+        <label className="profile-settings-field">
+          <span>{t("settings.notificationKeywordAdd")}</span>
+          <ImeTextField
+            value={draft}
+            syncKey={`notification-keyword-draft:${draftEpoch}`}
+            disabled={busy}
+            onChange={(event) => {
+              draftRef.current = event.currentTarget.value;
+              setDraft(event.currentTarget.value);
+            }}
+            data-testid="notification-keyword-input"
+          />
+        </label>
+        <div className="session-actions">
+          <button
+            className="trust-action-button primary"
+            type="submit"
+            data-testid="notification-keyword-add"
+            disabled={busy || draft.trim().length === 0}
+          >
+            {t("action.add")}
+          </button>
+        </div>
+      </ImeSafeForm>
+      {failure ? (
+        <p className="settings-status-text" data-testid="notification-keyword-error">
+          {t(accountNotificationsFailureMessage(failure))}
+        </p>
+      ) : null}
+      <p className="profile-settings-hint" data-testid="notification-keyword-hint">
+        {t("settings.notificationKeywordHint")}
+      </p>
+    </section>
   );
 }
 

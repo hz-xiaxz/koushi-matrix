@@ -2300,7 +2300,10 @@ mock.setCommandResponse("load_account_notifications", () =>
             },
             email_management: "available",
             emails: [{ address: "harness@example.invalid", notifications_active: false }],
-            unverified_email_pusher_count: 0
+            unverified_email_pusher_count: 0,
+            // #1427: the keyword editor reads this projection; the harness does
+            // not exercise the write commands, so the list starts empty.
+            keywords: []
           },
           pending_email: null,
           operation: { kind: "idle" }

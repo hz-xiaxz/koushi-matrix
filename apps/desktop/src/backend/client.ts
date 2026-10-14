@@ -415,6 +415,21 @@ export class TauriDesktopApi implements DesktopApi {
   }
 
   /**
+   * #1427 keyword push rules. `pattern` is the raw field text: Rust trims and
+   * validates it and mints the rule id, so the renderer never invents one. As
+   * with the neighbouring account-notification commands, the wrapper adds the
+   * optional `accountTabId` when this client is bound to a tab, and the request
+   * id stays Rust's business.
+   */
+  async addNotificationKeyword(pattern: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("add_notification_keyword", { pattern });
+  }
+
+  async removeNotificationKeyword(ruleId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("remove_notification_keyword", { ruleId });
+  }
+
+  /**
    * Device-local notification delivery (#1427). `secret` is a write-only value: the command
    * stores it in the OS credential store and the answer carries only an admission. It is
    * never put in a URL, a log, or a snapshot, and it is never read back to the renderer.

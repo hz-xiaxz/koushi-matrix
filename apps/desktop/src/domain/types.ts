@@ -731,6 +731,12 @@ export interface NotificationEmailAddress {
   notifications_active: boolean;
 }
 
+/** One account `content` push rule shown by the keyword editor (#1427). */
+export interface NotificationKeywordRule {
+  rule_id: string;
+  pattern: string;
+}
+
 export interface AccountNotificationsSnapshot {
   account_push_enabled: boolean;
   encrypted_event_push: boolean;
@@ -738,6 +744,8 @@ export interface AccountNotificationsSnapshot {
   email_management: NotificationEmailManagement;
   emails: NotificationEmailAddress[];
   unverified_email_pusher_count: number;
+  /** The account's own `kind: content` rules, in the server's rule order. */
+  keywords: NotificationKeywordRule[];
 }
 
 export type AccountNotificationsFailureKind =
@@ -752,7 +760,18 @@ export type AccountNotificationsFailureKind =
   | "rateLimited"
   | "network"
   | "server"
-  | "sessionRequired";
+  | "sessionRequired"
+  // #1427 keyword-rule validation, decided by Rust before the homeserver is
+  // asked. `emptyPattern` is empty after trimming, `patternTooLong` exceeds the
+  // character bound, `duplicate` matches an existing rule without regard to
+  // case, `limitReached` means the account already holds the maximum number of
+  // keyword rules, and `unknownRule` is a write that names a rule the account
+  // does not have (a race with another client, not a condition the user made).
+  | "emptyPattern"
+  | "patternTooLong"
+  | "duplicate"
+  | "limitReached"
+  | "unknownRule";
 
 export type AccountNotificationsLoadState =
   | { kind: "notLoaded" }
@@ -767,7 +786,9 @@ export type AccountNotificationsOperation =
   | { kind: "resendEmailToken" }
   | { kind: "confirmEmail" }
   | { kind: "enableEmailNotifications" }
-  | { kind: "disableEmailNotifications" };
+  | { kind: "disableEmailNotifications" }
+  | { kind: "addNotificationKeyword"; pattern: string }
+  | { kind: "removeNotificationKeyword"; ruleId: string };
 
 export type AccountNotificationsOperationState =
   | { kind: "idle" }

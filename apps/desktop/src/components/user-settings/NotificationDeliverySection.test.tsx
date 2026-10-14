@@ -5,13 +5,16 @@ import { afterEach, describe, expect, test, vi } from "vitest";
 
 import {
   type NotificationDeliveryActions,
+  type NotificationKeywordActions,
   NotificationDeliverySection
 } from "./NotificationDeliverySection";
 import { setActiveLocaleProfile } from "../../i18n/messages";
 import type {
+  AccountNotificationsOperationState,
   NotificationDeliveryPresetState,
   NotificationDeliverySettings,
   NotificationDeliveryState,
+  NotificationKeywordRule,
   NotificationSinkSettings,
   RoomSummary,
   SpaceSummary
@@ -83,6 +86,21 @@ function actions(): NotificationDeliveryActions {
   };
 }
 
+const KEYWORD_RULES: NotificationKeywordRule[] = [
+  {
+    rule_id: "org.matrix.desktop.notify.keyword.aaaaaaaaaaaaaaaa",
+    pattern: "Alpha"
+  },
+  {
+    rule_id: "org.matrix.desktop.notify.keyword.bbbbbbbbbbbbbbbb",
+    pattern: "Beta"
+  }
+];
+
+function keywordActions(): NotificationKeywordActions {
+  return { add: vi.fn(), remove: vi.fn() };
+}
+
 function rooms(): RoomSummary[] {
   return [
     { room_id: "!alpha:example.invalid", display_label: "Alpha room" } as RoomSummary,
@@ -98,9 +116,19 @@ type SectionProps = {
   delivery?: NotificationDeliverySettings;
   runtime?: NotificationDeliveryState;
   handlers?: NotificationDeliveryActions;
+  keywordRules?: readonly NotificationKeywordRule[];
+  keywordOperation?: AccountNotificationsOperationState;
+  keywordHandlers?: NotificationKeywordActions;
 };
 
-function section({ delivery: block = delivery(), runtime = state(), handlers = actions() }: SectionProps = {}) {
+function section({
+  delivery: block = delivery(),
+  runtime = state(),
+  handlers = actions(),
+  keywordRules = KEYWORD_RULES,
+  keywordOperation = { kind: "idle" },
+  keywordHandlers = keywordActions()
+}: SectionProps = {}) {
   return (
     <NotificationDeliverySection
       delivery={block}
@@ -108,6 +136,9 @@ function section({ delivery: block = delivery(), runtime = state(), handlers = a
       rooms={rooms()}
       spaces={spaces()}
       actions={handlers}
+      keywordRules={keywordRules}
+      keywordOperation={keywordOperation}
+      keywordActions={keywordHandlers}
     />
   );
 }
@@ -116,6 +147,13 @@ function renderSection(props: SectionProps = {}) {
   const handlers = props.handlers ?? actions();
   render(section({ ...props, handlers }));
   return handlers;
+}
+
+function renderKeywordSection(props: SectionProps = {}) {
+  const handlers = props.handlers ?? actions();
+  const keywordHandlers = props.keywordHandlers ?? keywordActions();
+  render(section({ ...props, handlers, keywordHandlers }));
+  return { handlers, keywordHandlers };
 }
 
 function lastUpdate(handlers: NotificationDeliveryActions): NotificationDeliverySettings {
@@ -684,5 +722,156 @@ describe("NotificationDeliverySection", () => {
     expect(screen.getByTestId("notification-delivery-sink-outcome").textContent).toContain(
       "接続できませんでした"
     );
+  });
+});
+
+describe("NotificationDeliverySection keyword editor (#1427)", () => {
+  test("renders the account's rules in the server's own order", () => {
+    renderKeywordSection();
+    const rows = screen.getAllByTestId("notification-keyword-row");
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByText("Alpha")).toBeTruthy();
+    expect(within(rows[1]).getByText("Beta")).toBeTruthy();
+    // The whole list is the projection, not a locally sorted or reversed copy.
+    expect(rows.map((row) => row.querySelector("span")?.textContent)).toEqual(["Alpha", "Beta"]);
+    expect(screen.queryByTestId("notification-keyword-empty")).toBeNull();
+  });
+
+  test("removes exactly the rule its row names, without patching the delivery block", () => {
+    const { handlers, keywordHandlers } = renderKeywordSection();
+    const rows = screen.getAllByTestId("notification-keyword-row");
+    fireEvent.click(within(rows[1]).getByTestId("notification-keyword-remove"));
+    expect(keywordHandlers.remove).toHaveBeenCalledWith(KEYWORD_RULES[1].rule_id);
+    expect(keywordHandlers.remove).toHaveBeenCalledTimes(1);
+    // Removal is account state; it never rewrites this device's delivery patch.
+    expect(handlers.update).not.toHaveBeenCalled();
+    expect(keywordHandlers.add).not.toHaveBeenCalled();
+  });
+
+  test("adds the trimmed pattern and stays unavailable until the field has text", () => {
+    const { keywordHandlers } = renderKeywordSection();
+    const input = screen.getByTestId("notification-keyword-input") as HTMLInputElement;
+    const add = screen.getByTestId("notification-keyword-add") as HTMLButtonElement;
+    expect(add.disabled).toBe(true);
+
+    fireEvent.change(input, { target: { value: "   " } });
+    expect(add.disabled).toBe(true);
+    // A form submit while empty dispatches nothing.
+    fireEvent.click(add);
+    expect(keywordHandlers.add).not.toHaveBeenCalled();
+
+    fireEvent.change(input, { target: { value: "  cake  " } });
+    expect(add.disabled).toBe(false);
+    fireEvent.click(add);
+    expect(keywordHandlers.add).toHaveBeenCalledWith("cake");
+  });
+
+  test("a refused duplicate leaves the list as it was and says why", () => {
+    renderKeywordSection({
+      keywordOperation: {
+        kind: "failed",
+        request_id: 4,
+        operation: { kind: "addNotificationKeyword", pattern: "alpha" },
+        failureKind: "duplicate"
+      }
+    });
+    // The projection is unchanged: the refused pattern is not shown as a rule.
+    const rows = screen.getAllByTestId("notification-keyword-row");
+    expect(rows).toHaveLength(2);
+    expect(rows.map((row) => row.querySelector("span")?.textContent)).toEqual(["Alpha", "Beta"]);
+    expect(screen.getByTestId("notification-keyword-error").textContent).toBe(
+      "That keyword is already in the list."
+    );
+  });
+
+  test("names the cap and a rule another client already removed", () => {
+    const { rerender } = render(
+      section({
+        keywordOperation: {
+          kind: "failed",
+          request_id: 6,
+          operation: { kind: "addNotificationKeyword", pattern: "cake" },
+          failureKind: "limitReached"
+        }
+      })
+    );
+    expect(screen.getByTestId("notification-keyword-error").textContent).toBe(
+      "Your keyword list is full. Remove one to add another."
+    );
+
+    rerender(
+      section({
+        keywordOperation: {
+          kind: "failed",
+          request_id: 7,
+          operation: {
+            kind: "removeNotificationKeyword",
+            ruleId: KEYWORD_RULES[0].rule_id
+          },
+          failureKind: "unknownRule"
+        }
+      })
+    );
+    expect(screen.getByTestId("notification-keyword-error").textContent).toBe(
+      "That keyword is no longer on the server. Reopen this page and try again."
+    );
+  });
+
+  test("renders the empty state when the account has no keywords", () => {
+    renderKeywordSection({ keywordRules: [] });
+    expect(screen.getByTestId("notification-keyword-empty").textContent).toBe(
+      "No keywords yet."
+    );
+    expect(screen.queryByTestId("notification-keyword-list")).toBeNull();
+  });
+
+  test("the delivery switch delivers for keywords but adds and removes nothing", () => {
+    const { handlers, keywordHandlers } = renderKeywordSection();
+    fireEvent.click(screen.getByTestId("notification-delivery-keywords"));
+    expect(lastUpdate(handlers).keywords).toBe(false);
+    expect(keywordHandlers.add).not.toHaveBeenCalled();
+    expect(keywordHandlers.remove).not.toHaveBeenCalled();
+  });
+
+  test("clears the field only once Rust confirms the add", () => {
+    const { rerender } = render(section());
+    const input = screen.getByTestId("notification-keyword-input") as HTMLInputElement;
+    fireEvent.change(input, { target: { value: "cake" } });
+    expect(input.value).toBe("cake");
+
+    // Rust's confirmation is a succeeded add; the acknowledged value is empty.
+    rerender(
+      section({
+        keywordRules: [
+          ...KEYWORD_RULES,
+          {
+            rule_id: "org.matrix.desktop.notify.keyword.cccccccccccccccc",
+            pattern: "cake"
+          }
+        ],
+        keywordOperation: {
+          kind: "succeeded",
+          request_id: 5,
+          operation: { kind: "addNotificationKeyword", pattern: "cake" }
+        }
+      })
+    );
+    expect(input.value).toBe("");
+    expect(screen.getAllByTestId("notification-keyword-row")).toHaveLength(3);
+  });
+
+  test("does not render the editor for a surface with no account projection", () => {
+    render(
+      <NotificationDeliverySection
+        delivery={delivery()}
+        state={state()}
+        rooms={rooms()}
+        spaces={spaces()}
+        actions={actions()}
+      />
+    );
+    expect(screen.queryByTestId("notification-keywords")).toBeNull();
+    // The switch remains: it is device state and exists without an account.
+    expect(screen.getByTestId("notification-delivery-keywords")).toBeTruthy();
   });
 });

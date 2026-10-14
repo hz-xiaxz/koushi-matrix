@@ -8076,6 +8076,13 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   gap: 6px;
 }
 
+/* #1427 keyword rules: the account projection beside the device switch that
+   delivers for it. */
+.settings-keyword-editor {
+  display: grid;
+  gap: 8px;
+}
+
 .settings-disclosure summary {
   cursor: pointer;
   color: var(--text-muted);
