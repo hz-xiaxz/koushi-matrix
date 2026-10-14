@@ -135,9 +135,10 @@ pub struct SettingsValues {
     #[serde(default)]
     pub notifications: NotificationSettings,
     /// Device-local notification delivery (#1427). App scope: the Matrix account is
-    /// never consulted for a destination.
+    /// never consulted for a destination. Boxed for the same reason the settings patch
+    /// is: the block would otherwise dominate the effect enum's largest variant.
     #[serde(default, deserialize_with = "deserialize_notification_delivery")]
-    pub delivery: NotificationDeliverySettings,
+    pub delivery: Box<NotificationDeliverySettings>,
     #[serde(default)]
     pub display: DisplaySettings,
     #[serde(default)]
@@ -171,8 +172,8 @@ pub struct AppSettingsValues {
     pub notifications: AppNotificationSettings,
     /// The settings file holds the app projection, so the same load-time
     /// canonicalization the full value gets has to run here too.
-    #[serde(deserialize_with = "deserialize_notification_delivery")]
-    pub delivery: NotificationDeliverySettings,
+    #[serde(default, deserialize_with = "deserialize_notification_delivery")]
+    pub delivery: Box<NotificationDeliverySettings>,
     pub display: AppDisplaySettings,
     pub media: MediaSettings,
     pub timeline: TimelineSettings,
@@ -388,7 +389,7 @@ impl SettingsValues {
         if apply_app && let Some(delivery) = patch.delivery {
             let mut delivery = delivery;
             delivery.canonicalize();
-            self.delivery = delivery;
+            *self.delivery = delivery;
         }
         if apply_account {
             if let Some(room_list_sort) = patch.room_list_sort {
@@ -447,7 +448,7 @@ impl AppSettingsValues {
         if let Some(value) = &patch.delivery {
             let mut delivery = value.clone();
             delivery.canonicalize();
-            self.delivery = delivery;
+            *self.delivery = delivery;
         }
         if let Some(value) = &patch.media {
             self.media = value.clone();
