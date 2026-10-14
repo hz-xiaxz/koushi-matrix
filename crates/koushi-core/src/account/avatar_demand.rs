@@ -43,6 +43,21 @@ impl AccountActor {
             .as_ref()
             .map(|demand| demand.resources_by_priority())
             .unwrap_or_default();
+        // #1396: a source that leaves the scoped demand is no longer referenced
+        // by a scoped reader, so its retained bytes are superseded. The demand
+        // carries the visible plus prefetch window, so scrolling back inside the
+        // window does not retire.
+        let demanded: std::collections::BTreeSet<String> =
+            resources.iter().map(|uri| (*uri).to_owned()).collect();
+        for uri in self
+            .demanded_avatar_sources
+            .difference(&demanded)
+            .cloned()
+            .collect::<Vec<_>>()
+        {
+            self.retire_avatar_source(&uri);
+        }
+        self.demanded_avatar_sources = demanded;
         let obsolete: Vec<_> = self
             .avatar_inflight
             .keys()

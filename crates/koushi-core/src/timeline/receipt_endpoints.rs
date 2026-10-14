@@ -148,20 +148,20 @@ impl RawReceiptWindow {
                     let avatar = receipt.avatar.map(|mut avatar| {
                         use crate::renderable_thumbnail::{
                             RenderableThumbnailKind, ThumbnailLeaseError,
-                            lease_renderable_thumbnail, renderable_thumbnail_cache_key_for_account,
+                            lease_renderable_thumbnail, renderable_thumbnail_cache_key,
                         };
                         use koushi_state::AvatarThumbnailState;
                         let lease = match &avatar.thumbnail {
                             AvatarThumbnailState::Ready { source_ref, .. } => {
                                 lease_renderable_thumbnail(source_ref)
                             }
-                            AvatarThumbnailState::NotRequested => lease_renderable_thumbnail(
-                                &renderable_thumbnail_cache_key_for_account(
+                            AvatarThumbnailState::NotRequested => {
+                                lease_renderable_thumbnail(&renderable_thumbnail_cache_key(
                                     RenderableThumbnailKind::Avatar,
                                     &account_scope,
                                     &avatar.mxc_uri,
-                                ),
-                            ),
+                                ))
+                            }
                             _ => Err(ThumbnailLeaseError::Unavailable),
                         };
                         if matches!(avatar.thumbnail, AvatarThumbnailState::NotRequested)

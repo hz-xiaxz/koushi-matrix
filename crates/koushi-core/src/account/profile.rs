@@ -7,14 +7,15 @@ use koushi_state::{
     AppAction, AvatarImage, AvatarThumbnailFailureKind, AvatarThumbnailState, OwnProfile,
     PresenceKind,
 };
-use matrix_sdk::media::{MediaFormat, MediaRequestParameters};
+use matrix_sdk::media::{MediaFormat, MediaRequestParameters, MediaThumbnailSettings};
 use matrix_sdk::ruma::events::room::MediaSource as SdkMediaSource;
 use matrix_sdk::ruma::{MxcUri, OwnedMxcUri};
 use tokio::sync::Semaphore;
 
 use crate::renderable_thumbnail::{
+    AVATAR_THUMBNAIL_IDENTITY, AVATAR_THUMBNAIL_LONG_EDGE, RenderableThumbnailContent,
     RenderableThumbnailKind, clear_renderable_thumbnail_cache_for_account,
-    store_renderable_thumbnail_for_account,
+    retire_renderable_thumbnail_source_for_account, store_renderable_thumbnail_variant_for_account,
 };
 use crate::room::RoomMessage;
 use crate::timeline::TimelineMessage;
@@ -157,26 +158,122 @@ async fn download_avatar_thumbnail(
         return Err(AvatarThumbnailFailureKind::Unsupported);
     }
     let uri: OwnedMxcUri = mxc.to_owned();
-    let bytes = session
-        .client()
-        .media()
-        .get_media_content(
-            &MediaRequestParameters {
-                source: SdkMediaSource::Plain(uri),
-                format: MediaFormat::File,
-            },
-            true,
-        )
-        .await
-        .map_err(|_| AvatarThumbnailFailureKind::Network)?;
+    let fetch = |format: MediaFormat| {
+        let uri = uri.clone();
+        async move {
+            session
+                .client()
+                .media()
+                .get_media_content(
+                    &MediaRequestParameters {
+                        source: SdkMediaSource::Plain(uri),
+                        format,
+                    },
+                    true,
+                )
+                .await
+                .map_err(|_| AvatarThumbnailFailureKind::Network)
+        }
+    };
 
-    store_renderable_thumbnail_for_account(
+    // #1396: ask for a homeserver thumbnail sized from the display slot, exactly
+    // as timeline media does. Only a failed thumbnail request downloads the
+    // original, and that original is resized before it is retained.
+    let avatar_long_edge = matrix_sdk::ruma::UInt::try_from(u64::from(AVATAR_THUMBNAIL_LONG_EDGE))
+        .expect("the avatar long edge fits a UInt");
+    let (source_bytes, resolution) = match fetch(MediaFormat::Thumbnail(
+        MediaThumbnailSettings::new(avatar_long_edge, avatar_long_edge),
+    ))
+    .await
+    {
+        Ok(bytes) => (bytes, AvatarResolution::ServerThumbnail),
+        Err(_) => {
+            let bytes = fetch(MediaFormat::File).await?;
+            (bytes, AvatarResolution::LocalResize)
+        }
+    };
+
+    let policy = koushi_media::ImagePreparationPolicy {
+        target_long_edge: AVATAR_THUMBNAIL_LONG_EDGE,
+        quality_percent: 82,
+    };
+    let (content, resolution) = prepare_avatar_content(source_bytes, resolution, &policy)?;
+    let stored = store_renderable_thumbnail_variant_for_account(
         RenderableThumbnailKind::Avatar,
         session.info.user_id.as_str(),
         mxc_uri,
-        bytes,
+        AVATAR_THUMBNAIL_IDENTITY,
+        content,
     )
-    .map_err(|_| AvatarThumbnailFailureKind::Unsupported)
+    .map_err(|_| AvatarThumbnailFailureKind::Unsupported)?;
+    // Only a stored avatar counts as a resolution; a rejected store is a
+    // failure and is counted by the caller.
+    koushi_diagnostics::increment_counter(resolution.counter());
+    Ok(stored)
+}
+
+/// Size fetched avatar bytes for the display slot (#1396).
+///
+/// Everything decodable is re-encoded to WebP inside
+/// [`AVATAR_THUMBNAIL_LONG_EDGE`], so what lands in the cache is never the
+/// original upload. Content that cannot be decoded (GIF, animated WebP/PNG) is
+/// passed through with its own bytes and dimensions, bounded by the avatar
+/// per-entry cap at store time.
+pub(super) fn prepare_avatar_content(
+    source_bytes: Vec<u8>,
+    fetch_resolution: AvatarResolution,
+    policy: &koushi_media::ImagePreparationPolicy,
+) -> Result<(RenderableThumbnailContent, AvatarResolution), AvatarThumbnailFailureKind> {
+    match koushi_media::prepare_image_output_fitted(
+        &source_bytes,
+        "avatar",
+        AVATAR_THUMBNAIL_LONG_EDGE,
+        koushi_media::ImageOutputFormat::WebP,
+        policy,
+    ) {
+        Ok(variant) => Ok((
+            RenderableThumbnailContent {
+                bytes: variant.bytes,
+                mime_type: Some(variant.mime_type),
+                width: Some(u64::from(variant.dimensions.0)),
+                height: Some(u64::from(variant.dimensions.1)),
+            },
+            fetch_resolution,
+        )),
+        Err(koushi_media::ImagePreparationError::UnsupportedFormat) => {
+            let dimensions = koushi_media::probe_image_dimensions(&source_bytes);
+            Ok((
+                RenderableThumbnailContent {
+                    bytes: source_bytes,
+                    mime_type: None,
+                    width: dimensions.map(|(width, _)| u64::from(width)),
+                    height: dimensions.map(|(_, height)| u64::from(height)),
+                },
+                AvatarResolution::OriginalPassthrough,
+            ))
+        }
+        Err(_) => Err(AvatarThumbnailFailureKind::Unsupported),
+    }
+}
+
+/// How a retained avatar thumbnail was produced (#1396).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub(super) enum AvatarResolution {
+    ServerThumbnail,
+    LocalResize,
+    OriginalPassthrough,
+    Failure,
+}
+
+impl AvatarResolution {
+    fn counter(self) -> &'static str {
+        match self {
+            Self::ServerThumbnail => "avatar_resolution_server_thumbnail",
+            Self::LocalResize => "avatar_resolution_local_resize",
+            Self::OriginalPassthrough => "avatar_resolution_original_passthrough",
+            Self::Failure => "avatar_resolution_failure",
+        }
+    }
 }
 
 fn classify_profile_error(error: &koushi_sdk::MatrixProfileError) -> ProfileFailureKind {
@@ -229,11 +326,11 @@ impl AccountActor {
     }
 
     pub(super) async fn handle_set_display_name(
-        &self,
+        &mut self,
         request_id: RequestId,
         display_name: Option<String>,
     ) {
-        let Some(session) = &self.session else {
+        let Some(session) = self.session.clone() else {
             self.send_actions(vec![AppAction::ProfileUpdateFailed {
                 request_id: request_id.sequence,
                 message: "profile update failed".to_owned(),
@@ -243,9 +340,12 @@ impl AccountActor {
             return;
         };
 
-        match koushi_sdk::set_display_name(session, display_name.as_deref()).await {
+        match koushi_sdk::set_display_name(&session, display_name.as_deref()).await {
             Ok(profile) => {
                 let profile = map_matrix_own_profile(profile);
+                self.note_own_avatar_source(
+                    profile.avatar.as_ref().map(|avatar| avatar.mxc_uri.clone()),
+                );
                 self.send_actions(vec![AppAction::ProfileUpdateSucceeded {
                     request_id: request_id.sequence,
                     profile,
@@ -341,11 +441,11 @@ impl AccountActor {
     }
 
     pub(super) async fn handle_set_avatar(
-        &self,
+        &mut self,
         request_id: RequestId,
         request: koushi_protocol::command::SetAvatarRequest,
     ) {
-        let Some(session) = &self.session else {
+        let Some(session) = self.session.clone() else {
             self.send_actions(vec![AppAction::ProfileUpdateFailed {
                 request_id: request_id.sequence,
                 message: "profile update failed".to_owned(),
@@ -355,9 +455,12 @@ impl AccountActor {
             return;
         };
 
-        match koushi_sdk::set_avatar(session, &request.mime_type, request.bytes).await {
+        match koushi_sdk::set_avatar(&session, &request.mime_type, request.bytes).await {
             Ok(profile) => {
                 let profile = map_matrix_own_profile(profile);
+                self.note_own_avatar_source(
+                    profile.avatar.as_ref().map(|avatar| avatar.mxc_uri.clone()),
+                );
                 self.send_actions(vec![AppAction::ProfileUpdateSucceeded {
                     request_id: request_id.sequence,
                     profile,
@@ -409,9 +512,12 @@ impl AccountActor {
                 download_avatar_thumbnail(&session, &mxc_uri_clone)
             })
             .await
-            .unwrap_or_else(|kind| AvatarThumbnailState::Failed {
-                request_id: request_sequence,
-                kind,
+            .unwrap_or_else(|kind| {
+                koushi_diagnostics::increment_counter(AvatarResolution::Failure.counter());
+                AvatarThumbnailState::Failed {
+                    request_id: request_sequence,
+                    kind,
+                }
             });
             // Best-effort: if the actor is already shut down, the send fails
             // silently — that is correct because the session is gone anyway.
@@ -647,6 +753,37 @@ impl AccountActor {
         self.start_pending_avatar_fetches();
     }
 
+    /// #1396: retire a superseded source's retained bytes. Called only from the
+    /// signals that mean "this source is no longer referenced": a scoped demand
+    /// dropping it, or the own profile moving to a new avatar. Never from a
+    /// renderer cancel — the renderer cancels its request as soon as the avatar
+    /// becomes `Ready`, which is not the end of its display lifetime.
+    ///
+    /// A terminal failure owns no bytes and stays cached so a returning renderer
+    /// does not retry it.
+    pub(super) fn retire_avatar_source(&mut self, mxc_uri: &str) {
+        if let Some(session) = &self.session
+            && retire_renderable_thumbnail_source_for_account(
+                session.info.user_id.as_str(),
+                mxc_uri,
+            ) > 0
+        {
+            self.avatar_cache.remove(mxc_uri);
+        }
+    }
+
+    /// Track the own profile's avatar source so a change retires the previous
+    /// entry (#1396).
+    pub(super) fn note_own_avatar_source(&mut self, mxc_uri: Option<String>) {
+        if self.own_avatar_mxc_uri == mxc_uri {
+            return;
+        }
+        let previous = std::mem::replace(&mut self.own_avatar_mxc_uri, mxc_uri);
+        if let Some(previous) = previous {
+            self.retire_avatar_source(&previous);
+        }
+    }
+
     pub(super) fn cancel_unwanted_avatar(&mut self, mxc_uri: &str) {
         if !self.avatar_inflight.get(mxc_uri).is_some_and(Vec::is_empty)
             || self
@@ -690,6 +827,8 @@ impl AccountActor {
         self.avatar_pending.clear();
         self.avatar_active_fetches = 0;
         self.avatar_cache.clear();
+        self.demanded_avatar_sources.clear();
+        self.own_avatar_mxc_uri = None;
         if let Some(session) = &self.session {
             clear_renderable_thumbnail_cache_for_account(session.info.user_id.as_str());
         }
@@ -878,17 +1017,14 @@ impl AccountActor {
 
 #[cfg(test)]
 mod tests {
-
-    use koushi_sdk::{MatrixClientSession, PersistableMatrixSession};
-    use koushi_state::{AvatarThumbnailFailureKind, AvatarThumbnailState};
-
     use super::{
         AvatarAdmission, avatar_admission, avatar_thumbnail_for_request, download_avatar_thumbnail,
         retry_avatar_thumbnail_fetch,
     };
-
     use crate::renderable_thumbnail::clear_renderable_thumbnail_cache;
     use koushi_protocol::ids::{RequestId, RuntimeConnectionId};
+    use koushi_sdk::{MatrixClientSession, PersistableMatrixSession};
+    use koushi_state::{AvatarThumbnailFailureKind, AvatarThumbnailState};
 
     use matrix_sdk::test_utils::mocks::MatrixMockServer;
     use std::{fs, path::Path};

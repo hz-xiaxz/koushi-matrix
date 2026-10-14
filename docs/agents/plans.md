@@ -19,6 +19,13 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
+[#1396 avatar thumbnails](../plans/2026-10-13-issue1396-avatar-thumbnails.md)
+requests a homeserver thumbnail sized from the 40 px avatar slot, resizes the
+fallback locally to the same long edge, keys the cache by thumbnail identity,
+retires a released source's bytes, and splits the avatar and link-preview
+budgets (8 MiB vs 32 MiB). Records the open decisions and the measured output
+size.
+
 [#1394 resident timeline-set diagnostics](../plans/2026-10-13-issue1394-resident-timeline-diagnostics.md)
 lands the export-time counters the memory measurement record asked for before any
 retention bound: resident Room/actor counts and a canonical-depth proxy, as
