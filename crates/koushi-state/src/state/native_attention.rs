@@ -7,13 +7,13 @@ use serde::{Deserialize, Serialize};
 
 use crate::locale_profile::DisplayPlatform;
 
+use super::AppState;
 use super::errors::OperationFailureKind;
 #[cfg(test)]
 use super::room::RoomLatestEventSummary;
 use super::room::{
     RoomAttentionKind, RoomSummary, room_activity_unread_count, room_attention_summary,
 };
-
 use super::settings::RoomNotificationMode;
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -387,6 +387,159 @@ pub(crate) fn native_attention_projection_from_rooms_with_live_room(
         badge_room_count,
         badge_excluded_room_count,
     }
+}
+
+/// One room the attention projection counts as holding unread attention (#1427).
+///
+/// The device-local delivery channel needs the same rooms the badge counts, but for
+/// every one of them rather than only the single room a transient alert may target. It
+/// also needs the mention count, which the candidate deliberately discards. Both come
+/// from this one function so the delivery channel cannot drift from the badge.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct RoomAttentionCandidate {
+    pub room_id: String,
+    /// The safe display label, the same one the candidate and the sidebar row use.
+    pub display_label: String,
+    pub kind: RoomAttentionKind,
+    /// Main-timeline plus thread unread, after the room's notification mode is applied.
+    pub unread: u32,
+    /// Main-timeline plus thread highlights, which is what makes a room a mention.
+    pub mentions: u32,
+    /// The spaces this room is a child of in the room list right now, so a watch list naming
+    /// a space covers a room that joined it after the list was written.
+    pub parent_space_ids: Vec<String>,
+}
+
+/// Every room with unread attention, for the device-local delivery channel.
+///
+/// The read/unread and mute semantics are exactly
+/// [`native_attention_projection_from_rooms_with_live_room`]'s: the same deduplication,
+/// the same explicit-mute and `Mute` mode exclusions, the same low-priority exclusion,
+/// the same ignored-user direct-message exclusion, the same `Mentions`-mode collapse,
+/// and the same display label. Two things the transient alert needs are deliberately not
+/// required here, because a digest is not a banner: a room does not have to be the live
+/// room, and it does not have to carry a usable latest event.
+pub fn attention_room_candidates(
+    input: NativeAttentionProjectionInput<'_>,
+) -> Vec<RoomAttentionCandidate> {
+    let mut seen_room_ids = BTreeSet::new();
+    let mut candidates = Vec::new();
+
+    for room in input.rooms {
+        if !seen_room_ids.insert(room.room_id.as_str()) {
+            continue;
+        }
+        let mode = input
+            .room_notification_modes
+            .get(&room.room_id)
+            .copied()
+            .unwrap_or_default();
+        let explicitly_muted = input
+            .muted_room_ids
+            .iter()
+            .any(|room_id| room_id == &room.room_id);
+        if explicitly_muted || mode == RoomNotificationMode::Mute {
+            continue;
+        }
+        if room.tags.low_priority.is_some() {
+            continue;
+        }
+        // An ignored user's direct message keeps its shared Dock contribution, but it is
+        // not attention: it stays out of the totals and out of the candidates.
+        if room.is_dm
+            && room
+                .dm_user_ids
+                .iter()
+                .any(|user_id| input.ignored_user_ids.contains(user_id))
+        {
+            continue;
+        }
+
+        let highlight_total = room
+            .highlight_count
+            .saturating_add(room.thread_highlight_count);
+        let activity_unread_count = room_activity_unread_count(room);
+        // `Mentions` only reports what was highlighted; without a highlight the room is
+        // read as far as this projection is concerned.
+        let effective_unread_count =
+            if mode == RoomNotificationMode::Mentions && highlight_total == 0 {
+                0
+            } else {
+                activity_unread_count
+            };
+        if effective_unread_count == 0 {
+            continue;
+        }
+        let Some(summary) = room_attention_summary(
+            room.display_label.clone(),
+            room.is_dm,
+            if mode == RoomNotificationMode::Mentions {
+                0
+            } else {
+                room.notification_count
+            },
+            highlight_total,
+            effective_unread_count,
+        ) else {
+            continue;
+        };
+        candidates.push(RoomAttentionCandidate {
+            room_id: room.room_id.clone(),
+            display_label: summary.room_display_name,
+            kind: summary.kind,
+            unread: u32::try_from(effective_unread_count).unwrap_or(u32::MAX),
+            mentions: u32::try_from(highlight_total).unwrap_or(u32::MAX),
+            parent_space_ids: room.parent_space_ids.clone(),
+        });
+    }
+
+    candidates.sort_by(|left, right| {
+        attention_kind_priority(right.kind)
+            .cmp(&attention_kind_priority(left.kind))
+            .then_with(|| right.mentions.cmp(&left.mentions))
+            .then_with(|| right.unread.cmp(&left.unread))
+            .then_with(|| left.display_label.cmp(&right.display_label))
+            .then_with(|| left.room_id.cmp(&right.room_id))
+    });
+    candidates
+}
+
+/// Every room with unread attention in this state, for the device-local delivery channel.
+///
+/// The input assembly mirrors `crate::reducer::native_attention`'s production projection -
+/// the same room list, the same room notification modes, the same ignored users - and shares
+/// [`attention_room_notification_modes`] with it, so the delivery channel reads exactly the
+/// attention state the badge is built from. The fields the candidate rule does not read
+/// (observation kind, the previous candidate, the platform capabilities) are filled with the
+/// neutral value, because this function answers one question about rooms only.
+pub fn attention_room_candidates_for_state(state: &AppState) -> Vec<RoomAttentionCandidate> {
+    let room_notification_modes = attention_room_notification_modes(state);
+    attention_room_candidates(NativeAttentionProjectionInput {
+        rooms: &state.rooms,
+        active_room_id: state.navigation.active_room_id.as_deref(),
+        muted_room_ids: &[],
+        room_notification_modes: &room_notification_modes,
+        ignored_user_ids: &state.profile.ignored_user_ids,
+        window_focused: state.native_attention_context.window_focused,
+        observation: NativeAttentionObservationKind::InitialSync,
+        previous_candidate: state.native_attention.summary.candidate.as_ref(),
+        message_previews: state.settings.values.notifications.message_previews,
+        capabilities: state.native_attention.summary.capabilities,
+    })
+}
+
+/// The per-room notification modes the attention projection reads, keyed by room id.
+///
+/// One function, so the badge's projection and the delivery channel's candidates can never
+/// read two different mute tables (#1427).
+pub fn attention_room_notification_modes(
+    state: &AppState,
+) -> HashMap<String, RoomNotificationMode> {
+    state
+        .room_notification_settings
+        .iter()
+        .map(|(room_id, settings)| (room_id.clone(), settings.mode))
+        .collect()
 }
 
 /// Compose the OS notification the adapter may show for the selected candidate.

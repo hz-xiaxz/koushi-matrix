@@ -7,6 +7,12 @@
 //! non-secret. A sink's credential lives in the credential store, keyed by the sink
 //! id, and is reported to the product only as a configured flag
 //! (state-machine.md, "Local Notification Delivery").
+//!
+//! [`NotificationDeliveryState`] is the device-local *runtime* projection of that
+//! channel: the per-sink configured flag and last outcome, plus the mailbox preset
+//! catalog the settings screen offers. It is app scope and deliberately not part of
+//! the settings file - a restart re-observes the credential store and re-arms every
+//! timer - and it never carries a secret value.
 
 use serde::{Deserialize, Serialize};
 
@@ -265,6 +271,13 @@ pub struct NotificationSinkSettings {
     /// The name the recipient sees. Empty falls back to the bare address.
     pub sender_name: String,
     pub config: NotificationSinkConfig,
+    /// The server and account the stored credential was entered for, in the shape
+    /// [`credential_identity`](Self::credential_identity) renders. The credential store is
+    /// keyed by the sink id alone, so without this a preset, host, port or username change
+    /// would keep the previous mailbox's password and offer it to the new server's
+    /// `AUTH LOGIN`. Rust owns this field: the user never types it and the frontend never
+    /// sends a value for it.
+    pub secret_binding: Option<String>,
 }
 
 impl NotificationSinkSettings {
@@ -274,6 +287,21 @@ impl NotificationSinkSettings {
         match &self.config {
             NotificationSinkConfig::Resend { endpoint } => endpoint.clone(),
             NotificationSinkConfig::Smtp { host, port, .. } => format!("{host}:{port}"),
+        }
+    }
+
+    /// The server and account a credential for this sink authenticates. Two sinks whose
+    /// identity differs must never be able to exchange a stored credential, which is why
+    /// the binding is compared against this string rather than against the sink id.
+    pub fn credential_identity(&self) -> String {
+        match &self.config {
+            NotificationSinkConfig::Resend { .. } => format!("resend:{}", self.endpoint()),
+            NotificationSinkConfig::Smtp {
+                host,
+                port,
+                username,
+                ..
+            } => format!("smtp:{host}:{port}:{username}"),
         }
     }
 
@@ -306,6 +334,13 @@ impl NotificationSinkSettings {
                 *port = (*port).max(1);
                 *username = trimmed_field(username);
             }
+        }
+        // A credential is only usable for the server and account it was entered for, so a
+        // binding that no longer matches the configuration is dropped. This runs after the
+        // fields above have been normalized and on every load and every patch, so a
+        // settings file edited while the app was closed fails closed here too.
+        if self.secret_binding.as_deref() != Some(self.credential_identity().as_str()) {
+            self.secret_binding = None;
         }
     }
 
@@ -404,6 +439,89 @@ fn trimmed_field(value: &str) -> String {
             .unwrap_or(trimmed);
     }
     trimmed.to_owned()
+}
+
+/// The device-local delivery channel as the frontend sees it (#1427).
+///
+/// App scope, and deliberately outside [`NotificationDeliverySettings`]: the settings
+/// file holds what the user chose, this holds what this run of the app has observed -
+/// whether each sink's credential is in the store, and how its last send ended. It is
+/// never persisted, so restarting re-reads the credential store instead of trusting a
+/// stale flag, and it holds no secret: a sink secret is only ever read at send time and
+/// only travels into the sink.
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NotificationDeliveryState {
+    /// One entry per sink in [`NotificationDeliverySettings::sinks`], in that order.
+    pub sinks: Vec<NotificationDeliverySinkState>,
+    /// The mailbox presets this build offers; see
+    /// [`NotificationDeliveryPresetState`].
+    pub presets: Vec<NotificationDeliveryPresetState>,
+}
+
+/// One delivery sink's runtime facts, keyed by the same sink id the settings use.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NotificationDeliverySinkState {
+    pub sink_id: String,
+    /// Whether the credential store holds a secret for this sink. A value never
+    /// reaches this flag, only its presence.
+    pub secret_configured: bool,
+    /// How this sink's most recent send ended, if it has sent in this run. The
+    /// frontend must not read a sink as working while this is a failure.
+    pub last_outcome: Option<NotificationDeliveryOutcomeState>,
+}
+
+/// One sink's most recent send, as a typed fact with the time it was observed.
+///
+/// The variants mirror the senders' own verdicts
+/// (`koushi_notify::NotificationDeliveryFailure`) one for one, so the frontend renders
+/// one catalog sentence per case instead of guessing from a string. `at_ms` is when
+/// this device observed the outcome, in milliseconds since the Unix epoch.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NotificationDeliveryOutcomeState {
+    Delivered {
+        at_ms: u64,
+    },
+    InvalidSecret {
+        at_ms: u64,
+    },
+    NotPermitted {
+        at_ms: u64,
+    },
+    Rejected {
+        at_ms: u64,
+    },
+    RateLimited {
+        at_ms: u64,
+        /// The provider's own delay, when it gave one. Absent means this device
+        /// chooses its own backoff.
+        retry_after_secs: Option<u64>,
+    },
+    Transport {
+        at_ms: u64,
+    },
+}
+
+/// One mailbox preset a user can pick instead of filling in a relay by hand.
+///
+/// A copy of the sender crate's own catalog, projected so the settings screen can offer
+/// it without depending on a sender: the host, port, and TLS mode are the provider's
+/// published coordinates, not a secret.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NotificationDeliveryPresetState {
+    /// Stable id the settings and the credential store key on.
+    pub id: String,
+    /// The vendor's own proper name, which is not translated: a product name reads the
+    /// same in every locale.
+    pub label: String,
+    pub host: String,
+    pub port: u16,
+    pub tls: SmtpTls,
+    /// Whether the relay authenticates the full address rather than its local part.
+    pub username_is_full_address: bool,
+    /// Catalog key for the sentence that tells the user which of the provider's own
+    /// credentials to go and fetch. Passed through unchanged; the frontend resolves it.
+    pub secret_hint: String,
 }
 
 #[cfg(test)]

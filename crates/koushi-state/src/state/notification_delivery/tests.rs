@@ -10,7 +10,103 @@ fn sink(id: &str, destination: &str) -> NotificationSinkSettings {
         config: NotificationSinkConfig::Resend {
             endpoint: DEFAULT_RESEND_ENDPOINT.to_owned(),
         },
+        secret_binding: None,
     }
+}
+
+fn smtp_sink(host: &str, port: u16, username: &str) -> NotificationSinkSettings {
+    NotificationSinkSettings {
+        config: NotificationSinkConfig::Smtp {
+            preset: None,
+            host: host.to_owned(),
+            port,
+            tls: SmtpTls::Implicit,
+            username: username.to_owned(),
+        },
+        ..sink("mail", "me@example.com")
+    }
+}
+
+#[test]
+fn a_credential_binding_outlives_the_recipient_and_the_sender_name_but_not_the_server() {
+    let mut sink = sink("home", "me@example.com");
+    sink.canonicalize();
+    sink.secret_binding = Some(sink.credential_identity());
+    assert!(sink.secret_binding.is_some());
+
+    // Who receives the mail and what the sender is called are not part of the identity, so
+    // editing them must never throw away a password the user has already entered.
+    sink.destination = "other@example.com".to_owned();
+    sink.from_address = "other@example.com".to_owned();
+    sink.sender_name = "Other".to_owned();
+    sink.enabled = false;
+    sink.canonicalize();
+    assert!(
+        sink.secret_binding.is_some(),
+        "the recipient and the sender name are not the credential's identity"
+    );
+
+    // The endpoint is the server the credential is offered to, so moving must retire it.
+    sink.config = NotificationSinkConfig::Resend {
+        endpoint: "https://relay.example.com/send".to_owned(),
+    };
+    sink.canonicalize();
+    assert_eq!(
+        sink.secret_binding, None,
+        "another endpoint is another server and must not inherit the password"
+    );
+}
+
+#[test]
+fn an_smtp_credential_is_retired_when_the_server_or_the_account_changes() {
+    let mut sink = smtp_sink("smtp.gmail.com", 465, "me@example.com");
+    sink.canonicalize();
+    sink.secret_binding = Some(sink.credential_identity());
+
+    // Re-canonicalizing the same configuration keeps the credential.
+    sink.canonicalize();
+    assert!(sink.secret_binding.is_some());
+
+    // Renaming the sink keeps it too: the identity is the server and the account, not the
+    // name of the button that filled the fields in.
+    let mut renamed = sink.clone();
+    renamed.id = "work".to_owned();
+    renamed.canonicalize();
+    assert!(renamed.secret_binding.is_some());
+
+    for (host, port, username, why) in [
+        ("smtp.gmail.com", 587, "me@example.com", "another port"),
+        ("smtp.qq.com", 465, "me@example.com", "another server"),
+        (
+            "smtp.gmail.com",
+            465,
+            "other@example.com",
+            "another account",
+        ),
+    ] {
+        let mut changed = sink.clone();
+        changed.config = smtp_sink(host, port, username).config;
+        changed.canonicalize();
+        assert_eq!(
+            changed.secret_binding, None,
+            "{why} must not receive the password entered for the previous one"
+        );
+    }
+}
+
+#[test]
+fn a_binding_that_does_not_name_this_configuration_is_dropped_on_load() {
+    // The settings file can be edited while the app is closed, so a binding that does not
+    // match is dropped at load rather than trusted.
+    let mut smtp = smtp_sink("smtp.gmail.com", 465, "me@example.com");
+    smtp.secret_binding = Some("smtp:elsewhere.example.com:465:someone@example.com".to_owned());
+    smtp.canonicalize();
+    assert_eq!(smtp.secret_binding, None);
+
+    let mut resend = sink("home", "me@example.com");
+    resend.secret_binding = Some("resend:https://elsewhere.example.com/send".to_owned());
+    resend.canonicalize();
+    assert_eq!(resend.secret_binding, None);
 }
 
 #[test]

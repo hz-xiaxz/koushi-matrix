@@ -131,9 +131,10 @@ pub use settings::{
 // ── Re-exports: notification delivery ───────────────────────────────────────
 pub use notification_delivery::{
     MAX_NOTIFICATION_DELIVERY_DWELL_SECS, MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
-    MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS, NotificationDeliveryPrefixConsent,
-    NotificationDeliverySettings, NotificationDeliveryTarget, NotificationSinkConfig,
-    NotificationSinkSettings, SmtpTls,
+    MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS, NotificationDeliveryOutcomeState,
+    NotificationDeliveryPrefixConsent, NotificationDeliveryPresetState,
+    NotificationDeliverySettings, NotificationDeliverySinkState, NotificationDeliveryState,
+    NotificationDeliveryTarget, NotificationSinkConfig, NotificationSinkSettings, SmtpTls,
 };
 
 // ── Re-exports: profile ─────────────────────────────────────────────────────
@@ -250,8 +251,9 @@ pub use native_attention::{
     NativeAttentionObservationKind, NativeAttentionProjection, NativeAttentionProjectionInput,
     NativeAttentionSoundOutcome, NativeAttentionState, NativeAttentionSummary,
     NativeAttentionSuppressionReason, NativeNotificationPayload, NativeNotificationTarget,
-    native_attention_capabilities_for_platform, native_attention_projection_from_rooms,
-    native_attention_state_from_rooms,
+    RoomAttentionCandidate, attention_room_candidates, attention_room_candidates_for_state,
+    attention_room_notification_modes, native_attention_capabilities_for_platform,
+    native_attention_projection_from_rooms, native_attention_state_from_rooms,
 };
 
 // ── Re-exports: cjk ─────────────────────────────────────────────────────────
@@ -393,6 +395,12 @@ pub struct AppState {
     #[serde(default)]
     pub qr_login: QrLoginState,
     pub settings: SettingsState,
+    /// #1427: the device-local notification delivery channel's runtime facts - which
+    /// sinks hold a credential and how their last send ended. App scope, never
+    /// persisted, and never a secret value. The channel's settings live in
+    /// `settings.values.delivery`.
+    #[serde(default)]
+    pub notification_delivery: NotificationDeliveryState,
     #[serde(default)]
     pub link_preview_settings: LinkPreviewSettingsState,
     #[serde(default)]
@@ -523,6 +531,7 @@ impl Default for AppState {
             soft_logout_reauth: SoftLogoutReauthState::Idle,
             qr_login: QrLoginState::Idle,
             settings: SettingsState::default(),
+            notification_delivery: NotificationDeliveryState::default(),
             link_preview_settings: LinkPreviewSettingsState::default(),
             room_preferences: RoomPreferencesState::default(),
             room_activity: RoomActivityState::default(),

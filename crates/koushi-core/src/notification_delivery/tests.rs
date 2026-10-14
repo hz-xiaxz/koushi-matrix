@@ -53,6 +53,7 @@ fn sink(id: &str, destination: &str) -> NotificationSinkSettings {
         from_address: "koushi@example.invalid".to_owned(),
         sender_name: "Koushi".to_owned(),
         config: NotificationSinkConfig::default(),
+        secret_binding: None,
     }
 }
 
