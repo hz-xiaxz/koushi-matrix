@@ -109,19 +109,27 @@ pub(crate) fn authorization_value(key: &str) -> Result<HeaderValue, Notification
         .map_err(|_| NotificationDeliveryFailure::InvalidSecret)
 }
 
+/// A display name that can appear in a sender field, or `None` when it cannot.
+///
+/// A name carrying `<`, `>`, `"`, or a line ending could restructure the field it is
+/// placed in, so it is refused rather than escaped: the bare address is always a valid
+/// sender, and dropping a name is the smaller surprise.
+pub(crate) fn usable_sender_name(sender_name: &str) -> Option<&str> {
+    let usable = !sender_name.is_empty()
+        && !sender_name
+            .chars()
+            .any(|character| matches!(character, '<' | '>' | '"' | '\r' | '\n'));
+    usable.then_some(sender_name)
+}
+
 /// `Name <address>` when a usable display name is given, the bare address otherwise.
 ///
 /// Both mail sinks build the same sender field, so it lives here rather than twice; the
 /// SMTP sink passes an already-reduced bare address.
 pub(crate) fn sender_field(sender_name: &str, from_address: &str) -> String {
-    let usable_name = !sender_name.is_empty()
-        && !sender_name
-            .chars()
-            .any(|character| matches!(character, '<' | '>' | '"' | '\r' | '\n'));
-    if usable_name {
-        format!("{sender_name} <{from_address}>")
-    } else {
-        from_address.to_owned()
+    match usable_sender_name(sender_name) {
+        Some(sender_name) => format!("{sender_name} <{from_address}>"),
+        None => from_address.to_owned(),
     }
 }
 

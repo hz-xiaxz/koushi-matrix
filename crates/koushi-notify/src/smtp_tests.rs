@@ -212,6 +212,113 @@ async fn an_implicit_tls_submission_sends_exactly_the_decided_message() {
     assert!(transcript.contains(&"..\r\n".to_owned()));
 }
 
+/// The base64 of `高志`, the non-ASCII display name the encoding test needs.
+const NON_ASCII_NAME_BASE64: &str = "6auY5b+X";
+
+/// A sender name outside US-ASCII must go on the wire as an RFC 2047 encoded-word.
+///
+/// A relay is only obliged to accept 8-bit header text when it advertises `SMTPUTF8`
+/// (RFC 6531), and this sink does not require that extension, so raw UTF-8 in a header is
+/// a message a strict relay is free to refuse. The address beside the name stays readable
+/// while only the name is encoded, which is the whole point of building them separately.
+#[tokio::test]
+async fn a_non_ascii_sender_name_is_encoded_while_the_address_stays_readable() {
+    let script = chain(
+        turns(EHLO_WITH_CAPABILITIES),
+        turns(&[
+            ("AUTH LOGIN", "334 VXNlcm5hbWU6\r\n"),
+            (USERNAME_BASE64, "334 UGFzc3dvcmQ6\r\n"),
+            (SECRET_BASE64, "235 2.7.0 Accepted\r\n"),
+            ("MAIL FROM:<sender@example.invalid>", "250 2.1.0 Ok\r\n"),
+            ("RCPT TO:<me@example.invalid>", "250 2.1.5 Ok\r\n"),
+            ("DATA", "354 End data with <CR><LF>.<CR><LF>\r\n"),
+            ("From: =?UTF-8?B?6auY5b+X?= <sender@example.invalid>", ""),
+            ("To: <me@example.invalid>", ""),
+            ("Subject: Koushi", ""),
+            ("MIME-Version: 1.0", ""),
+            ("Content-Type: text/plain; charset=utf-8", ""),
+            ("Content-Transfer-Encoding: 8bit", ""),
+            ("", ""),
+            ("2 unread in Synthetic Workspace", ""),
+            ("..", ""),
+            ("Sent by Koushi", ""),
+            (".", "250 2.0.0 Ok: queued\r\n"),
+            ("QUIT", "221 2.0.0 Bye\r\n"),
+        ]),
+    );
+    let (client, relay_stream) = duplex(64 * 1024);
+    let relay = tokio::spawn(async move {
+        let mut relay = FakeRelay::new(relay_stream);
+        scripted(&mut relay, GREETING, &script).await
+    });
+
+    let mut request = request();
+    request.sender_name = "高志".to_owned();
+    let outcome =
+        outcome(converse(client, &settings(SmtpTls::Implicit), &secret(), &request).await);
+    let transcript = relay.await.expect("the relay task");
+
+    assert_eq!(outcome, NotificationDeliveryOutcome::Delivered);
+    assert!(
+        transcript.contains(&format!(
+            "From: =?UTF-8?B?{NON_ASCII_NAME_BASE64}?= <sender@example.invalid>\r\n"
+        )),
+        "the encoded name keeps the address readable beside it: {transcript:?}"
+    );
+    assert!(
+        !transcript.iter().any(|line| line.contains("高志")),
+        "a non-ASCII header must not be sent as raw bytes: {transcript:?}"
+    );
+}
+
+/// A subject carrying a line ending must not add a header of its own.
+///
+/// The subject is built from counts, so this is a property rather than a live risk, and a
+/// property that is only asserted is a property that stays true when the source changes.
+#[tokio::test]
+async fn a_subject_cannot_open_a_header_of_its_own() {
+    let script = chain(
+        turns(EHLO_WITH_CAPABILITIES),
+        turns(&[
+            ("AUTH LOGIN", "334 VXNlcm5hbWU6\r\n"),
+            (USERNAME_BASE64, "334 UGFzc3dvcmQ6\r\n"),
+            (SECRET_BASE64, "235 2.7.0 Accepted\r\n"),
+            ("MAIL FROM:<sender@example.invalid>", "250 2.1.0 Ok\r\n"),
+            ("RCPT TO:<me@example.invalid>", "250 2.1.5 Ok\r\n"),
+            ("DATA", "354 End data with <CR><LF>.<CR><LF>\r\n"),
+            ("From: Koushi <sender@example.invalid>", ""),
+            ("To: <me@example.invalid>", ""),
+            ("Subject: KoushiBcc: someone@example.invalid", ""),
+            ("MIME-Version: 1.0", ""),
+            ("Content-Type: text/plain; charset=utf-8", ""),
+            ("Content-Transfer-Encoding: 8bit", ""),
+            ("", ""),
+            ("2 unread in Synthetic Workspace", ""),
+            ("..", ""),
+            ("Sent by Koushi", ""),
+            (".", "250 2.0.0 Ok: queued\r\n"),
+            ("QUIT", "221 2.0.0 Bye\r\n"),
+        ]),
+    );
+    let (client, relay_stream) = duplex(64 * 1024);
+    let relay = tokio::spawn(async move {
+        let mut relay = FakeRelay::new(relay_stream);
+        scripted(&mut relay, GREETING, &script).await
+    });
+
+    let mut request = request();
+    request.subject = "Koushi\r\nBcc: someone@example.invalid".to_owned();
+    let outcome =
+        outcome(converse(client, &settings(SmtpTls::Implicit), &secret(), &request).await);
+    let transcript = relay.await.expect("the relay task");
+
+    assert_eq!(outcome, NotificationDeliveryOutcome::Delivered);
+    assert!(
+        !transcript.iter().any(|line| line.starts_with("Bcc:")),
+        "the subject must not have become a header: {transcript:?}"
+    );
+}
+
 #[tokio::test]
 async fn starttls_is_negotiated_before_a_single_byte_of_the_credential() {
     let script = chain(

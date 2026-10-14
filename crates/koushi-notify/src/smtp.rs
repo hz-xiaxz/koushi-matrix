@@ -27,7 +27,7 @@ use tokio_rustls::{TlsConnector, client::TlsStream};
 
 use crate::{
     NotificationDeliveryFailure, NotificationDeliveryOutcome, NotificationDeliveryRequest,
-    resend::sender_field,
+    resend::usable_sender_name,
 };
 
 /// How long one delivery may take, from the first byte of the TCP connect to the last
@@ -523,11 +523,20 @@ fn parse_reply_line(line: &[u8]) -> Option<(u16, bool)> {
 fn message(request: &NotificationDeliveryRequest, from: &str, to: &str) -> String {
     let mut message = String::new();
     message.push_str("From: ");
-    message.push_str(&field_value(&sender_field(&request.sender_name, from)));
+    match usable_sender_name(&request.sender_name) {
+        Some(sender_name) => {
+            message.push_str(&encoded_header_value(sender_name));
+            message.push_str(" <");
+            message.push_str(from);
+            message.push('>');
+        }
+        // No usable name: the bare address, which is always a well-formed sender.
+        None => message.push_str(from),
+    }
     message.push_str("\r\nTo: <");
     message.push_str(to);
     message.push_str(">\r\nSubject: ");
-    message.push_str(&field_value(&request.subject));
+    message.push_str(&encoded_header_value(&request.subject));
     // Declared rather than left to be guessed: the body is UTF-8, and a reader must not
     // have to infer an encoding from the bytes.
     message.push_str(
@@ -559,6 +568,24 @@ fn field_value(raw: &str) -> String {
     raw.chars()
         .filter(|character| !character.is_control())
         .collect()
+}
+
+/// A header value that may carry non-ASCII text: control characters removed, and anything
+/// outside US-ASCII encoded as an RFC 2047 encoded-word.
+///
+/// A relay is only obliged to accept 8-bit header text when it advertises `SMTPUTF8`
+/// (RFC 6531), and this sink does not require that extension, so a display name or a
+/// subject written in, say, Japanese is encoded rather than sent as raw bytes that a
+/// strict relay may refuse. Only the display name is encoded, never the address beside
+/// it: the address has to stay readable for the field to mean anything. An encoded word
+/// is base64, whose alphabet cannot contain a control character, so this inherits the
+/// single-line guarantee above.
+fn encoded_header_value(raw: &str) -> String {
+    let value = field_value(raw);
+    if value.is_ascii() {
+        return value;
+    }
+    format!("=?UTF-8?B?{}?=", STANDARD.encode(value.as_bytes()))
 }
 
 /// The bare address of a `Display Name <address>` form, with everything that could
