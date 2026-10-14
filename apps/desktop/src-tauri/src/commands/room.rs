@@ -487,39 +487,6 @@ pub async fn unpin_event(
 }
 
 #[tauri::command]
-pub async fn refresh_pinned_events(
-    account_tab_id: Option<String>,
-    room_id: String,
-    app: AppHandle,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendCommandSettlement, String> {
-    let mut event_conn = account_connection(state.inner(), account_tab_id.as_deref()).await?;
-    let baseline = event_conn.versioned_snapshot();
-    let account_key = account_key_from_app_state(&baseline.state);
-    let request_id = event_conn.next_request_id();
-    event_conn
-        .command(build_refresh_pinned_events_command(
-            request_id,
-            room_id.clone(),
-        ))
-        .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
-    let generation = wait_for_room_operation(
-        &mut event_conn,
-        request_id,
-        baseline.generation,
-        account_key,
-        room_id.clone(),
-        RoomOperationKind::PinnedEventsRefreshed,
-        ROOM_OPERATION_EVENT_TIMEOUT,
-        "pinned messages refresh",
-    )
-    .await?;
-    update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(command_settlement(generation))
-}
-
-#[tauri::command]
 pub async fn load_room_settings(
     account_tab_id: Option<String>,
     room_id: String,
@@ -1558,16 +1525,6 @@ pub(super) fn build_unpin_event_command(
         request_id,
         room_id,
         event_id,
-    })
-}
-
-pub(super) fn build_refresh_pinned_events_command(
-    request_id: koushi_protocol::RequestId,
-    room_id: String,
-) -> CoreCommand {
-    CoreCommand::Room(RoomCommand::RefreshPinnedEvents {
-        request_id,
-        room_id,
     })
 }
 

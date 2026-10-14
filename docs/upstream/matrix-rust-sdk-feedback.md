@@ -1439,15 +1439,15 @@ this inventory were cross-checked. `CacheOnlyBackOutcome`,
 and the internal `reveal_lazy_items` helper existed only for the removed path
 and are gone; the retained markers all name a surface with a live consumer.
 
-Tauri commands: all 236 registered commands in
+Tauri commands: all 236 commands registered at the time of the audit in
 `apps/desktop/src-tauri/src/lib.rs` were checked against `apps/desktop/src`.
-Two have no renderer caller and are kept with a recorded verdict, to be removed
-by their own change:
+Two had no renderer caller; both were recorded as verdicts and removed by
+#1409, leaving 234:
 
 | Command | Verdict | Note |
 | --- | --- | --- |
-| `refresh_pinned_events` | dead (renderer-less) | no `apps/desktop/src` reference; the pinned-event projection refreshes itself |
-| `toggle_reaction` | dead (renderer-less) | the renderer uses `send_reaction` / `redact_reaction` |
+| `refresh_pinned_events` | **dead → removed by #1409** | no `apps/desktop/src` reference; the pinned-event projection refreshes itself. `RoomCommand::RefreshPinnedEvents` and its Core handler went with it; the sync-driven `RoomMessage::PinnedEventsChanged` refresh stays. |
+| `toggle_reaction` | **dead → removed by #1409** | the renderer uses `send_reaction` / `redact_reaction`. `TimelineCommand::ToggleReaction`, its Core handler and the manager route went with it; the SDK's `Timeline::toggle_reaction` stays as the delegation behind send/redact. |
 
 Re-entry point for offline deep-anchor restore: if the product later wants
 "open a Room at a months-old event, offline and fast", the removed path was

@@ -699,46 +699,6 @@ fn tauri_command_routes_build_expected_core_commands() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    match build_toggle_reaction_command(
-        fake_request_id(13),
-        active_account_key.clone(),
-        room_id.clone(),
-        "$event".to_owned(),
-        "👍".to_owned(),
-    )
-    .expect("toggle_reaction should build a command")
-    {
-        CoreCommand::Timeline(TimelineCommand::ToggleReaction {
-            request_id,
-            key,
-            event_id,
-            reaction_key,
-        }) => {
-            assert_eq!(request_id, fake_request_id(13));
-            assert_eq!(key.account_key, active_account_key);
-            assert_eq!(
-                key.kind,
-                koushi_protocol::TimelineKind::Room {
-                    room_id: room_id.clone()
-                }
-            );
-            assert_eq!(event_id, "$event");
-            assert_eq!(reaction_key, "👍");
-            let debug = format!(
-                "{:?}",
-                CoreCommand::Timeline(TimelineCommand::ToggleReaction {
-                    request_id: fake_request_id(13),
-                    key,
-                    event_id,
-                    reaction_key,
-                })
-            );
-            assert!(!debug.contains("👍"), "{debug}");
-            assert!(!debug.contains("$event"), "{debug}");
-        }
-        other => panic!("unexpected command: {other:?}"),
-    }
-
     match build_send_reaction_command(
         fake_request_id(25),
         active_account_key.clone(),

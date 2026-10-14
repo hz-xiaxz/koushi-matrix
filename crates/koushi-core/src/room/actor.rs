@@ -1000,12 +1000,6 @@ impl RoomActor {
             } => {
                 self.handle_unpin_event(request_id, room_id, event_id).await;
             }
-            RoomCommand::RefreshPinnedEvents {
-                request_id,
-                room_id,
-            } => {
-                self.handle_refresh_pinned_events(request_id, room_id);
-            }
             RoomCommand::QueryDirectory { request_id, query } => {
                 self.handle_query_directory(request_id, query).await;
             }

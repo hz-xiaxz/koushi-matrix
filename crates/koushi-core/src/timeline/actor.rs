@@ -353,11 +353,6 @@ pub(super) enum TimelineActorMessage {
         request_id: RequestId,
         event_id: String,
     },
-    ToggleReaction {
-        request_id: RequestId,
-        event_id: String,
-        reaction_key: String,
-    },
     SendReaction {
         request_id: RequestId,
         event_id: String,
@@ -2725,14 +2720,6 @@ impl TimelineActor {
                 event_id,
             } => {
                 self.handle_redact(request_id, event_id).await;
-            }
-            TimelineActorMessage::ToggleReaction {
-                request_id,
-                event_id,
-                reaction_key,
-            } => {
-                self.handle_toggle_reaction(request_id, event_id, reaction_key)
-                    .await;
             }
             TimelineActorMessage::SendReaction {
                 request_id,

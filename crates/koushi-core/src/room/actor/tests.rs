@@ -247,10 +247,9 @@ async fn pinned_event_network_delay_does_not_block_later_room_work() {
     );
     assert!(
         handle
-            .send(RoomMessage::Command(RoomCommand::RefreshPinnedEvents {
-                request_id: make_request_id(81),
-                room_id: room_id.to_string(),
-            }))
+            .send(RoomMessage::PinnedEventsChanged {
+                room_ids: [room_id.to_string()].into_iter().collect(),
+            })
             .await
     );
     tokio::time::timeout(LIVENESS, async {

@@ -286,48 +286,6 @@ impl TimelineActor {
         }
         // Redact success: timeline diff reflects it (removal or redacted-state Set diff).
     }
-    pub(super) async fn handle_toggle_reaction(
-        &mut self,
-        request_id: RequestId,
-        event_id: String,
-        reaction_key: String,
-    ) {
-        let candidates = self.item_ids_for_event(&event_id);
-        if candidates.is_empty() {
-            self.emit_failure(
-                request_id,
-                CoreFailure::TimelineOperationFailed {
-                    kind: TimelineFailureKind::Sdk,
-                },
-            );
-            return;
-        }
-
-        let _interactive = self
-            .account_work
-            .begin_interactive(AccountWorkKind::MessageSend);
-        let mut result: Result<(), matrix_sdk_ui::timeline::Error> = Ok(());
-        for item_id in &candidates {
-            result = self
-                .timeline
-                .toggle_reaction(item_id, &reaction_key)
-                .await
-                .map(|_| ());
-            match &result {
-                Err(matrix_sdk_ui::timeline::Error::EventNotInTimeline(_)) => continue,
-                _ => break,
-            }
-        }
-
-        if result.is_err() {
-            self.emit_failure(
-                request_id,
-                CoreFailure::TimelineOperationFailed {
-                    kind: TimelineFailureKind::Sdk,
-                },
-            );
-        }
-    }
     pub(super) async fn handle_send_reaction(
         &mut self,
         request_id: RequestId,
