@@ -265,8 +265,47 @@ dispatches typed commands; every string is a catalog entry in English and Japane
    webhook. The WeCom-webhook sink joins here when a mailbox relay is not wanted.
 5. Settings model, protocol patch, DTO, React section, catalog entries.
 6. Dispatch integration, coalescing, and the headless lane.
-7. User guide, troubleshooting, lane row, and closing the issue once only manual
+7. The keyword editor, which is what makes the keyword trigger reachable at all:
+   nothing in the app could write a `kind: content` push rule, so the trigger named
+   a list the user had no way to fill. It rides the account notification surface,
+   which already fetches the ruleset for the account's own push settings.
+8. User guide, troubleshooting, lane row, and closing the issue once only manual
    checks remain.
+
+### Keyword editor surface
+
+The editor is a list of the account's `content` rules, in the server's own rule
+order, each row a pattern with a remove control, plus one text field and an add
+control. It rides the existing account notification surface rather than the delivery
+projection, because the rules are server state the account screen already loads:
+`load_account_notifications` already calls `fetch_push_ruleset`, so the list costs one
+more projection field rather than a new fetch, and the write path reuses that
+surface's operation state (`pending`, confirmed, failed) instead of inventing a
+second one.
+
+Frozen shapes, to be implemented as stated so the DTO mirror and the React side can be
+written against them:
+
+- `AccountNotificationsSnapshot` gains `keywords: Vec<NotificationKeywordRuleState>`
+  ordered as the server orders the rules, each `{ rule_id, pattern }` - no action, no
+  index, nothing else, because the rule's action is an implementation detail and the
+  index is the order itself.
+- `AppCommand::App(AddNotificationKeyword { request_id, pattern })` and
+  `AppCommand::App(RemoveNotificationKeyword { request_id, rule_id })`, both carrying a
+  request id so an admission settles the caller exactly as the other commands do.
+- `normalize_notification_keyword` owns validation before anything leaves the client:
+  trim, reject empty, reject control characters, reject over
+  `MAX_NOTIFICATION_KEYWORD_CHARS` (64), and reject a pattern that matches an existing
+  rule case-insensitively, because a duplicate would write a second rule that can never
+  fire. The homeserver stays the authority for the write itself.
+- `MAX_NOTIFICATION_KEYWORDS` (64) bounds the list: an add beyond it is refused with the
+  same typed failure rather than silently trimming the newest rule.
+- A remove names a rule id that exists in the loaded list; an unknown id is refused.
+
+Adding and removing are the only writes, they happen only on explicit user action, and
+opening the screen writes nothing. The copy sits with the controls: the keyword is
+stored on the homeserver, which is why the app and the other devices highlight it too,
+while the switch beside it decides what this device mails about.
 
 ### Recommended default setup
 
