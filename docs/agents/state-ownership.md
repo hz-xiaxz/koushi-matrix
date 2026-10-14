@@ -444,7 +444,13 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   them or keep its own list of which credentials it has seen. The keyword list is not
   local settings at all: it is the account's own `content` push rules, read and
   written through the account notification surface, so a rule another client wrote is
-  visible here and a failed write is never shown as saved. The plaintext prefix's
+  visible here and a failed write is never shown as saved. React adds a keyword by
+  sending the pattern and nothing else: Rust trims it, rejects the empty, oversized,
+  and duplicate cases, enforces the cap, and mints the rule id, and a refusal reaches
+  the screen as one of that surface's typed failures. A rule's `enabled` flag is also
+  the server's, so a rule another client turned off is rendered as off - it is still on
+  the account and still refuses a same-pattern add - and React must not hide it,
+  re-enable it, or keep an enabled list of its own. The plaintext prefix's
   source is the message body the room list already holds, marked never to be
   serialized, and it reaches the send request without passing through any DTO.
   The same attention projection that drives the badge and the unread marks is the
