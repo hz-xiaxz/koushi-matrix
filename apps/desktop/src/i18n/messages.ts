@@ -278,12 +278,12 @@ export type MessageId =
   | "dialog.invitedOnlyRoomInSpace"
   | "dialog.inviteCandidates"
   | "dialog.inviteHistory"
-  | "dialog.inviteHistoryCurrent"
-  | "dialog.inviteHistoryCurrentBadge"
+  | "dialog.inviteHistoryChange"
   | "dialog.inviteHistoryEncryptedShared"
-  | "dialog.inviteHistoryNonRetroactive"
+  | "dialog.inviteHistoryInvited"
+  | "dialog.inviteHistoryJoined"
   | "dialog.inviteHistoryRecovery"
-  | "dialog.inviteHistoryWorldReadableWarning"
+  | "dialog.inviteHistoryShared"
   | "dialog.inviteInvalidMatrixId"
   | "dialog.invitePeopleTitle"
   | "dialog.inviteScope"
@@ -294,7 +294,6 @@ export type MessageId =
   | "dialog.invitePerson"
   | "dialog.inviteSearchFailed"
   | "dialog.inviteSelectedTargets"
-  | "dialog.openRoomInfo"
   | "dialog.matrixUserId"
   | "dialog.newDmTitle"
   | "dialog.privateRoom"
@@ -2179,14 +2178,13 @@ const en: Catalog = {
   "dialog.invitedOnlyRoom": "Invited only",
   "dialog.invitedOnlyRoomInSpace": "Invite-only room in {spaceName}: only explicitly invited people can join.",
   "dialog.inviteCandidates": "Invite candidates",
-  "dialog.inviteHistory": "History visibility for invitees",
-  "dialog.inviteHistoryCurrent": "Current room setting. Change it in Room Info before sending the invite.",
-  "dialog.inviteHistoryCurrentBadge": "Current",
-  "dialog.inviteHistoryEncryptedShared": "Past room keys may be shared with an invitee automatically. The share needs verification on both sides and may be skipped, so some or all earlier messages may stay unreadable.",
-  "dialog.inviteHistoryNonRetroactive": "This is not retroactive, and already shared events or keys cannot be revoked.",
+  "dialog.inviteHistory": "Earlier messages",
+  "dialog.inviteHistoryChange": "Change in Room Info",
+  "dialog.inviteHistoryEncryptedShared": "This room is encrypted, so some earlier messages may stay unreadable if their keys can't be shared.",
+  "dialog.inviteHistoryInvited": "They can read messages from when they were invited.",
+  "dialog.inviteHistoryJoined": "They can read messages from when they join.",
+  "dialog.inviteHistoryShared": "They can read earlier messages in this room.",
   "dialog.inviteHistoryRecovery": "Recovery is incomplete; the invite can still proceed, but encrypted history sharing may be limited.",
-  "dialog.inviteHistoryWorldReadableWarning":
-    "Current advanced setting: non-members may read this room's history.",
   "dialog.inviteInvalidMatrixId": "Invalid Matrix ID",
   "dialog.invitePeopleTitle": "Invite people to {name}",
   "dialog.inviteScope": "Invite scope",
@@ -2197,7 +2195,6 @@ const en: Catalog = {
   "dialog.invitePerson": "Invite {name}",
   "dialog.inviteNoResults": "No invite candidates found. Try another name or enter a full Matrix ID.",
   "dialog.inviteSelectedTargets": "Selected invite targets",
-  "dialog.openRoomInfo": "Open Room Info",
   "dialog.matrixUserId": "Matrix user ID",
   "dialog.newDmTitle": "New DM",
   "dialog.privateRoom": "Private room",
@@ -4010,14 +4007,13 @@ const ja: Catalog = {
   "dialog.invitedOnlyRoom": "招待された人のみ",
   "dialog.invitedOnlyRoomInSpace": "{spaceName}内の招待専用ルーム：明示的に招待された人だけが参加できます",
   "dialog.inviteCandidates": "招待候補",
-  "dialog.inviteHistory": "招待先に見える履歴",
-  "dialog.inviteHistoryCurrent": "現在のルーム設定です。招待を送る前にRoom Infoから変更できます。",
-  "dialog.inviteHistoryCurrentBadge": "現在",
-  "dialog.inviteHistoryEncryptedShared": "過去のルーム鍵は招待者へ自動的に共有される場合があります。共有には双方の検証が必要で、共有されないこともあるため、それ以前のメッセージが読めないままになる場合があります。",
-  "dialog.inviteHistoryNonRetroactive": "この設定は過去に遡らず、すでに共有されたイベントや鍵を取り消すこともできません。",
+  "dialog.inviteHistory": "過去のメッセージ",
+  "dialog.inviteHistoryChange": "Room Infoで変更",
+  "dialog.inviteHistoryEncryptedShared": "暗号化ルームのため、鍵を共有できなかった過去のメッセージは読めない場合があります。",
+  "dialog.inviteHistoryInvited": "招待された時点以降のメッセージを読めます。",
+  "dialog.inviteHistoryJoined": "参加した時点以降のメッセージを読めます。",
+  "dialog.inviteHistoryShared": "このルームの過去のメッセージも読めます。",
   "dialog.inviteHistoryRecovery": "復旧が完了していません。招待は続行できますが、暗号化履歴の共有が制限される場合があります。",
-  "dialog.inviteHistoryWorldReadableWarning":
-    "現在の高度な設定: メンバーでない人もこのルームの履歴を閲覧できます。",
   "dialog.inviteInvalidMatrixId": "Matrix IDが正しくありません",
   "dialog.invitePeopleTitle": "{name}に招待",
   "dialog.inviteScope": "招待範囲",
@@ -4028,7 +4024,6 @@ const ja: Catalog = {
   "dialog.invitePerson": "{name}を招待",
   "dialog.inviteNoResults": "招待候補が見つかりません。別の名前か、完全なMatrix IDで検索してください。",
   "dialog.inviteSelectedTargets": "選択中の招待先",
-  "dialog.openRoomInfo": "Room Infoを開く",
   "dialog.matrixUserId": "MatrixユーザーID",
   "dialog.newDmTitle": "新しいDM",
   "dialog.privateRoom": "非公開ルーム",

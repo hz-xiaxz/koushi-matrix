@@ -133,16 +133,20 @@ an invitation before participating.
 1. Open the room and select **Room info** in its header.
 2. Choose **Invite people**, search for or enter the person's Matrix ID, and
    select the intended person.
-3. Review the offered scope and history options, then choose **Invite**.
+3. Review the offered scope, then choose **Invite**.
+
+Inviting never changes room settings. Under **Earlier messages** the dialog
+says in one sentence what the invitee will be able to read, based on the room's
+current history setting: earlier messages (shared history), messages from when
+they were invited, or messages from when they join. In an encrypted room with
+shared history it adds a short note that some earlier messages may stay
+unreadable when their keys cannot be shared. If you are allowed to change the
+history setting, a **Change in Room Info** link opens Room Info and brings you
+back to the invite; otherwise no link is shown. Changing the setting does not
+revoke events or keys already shared.
 
 If the action is unavailable, your role or the current room state may not allow
 it. Room history visibility and room entry rules are separate settings.
-**Since invite**, **Since join**, and **Shared history** describe different
-history access. In an encrypted room with shared history, past room keys may be
-shared with the invitee automatically, but the share needs verification on both
-sides and may be skipped, so some or all earlier messages can stay unreadable
-until a key becomes available another way. Changing a setting does not revoke
-events or keys already shared.
 
 ## Conversation list sections
 
