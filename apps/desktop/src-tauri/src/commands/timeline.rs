@@ -479,24 +479,6 @@ pub(super) fn build_redact_message_command(
     })
 }
 
-pub(super) fn build_toggle_reaction_command(
-    request_id: koushi_protocol::RequestId,
-    account_key: AccountKey,
-    room_id: String,
-    event_id: String,
-    reaction_key: String,
-) -> Option<CoreCommand> {
-    if reaction_key.is_empty() {
-        return None;
-    }
-    Some(CoreCommand::Timeline(TimelineCommand::ToggleReaction {
-        request_id,
-        key: build_timeline_key(account_key, room_id),
-        event_id,
-        reaction_key,
-    }))
-}
-
 pub(super) fn build_send_reaction_command(
     request_id: koushi_protocol::RequestId,
     account_key: AccountKey,
@@ -1593,31 +1575,6 @@ pub async fn redact_message(
     let admission = submit_core_command_with_admission(
         state.inner(),
         build_redact_message_command(request_id, account_key, room_id, event_id),
-    )
-    .await?;
-    update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(admission)
-}
-
-#[tauri::command]
-pub async fn toggle_reaction(
-    account_tab_id: Option<String>,
-    room_id: String,
-    event_id: String,
-    reaction_key: String,
-    app: AppHandle,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendCommandAdmission, String> {
-    if reaction_key.is_empty() {
-        return Err("reaction key must not be blank".to_owned());
-    }
-
-    let account_key = account_key_from_snapshot(state.inner(), account_tab_id.as_deref()).await?;
-    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
-    let admission = submit_required_admission(
-        state.inner(),
-        build_toggle_reaction_command(request_id, account_key, room_id, event_id, reaction_key),
-        "reaction target must not be blank",
     )
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;

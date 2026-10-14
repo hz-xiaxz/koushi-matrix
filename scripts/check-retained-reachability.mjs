@@ -82,8 +82,11 @@ const INVENTORY = [
 /**
  * Registered Tauri commands with no renderer caller, recorded as a verdict in
  * the inventory's reachability audit. Each is tracked for removal there.
+ * `refresh_pinned_events` and `toggle_reaction` were the first two; #1409
+ * removed them, so the set is empty. Add an entry only together with an audit
+ * verdict that names the removal.
  */
-const RENDERER_LESS_COMMANDS = new Set(["refresh_pinned_events", "toggle_reaction"]);
+const RENDERER_LESS_COMMANDS = new Set();
 
 /** Surfaces removed by #1395; they must not reappear in product crates. */
 const REMOVED_SURFACES = [

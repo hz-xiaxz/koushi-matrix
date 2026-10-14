@@ -63,12 +63,6 @@ fn secret_bearing_commands_redact_debug() {
         transaction_id: "txn-1".to_owned(),
         document: koushi_state::ComposerDocument::from_plain_text(BODY.to_owned()),
     });
-    let toggle_reaction = CoreCommand::Timeline(TimelineCommand::ToggleReaction {
-        request_id: fake_request_id(),
-        key: key.clone(),
-        event_id: "$evt".to_owned(),
-        reaction_key: "👍".to_owned(),
-    });
     let send_reaction = CoreCommand::Timeline(TimelineCommand::SendReaction {
         request_id: fake_request_id(),
         key: key.clone(),
@@ -148,7 +142,6 @@ fn secret_bearing_commands_redact_debug() {
         (&enable_key_backup, vec![RECOVERY]),
         (&restore_key_backup, vec![RECOVERY, "backup-version-1"]),
         (&send, vec![BODY]),
-        (&toggle_reaction, vec!["👍", "$evt"]),
         (&send_reaction, vec!["👍", "$evt"]),
         (&redact_reaction, vec!["👍", "$evt", "$reaction"]),
         (&edit, vec![BODY]),

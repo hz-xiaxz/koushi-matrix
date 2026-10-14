@@ -1628,23 +1628,6 @@ impl TimelineManagerActor {
                 )
                 .await;
             }
-            TimelineCommand::ToggleReaction {
-                request_id,
-                key,
-                event_id,
-                reaction_key,
-            } => {
-                self.route_to_actor_or_fail(
-                    request_id,
-                    &key,
-                    TimelineActorMessage::ToggleReaction {
-                        request_id,
-                        event_id,
-                        reaction_key,
-                    },
-                )
-                .await;
-            }
             TimelineCommand::SendReaction {
                 request_id,
                 key,

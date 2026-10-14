@@ -285,10 +285,6 @@ pub enum RoomCommand {
         room_id: String,
         event_id: String,
     },
-    RefreshPinnedEvents {
-        request_id: RequestId,
-        room_id: String,
-    },
     QueryDirectory {
         request_id: RequestId,
         query: DirectoryQuery,
@@ -579,11 +575,6 @@ impl fmt::Debug for RoomCommand {
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .field("event_id", &"EventId(..)")
-                .finish(),
-            Self::RefreshPinnedEvents { request_id, .. } => formatter
-                .debug_struct("RefreshPinnedEvents")
-                .field("request_id", request_id)
-                .field("room_id", &"RoomId(..)")
                 .finish(),
             Self::QueryDirectory { request_id, query } => formatter
                 .debug_struct("QueryDirectory")
