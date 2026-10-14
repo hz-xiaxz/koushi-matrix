@@ -193,6 +193,9 @@ async function run() {
   if (scenarios.includes("user_verification") && !runCoreQa) {
     throw new Error("--scenario=user_verification requires --core because it validates Core state");
   }
+  if (scenarios.includes("notification_delivery") && !runCoreQa) {
+    throw new Error("--scenario=notification_delivery requires --core because it validates Core state");
+  }
   if (fixtureRunOption !== undefined) {
     if (scenarios.length !== 1 || scenarios[0] !== "timeline_stress") {
       throw new Error("--fixture-run is currently supported only with --scenario=timeline_stress");
@@ -257,6 +260,7 @@ async function runForServer(serverKind, scenario) {
       scenario !== "encryption_debug" &&
       scenario !== "avatar_demand" &&
       scenario !== "account_notifications" &&
+      scenario !== "notification_delivery" &&
       scenario !== "user_verification"
     ) {
       const sdkUsers = await registerQaUsers(homeserver, "sdk");

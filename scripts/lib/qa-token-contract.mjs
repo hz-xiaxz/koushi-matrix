@@ -66,6 +66,22 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
     "thread_late_joiner_thread_panel=ok",
     "thread_late_joiner=ok"
   ]),
+  notification_delivery: Object.freeze([
+    "notification_delivery_file_credential_store=ok",
+    "notification_delivery_unfocused=ok",
+    "notification_delivery_channel_off=ok",
+    "notification_delivery_dwell=ok",
+    "notification_delivery_request=ok",
+    "notification_delivery_body=ok",
+    "notification_delivery_read_cancels=ok",
+    "notification_delivery_rearm=ok",
+    "notification_delivery_min_interval=ok",
+    "notification_delivery_watched_room=ok",
+    "notification_delivery_watched_space=ok",
+    "notification_delivery_secret_hygiene=ok",
+    "notification_delivery_secret_binding=ok",
+    "notification_delivery=ok"
+  ]),
   room_history_export: Object.freeze([
     "history_export_full=ok",
     "history_export_period=ok",

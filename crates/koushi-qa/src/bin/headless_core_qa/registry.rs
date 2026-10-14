@@ -131,6 +131,7 @@ pub(super) enum QaScenario {
     HiddenStateAcl,
     ThreadLateJoiner,
     IdleSyncGapInspection,
+    NotificationDelivery,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -176,6 +177,7 @@ pub(super) enum QaStage {
     HiddenStateAcl,
     ThreadLateJoiner,
     IdleSyncGapInspection,
+    NotificationDelivery,
 }
 
 /// Refuse to run against the OS keychain. Debug and qa-bin release builds both
@@ -257,11 +259,12 @@ impl QaScenario {
             "hidden_state_acl" => Ok(Self::HiddenStateAcl),
             "thread_late_joiner" => Ok(Self::ThreadLateJoiner),
             "idle_sync_gap_inspection" => Ok(Self::IdleSyncGapInspection),
+            "notification_delivery" => Ok(Self::NotificationDelivery),
             "avatar_demand" => Ok(Self::AvatarDemand),
             "account_notifications" => Ok(Self::AccountNotifications),
             "user_verification" => Ok(Self::UserVerification),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, search_crawler_catchup, room_history_export, scheduled_send, restore_cleanup, link_preview, read_state_convergence, hidden_state_acl, thread_late_joiner, avatar_demand, account_notifications, user_verification; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, search_crawler_catchup, room_history_export, scheduled_send, restore_cleanup, link_preview, read_state_convergence, hidden_state_acl, thread_late_joiner, avatar_demand, account_notifications, user_verification, notification_delivery; got {other}"
             )),
         }
     }
@@ -281,6 +284,7 @@ impl QaScenario {
                     | QaStage::AccountNotifications
                     | QaStage::UserVerification
                     | QaStage::IdleSyncGapInspection
+                    | QaStage::NotificationDelivery
             ),
             Self::Safety => matches!(stage, QaStage::Safety),
             Self::UserVerification => matches!(
@@ -486,6 +490,9 @@ impl QaScenario {
             }
             Self::HiddenStateAcl => matches!(stage, QaStage::Safety | QaStage::HiddenStateAcl),
             Self::ThreadLateJoiner => matches!(stage, QaStage::Safety | QaStage::ThreadLateJoiner),
+            Self::NotificationDelivery => {
+                matches!(stage, QaStage::Safety | QaStage::NotificationDelivery)
+            }
             Self::IdleSyncGapInspection => {
                 matches!(stage, QaStage::Safety | QaStage::IdleSyncGapInspection)
             }
@@ -740,6 +747,22 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
         ],
         QaStage::AvatarDemand => &["avatar_window_requests=ok"],
         QaStage::IdleSyncGapInspection => &["idle_sync_gap_inspection=ok"],
+        QaStage::NotificationDelivery => &[
+            "notification_delivery_file_credential_store=ok",
+            "notification_delivery_unfocused=ok",
+            "notification_delivery_channel_off=ok",
+            "notification_delivery_dwell=ok",
+            "notification_delivery_request=ok",
+            "notification_delivery_body=ok",
+            "notification_delivery_read_cancels=ok",
+            "notification_delivery_rearm=ok",
+            "notification_delivery_min_interval=ok",
+            "notification_delivery_watched_room=ok",
+            "notification_delivery_watched_space=ok",
+            "notification_delivery_secret_hygiene=ok",
+            "notification_delivery_secret_binding=ok",
+            "notification_delivery=ok",
+        ],
         QaStage::AccountNotifications => &[
             "account_notifications_load=ok",
             "account_notifications_no_write_on_open=ok",
@@ -865,6 +888,20 @@ fn implemented_final_tokens() -> Vec<&'static str> {
         "link_preview_room=ok",
         "link_preview_e2ee_default=ok",
         "link_preview_hide=ok",
+        "notification_delivery_file_credential_store=ok",
+        "notification_delivery_unfocused=ok",
+        "notification_delivery_channel_off=ok",
+        "notification_delivery_dwell=ok",
+        "notification_delivery_request=ok",
+        "notification_delivery_body=ok",
+        "notification_delivery_read_cancels=ok",
+        "notification_delivery_rearm=ok",
+        "notification_delivery_min_interval=ok",
+        "notification_delivery_watched_room=ok",
+        "notification_delivery_watched_space=ok",
+        "notification_delivery_secret_hygiene=ok",
+        "notification_delivery_secret_binding=ok",
+        "notification_delivery=ok",
     ]
 }
 
@@ -1047,6 +1084,9 @@ pub(super) fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
         }
         QaScenario::HiddenStateAcl => vec![QaStage::Safety, QaStage::HiddenStateAcl],
         QaScenario::IdleSyncGapInspection => vec![QaStage::Safety, QaStage::IdleSyncGapInspection],
+        QaScenario::NotificationDelivery => {
+            vec![QaStage::Safety, QaStage::NotificationDelivery]
+        }
         QaScenario::ThreadLateJoiner => vec![QaStage::Safety, QaStage::ThreadLateJoiner],
         QaScenario::SearchCrawlerCatchup => vec![QaStage::Safety, QaStage::SearchCrawlerCatchup],
         QaScenario::All => vec![
@@ -1141,7 +1181,8 @@ pub(super) fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static st
         | QaScenario::HiddenStateAcl
         | QaScenario::SearchCrawlerCatchup
         | QaScenario::ThreadLateJoiner
-        | QaScenario::IdleSyncGapInspection => stages_for_scenario(scenario)
+        | QaScenario::IdleSyncGapInspection
+        | QaScenario::NotificationDelivery => stages_for_scenario(scenario)
             .into_iter()
             .flat_map(|stage| tokens_for_stage(stage).iter().copied())
             .collect(),
