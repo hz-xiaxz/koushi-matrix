@@ -116,9 +116,10 @@ is defined over delivery sinks rather than over one mail provider.
 in the flat `NotificationSettings` (`:844`) patch surface and the app branch of
 `SettingsPatchScope` (`:1077`):
 
-- a sink list, each entry with `kind` (`Resend`, `WeComWebhook`, `Smtp`),
-  `enabled` (default false) and its own non-secret fields: mail addresses, the
-  webhook URL, or the SMTP host, port, TLS mode and username;
+- a sink list, each entry with `kind` (`Resend` or `Smtp` today; the shape leaves
+  room for a webhook kind, which stays deferred below),
+  `enabled` (default false) and its own non-secret fields: mail addresses, or the
+  SMTP host, port, TLS mode and username;
 - channel-wide `dwell_secs` (default 300; how long a qualifying unread state must
   last), `min_interval_secs` (default 900; the gap between two messages),
   `only_when_unfocused`, `prefix_chars` (0 = no prefix) and `prefix_consent`;
@@ -264,7 +265,8 @@ dispatches typed commands; every string is a catalog entry in English and Japane
 4. The SMTP sink, because it is the no-hassle path: an existing mailbox with an
    app password needs no signup, no card and no domain, and a QQ mailbox can push
    its new-mail reminder into WeChat, which covers the WeChat case without a
-   webhook. The WeCom-webhook sink joins here when a mailbox relay is not wanted.
+   webhook. Nothing offers a webhook sink in this change: the boundary is shaped
+   for a third sink, and the group-robot option stays in the deferred list above.
 5. Settings model, protocol patch, DTO, React section, catalog entries.
 6. Dispatch integration, coalescing, and the headless lane.
 7. The keyword editor, which is what makes the keyword trigger reachable at all:
@@ -272,7 +274,13 @@ dispatches typed commands; every string is a catalog entry in English and Japane
    a list the user had no way to fill. It rides the account notification surface,
    which already fetches the ruleset for the account's own push settings.
 8. User guide, troubleshooting, lane row, and closing the issue once only manual
-   checks remain.
+   checks remain. The lane proves the keyword trigger reaches the authority it
+   claims rather than only that a rule was written: the account adds a pattern,
+   another account's message containing that pattern raises the first account's
+   highlight count, which is the mention-kind authority the delivery channel reads,
+   and removing the rule ends it. That is also the only evidence that the written
+   action carries the highlight tweak, because a rule written without it would sit
+   on the account and never fire.
 
 ### Keyword editor surface
 
