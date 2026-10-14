@@ -26,7 +26,16 @@
 //! 5. a room on the watch list delivers while its category is off, and a room that
 //!    joins a watched Space after the list was written delivers too;
 //! 6. the sink secret reaches neither the settings snapshot, nor the diagnostics
-//!    stream, nor this lane's own captured requests.
+//!    stream, nor this lane's own captured requests;
+//! 7. the plaintext prefix of the room's newest message reaches the body only with
+//!    the option on and a consent that covers this sink, destination, and endpoint;
+//!    with no consent, with the option off, and when the newest event yields no
+//!    readable text, the body carries none of it and the delivery still succeeds, so
+//!    a missing prefix is never a failure;
+//! 8. changing the destination a consent was given for, or the endpoint, drops the
+//!    consent, so the next delivery carries no message text;
+//! 9. that message text reaches no serialized app-state snapshot, no settings file,
+//!    no diagnostics stream, and no file this lane wrote.
 //!
 //! Private data: the lane prints tokens and counts only. Room ids, event ids,
 //! account ids, room labels, and message bodies stay inside the process, and the
@@ -40,25 +49,31 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use koushi_state::{
-    AppState, NotificationDeliverySettings, NotificationDeliveryTarget, NotificationSinkConfig,
-    NotificationSinkSettings, SettingsPatch, SettingsPatchScope, room_activity_unread_count,
+    AppState, NotificationDeliveryPrefixConsent, NotificationDeliverySettings,
+    NotificationDeliveryTarget, NotificationSinkConfig, NotificationSinkSettings, SettingsPatch,
+    SettingsPatchScope, room_activity_unread_count,
 };
 
 use super::cleanup::cleanup_logged_in_runtime;
 use super::event_wait::{
     send_main_timeline_read_receipt, subscribe_timeline_for_qa, wait_for_dm_room_in_room_list,
-    wait_for_invite_in_snapshot, wait_for_room_in_room_list, wait_for_space_in_space_list,
+    wait_for_invite_in_snapshot, wait_for_media_send_flow_completion, wait_for_room_in_room_list,
+    wait_for_space_in_space_list,
 };
 use super::fixtures::{
     accept_invite_for_qa, create_room_for_qa, create_space_for_qa, invite_user_for_qa,
     set_space_child_for_qa, start_direct_message_for_qa,
 };
 use super::participants::{
-    QaParticipantLoginGate, QaParticipantLoginOutcome, login_synced_participant_for_qa, qa_data_dir,
+    QaParticipantLoginGate, QaParticipantLoginOutcome, authenticated_session_info,
+    login_synced_participant_for_qa, qa_data_dir,
 };
 use super::registry::{EVENT_TIMEOUT, QaConfig, ROOM_LIST_EVENT_TIMEOUT};
 use super::scenario_read_state::send_text_and_wait_event;
-use super::{AppCommand, CoreCommand, CoreConnection, RoomCommand, TimelineKey, TimelineKind};
+use super::{
+    AppCommand, CoreCommand, CoreConnection, MentionIntent, RoomCommand, TimelineCommand,
+    TimelineKey, TimelineKind, UploadMediaKind, UploadMediaRequest, build_formatted_message_draft,
+};
 
 /// The one sink this lane configures. Sink ids are the credential store's own
 /// alphabet, so the id can also be a file name component inside the QA store.
@@ -98,8 +113,29 @@ const QA_DELIVERY_WATCHED_ROOM_BODY: &str = "Koushi QA delivery watched room mes
 const QA_DELIVERY_WATCHED_SPACE_BODY: &str = "Koushi QA delivery watched space message";
 const QA_DELIVERY_BINDING_BODY: &str = "Koushi QA delivery changed endpoint message";
 
-/// Run the delivery lane: two synthetic participants, one stub sink, and the six
-/// phases whose tokens are the lane's evidence.
+/// The synthetic text the prefix assertions make the room's newest message.
+///
+/// Plain ASCII and unmistakable, so a search for it in a captured body or an artifact
+/// is meaningful, and what the digest renders is what was sent.
+const QA_DELIVERY_PREFIX_MARKER: &str = "qa-notification-prefix-alpine";
+
+/// The synthetic caption of the non-text (file) message the prefix assertions make the
+/// room's newest event.
+///
+/// It is the event's `body`, so it is exactly what a prefix would render if the channel
+/// read any message body rather than only a readable text message.
+const QA_DELIVERY_PREFIX_MEDIA_CAPTION: &str = "qa-notification-prefix-nontext";
+
+/// Characters of the newest message the prefix may render, far more than the marker, so
+/// an option that is on renders all of it and an option that is off renders none.
+const QA_DELIVERY_PREFIX_CHARS: u32 = 80;
+
+/// A second synthetic mailbox, so changing where a consented sink delivers is a change
+/// the lane owns and never a real address.
+const QA_DELIVERY_PREFIX_OTHER_DESTINATION: &str = "other-recipient@example.invalid";
+
+/// Run the delivery lane: two synthetic participants, one stub sink, and the phases
+/// whose tokens are the lane's evidence.
 pub(super) async fn run_notification_delivery_scenario(config: &QaConfig) -> Result<(), String> {
     let secret = format!("qa-notification-delivery-{}", std::process::id());
     let stub = QaDeliveryStub::start(&secret)?;
@@ -254,6 +290,7 @@ impl QaDeliveryFlow<'_> {
         self.assert_watch_list().await?;
         self.assert_secret_hygiene().await?;
         self.assert_secret_binding(&dm_room_id, &dm_key_b).await?;
+        self.assert_prefix_text(&dm_room_id, &dm_key_b).await?;
 
         println!("notification_delivery=ok");
         Ok(())
@@ -971,6 +1008,455 @@ impl QaDeliveryFlow<'_> {
         Ok(())
     }
 
+    /// The plaintext-prefix assertions: what the body carries, what a missing consent or
+    /// a switched-off option withholds, what a newest event without readable text
+    /// withholds, what a moved destination or endpoint drops, and where the text never
+    /// reaches at all.
+    ///
+    /// The credential-binding phase above deliberately takes the sink out of service, so
+    /// this phase re-enters the credential the way a user would before it asserts
+    /// anything. Every sub-assertion reads the app's own snapshot for the prefix source
+    /// the room list holds and for whether the stored consent survived, and the stub for
+    /// what the delivery carried.
+    async fn assert_prefix_text(
+        &mut self,
+        room_id: &str,
+        room_key_b: &TimelineKey,
+    ) -> Result<(), String> {
+        self.restore_prefix_sink(room_id).await?;
+        let destination = self.primary_sink()?.destination.clone();
+
+        self.assert_prefix_rendered(room_id, room_key_b).await?;
+        self.assert_prefix_without_consent(room_id, room_key_b)
+            .await?;
+        self.assert_prefix_option_off(room_id, room_key_b).await?;
+        self.assert_prefix_without_readable_text(room_id, room_key_b)
+            .await?;
+        self.assert_prefix_consent_cleared(room_id, room_key_b)
+            .await?;
+        self.assert_prefix_hygiene(room_id)?;
+        self.assert_prefix_endpoint_cleared(room_id, room_key_b, &destination)
+            .await?;
+        Ok(())
+    }
+
+    /// Put the sink back in service on this lane's own stub, with the channel off.
+    ///
+    /// The binding phase above moved the endpoint and retired the credential, so the
+    /// prefix assertions re-enter it exactly as a user would: point the sink at this
+    /// lane's stub again and save the credential. The channel stays off while the room
+    /// that phase left unread is read, so this phase's first delivery is armed by its own
+    /// message and never by that leftover.
+    async fn restore_prefix_sink(&mut self, room_id: &str) -> Result<(), String> {
+        self.settings.enabled = false;
+        self.settings.direct_messages = true;
+        self.settings.mentions = false;
+        self.settings.keywords = false;
+        self.settings.watched.clear();
+        self.settings.dwell_secs = QA_DELIVERY_DWELL_SECS;
+        self.settings.min_interval_secs = 0;
+        self.settings.prefix_chars = 0;
+        self.settings.prefix_consent = None;
+        let endpoint = self.stub.endpoint().to_owned();
+        if let NotificationSinkConfig::Resend { endpoint: current } =
+            &mut self.primary_sink_mut()?.config
+        {
+            *current = endpoint;
+        }
+        self.apply_settings("notification delivery prefix restore sink")
+            .await?;
+        self.store_secret().await?;
+        self.mark_room_read_to_latest(room_id).await
+    }
+
+    /// With the option on and a consent that covers this sink, destination, and endpoint,
+    /// the delivered body leads with the room's newest message text.
+    async fn assert_prefix_rendered(
+        &mut self,
+        room_id: &str,
+        room_key_b: &TimelineKey,
+    ) -> Result<(), String> {
+        let requests_before = self.stub.count();
+        self.settings.enabled = true;
+        self.settings.prefix_chars = QA_DELIVERY_PREFIX_CHARS;
+        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        self.apply_settings("notification delivery prefix consent")
+            .await?;
+        if self.stored_prefix_consent().is_none() {
+            return Err(
+                "notification delivery prefix: a consent matching the sink was dropped".to_owned(),
+            );
+        }
+
+        self.send_from_b(room_key_b, "qa-delivery-prefix", QA_DELIVERY_PREFIX_MARKER)
+            .await?;
+        let unread = self
+            .wait_room_unread(room_id, "notification delivery prefix unread")
+            .await?;
+        self.wait_requests(requests_before + 1, "notification delivery prefix request")
+            .await?;
+        let request = self.request(requests_before)?;
+        let label = self.room_label(room_id)?;
+        assert_prefix_leads(
+            &request.body,
+            "notification delivery prefix",
+            &label,
+            unread,
+            QA_DELIVERY_PREFIX_MARKER,
+        )?;
+        println!("notification_delivery_prefix=ok");
+        Ok(())
+    }
+
+    /// With the option on but no consent stored, the delivery still succeeds and carries
+    /// none of the message text.
+    async fn assert_prefix_without_consent(
+        &mut self,
+        room_id: &str,
+        room_key_b: &TimelineKey,
+    ) -> Result<(), String> {
+        let label = self.room_label(room_id)?;
+        self.mark_room_read_to_latest(room_id).await?;
+        let requests_before = self.stub.count();
+        self.settings.prefix_chars = QA_DELIVERY_PREFIX_CHARS;
+        self.settings.prefix_consent = None;
+        self.apply_settings("notification delivery prefix without consent")
+            .await?;
+
+        self.send_from_b(
+            room_key_b,
+            "qa-delivery-prefix-no-consent",
+            QA_DELIVERY_PREFIX_MARKER,
+        )
+        .await?;
+        let unread = self
+            .wait_room_unread(room_id, "notification delivery prefix no consent unread")
+            .await?;
+        self.wait_requests(
+            requests_before + 1,
+            "notification delivery prefix no consent request",
+        )
+        .await?;
+        let request = self.request(requests_before)?;
+        assert_prefix_absent(
+            &request,
+            "notification delivery prefix no consent",
+            &label,
+            unread,
+            QA_DELIVERY_PREFIX_MARKER,
+        )?;
+        // Positive control: the room list did hold the text, so what kept it out of the
+        // body was the missing consent and never a missing message.
+        self.assert_room_latest_text(room_id, QA_DELIVERY_PREFIX_MARKER)?;
+        println!("notification_delivery_prefix_no_consent=ok");
+        Ok(())
+    }
+
+    /// With the option off, a stored consent still renders nothing, and the delivery
+    /// still succeeds.
+    async fn assert_prefix_option_off(
+        &mut self,
+        room_id: &str,
+        room_key_b: &TimelineKey,
+    ) -> Result<(), String> {
+        let label = self.room_label(room_id)?;
+        self.mark_room_read_to_latest(room_id).await?;
+        let requests_before = self.stub.count();
+        self.settings.prefix_chars = 0;
+        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        self.apply_settings("notification delivery prefix option off")
+            .await?;
+        // The acceptance is kept: what is off is the option, not the consent.
+        let delivery = self.conn_a.snapshot().settings.values.delivery.clone();
+        if delivery.prefix_chars != 0 || delivery.prefix_consent.is_none() {
+            return Err(
+                "notification delivery prefix option off: the option and the stored consent did not read as off-but-consented"
+                    .to_owned(),
+            );
+        }
+
+        self.send_from_b(
+            room_key_b,
+            "qa-delivery-prefix-option-off",
+            QA_DELIVERY_PREFIX_MARKER,
+        )
+        .await?;
+        let unread = self
+            .wait_room_unread(room_id, "notification delivery prefix option off unread")
+            .await?;
+        self.wait_requests(
+            requests_before + 1,
+            "notification delivery prefix option off request",
+        )
+        .await?;
+        let request = self.request(requests_before)?;
+        assert_prefix_absent(
+            &request,
+            "notification delivery prefix option off",
+            &label,
+            unread,
+            QA_DELIVERY_PREFIX_MARKER,
+        )?;
+        self.assert_room_latest_text(room_id, QA_DELIVERY_PREFIX_MARKER)?;
+        println!("notification_delivery_prefix_option_off=ok");
+        Ok(())
+    }
+
+    /// A newest event that yields no readable text still delivers, without a prefix.
+    ///
+    /// The event is a real file message whose caption is the marker, so its `body` is the
+    /// marker while its message kind has no message text. A channel that read any body
+    /// rather than only a readable text message would render it.
+    async fn assert_prefix_without_readable_text(
+        &mut self,
+        room_id: &str,
+        room_key_b: &TimelineKey,
+    ) -> Result<(), String> {
+        let label = self.room_label(room_id)?;
+        self.mark_room_read_to_latest(room_id).await?;
+        let requests_before = self.stub.count();
+        self.settings.prefix_chars = QA_DELIVERY_PREFIX_CHARS;
+        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        self.apply_settings("notification delivery prefix non-text")
+            .await?;
+
+        self.send_media_from_b(
+            room_key_b,
+            "qa-delivery-prefix-media",
+            QA_DELIVERY_PREFIX_MEDIA_CAPTION,
+        )
+        .await?;
+        // Wait for the room list to read the file message as its newest event, so the
+        // delivery is about that event and not the text message before it.
+        self.wait_room_latest_preview(
+            room_id,
+            QA_DELIVERY_PREFIX_MEDIA_CAPTION,
+            "notification delivery prefix media projection",
+        )
+        .await?;
+        let unread = self
+            .wait_room_unread(room_id, "notification delivery prefix non-text unread")
+            .await?;
+        self.wait_requests(
+            requests_before + 1,
+            "notification delivery prefix non-text request",
+        )
+        .await?;
+        let request = self.request(requests_before)?;
+        assert_prefix_absent(
+            &request,
+            "notification delivery prefix non-text",
+            &label,
+            unread,
+            QA_DELIVERY_PREFIX_MEDIA_CAPTION,
+        )?;
+        if request.body.contains(QA_DELIVERY_PREFIX_MARKER) {
+            return Err(
+                "notification delivery prefix non-text: the body carried the text message before the file message"
+                    .to_owned(),
+            );
+        }
+        // Positive controls: the room list's newest event carries the caption as its
+        // preview and holds no readable text at all, so the absence is the event's own
+        // kind.
+        self.assert_room_latest_text_is_none(room_id)?;
+        println!("notification_delivery_prefix_no_text=ok");
+        Ok(())
+    }
+
+    /// Changing where a consented sink delivers drops the consent, so the next delivery
+    /// carries no message text.
+    async fn assert_prefix_consent_cleared(
+        &mut self,
+        room_id: &str,
+        room_key_b: &TimelineKey,
+    ) -> Result<(), String> {
+        let label = self.room_label(room_id)?;
+        self.mark_room_read_to_latest(room_id).await?;
+        let requests_before = self.stub.count();
+        // Set the option and a consent that covers the sink as it is, then change the
+        // destination in the same patch: the app is the one that must drop the consent.
+        self.settings.prefix_chars = QA_DELIVERY_PREFIX_CHARS;
+        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        self.primary_sink_mut()?.destination = QA_DELIVERY_PREFIX_OTHER_DESTINATION.to_owned();
+        self.apply_settings("notification delivery prefix changed destination")
+            .await?;
+        if self.stored_prefix_consent().is_some() {
+            return Err(
+                "notification delivery prefix changed destination: the consent survived a different destination"
+                    .to_owned(),
+            );
+        }
+
+        self.send_from_b(
+            room_key_b,
+            "qa-delivery-prefix-destination",
+            QA_DELIVERY_PREFIX_MARKER,
+        )
+        .await?;
+        let unread = self
+            .wait_room_unread(room_id, "notification delivery prefix destination unread")
+            .await?;
+        self.wait_requests(
+            requests_before + 1,
+            "notification delivery prefix destination request",
+        )
+        .await?;
+        let request = self.request(requests_before)?;
+        assert_prefix_absent(
+            &request,
+            "notification delivery prefix changed destination",
+            &label,
+            unread,
+            QA_DELIVERY_PREFIX_MARKER,
+        )?;
+        self.assert_room_latest_text(room_id, QA_DELIVERY_PREFIX_MARKER)?;
+        println!("notification_delivery_prefix_consent_cleared=ok");
+        Ok(())
+    }
+
+    /// The message text reaches no serialized artifact the run produces.
+    ///
+    /// The room-list `preview` is the sidebar's own serialized field and has always
+    /// carried message text, so it is the one carrier this search excludes: the prefix
+    /// source this feature adds is a separate field, and it must not join it. The
+    /// positive control below reads that separate field from the live snapshot, so the
+    /// search is over a state that really did hold the text.
+    fn assert_prefix_hygiene(&self, room_id: &str) -> Result<(), String> {
+        self.assert_room_latest_text(room_id, QA_DELIVERY_PREFIX_MARKER)?;
+        let snapshot = self.conn_a.snapshot();
+
+        let mut without_previews = snapshot.clone();
+        for room in &mut without_previews.rooms {
+            if let Some(latest) = &mut room.latest_event {
+                latest.preview = None;
+            }
+        }
+        let serialized = serde_json::to_string(&without_previews).map_err(|_| {
+            "notification delivery prefix hygiene: the app-state snapshot is not serializable"
+                .to_owned()
+        })?;
+        let full = serde_json::to_string(&snapshot).map_err(|_| {
+            "notification delivery prefix hygiene: the app-state snapshot is not serializable"
+                .to_owned()
+        })?;
+        let diagnostics = serde_json::to_string(&koushi_diagnostics::snapshot()).map_err(|_| {
+            "notification delivery prefix hygiene: the diagnostics are not serializable".to_owned()
+        })?;
+        let settings_path = qa_data_dir("notification-delivery-a")
+            .join("settings")
+            .join("settings.json");
+        let settings_file = std::fs::read(&settings_path).map_err(|_| {
+            "notification delivery prefix hygiene: the settings file was not readable".to_owned()
+        })?;
+
+        for marker in [QA_DELIVERY_PREFIX_MARKER, QA_DELIVERY_PREFIX_MEDIA_CAPTION] {
+            if serialized.contains(marker) {
+                return Err(
+                    "notification delivery prefix hygiene: the app-state snapshot carried message text"
+                        .to_owned(),
+                );
+            }
+            // The exact field shape this feature adds, searched in the untouched snapshot:
+            // `preview` and the prefix source are different fields, so a marker under
+            // `message_text` is the prefix source serializing itself.
+            if full.contains(&format!("\"message_text\":\"{marker}\"")) {
+                return Err(
+                    "notification delivery prefix hygiene: the app-state snapshot serialized the prefix source"
+                        .to_owned(),
+                );
+            }
+            if diagnostics.contains(marker) {
+                return Err(
+                    "notification delivery prefix hygiene: the diagnostics stream carried message text"
+                        .to_owned(),
+                );
+            }
+            if bytes_contain(&settings_file, marker) {
+                return Err(
+                    "notification delivery prefix hygiene: the settings file carried message text"
+                        .to_owned(),
+                );
+            }
+        }
+
+        let credential_root =
+            std::env::var(super::registry::ENV_FILE_CREDENTIAL_STORE_DIR).map_err(|_| {
+                "notification delivery prefix hygiene: the QA file credential store is not configured"
+                    .to_owned()
+            })?;
+        for marker in [QA_DELIVERY_PREFIX_MARKER, QA_DELIVERY_PREFIX_MEDIA_CAPTION] {
+            if directory_holds_text(std::path::Path::new(&credential_root), marker) {
+                return Err(
+                    "notification delivery prefix hygiene: a file the lane wrote carried message text"
+                        .to_owned(),
+                );
+            }
+        }
+        println!("notification_delivery_prefix_hygiene=ok");
+        Ok(())
+    }
+
+    /// Changing the endpoint a consent was given for drops that consent too.
+    ///
+    /// The endpoint is also what the stored credential was entered for, so the sink goes
+    /// out of service as well: a fresh unread transition must leave no request at either
+    /// endpoint, which is stronger than a body without a prefix.
+    async fn assert_prefix_endpoint_cleared(
+        &mut self,
+        room_id: &str,
+        room_key_b: &TimelineKey,
+        destination: &str,
+    ) -> Result<(), String> {
+        let moved = QaDeliveryStub::start(self.secret)?;
+        self.mark_room_read_to_latest(room_id).await?;
+        let requests_before = self.stub.count();
+        // Bring the destination back and store a consent that covers that configuration,
+        // so the endpoint change below is the one thing the next patch changes.
+        self.primary_sink_mut()?.destination = destination.to_owned();
+        self.settings.prefix_chars = QA_DELIVERY_PREFIX_CHARS;
+        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        self.apply_settings("notification delivery prefix restore destination")
+            .await?;
+        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        if let NotificationSinkConfig::Resend { endpoint } = &mut self.primary_sink_mut()?.config {
+            *endpoint = moved.endpoint().to_owned();
+        }
+        self.apply_settings("notification delivery prefix changed endpoint")
+            .await?;
+        if self.stored_prefix_consent().is_some() {
+            return Err(
+                "notification delivery prefix changed endpoint: the consent survived a different endpoint"
+                    .to_owned(),
+            );
+        }
+
+        self.send_from_b(
+            room_key_b,
+            "qa-delivery-prefix-endpoint",
+            QA_DELIVERY_PREFIX_MARKER,
+        )
+        .await?;
+        let unread = self
+            .wait_room_unread(room_id, "notification delivery prefix endpoint unread")
+            .await?;
+        if unread == 0 {
+            return Err(
+                "notification delivery prefix changed endpoint: the room did not go unread again"
+                    .to_owned(),
+            );
+        }
+        settle(self.conn_a, Duration::from_millis(2500)).await;
+        if moved.count() != 0 || self.stub.count() != requests_before {
+            return Err(
+                "notification delivery prefix changed endpoint: a request left the device for an endpoint the consent did not cover"
+                    .to_owned(),
+            );
+        }
+        println!("notification_delivery_prefix_endpoint_cleared=ok");
+        Ok(())
+    }
+
     /// Send one message as user B and return the event id the homeserver accepted.
     ///
     /// B viewing its own message immediately afterwards is what a real client does,
@@ -1019,6 +1505,175 @@ impl QaDeliveryFlow<'_> {
             .find(|room| room.room_id == room_id)
             .map(room_activity_unread_count)
             .ok_or_else(|| "notification delivery: the room is not in the room list".to_owned())
+    }
+
+    /// The one sink this lane configures.
+    fn primary_sink(&self) -> Result<&NotificationSinkSettings, String> {
+        self.settings
+            .sinks
+            .first()
+            .ok_or_else(|| "notification delivery prefix: the lane has no sink".to_owned())
+    }
+
+    fn primary_sink_mut(&mut self) -> Result<&mut NotificationSinkSettings, String> {
+        self.settings
+            .sinks
+            .first_mut()
+            .ok_or_else(|| "notification delivery prefix: the lane has no sink".to_owned())
+    }
+
+    /// A prefix consent that covers the sink as it is configured right now, which is what
+    /// the user gives when they turn the option on. The timestamp is synthetic: this lane
+    /// asserts the binding, not the clock.
+    fn prefix_consent(&self) -> Result<NotificationDeliveryPrefixConsent, String> {
+        let sink = self.primary_sink()?;
+        Ok(NotificationDeliveryPrefixConsent {
+            sink_id: sink.id.clone(),
+            destination: sink.destination.clone(),
+            endpoint: sink.endpoint(),
+            accepted_at_ms: 0,
+        })
+    }
+
+    /// The consent the app's own state holds right now, if any.
+    fn stored_prefix_consent(&self) -> Option<NotificationDeliveryPrefixConsent> {
+        self.conn_a
+            .snapshot()
+            .settings
+            .values
+            .delivery
+            .prefix_consent
+            .clone()
+    }
+
+    /// The room's newest event id, which is what the room list holds right now.
+    fn room_latest_event_id(&self, room_id: &str) -> Result<String, String> {
+        self.conn_a
+            .snapshot()
+            .rooms
+            .iter()
+            .find(|room| room.room_id == room_id)
+            .and_then(|room| room.latest_event.as_ref())
+            .map(|latest| latest.event_id.clone())
+            .ok_or_else(|| "notification delivery prefix: the room has no latest event".to_owned())
+    }
+
+    /// The delivery prefix source the room list holds for the room, if any. It is the
+    /// field the feature adds and never serializes, so reading it here is the positive
+    /// control a hygiene search needs to be about a state that held the text.
+    fn room_latest_text(&self, room_id: &str) -> Option<String> {
+        self.conn_a
+            .snapshot()
+            .rooms
+            .iter()
+            .find(|room| room.room_id == room_id)
+            .and_then(|room| room.latest_event.as_ref())
+            .and_then(|latest| latest.message_text.clone())
+    }
+
+    fn assert_room_latest_text(&self, room_id: &str, expected: &str) -> Result<(), String> {
+        if self.room_latest_text(room_id).as_deref() != Some(expected) {
+            return Err(
+                "notification delivery prefix: the room list did not hold the message text the delivery was about"
+                    .to_owned(),
+            );
+        }
+        Ok(())
+    }
+
+    fn assert_room_latest_text_is_none(&self, room_id: &str) -> Result<(), String> {
+        if self.room_latest_text(room_id).is_some() {
+            return Err(
+                "notification delivery prefix: the room list held readable text for an event that has none"
+                    .to_owned(),
+            );
+        }
+        Ok(())
+    }
+
+    /// Mark the room read through its newest event, which is how every prefix assertion
+    /// ends the episode before it arms the next one.
+    async fn mark_room_read_to_latest(&mut self, room_id: &str) -> Result<(), String> {
+        let event_id = self.room_latest_event_id(room_id)?;
+        self.mark_room_read(room_id, &event_id).await
+    }
+
+    /// Wait until the room list's newest event carries `preview`, so a delivery is known
+    /// to be about that event rather than the one before it.
+    async fn wait_room_latest_preview(
+        &mut self,
+        room_id: &str,
+        preview: &str,
+        label: &str,
+    ) -> Result<(), String> {
+        let room = room_id.to_owned();
+        let expected = preview.to_owned();
+        let conn = &mut *self.conn_a;
+        wait_for_condition(conn, label, EVENT_TIMEOUT, move |state| {
+            state
+                .rooms
+                .iter()
+                .find(|summary| summary.room_id == room)
+                .and_then(|summary| summary.latest_event.as_ref())
+                .filter(|latest| latest.preview.as_deref() == Some(expected.as_str()))
+                .map(|_| ())
+        })
+        .await
+    }
+
+    /// Send one non-text (file) message as user B with `caption` as its body, and return
+    /// the event id the homeserver accepted.
+    ///
+    /// A media message carries its caption in `body` but is not a text message, so the
+    /// room list's `preview` shows the caption while the delivery prefix source has
+    /// nothing: the newest event exists, is unread, and yields no readable text.
+    async fn send_media_from_b(
+        &mut self,
+        key: &TimelineKey,
+        transaction_id: &str,
+        caption: &str,
+    ) -> Result<String, String> {
+        let info =
+            authenticated_session_info(self.conn_b, "notification delivery prefix media account")?;
+        let expected_account = koushi_core::store::session_key_id_from_info(&info);
+        let request_id = self.conn_b.next_request_id();
+        self.conn_b
+            .command(CoreCommand::Timeline(TimelineCommand::UploadAndSendMedia {
+                request_id,
+                expected_account,
+                key: key.clone(),
+                transaction_id: transaction_id.to_owned(),
+                request: UploadMediaRequest {
+                    filename: "qa-notification-prefix-media.bin".to_owned(),
+                    mime_type: "application/octet-stream".to_owned(),
+                    bytes: b"koushi qa notification prefix fixture".to_vec(),
+                    kind: UploadMediaKind::File,
+                    compression: None,
+                    thumbnail: None,
+                    caption: Some(build_formatted_message_draft(
+                        caption,
+                        MentionIntent::default(),
+                    )),
+                },
+            }))
+            .await
+            .map_err(|_| format!("{transaction_id}: media send submission failed"))?;
+        let event_id = wait_for_media_send_flow_completion(
+            self.conn_b,
+            request_id,
+            key,
+            transaction_id,
+            transaction_id,
+        )
+        .await?;
+        send_main_timeline_read_receipt(
+            self.conn_b,
+            key,
+            &event_id,
+            &format!("{transaction_id} (receipt)"),
+        )
+        .await?;
+        Ok(event_id)
     }
 
     async fn wait_room_unread(&mut self, room_id: &str, label: &str) -> Result<u64, String> {
@@ -1180,6 +1835,115 @@ fn carries_matrix_identifier(body: &str) -> bool {
     })
 }
 
+/// Assert the delivered body leads with `marker`, the room's newest message text,
+/// and still names the room with its own counts.
+fn assert_prefix_leads(
+    body: &str,
+    context: &str,
+    room_label: &str,
+    unread: u64,
+    marker: &str,
+) -> Result<(), String> {
+    let headline = format!("Direct message in {room_label}");
+    let Some(marker_at) = body.find(marker) else {
+        return Err(format!(
+            "{context}: the body carried none of the room's newest message text"
+        ));
+    };
+    let Some(headline_at) = body.find(&headline) else {
+        return Err(format!(
+            "{context}: the body did not name the room by its safe display label"
+        ));
+    };
+    if marker_at >= headline_at {
+        return Err(format!(
+            "{context}: the message text did not lead the room's own line"
+        ));
+    }
+    if !body.contains(&format!("{unread} unread")) {
+        return Err(format!(
+            "{context}: the body did not carry the room's unread count"
+        ));
+    }
+    if carries_matrix_identifier(body) {
+        return Err(format!("{context}: the body carried a Matrix identifier"));
+    }
+    Ok(())
+}
+
+/// Assert a delivery that must not carry message text still succeeded, and that
+/// `marker` appears nowhere in what the stub recorded: the body it received or the
+/// idempotency key it correlated the request by.
+fn assert_prefix_absent(
+    request: &QaDeliveryStubRequest,
+    context: &str,
+    room_label: &str,
+    unread: u64,
+    marker: &str,
+) -> Result<(), String> {
+    let headline = format!("Direct message in {room_label}");
+    if !request.body.contains(&headline) {
+        return Err(format!(
+            "{context}: the delivery did not reach the stub naming the room"
+        ));
+    }
+    if !request.body.contains(&format!("{unread} unread")) {
+        return Err(format!(
+            "{context}: the delivery did not reach the stub with the room's unread count"
+        ));
+    }
+    if request.body.contains(marker) {
+        return Err(format!("{context}: the received body carried message text"));
+    }
+    if request
+        .idempotency_key
+        .as_deref()
+        .is_some_and(|key| key.contains(marker))
+    {
+        return Err(format!(
+            "{context}: the received idempotency key carried message text"
+        ));
+    }
+    Ok(())
+}
+
+/// Whether `needle` appears in `haystack` as raw bytes.
+fn bytes_contain(haystack: &[u8], needle: &str) -> bool {
+    !needle.is_empty()
+        && haystack
+            .windows(needle.len())
+            .any(|window| window == needle.as_bytes())
+}
+
+/// Whether any file under `dir` contains `needle` as raw bytes.
+///
+/// The lane's own artifacts are plain files, so a byte walk is an honest read of "did
+/// this text reach a file this run wrote". It compares only against the lane's own
+/// synthetic value and prints nothing about any file it reads.
+fn directory_holds_text(dir: &std::path::Path, needle: &str) -> bool {
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        let Ok(metadata) = std::fs::metadata(&path) else {
+            continue;
+        };
+        if metadata.is_dir() {
+            let Ok(entries) = std::fs::read_dir(&path) else {
+                continue;
+            };
+            for entry in entries.flatten() {
+                pending.push(entry.path());
+            }
+            continue;
+        }
+        if let Ok(contents) = std::fs::read(&path)
+            && bytes_contain(&contents, needle)
+        {
+            return true;
+        }
+    }
+    false
+}
+
 /// The settings every phase starts from: one enabled sink pointing at the stub,
 /// and the channel off until a phase turns it on.
 fn delivery_settings(stub: &QaDeliveryStub, sink_id: &str) -> NotificationDeliverySettings {
@@ -1215,9 +1979,14 @@ fn delivery_settings(stub: &QaDeliveryStub, sink_id: &str) -> NotificationDelive
 ///
 /// `secret_binding` is Rust's own field: the lane carries the stored value through a
 /// patch, but it cannot predict whether canonicalization keeps or drops it, so an
-/// equality check over what the lane chose must ignore it.
+/// equality check over what the lane chose must ignore it. Canonicalization is also what
+/// decides whether a prefix consent still covers the sink the lane configured, so the
+/// expected value is canonicalized exactly the way the app canonicalizes the state: a
+/// patch that changes a destination or an endpoint is expected to drop the consent, and
+/// the equality check must expect that drop rather than fight it.
 fn lane_visible_delivery(settings: &NotificationDeliverySettings) -> NotificationDeliverySettings {
     let mut copy = settings.clone();
+    copy.canonicalize();
     for sink in &mut copy.sinks {
         sink.secret_binding = None;
     }

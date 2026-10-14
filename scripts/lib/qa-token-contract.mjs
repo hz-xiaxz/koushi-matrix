@@ -59,6 +59,11 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
     "account_notifications_category_restore=ok",
     "account_notifications_email_unsupported=ok",
     "account_notifications_email_requires_verified=ok",
+    "account_notifications_keyword_actions=ok",
+    "account_notifications_keyword_projection=ok",
+    "account_notifications_keyword_duplicate=ok",
+    "account_notifications_keyword_disabled=ok",
+    "account_notifications_keyword_remove=ok",
     "account_notifications=ok"
   ]),
   thread_late_joiner: Object.freeze([
@@ -80,6 +85,13 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
     "notification_delivery_watched_space=ok",
     "notification_delivery_secret_hygiene=ok",
     "notification_delivery_secret_binding=ok",
+    "notification_delivery_prefix=ok",
+    "notification_delivery_prefix_no_consent=ok",
+    "notification_delivery_prefix_option_off=ok",
+    "notification_delivery_prefix_no_text=ok",
+    "notification_delivery_prefix_consent_cleared=ok",
+    "notification_delivery_prefix_endpoint_cleared=ok",
+    "notification_delivery_prefix_hygiene=ok",
     "notification_delivery=ok"
   ]),
   room_history_export: Object.freeze([
