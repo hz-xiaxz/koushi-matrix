@@ -6138,25 +6138,30 @@ implementation of email notification in Koushi. Delivery goes through sinks that
 consume the same selected candidate, so the channel is not tied to one transport or to
 one country's infrastructure:
 
-- **Sinks.** Mail is one sink: a provider API such as Resend, or a generic SMTP relay,
-  which covers the cheap relays (Amazon SES, Brevo, Mailjet, Elastic Email) and the
-  Chinese providers (Aliyun DirectMail, Tencent Cloud SES). A mailbox preset is the
+- **Sinks.** Two are implemented. A mail provider API, Resend, and a generic SMTP
+  relay, which covers the cheap relays (Amazon SES, Brevo, Mailjet, Elastic Email) and
+  the Chinese providers (Aliyun DirectMail, Tencent Cloud SES). A mailbox preset is the
   practical route inside China: QQ Mail is the same SMTP sink with its host, port and
   authorization-code field filled in, and because the mailbox's own new-mail reminder
   can surface the message in WeChat, that one sink reaches both destinations. A WeChat
-  relay is the other kind of sink: a WeCom group-robot webhook, with a WeCom self-built
-  app or a third-party relay (ServerChan, PushPlus, WxPusher) behind the same boundary.
-  Every sink is individually enabled and carries its own non-secret configuration plus
-  a `configured` secret flag.
+  relay is the other kind of sink the boundary is shaped for - a WeCom group-robot
+  webhook, with a WeCom self-built app or a third-party relay (ServerChan, PushPlus,
+  WxPusher) behind the same boundary - but it is **not implemented** and no screen
+  offers one: adding it is a new arm of `NotificationSink` and a new configuration
+  variant, with no change to the settings, the digest, or the decision engine. Every
+  sink is individually enabled and carries its own non-secret configuration plus a
+  `configured` secret flag.
 - **Settings.** The enabled sinks, their addresses and endpoints, the dwell, the
   minimum interval, the focus suppression, the optional plaintext prefix and its
-  consent live in `SettingsValues.notifications` at app scope. The Matrix account is
+  consent live in `SettingsValues.delivery` at app scope, which is a different group
+  from `SettingsValues.notifications` (this device's banners). The Matrix account is
   never consulted for a destination, so the channel works on a homeserver that supports
   neither email 3PIDs nor pushers.
-- **Secrets.** Every sink secret - provider API key, SMTP password, webhook key, relay
-  send key - is held only by the credential store. Settings and diagnostics carry a
+- **Secrets.** Every sink secret - a provider API key or an SMTP password today, and a
+  webhook key or a relay send key for a sink added later - is held only by the
+  credential store. Settings and diagnostics carry a
   `configured` flag and never a value, and a secret is read when the sink is configured
-  or the delivery actor starts, never on the settings or dispatch hot path.
+  or by the send itself, never on the settings or dispatch hot path.
 - **One authority.** The channel reads the same Rust-owned attention projection that
   drives the badge and the unread/mention marks; the transient candidate feeds the
   toast. Both derive from one `RoomAttentionKind` and count authority, so a mail can

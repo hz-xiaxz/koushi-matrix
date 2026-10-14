@@ -151,10 +151,12 @@ typed failure (`InvalidSecret`, `UnverifiedSender`, `Suspended`, `RateLimited`,
 
 - `Resend` - `POST https://api.resend.com/emails` with the key in the
   `Authorization` header.
-- `WeComWebhook` - the group-robot webhook with a text body, the webhook key
-  being the secret. This is the cheapest way for a desktop app to reach WeChat; a
-  WeCom self-built app or a third-party relay (ServerChan, PushPlus, WxPusher) is
-  the same sink shape with different fields, added when one is actually needed.
+- `WeComWebhook` - **deferred, not built in this change.** The group-robot webhook
+  with a text body, the webhook key being the secret, is the cheapest way for a
+  desktop app to reach WeChat; a WeCom self-built app or a third-party relay
+  (ServerChan, PushPlus, WxPusher) is the same sink shape with different fields. The
+  boundary is shaped for it, but nothing offers it until someone needs it, and the
+  canon records it as not implemented rather than as a sink that exists.
 - `Smtp` - on a later phase, and the reason the boundary is worth having: Amazon
   SES, Brevo, Mailjet and Elastic Email outside China, and Aliyun DirectMail or
   Tencent Cloud SES inside it, all expose SMTP, so one sink covers the whole cheap
