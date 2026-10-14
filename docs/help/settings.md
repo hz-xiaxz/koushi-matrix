@@ -187,6 +187,23 @@ without regard to case. A hit arrives as a mention, so either this switch or
 **Mentions and replies** sends it. The rules live on your homeserver, not in
 Koushi's settings, so a rule another Matrix client set counts here too.
 
+The words themselves are under the switch. Type one into the box and choose
+**Add a keyword**; each keyword already on the account is listed with a remove
+control beside it. Adding writes the rule to your account, which is why your
+other Matrix clients highlight the word too; removing deletes that rule for every
+client, not only for Koushi. Nothing is written until you add or remove
+something, so simply opening this screen changes nothing, and the list is what
+the server reports rather than what Koushi remembers.
+
+A word that another Matrix client turned off stays in the list marked as off. It
+is still on your account, which is why adding the same word again is refused
+while it is there; remove it, then add it again if you want it back on.
+
+Koushi checks the word before it writes anything: an empty box, a word longer
+than 64 characters, a word already in the list, and a list that is already at 64
+keywords are each refused with their own message. A refusal means nothing was
+changed.
+
 ### When a notification is sent
 
 A room is not sent the moment it becomes unread.
