@@ -4205,6 +4205,15 @@ stateDiagram-v2
   canonical policy that carries no room id, so React attributes a save to that
   policy without re-implementing canonicalization or exposing a preserved
   target identity.
+- The renderer requests the access and create previews and caches them per
+  selection identity: the scope, the editor context, and a selection key built
+  from the draft revision and the confirmed settings it previews (#1417). An
+  unrelated `state_generation` change re-requests the preview but keeps the
+  preview for the same identity on screen until the newer response lands, so
+  typing or sync traffic never collapses the editor and shifts its scroll
+  position. A selection change hides the previous identity's preview
+  immediately, and only the latest request for the current identity is
+  admitted, so an older selection's outcome is never shown.
 - An access-policy edit is re-validated against the pre-send settings read
   (#1177). `RoomSettingsSnapshot.access` carries the verified facts and is
   serde-skipped from the IPC wire shape. `RoomAccessCondition::access_policy_rejection`

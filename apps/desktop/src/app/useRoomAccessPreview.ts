@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 
 import type { DesktopApi } from "../backend/desktopApi";
 import type {
@@ -9,94 +9,111 @@ import type {
   RoomAccessPreviewContext
 } from "../domain/types";
 
-/** The identity of one preview request: scope, context and resolved inputs. */
+/**
+ * The selection identity of one preview: scope, context, the caller's
+ * selection key (the Rust draft revision plus any confirmed facts it shows)
+ * and the resolved inputs. The published `stateGeneration` is deliberately
+ * not part of it (#1417).
+ */
 function previewIdentity(
   scope: RoomAccessDraftScope | null,
   context: string,
-  stateGeneration: number | undefined,
+  selectionKey: string,
   extra = ""
 ): string {
-  return `${scope ? JSON.stringify(scope) : ""}|${context}|${stateGeneration ?? ""}|${extra}`;
+  return `${scope ? JSON.stringify(scope) : ""}|${context}|${selectionKey}|${extra}`;
 }
 
 /**
- * Issue #1177: render the Rust access/history preview for one panel, never an
- * older response and never a result for a different identity.
+ * Stale-while-revalidate over one Rust preview (#1177, #1417).
  *
- * The preview is fenced by the full identity: the scope/context arguments and
- * the published `stateGeneration`, which advances for every draft mutation, a
- * confirmed-property advance, an encryption toggle or a session reset. A result
- * is returned only while its identity still matches, so a change to the
- * selection never renders the previous selection's details or verdict.
+ * Every published `stateGeneration` re-requests the preview, but only a change
+ * of the selection identity hides the shown result: an unrelated snapshot
+ * advance (sync, typing, another room) keeps the current details on screen
+ * until the newer response replaces them, so the panel never collapses,
+ * flickers or moves the scroll position. A response is admitted only when it
+ * is newer than the last admitted one and was requested for the identity that
+ * is still current, so an older response never replaces newer details and a
+ * different selection's preview is never rendered.
+ */
+function useRevalidatedPreview<T>(
+  request: () => Promise<T>,
+  identity: string,
+  stateGeneration: number | undefined,
+  active: boolean
+): T | null {
+  const [result, setResult] = useState<{ identity: string; preview: T } | null>(null);
+  const currentIdentityRef = useRef(identity);
+  currentIdentityRef.current = identity;
+  const requestSeqRef = useRef(0);
+  const admittedSeqRef = useRef(0);
+  const requestRef = useRef(request);
+  requestRef.current = request;
+  useEffect(() => {
+    if (!active) {
+      return;
+    }
+    requestSeqRef.current += 1;
+    const seq = requestSeqRef.current;
+    const requestIdentity = identity;
+    const admit = (next: { identity: string; preview: T } | null) => {
+      if (seq <= admittedSeqRef.current || currentIdentityRef.current !== requestIdentity) {
+        return;
+      }
+      admittedSeqRef.current = seq;
+      setResult(next);
+    };
+    void requestRef
+      .current()
+      .then((preview) => admit({ identity: requestIdentity, preview }))
+      .catch(() => admit(null));
+  }, [identity, stateGeneration, active]);
+  return active && result?.identity === identity ? result.preview : null;
+}
+
+/**
+ * Issue #1177: render the Rust access/history preview for one Room Info panel,
+ * never an older response and never a result for a different selection.
  */
 export function useRoomAccessPreview(
   api: Pick<DesktopApi, "previewRoomAccess">,
   scope: RoomAccessDraftScope | null,
   context: RoomAccessPreviewContext,
+  selectionKey: string,
   stateGeneration: number | undefined,
   enabled: boolean
 ): RoomAccessPreview | null {
-  const identity = previewIdentity(scope, context, stateGeneration);
-  const [result, setResult] = useState<{ identity: string; preview: RoomAccessPreview } | null>(
-    null
+  const identity = previewIdentity(scope, context, selectionKey);
+  return useRevalidatedPreview(
+    () => (scope ? api.previewRoomAccess(scope, context) : Promise.reject(new Error("no scope"))),
+    identity,
+    stateGeneration,
+    enabled && scope !== null
   );
-  useEffect(() => {
-    if (!enabled || !scope) {
-      return;
-    }
-    let current = true;
-    const requestIdentity = identity;
-    void api
-      .previewRoomAccess(scope, context)
-      .then((preview) => {
-        if (current) setResult({ identity: requestIdentity, preview });
-      })
-      .catch(() => {
-        if (current) setResult(null);
-      });
-    return () => {
-      current = false;
-    };
-  }, [api, scope, context, stateGeneration, enabled, identity]);
-  return enabled && scope && result?.identity === identity ? result.preview : null;
 }
 
 /**
  * Issue #1177: render the Rust effective-proposed-tuple preview for the create
  * dialog, fenced the same way. The input is a plain value object, so it is
- * keyed by value while the effect still re-requests on every published
- * generation.
+ * keyed by value.
  */
 export function useCreateRoomAccessPreview(
   api: Pick<DesktopApi, "previewCreateRoomAccess">,
   scope: RoomAccessDraftScope | null,
   input: CreateRoomAccessPreviewInput,
+  selectionKey: string,
   stateGeneration: number | undefined,
   enabled: boolean
 ): CreateRoomAccessPreview | null {
   const inputKey = JSON.stringify(input);
-  const identity = previewIdentity(scope, "create", stateGeneration, inputKey);
-  const [result, setResult] = useState<{
-    identity: string;
-    preview: CreateRoomAccessPreview;
-  } | null>(null);
-  useEffect(() => {
-    if (!enabled || !scope) {
-      return;
-    }
-    let current = true;
-    const requestIdentity = identity;
-    void api
-      .previewCreateRoomAccess(scope, JSON.parse(inputKey) as CreateRoomAccessPreviewInput)
-      .then((preview) => {
-        if (current) setResult({ identity: requestIdentity, preview });
-      })
-      .catch(() => {
-        if (current) setResult(null);
-      });
-    return () => {
-      current = false;
-    };
-  }, [api, scope, inputKey, stateGeneration, enabled, identity]);
-  return enabled && scope && result?.identity === identity ? result.preview : null;
+  const identity = previewIdentity(scope, "create", selectionKey, inputKey);
+  return useRevalidatedPreview(
+    () =>
+      scope
+        ? api.previewCreateRoomAccess(scope, JSON.parse(inputKey) as CreateRoomAccessPreviewInput)
+        : Promise.reject(new Error("no scope")),
+    identity,
+    stateGeneration,
+    enabled && scope !== null
+  );
 }
