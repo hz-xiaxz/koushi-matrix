@@ -1,4 +1,4 @@
-# #1427 - Device-local notification delivery (mail and WeChat relay)
+# #1427 - Device-local notification delivery (mail; a webhook sink is deferred)
 
 Status: implementation plan. Canon: `docs/architecture/state-machine.md`,
 "Account Notification Settings" and "Local Notification Delivery";
