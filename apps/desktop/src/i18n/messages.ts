@@ -274,7 +274,6 @@ export type MessageId =
   | "dialog.createRoomTitle"
   | "dialog.createSpaceTitle"
   | "dialog.encryptedRoom"
-  | "dialog.invitedOnlyRoom"
   | "dialog.invitedOnlyRoomInSpace"
   | "dialog.inviteCandidates"
   | "dialog.inviteHistory"
@@ -312,14 +311,24 @@ export type MessageId =
   | "dialog.roomAddressSuggestion"
   | "dialog.roomAddressUseSuggestion"
   | "dialog.roomAddressScope"
-  | "dialog.publicRoomInSpace"
   | "dialog.roomAddressAbout"
   | "dialog.roomAddressHelp"
   | "dialog.roomAddressPreview"
   | "dialog.roomAddressEmpty"
-  | "dialog.roomAddressNone"
   | "dialog.roomAddressInvalid"
   | "dialog.roomAddressPending"
+  | "dialog.roomAddressChange"
+  | "dialog.roomAddressChangeLabel"
+  | "dialog.roomAddressNameVsAddress"
+  | "dialog.createWhoCanJoin"
+  | "dialog.createJoinSpaceMembers"
+  | "dialog.createJoinInvite"
+  | "dialog.createJoinPublic"
+  | "dialog.createJoinPublicHint"
+  | "dialog.createEarlierMessages"
+  | "dialog.createHistoryShared"
+  | "dialog.createHistoryInvited"
+  | "dialog.createHistoryWorldReadable"
   | "dialog.roomTopic"
   | "dialog.roomVisibility"
   | "dialog.sendInvite"
@@ -328,8 +337,6 @@ export type MessageId =
   | "dialog.roomNameOptional"
   | "dialog.roomNameOptionalHelp"
   | "dialog.spaceName"
-  | "dialog.standardRoomInSpace"
-  | "dialog.privateRoomDescription"
   | "dialog.startDm"
   | "dialog.reportReasonLabel"
   | "dialog.reportReasonPlaceholder"
@@ -2176,7 +2183,6 @@ const en: Catalog = {
   "dialog.createRoomTitle": "Create room",
   "dialog.createSpaceTitle": "Create space",
   "dialog.encryptedRoom": "Encrypted room",
-  "dialog.invitedOnlyRoom": "Invited only",
   "dialog.invitedOnlyRoomInSpace": "Invite-only room in {spaceName}: only explicitly invited people can join.",
   "dialog.inviteCandidates": "Invite candidates",
   "dialog.inviteHistory": "History visibility for invitees",
@@ -2207,7 +2213,7 @@ const en: Catalog = {
   "room.shareLinkCopyFailed": "Could not copy the link. Select and copy the URL instead.",
   "dialog.roomAddress": "Room address",
   "dialog.roomAddressInUse": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. You can keep the room name ‘{roomName}’; change only the room address, for example by adding a project name or number.",
-  "dialog.roomAddressInUseUnnamed": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. Change the room address, for example by adding a project name or number, or clear it to create the room without an address.",
+  "dialog.roomAddressInUseUnnamed": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. Change the room address, for example by adding a project name or number.",
   "dialog.roomAddressChecking": "Checking whether {address} is in use…",
   "dialog.roomAddressAvailable": "{address} was not in use when checked. This does not reserve it; the server confirms the address when you create the room.",
   "dialog.roomAddressTaken": "{address} is already in use on {server}. Keep the room name and change only the address.",
@@ -2215,14 +2221,24 @@ const en: Catalog = {
   "dialog.roomAddressSuggestion": "Suggestion (not checked yet): {address}",
   "dialog.roomAddressUseSuggestion": "Use this address",
   "dialog.roomAddressScope": "The room name can repeat, but this address must be unique on {server}, across all Spaces. Starting it with the Space name makes a conflict less likely but does not reserve it.",
-  "dialog.publicRoomInSpace": "Public room in {spaceName}: it is listed in the public room directory, and anyone, including people outside the space, can find and join it. Space membership does not limit who can join.",
   "dialog.roomAddressAbout": "About room addresses ↗",
   "dialog.roomAddressHelp": "This address lets people find and share this room. Enter only the room-specific name, without # or a server name. Availability is confirmed when you create the room.",
   "dialog.roomAddressPreview": "Full address: {address}",
   "dialog.roomAddressEmpty": "Enter an address for this public room.",
-  "dialog.roomAddressNone": "This room will be created without an address. People can still find it in the room directory and join it.",
   "dialog.roomAddressInvalid": "Use a room-specific name without spaces, # at the start, or a server suffix. Shorten it if needed.",
   "dialog.roomAddressPending": "Waiting for the address preview.",
+  "dialog.roomAddressChange": "Change",
+  "dialog.roomAddressChangeLabel": "Change room address",
+  "dialog.roomAddressNameVsAddress": "The name is what people see in their room list. The address is the link that opens the room, for example in a message or on a web page.",
+  "dialog.createWhoCanJoin": "Who can join",
+  "dialog.createJoinSpaceMembers": "Members of {spaceName}",
+  "dialog.createJoinInvite": "Only people you invite",
+  "dialog.createJoinPublic": "Anyone",
+  "dialog.createJoinPublicHint": "Anyone, including people outside your Spaces, can find this room in the public room directory and join it. A public room is not encrypted.",
+  "dialog.createEarlierMessages": "Earlier messages",
+  "dialog.createHistoryShared": "New members can read earlier messages",
+  "dialog.createHistoryInvited": "New members read from when they were invited",
+  "dialog.createHistoryWorldReadable": "Let people read without joining",
   "dialog.roomTopic": "Topic",
   "dialog.roomVisibility": "Room visibility",
   "dialog.sendInvite": "Send invite",
@@ -2231,8 +2247,6 @@ const en: Catalog = {
   "dialog.roomNameOptional": "Room name (optional)",
   "dialog.roomNameOptionalHelp": "Leave the name empty to show a name based on the room's address or members. You can set a name later.",
   "dialog.spaceName": "Space name",
-  "dialog.standardRoomInSpace": "Standard room in {spaceName}: space members can join without approval.",
-  "dialog.privateRoomDescription": "Only explicitly invited people can join.",
   "dialog.startDm": "Start DM",
   "dialog.reportReasonLabel": "Reason",
   "dialog.reportReasonPlaceholder": "Why are you reporting this?",
@@ -4007,7 +4021,6 @@ const ja: Catalog = {
   "dialog.createRoomTitle": "ルームを作成",
   "dialog.createSpaceTitle": "スペースを作成",
   "dialog.encryptedRoom": "暗号化ルーム",
-  "dialog.invitedOnlyRoom": "招待された人のみ",
   "dialog.invitedOnlyRoomInSpace": "{spaceName}内の招待専用ルーム：明示的に招待された人だけが参加できます",
   "dialog.inviteCandidates": "招待候補",
   "dialog.inviteHistory": "招待先に見える履歴",
@@ -4038,7 +4051,7 @@ const ja: Catalog = {
   "room.shareLinkCopyFailed": "リンクをコピーできませんでした。URLを選択してコピーしてください。",
   "dialog.roomAddress": "ルームアドレス",
   "dialog.roomAddressInUse": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルーム名『{roomName}』はそのままで、ルームアドレスにプロジェクト名や数字などを追加してください。",
-  "dialog.roomAddressInUseUnnamed": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルームアドレスにプロジェクト名や数字などを追加するか、空欄にしてアドレスなしでルームを作成してください。",
+  "dialog.roomAddressInUseUnnamed": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルームアドレスにプロジェクト名や数字などを追加してください。",
   "dialog.roomAddressChecking": "{address} が使われているか確認しています…",
   "dialog.roomAddressAvailable": "{address} は確認時点では使われていません。予約ではありません。アドレスはルーム作成時にサーバーで確定します。",
   "dialog.roomAddressTaken": "{address} は {server} ですでに使われています。ルーム名はそのままで、アドレスだけを変更してください。",
@@ -4046,14 +4059,24 @@ const ja: Catalog = {
   "dialog.roomAddressSuggestion": "候補（未確認）: {address}",
   "dialog.roomAddressUseSuggestion": "このアドレスを使う",
   "dialog.roomAddressScope": "ルーム名は重複してもかまいませんが、このアドレスは {server} 上のすべてのスペースを通じて一意である必要があります。スペース名で始めると重複しにくくなりますが、予約されるわけではありません。",
-  "dialog.publicRoomInSpace": "{spaceName}内の公開ルーム：公開ルームディレクトリに掲載され、スペース外の人を含め誰でも見つけて参加できます。スペースのメンバーかどうかで参加できる人は制限されません。",
   "dialog.roomAddressAbout": "ルームアドレスについて ↗",
   "dialog.roomAddressHelp": "このアドレスでルームを見つけたり共有したりできます。# やサーバー名を付けず、ルーム固有の名前だけ入力してください。使用可能かどうかは作成時に確認されます。",
   "dialog.roomAddressPreview": "完全なアドレス: {address}",
   "dialog.roomAddressEmpty": "公開ルームのアドレスを入力してください。",
-  "dialog.roomAddressNone": "このルームはアドレスなしで作成されます。ルームディレクトリから見つけて参加することはできます。",
   "dialog.roomAddressInvalid": "空白、先頭の #、サーバー名を除いたルーム固有の名前を入力してください。長すぎる場合は短くしてください。",
   "dialog.roomAddressPending": "アドレスのプレビューを待っています。",
+  "dialog.roomAddressChange": "変更",
+  "dialog.roomAddressChangeLabel": "ルームアドレスを変更",
+  "dialog.roomAddressNameVsAddress": "名前はルーム一覧に表示されるものです。アドレスは、メッセージやウェブページなどからルームを開くためのリンクです。",
+  "dialog.createWhoCanJoin": "参加できる人",
+  "dialog.createJoinSpaceMembers": "{spaceName} のメンバー",
+  "dialog.createJoinInvite": "招待した人だけ",
+  "dialog.createJoinPublic": "誰でも",
+  "dialog.createJoinPublicHint": "スペース外の人も含め、誰でも公開ルームディレクトリからこのルームを見つけて参加できます。公開ルームは暗号化されません。",
+  "dialog.createEarlierMessages": "過去のメッセージ",
+  "dialog.createHistoryShared": "新しいメンバーも過去のメッセージを読める",
+  "dialog.createHistoryInvited": "新しいメンバーは招待された時点から読める",
+  "dialog.createHistoryWorldReadable": "参加しなくても読めるようにする",
   "dialog.roomTopic": "トピック",
   "dialog.roomVisibility": "ルーム公開範囲",
   "dialog.sendInvite": "招待を送信",
@@ -4062,8 +4085,6 @@ const ja: Catalog = {
   "dialog.roomNameOptional": "ルーム名（任意）",
   "dialog.roomNameOptionalHelp": "名前を空欄にすると、ルームのアドレスやメンバーに基づく名前が表示されます。名前は後から設定できます。",
   "dialog.spaceName": "スペース名",
-  "dialog.standardRoomInSpace": "{spaceName}内の標準ルーム：スペースメンバーは承認なしで参加できます",
-  "dialog.privateRoomDescription": "明示的に招待された人だけが参加できます",
   "dialog.startDm": "DMを開始",
   "dialog.reportReasonLabel": "理由",
   "dialog.reportReasonPlaceholder": "報告理由を入力してください",

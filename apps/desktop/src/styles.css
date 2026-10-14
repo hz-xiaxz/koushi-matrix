@@ -6648,14 +6648,140 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   gap: 8px;
 }
 
-/* #1177: the create dialog's access/history choices make it tall, and the
-   dialog box scrolls at short window heights. Pin the actions to the bottom of
-   the scrollport so Create and Cancel stay reachable without scrolling. */
-.create-dialog-actions {
-  position: sticky;
-  bottom: 0;
-  padding-block: 8px;
-  background: var(--surface);
+/* #1416: the create dialog is a header, a body that scrolls on its own at
+   short window heights, and a footer with the summary and the buttons. The
+   footer is part of the layout, not floated over the body. */
+.dialog-box.create-dialog {
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0;
+  width: min(420px, calc(100vw - 48px));
+  padding: 0;
+  overflow: hidden;
+}
+
+.create-dialog-header {
+  padding: 18px 20px 10px;
+}
+
+.create-dialog-body {
+  display: grid;
+  gap: 12px;
+  min-block-size: 0;
+  padding: 4px 20px 16px;
+  overflow: auto;
+  overscroll-behavior: contain;
+}
+
+.create-dialog-footer {
+  display: grid;
+  gap: 10px;
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--line);
+}
+
+.create-room-summary {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: 12px;
+  line-height: 1.45;
+}
+
+.create-room-fieldset {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-inline-size: 0;
+}
+
+.create-room-fieldset > legend {
+  margin-block-end: 4px;
+  padding: 0;
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.create-room-choice {
+  display: grid;
+  grid-template-columns: auto minmax(0, 1fr);
+  gap: 8px;
+  align-items: start;
+  color: var(--text);
+  font-size: 13px;
+  line-height: 1.4;
+}
+
+.create-room-choice > input {
+  margin: 2px 0 0;
+}
+
+.create-room-choice-text {
+  display: grid;
+  gap: 2px;
+  min-inline-size: 0;
+}
+
+.create-room-choice-hint {
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.create-room-allow-targets {
+  display: grid;
+  gap: 4px;
+  margin-inline-start: 24px;
+}
+
+.create-room-address {
+  display: grid;
+  gap: 6px;
+}
+
+.create-room-address p {
+  margin: 0;
+}
+
+.create-room-address-label {
+  color: var(--text);
+  font-size: 13px;
+  font-weight: 600;
+}
+
+.create-room-address-readonly {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  min-inline-size: 0;
+}
+
+.create-room-address-readonly > code {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+  overflow-wrap: anywhere;
+  font-size: 13px;
+}
+
+.create-room-address-editor {
+  display: flex;
+  align-items: center;
+  gap: 4px;
+  min-inline-size: 0;
+  color: var(--text-muted);
+  font-size: 13px;
+}
+
+.create-room-address-editor > .dialog-input {
+  flex: 1 1 auto;
+  min-inline-size: 0;
+}
+
+.create-room-address-editor > span:last-child {
+  max-inline-size: 45%;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .dialog-button {

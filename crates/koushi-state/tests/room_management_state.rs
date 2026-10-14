@@ -1308,9 +1308,102 @@ fn open_create(state: &mut AppState, session_id: u64, parent_space: Option<&str>
                 visibility: koushi_state::CreateRoomVisibility::Private,
                 invited_only: false,
                 parent_space_id: parent_space.map(str::to_owned),
+                address_suffix: Some("3fa9c2".to_owned()),
             }),
         },
     );
+}
+
+fn set_create_rule(state: &mut AppState, session_id: u64, rule: RoomJoinRule) {
+    reduce(
+        state,
+        AppAction::RoomAccessDraftRuleSet {
+            scope: koushi_state::RoomAccessDraftScope::Create { session_id },
+            rule: Some(rule),
+        },
+    );
+}
+
+/// #1416: the membership choice is labelled with the attachment Space, so
+/// choosing it in a create draft with no targets selects that Space.
+#[test]
+fn choosing_space_members_in_a_create_draft_selects_the_attachment_space() {
+    let mut state = ready_state();
+    state.spaces = vec![joined_space("!space:example.invalid")];
+    open_create(&mut state, 1, Some("!space:example.invalid"));
+    set_create_rule(&mut state, 1, RoomJoinRule::Invite);
+    assert!(
+        state
+            .room_management
+            .draft
+            .as_ref()
+            .unwrap()
+            .allow_targets
+            .is_empty()
+    );
+
+    set_create_rule(&mut state, 1, RoomJoinRule::Restricted);
+    let draft = state.room_management.draft.as_ref().expect("create draft");
+    assert_eq!(draft.rule, Some(RoomJoinRule::Restricted));
+    assert_eq!(
+        draft.allow_targets,
+        vec!["!space:example.invalid".to_owned()]
+    );
+    assert_eq!(
+        draft.selected_allow_targets,
+        vec!["!space:example.invalid".to_owned()]
+    );
+
+    // At Home there is no attachment Space to select.
+    let mut home = ready_state();
+    open_create(&mut home, 2, None);
+    set_create_rule(&mut home, 2, RoomJoinRule::Restricted);
+    assert!(
+        home.room_management
+            .draft
+            .as_ref()
+            .unwrap()
+            .allow_targets
+            .is_empty()
+    );
+}
+
+/// #1416: world-readable history is offered only for a public room; leaving
+/// public drops it back to shared history.
+#[test]
+fn leaving_public_drops_a_world_readable_create_history_to_shared() {
+    let mut state = ready_state();
+    open_create(&mut state, 1, None);
+    set_create_rule(&mut state, 1, RoomJoinRule::Public);
+    reduce(
+        &mut state,
+        AppAction::RoomAccessDraftHistorySet {
+            scope: koushi_state::RoomAccessDraftScope::Create { session_id: 1 },
+            history: Some(RoomHistoryVisibility::WorldReadable),
+        },
+    );
+    set_create_rule(&mut state, 1, RoomJoinRule::Public);
+    assert_eq!(
+        state.room_management.draft.as_ref().unwrap().history,
+        Some(RoomHistoryVisibility::WorldReadable)
+    );
+    set_create_rule(&mut state, 1, RoomJoinRule::Invite);
+    assert_eq!(
+        state.room_management.draft.as_ref().unwrap().history,
+        Some(RoomHistoryVisibility::Shared)
+    );
+}
+
+/// #1416: the create session's address suffix stays inside Rust.
+#[test]
+fn the_create_address_suffix_is_kept_on_the_draft_and_never_serialized() {
+    let mut state = ready_state();
+    open_create(&mut state, 1, None);
+    let draft = state.room_management.draft.as_ref().expect("create draft");
+    assert_eq!(draft.create_address_suffix.as_deref(), Some("3fa9c2"));
+    let wire = serde_json::to_string(draft).expect("serialize draft");
+    assert!(!wire.contains("3fa9c2"), "{wire}");
+    assert!(!format!("{draft:?}").contains("3fa9c2"));
 }
 
 #[test]

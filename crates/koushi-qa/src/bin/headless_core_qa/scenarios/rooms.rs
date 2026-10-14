@@ -1535,3 +1535,50 @@ pub(super) async fn wait_for_invite_absent(
 #[cfg(test)]
 #[path = "rooms_tests.rs"]
 mod tests;
+
+/// #1416: open a create-room access draft as the dialog does, so Core draws
+/// the session's random address suffix, and return its default address.
+pub(super) async fn open_create_draft_for_qa(
+    conn: &mut CoreConnection,
+    parent_space_id: Option<&str>,
+    label: &str,
+) -> Result<koushi_state::RoomAddressPreview, String> {
+    static NEXT_SESSION: std::sync::atomic::AtomicU64 = std::sync::atomic::AtomicU64::new(1);
+    let session_id = conn.snapshot().create_access_session_watermark
+        + NEXT_SESSION.fetch_add(1, std::sync::atomic::Ordering::Relaxed);
+    let scope = koushi_state::RoomAccessDraftScope::Create { session_id };
+    let request_id = conn.next_request_id();
+    conn.command(CoreCommand::Room(RoomCommand::SetRoomAccessDraft {
+        request_id,
+        command: koushi_protocol::RoomAccessDraftCommand::Open {
+            scope: scope.clone(),
+            create: Some(koushi_state::CreateRoomAccessSeed {
+                visibility: koushi_state::CreateRoomVisibility::Public,
+                invited_only: false,
+                parent_space_id: parent_space_id.map(str::to_owned),
+                address_suffix: None,
+            }),
+        },
+    }))
+    .await
+    .map_err(|_| format!("{label}: create draft submission failed"))?;
+    let opened = |state: &AppState| {
+        state
+            .room_management
+            .draft
+            .as_ref()
+            .is_some_and(|draft| draft.scope == scope)
+    };
+    let deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
+    while !opened(&conn.snapshot()) {
+        tokio::time::timeout_at(deadline, conn.recv_event())
+            .await
+            .map_err(|_| format!("{label}: create draft timeout"))?
+            .map_err(|_| format!("{label}: create draft event stream lagged"))?;
+    }
+    let preview = conn.preview_room_address(None, session_id);
+    if preview.error.is_some() || preview.full_alias.is_none() {
+        return Err(format!("{label}: the default address was not valid"));
+    }
+    Ok(preview)
+}

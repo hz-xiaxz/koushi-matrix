@@ -491,7 +491,8 @@ export interface DesktopApi {
     powerLevel: number,
     confirmed: boolean
   ): Promise<CommandSettlement>;
-  previewRoomAddress(name: string, aliasLocalpart: string | null): Promise<RoomAddressPreview>;
+  /** #1416: `aliasLocalpart === null` previews the create session's default. */
+  previewRoomAddress(createSessionId: number, aliasLocalpart: string | null): Promise<RoomAddressPreview>;
   setRoomAccessDraft(command: RoomAccessDraftCommand): Promise<CommandAdmission>;
   previewRoomAccess(
     scope: RoomAccessDraftScope,
