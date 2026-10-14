@@ -110,7 +110,10 @@ pub(crate) fn authorization_value(key: &str) -> Result<HeaderValue, Notification
 }
 
 /// `Name <address>` when a usable display name is given, the bare address otherwise.
-fn sender_field(sender_name: &str, from_address: &str) -> String {
+///
+/// Both mail sinks build the same sender field, so it lives here rather than twice; the
+/// SMTP sink passes an already-reduced bare address.
+pub(crate) fn sender_field(sender_name: &str, from_address: &str) -> String {
     let usable_name = !sender_name.is_empty()
         && !sender_name
             .chars()

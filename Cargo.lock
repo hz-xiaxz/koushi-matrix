@@ -3455,10 +3455,14 @@ dependencies = [
 name = "koushi-notify"
 version = "0.1.0"
 dependencies = [
+ "base64 0.22.1",
  "koushi-key",
  "reqwest",
+ "rustls",
+ "rustls-platform-verifier",
  "serde_json",
  "tokio",
+ "tokio-rustls",
  "wiremock",
 ]
 

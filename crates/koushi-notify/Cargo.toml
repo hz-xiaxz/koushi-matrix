@@ -5,9 +5,19 @@ edition = "2024"
 license.workspace = true
 
 [dependencies]
+base64 = "0.22"
 koushi-key = { path = "../koushi-key" }
 reqwest = { version = "0.13.1", default-features = false, features = ["json", "rustls"] }
+# The SMTP sink speaks the protocol itself, so it needs the TLS stack under it. The
+# provider is named explicitly because this workspace can enable two of them at once;
+# see `smtp::client_config` for why that matters.
+rustls = { version = "0.23", default-features = false, features = ["std", "tls12", "aws_lc_rs"] }
+rustls-platform-verifier = "0.7"
 serde_json = "1"
+tokio = { version = "1", features = ["io-util", "net", "time"] }
+# No features of its own: the sink only needs `TlsConnector` and `TlsStream`, and the
+# rustls features above are the ones this workspace already builds.
+tokio-rustls = { version = "0.26", default-features = false }
 
 [dev-dependencies]
 tokio = { version = "1", features = ["macros", "rt-multi-thread"] }

@@ -6,17 +6,29 @@
 //! it is given, once, and reports a typed outcome. It must not choose recipients,
 //! coalesce, suppress, or build content (state-ownership.md, "Threads and attention").
 //!
+//! Two kinds of sink reach the wire today: Resend's HTTPS API, which needs no mailbox of
+//! the user's own, and SMTP against a mailbox the user already has — the cheap relays,
+//! and the providers in [`presets`] (QQ Mail, Gmail, iCloud Mail) whose authorization
+//! code or app password is the only credential a third-party client may use.
+//!
 //! Crate ownership (engineering rules, "Crate Ownership And Projection Authority"):
 //! `koushi-sdk` owns SDK-facing Matrix primitives, `koushi-store` owns credential and
 //! encrypted-file mechanics, and the desktop app stays a thin platform adapter, so a
 //! product-facing outbound sender that is neither Matrix nor platform lives here.
 
+mod presets;
 mod resend;
+mod smtp;
+
+#[cfg(test)]
+mod smtp_tests;
 
 #[cfg(test)]
 mod tests;
 
+pub use presets::{SMTP_PRESETS, SmtpPreset, preset};
 pub use resend::{RESEND_ENDPOINT, ResendSink};
+pub use smtp::{SmtpSettings, SmtpSink, SmtpTls};
 
 /// One notification this device has already decided to deliver.
 ///
@@ -50,7 +62,9 @@ pub enum NotificationDeliveryFailure {
     Rejected,
     /// The provider asked us to slow down (429), with its own delay when it gave one.
     RateLimited { retry_after_secs: Option<u64> },
-    /// No verdict was reached: connect error, TLS error, timeout, or a 5xx.
+    /// No verdict was reached: a connect error, a TLS error, a timeout, a connection
+    /// closed mid-delivery, a reply the sink cannot classify, or a provider 5xx that
+    /// says nothing about the request itself.
     Transport,
 }
 
@@ -80,14 +94,15 @@ impl NotificationDeliveryOutcome {
 #[derive(Clone)]
 pub enum NotificationSink {
     Resend(ResendSink),
+    Smtp(SmtpSink),
 }
 
 impl NotificationSink {
     /// Deliver one notification through this sink.
     ///
     /// The typed outcome is the only thing that leaves. Raw provider bodies, the
-    /// endpoint, and transport errors stay inside the sink, because a settings
-    /// snapshot, a diagnostics export, or a log line must never carry them
+    /// endpoint or relay host, and transport errors stay inside the sink, because a
+    /// settings snapshot, a diagnostics export, or a log line must never carry them
     /// (engineering rules, "Logging and Diagnostics").
     pub async fn send(
         &self,
@@ -96,6 +111,7 @@ impl NotificationSink {
     ) -> NotificationDeliveryOutcome {
         match self {
             Self::Resend(sink) => sink.send(secret, request).await,
+            Self::Smtp(sink) => sink.send(secret, request).await,
         }
     }
 }
