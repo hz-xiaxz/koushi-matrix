@@ -95,6 +95,20 @@ fn an_smtp_credential_is_retired_when_the_server_or_the_account_changes() {
 }
 
 #[test]
+fn a_sink_saved_before_the_credential_binding_existed_still_loads() {
+    // The binding is newer than the rest of the sink, so a file written by an earlier
+    // build must still load. A missing binding is not a wildcard: it means the stored
+    // credential, if there is one, is not usable for this sink.
+    let delivery: NotificationDeliverySettings = serde_json::from_str(
+        r#"{"enabled":true,"sinks":[{"id":"home","enabled":true,"destination":"me@example.com","from_address":"koushi@example.com","sender_name":"Koushi","config":{"kind":"resend","endpoint":"https://relay.example.com/emails"}}]}"#,
+    )
+    .expect("a settings file written before the binding existed must still load");
+    assert_eq!(delivery.sinks.len(), 1);
+    assert_eq!(delivery.sinks[0].secret_binding, None);
+    assert_eq!(delivery.sinks[0].destination, "me@example.com");
+}
+
+#[test]
 fn a_binding_that_does_not_name_this_configuration_is_dropped_on_load() {
     // The settings file can be edited while the app is closed, so a binding that does not
     // match is dropped at load rather than trusted.

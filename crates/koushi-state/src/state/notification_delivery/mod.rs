@@ -262,6 +262,7 @@ impl NotificationDeliveryTarget {
 /// The id names the credential in the credential store and is the only identity a
 /// sink has; two sinks never share one.
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
 pub struct NotificationSinkSettings {
     pub id: String,
     pub enabled: bool,
