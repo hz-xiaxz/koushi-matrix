@@ -1,9 +1,10 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, AppearanceSettings, ComposerSendShortcut, ComposerSettings,
     DisplaySettings, EmojiPreference, FontPreference, KeyboardSettings, LocaleSettings,
-    MediaSettings, NotificationSettings, RoomListSort, RoomSummary, SettingsPatch,
-    SettingsPersistenceState, SettingsValues, TextDirectionPreference, ThemePreference,
-    ThreadListOrder, TimelineSettings, TimelineThreadRootOrder, UiEvent, WindowSettings, reduce,
+    MediaSettings, NotificationDeliverySettings, NotificationSettings, RoomListSort, RoomSummary,
+    SettingsPatch, SettingsPersistenceState, SettingsValues, TextDirectionPreference,
+    ThemePreference, ThreadListOrder, TimelineSettings, TimelineThreadRootOrder, UiEvent,
+    WindowSettings, reduce,
 };
 
 fn dark_theme_patch() -> SettingsPatch {
@@ -104,6 +105,7 @@ fn settings_loaded_replaces_values_without_requiring_a_session() {
             url_previews_enabled: true,
             encrypted_url_previews_enabled: true,
         },
+        delivery: NotificationDeliverySettings::default(),
         media: MediaSettings {
             ..MediaSettings::default()
         },

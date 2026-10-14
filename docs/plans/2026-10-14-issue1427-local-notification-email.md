@@ -237,7 +237,13 @@ dispatches typed commands; every string is a catalog entry in English and Japane
 1. Canon and record: this plan, the canon sections above, and the issue.
 2. Secret surface with redaction tests, including "no secret reaches a settings
    snapshot or a diagnostics export".
-3. Relay boundary plus the Resend sink and the stub-server contract tests.
+3. Relay boundary plus the Resend sink and the stub-server contract tests. The
+   boundary and the sinks are a new leaf crate, `crates/koushi-notify`, because
+   `koushi-sdk` owns Matrix-facing primitives by the crate-ownership rule and
+   `koushi-store` owns credential and encrypted-file mechanics, so a sender that is
+   neither Matrix nor platform gets its own home; `koushi-core` depends on it and
+   performs the send, which keeps a sink secret inside the core rather than
+   serializing it into a DTO, an event, or a log.
 4. The SMTP sink, because it is the no-hassle path: an existing mailbox with an
    app password needs no signup, no card and no domain, and a QQ mailbox can push
    its new-mail reminder into WeChat, which covers the WeChat case without a

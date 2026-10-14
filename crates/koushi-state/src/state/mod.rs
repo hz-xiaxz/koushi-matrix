@@ -25,6 +25,7 @@ mod local_encryption;
 mod mention;
 mod native_attention;
 mod navigation;
+mod notification_delivery;
 mod profile;
 mod room;
 mod room_activity;
@@ -125,6 +126,12 @@ pub use settings::{
     SidebarSettings, TextDirectionPreference, ThemePreference, ThreadListOrder, TimelineSettings,
     TimelineThreadRootOrder, TypographySettings, UpdatesSettings, WindowSettings,
     sidebar_scope_key,
+};
+
+// ── Re-exports: notification delivery ───────────────────────────────────────
+pub use notification_delivery::{
+    NotificationDeliveryPrefixConsent, NotificationDeliverySettings, NotificationSinkConfig,
+    NotificationSinkSettings, SmtpTls,
 };
 
 // ── Re-exports: profile ─────────────────────────────────────────────────────
