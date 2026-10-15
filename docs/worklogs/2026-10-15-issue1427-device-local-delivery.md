@@ -93,6 +93,16 @@ Points worth keeping:
   binds the endpoint, and the plan promised a webhook sink this change does not
   offer.
 
+- Three jobs the local matrix does not run failed on the first CI pass: the QA
+  registry and its token literals had drifted and carried neither lane's new
+  tokens (`6e5875fb`); a `hidden` tabpanel is out of the accessibility tree, so
+  the account-notification spec could not reach the server switches it names, and
+  the same restructure left two switches answering to "Direct messages" for
+  anyone who opens that tab first (`cc2d9605`); and four rustls advisories
+  published for versions before 0.23.46 fail `cargo deny check` against the lock
+  `origin/main` carries too (`d84342c7`). Each fix was verified with the failing
+  job's own command.
+
 ## Known limitations, left as they are
 
 - The lane's own `load()` helper matches `Loaded` without correlating the request
