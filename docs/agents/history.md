@@ -25,7 +25,7 @@ rejected by the current runners. If you find one in `docs/superpowers/plans/`,
 | `Core homeserver QA (conduit)` CI job | Replaced | `Core invitations (tuwunel)` / `Core invitations (synapse)`, plus `Core QA binary tests` |
 | `qa:real-homeserver`, `qa:real-account`, `qa:headless-basic:real` package scripts | Removed (#1413). Automated QA never logs in to matrix.org or another external homeserver, with or without a dedicated test account | `qa:headless-local` / `qa:headless-basic:local` against a disposable local Tuwunel/Synapse |
 | `password-login-smoke --real-account-qa` | Rejected (#1413): the binary prints the retirement notice and exits non-zero before any credential is read | the same smoke against a loopback homeserver, without the flag |
-| `crates/koushi-qa` `real-homeserver-qa` binary | Retired (#1413): `main()` fails closed before credentials are read; the implementation below it is a tombstone, kept only while its boundary checker still requires it (#1435) | the local headless lanes |
+| `crates/koushi-qa` `real-homeserver-qa` binary, its `real_homeserver_qa/` module, and `scripts/desktop-real-homeserver-qa.mjs` | Retired (#1413) and deleted with the checkers that still required it (#1435). Automated QA uses disposable local Tuwunel/Synapse only | the local headless lanes |
 
 ## Sync backend selection and the sliding-sync probe (superseded)
 
