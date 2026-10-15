@@ -52,8 +52,10 @@ mod scenario_tests {
 
     #[test]
     fn real_homeserver_qa_scenario_defaults_to_space_compat_when_missing() {
-        // The default real lane proves space create/link/cleanup, matching the
-        // qa:headless-basic:real package script and docs/qa contract.
+        // The default real lane proved space create/link/cleanup, matching the
+        // retired qa:headless-basic:real package script and docs/qa contract.
+        // The binary is a fail-closed tombstone now (#1413); the enum and its
+        // default stay until #1435 decides whether it is deleted.
         assert_eq!(
             RealQaScenario::from_env_value(None).unwrap(),
             RealQaScenario::SpaceCompat
