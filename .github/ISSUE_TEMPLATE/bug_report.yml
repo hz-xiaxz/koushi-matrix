@@ -42,7 +42,7 @@ body:
     id: version
     attributes:
       label: Koushi version
-      description: The version shown by **About Koushi** in the application menu, or by **Check for updates** in **App Settings → Software update**.
+      description: The version shown by **About Koushi** or **Check for Updates…** in the Koushi menu.
       placeholder: "0.22.0"
     validations:
       required: true

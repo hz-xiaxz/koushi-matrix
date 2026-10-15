@@ -1093,21 +1093,30 @@ verification.
 `crates/matrix-sdk/src/event_cache` delta against upstream `6602de58e`:
 `live_tail.rs` is fork-only (380 lines, no upstream file), `pagination.rs` adds
 `inspect_timeline_gaps`, `repair_timeline_gap_inner`/`_task`/`_with_projection`,
-`run_backwards_cache_only`, `run_backwards_once_serialized`, `pagination_operation_lock`
-and the `RoomTimelineGap*`/`CacheOnlyBackOutcome` types, and `room/mod.rs` adds
+`run_backwards_once_serialized`, `pagination_operation_lock`
+and the `RoomTimelineGap*` types, and `room/mod.rs` adds
 `RoomTimelineSyncObservation`/`latest_sync_observation`. Upstream has no gap
-inspection or repair API, no cache-only back pagination and no live-tail or
-sync-observation surface at all; the fork's machinery is built on the standard
-pagination primitives rather than duplicating them, and every added item is
-consumed — Koushi through `crates/koushi-sdk/src/timeline.rs`
-(`inspect_room_timeline_gaps`, `repair_room_timeline_gap`,
-`refresh_room_live_tail`, `MatrixCommittedRoomTimelineCheckpoint`) and the SDK's
-own timeline path (`crates/matrix-sdk-ui/src/timeline/pagination.rs` calls
-`run_backwards_cache_only`). No dead or ungated test-only surface remains: the
-live-tail commit hook is already `#[cfg(feature = "testing")]` and
-`#[doc(hidden)]`. Decision: **keep** — there is no upstream equivalent to
-converge on, and re-expressing the machinery on the standard focus APIs would be
-a rewrite without an upstream counterpart, not a simplification.
+inspection or repair API and no live-tail or sync-observation surface at all;
+the fork's machinery is built on the standard pagination primitives rather than
+duplicating them, and every added item had a consumer — Koushi through
+`crates/koushi-sdk/src/timeline.rs` (`inspect_room_timeline_gaps`,
+`repair_room_timeline_gap`, `refresh_room_live_tail`,
+`MatrixCommittedRoomTimelineCheckpoint`). Decision: **keep** the
+gap-inspection/repair and live-tail machinery — there is no upstream equivalent
+to converge on, and re-expressing it on the standard focus APIs would be a
+rewrite without an upstream counterpart, not a simplification.
+
+> Superseded in part (2026-10-14, #1395). This section originally also counted
+> cache-only back pagination (`run_backwards_cache_only`,
+> `CacheOnlyBackOutcome`, and the SDK timeline path that called
+> `run_backwards_cache_only`) as present and consumed, claimed that no dead or
+> ungated test-only surface remained, and recorded `Decision: keep` for it. The
+> reachability audit below found the path dead — the `cache_restore` QA lane was
+> its only driver — and removed the SDK surface and the app side
+> (protocol command/event, Tauri command, Core state machine, QA scenario).
+> `scripts/check-retained-reachability.mjs` now fails if those symbols reappear
+> in a product crate; re-entry needs a live consumer and a fresh verdict, which
+> this paragraph cannot supply.
 
 **Thread aggregates after edits, redactions and duplicate delivery (bullet 3).**
 Function-set comparison of
