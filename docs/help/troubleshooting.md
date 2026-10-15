@@ -198,9 +198,8 @@ You can [ask an AI assistant](README.md#ask-an-ai-assistant) using the public
 repository and your version. If the issue persists, open a
 [GitHub issue](https://github.com/shinaoka/koushi-matrix/issues/new/choose) with:
 
-- Koushi version (**About Koushi** in the application menu, or **Check for
-  updates** in **App Settings → Software update**), operating system, and
-  whether the problem began after updating.
+- Koushi version (**About Koushi** or **Check for Updates…** in the Koushi
+  menu), operating system, and whether the problem began after updating.
 - The steps you took, what you expected, and what happened instead.
 - Whether the affected room is encrypted and whether the issue affects one room
   or several, without disclosing private room IDs or messages.
