@@ -51,7 +51,7 @@ Expected: PASS.
 
 **Files:**
 - Build output: `target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg`
-- Copy output: `/Users/hiroshi/projects/Element-dev/matrix-desktop/target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg`
+- Copy output: `<repo>/target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg`
 
 **Interfaces:**
 - Consumes: the Task 1 SDK patch and existing diagnostic changes.

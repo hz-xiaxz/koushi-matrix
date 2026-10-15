@@ -60,7 +60,7 @@ Run both focused tests and the adjacent `committed_response_becomes_authoritativ
 
 **Files:**
 - Build: `target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg`
-- Copy: `/Users/hiroshi/projects/Element-dev/matrix-desktop/target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg`
+- Copy: `<repo>/target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg`
 
 **Interfaces:**
 - Produces: installable arm64 DMG containing token migration and progressive connectivity.

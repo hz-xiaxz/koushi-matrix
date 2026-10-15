@@ -96,13 +96,13 @@ export function readyDesktopSnapshotFixture(): DesktopSnapshot {
       is_encrypted: false
     },
     {
-      room_id: "!dm-hiroshi:example.invalid",
-      display_name: "Hiroshi",
-      display_label: "Hiroshi",
-      original_display_label: "Hiroshi",
+      room_id: "!dm-member-one:example.invalid",
+      display_name: "Member 1",
+      display_label: "Member 1",
+      original_display_label: "Member 1",
       avatar: null,
       is_dm: true,
-      dm_user_ids: ["@hiroshi.shinaoka:matrix.org"],
+      dm_user_ids: ["@approved-self-dm:example.invalid"],
       tags: { favourite: null, low_priority: null },
       unread_count: 0,
       highlight_count: 0,
@@ -139,7 +139,7 @@ export function readyDesktopSnapshotFixture(): DesktopSnapshot {
     has_unread_mention: false,
     is_muted: false
   };
-  const dmItem = { ...roomItem, room_id: "!dm-hiroshi:example.invalid", display_name: "Hiroshi" };
+  const dmItem = { ...roomItem, room_id: "!dm-member-one:example.invalid", display_name: "Member 1" };
   snapshot.timeline = [{
     room_id: "!room-alpha:example.invalid",
     event_id: "$fixture:example.invalid",

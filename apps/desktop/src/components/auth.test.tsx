@@ -364,7 +364,7 @@ describe("RecoveryPanel", () => {
         snapshot={snapshot({
           session: {
             kind: "needsRecovery",
-            user_id: "@hiroshi.shinaoka.test:matrix.org",
+            user_id: "@qa-test-account:example.invalid",
             recovery_methods: ["recoveryKey"],
           },
           errors: [
@@ -392,7 +392,7 @@ describe("RecoveryPanel", () => {
         snapshot={snapshot({
           session: {
             kind: "needsRecovery",
-            user_id: "@hiroshi.shinaoka.test:matrix.org",
+            user_id: "@qa-test-account:example.invalid",
             recovery_methods: ["recoveryKey"],
           },
           errors: [

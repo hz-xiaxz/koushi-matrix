@@ -91,14 +91,14 @@ Date observed: 2026-06-19.
 Evidence:
 
 - The macOS real `matrix.org` GUI smoke reached `send=sent` when sending to the
-  approved self-DM target `@hiroshi.shinaoka:matrix.org`.
+  approved self-DM target `@approved-self-dm:example.invalid`.
 - Element Desktop showed the event from the test account, but the body rendered
   as `Unable to decrypt message`.
 - Element Desktop's event source projected the encrypted event as
   `m.bad.encrypted` with:
   `The sender's device has not sent us the keys for this message.`
 - Element on iPhone could decrypt the same message body and also showed:
-  `Hiroshi Shinaoka (test)'s (@hiroshi.shinaoka.test:matrix.org) identity was
+  `The QA test account's (@qa-test-account:example.invalid) identity was
   reset.`
 - `headless-core-qa` previously ran `reset_identity_for_qa` at the end of the
   E2EE trust stage. That operation is appropriate only for disposable QA
@@ -113,7 +113,7 @@ artifacts/mac-gui-smoke/2026-06-19T12-26-29-962Z
 
 - A private-data-free `/keys/query` diagnostic from the sender account saw
   `target_device_count=17 target_devices_with_keys=17 target_unsigned=0` for
-  `@hiroshi.shinaoka:matrix.org`.
+  `@approved-self-dm:example.invalid`.
 - A later `--keep-session` macOS real `matrix.org` GUI smoke reached
   `send=sent` with the same encrypted DM diagnostics, and Element Desktop could
   decrypt the latest synthetic message:
@@ -266,7 +266,7 @@ Follow-up:
 Resolved evidence:
 
 - Real `matrix.org` macOS GUI smoke to the approved self-DM target
-  `@hiroshi.shinaoka:matrix.org` reached `send=sent`, opened keyboard settings,
+  `@approved-self-dm:example.invalid` reached `send=sent`, opened keyboard settings,
   opened user settings, and completed logout cleanup.
 - Artifact:
 

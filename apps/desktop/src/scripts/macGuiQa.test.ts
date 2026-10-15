@@ -427,14 +427,14 @@ describe("desktop release scripts", () => {
     const output = runScript("scripts/desktop-mac-gui-smoke.mjs", [
       "--child-env",
       "--send-smoke-message=Koushi synthetic QA send",
-      "--send-smoke-user-id=@hiroshi.shinaoka:matrix.org"
+      "--send-smoke-user-id=@approved-self-dm:example.invalid"
     ]);
     const source = readFileSync(
       new URL("../../../../apps/desktop/src/App.tsx", import.meta.url),
       "utf8"
     );
 
-    expect(output).toContain("VITE_KOUSHI_QA_SEND_SMOKE_USER_ID=@hiroshi.shinaoka:matrix.org");
+    expect(output).toContain("VITE_KOUSHI_QA_SEND_SMOKE_USER_ID=@approved-self-dm:example.invalid");
     expect(source).toContain("qaSendSmokeTargetUserId");
     expect(source).toContain("api.startDirectMessage(targetUserId)");
     expect(source).toContain("void selectRoom(targetRoom.room_id)");

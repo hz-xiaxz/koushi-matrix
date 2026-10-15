@@ -704,7 +704,7 @@ git commit -m "feat: diagnose direct-message classification state"
 **Files:**
 - Verify: all Task 1-3 files
 - Build: `target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg`
-- Copy: `/Users/hiroshi/projects/Element-dev/matrix-desktop/target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg`
+- Copy: `<repo>/target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg`
 
 **Interfaces:**
 - Produces: an installable arm64 DMG containing the startup DM-classification fix and expanded diagnostics.
@@ -755,8 +755,8 @@ Run:
 ```bash
 hdiutil verify target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg
 shasum -a 256 target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg
-cp target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg /Users/hiroshi/projects/Element-dev/matrix-desktop/target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg
-shasum -a 256 /Users/hiroshi/projects/Element-dev/matrix-desktop/target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg
+cp target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg <repo>/target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg
+shasum -a 256 <repo>/target/release/bundle/dmg/Koushi_0.1.0_aarch64.dmg
 ```
 
 Expected: `hdiutil` reports `VALID`; source and copied SHA-256 values match.

@@ -847,7 +847,7 @@ describe("composerSendingAccount", () => {
       render(<Sidebar snapshot={readyDesktopSnapshotFixture()} {...sidebarProps()} />);
       const targets = [
         // Another DM row.
-        () => screen.getByRole("button", { name: "Hiroshi" }),
+        () => screen.getByRole("button", { name: "Member 1" }),
         // The room-list filter control.
         () => screen.getByRole("searchbox"),
         // A section header outside the menu.

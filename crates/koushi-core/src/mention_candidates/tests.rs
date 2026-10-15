@@ -61,17 +61,22 @@ fn exact_alias_then_prefix_then_substring_order_is_deterministic() {
 fn full_mxid_localpart_name_tokens_and_cjk_substrings_match() {
     let members = vec![
         member("@mxid-match:example.org", None, None, None),
-        member("@hiroshi:example.org", Some("Hiroshi Shinaoka"), None, None),
-        member("@jp:example.org", Some("品岡浩司"), None, None),
+        member(
+            "@name-token:example.invalid",
+            Some("Synthetic Member"),
+            None,
+            None,
+        ),
+        member("@jp:example.org", Some("山田太郎"), None, None),
     ];
 
     for (query, expected) in [
         ("@mxid-match:example.org", "@mxid-match:example.org"),
         ("mxid-match", "@mxid-match:example.org"),
-        ("shina", "@hiroshi:example.org"),
-        ("hiro", "@hiroshi:example.org"),
-        ("品岡", "@jp:example.org"),
-        ("浩司", "@jp:example.org"),
+        ("synth", "@name-token:example.invalid"),
+        ("nthetic", "@name-token:example.invalid"),
+        ("山田", "@jp:example.org"),
+        ("太郎", "@jp:example.org"),
     ] {
         let projection = project_candidates(query, members.clone(), RoomMentionPermission::Denied);
         assert_eq!(projection.candidates.len(), 1, "query={query}");
