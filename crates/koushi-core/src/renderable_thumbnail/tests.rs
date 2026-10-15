@@ -1,5 +1,29 @@
 use super::*;
 use std::fs;
+
+fn insert_avatar_entry(cache: &mut RenderableThumbnailCache, key: &str, bytes: Vec<u8>) {
+    cache
+        .insert(
+            RenderableThumbnailKind::Avatar,
+            key.to_owned(),
+            "",
+            key,
+            RenderableThumbnailContent::from_bytes(bytes),
+        )
+        .expect("test entry is within the avatar bound");
+}
+
+fn insert_link_preview_entry(cache: &mut RenderableThumbnailCache, key: &str, bytes: Vec<u8>) {
+    cache
+        .insert(
+            RenderableThumbnailKind::LinkPreview,
+            key.to_owned(),
+            "",
+            key,
+            RenderableThumbnailContent::from_bytes(bytes),
+        )
+        .expect("test entry is within the link-preview bound");
+}
 fn cache_test_lock() -> tokio::sync::MutexGuard<'static, ()> {
     super::test_cache_lock()
 }
@@ -69,9 +93,9 @@ fn resolved_reader_binds_ready_bytes_and_preserves_missing_avatar_demand() {
     drop(resolved);
     drop(missing);
     let large = store_renderable_thumbnail(
-        RenderableThumbnailKind::Avatar,
+        RenderableThumbnailKind::LinkPreview,
         "mxc://example.test/large-binding",
-        vec![0; MAX_RENDERABLE_THUMBNAIL_BYTES],
+        vec![0; MAX_LINK_PREVIEW_THUMBNAIL_BYTES],
     )
     .unwrap();
     let AvatarThumbnailState::Ready { source_ref, .. } = large else {
@@ -372,16 +396,12 @@ async fn installed_scope_owns_reader_leases_until_retirement_and_delivery_releas
 #[test]
 fn charged_lease_survives_eviction_without_restoring_discoverability() {
     let mut cache = RenderableThumbnailCache::default();
-    cache
-        .insert("avatar/first".into(), "", vec![7; 1024], "image/png".into())
-        .unwrap();
+    insert_avatar_entry(&mut cache, "avatar/first", vec![7; 1024]);
     let lease = cache.lease("avatar/first").unwrap();
     let clone = lease.clone();
     assert_eq!(*cache.lease_bytes.lock().unwrap(), 1024);
     for i in 0..MAX_RENDERABLE_THUMBNAIL_ENTRIES {
-        cache
-            .insert(format!("avatar/{i}"), "", vec![0], "image/png".into())
-            .unwrap();
+        insert_avatar_entry(&mut cache, &format!("avatar/{i}"), vec![0]);
     }
     assert!(cache.get("avatar/first").is_none());
     assert_eq!(lease.content().bytes, vec![7; 1024]);
@@ -396,23 +416,20 @@ fn charged_lease_survives_eviction_without_restoring_discoverability() {
 #[test]
 fn independent_leases_are_conservatively_capped_without_releasing_existing_charge() {
     let mut cache = RenderableThumbnailCache::default();
-    cache
-        .insert(
-            "avatar/large".into(),
-            "",
-            vec![0; MAX_RENDERABLE_THUMBNAIL_BYTES],
-            "image/png".into(),
-        )
-        .unwrap();
+    insert_link_preview_entry(
+        &mut cache,
+        "link-preview/large",
+        vec![0; MAX_LINK_PREVIEW_THUMBNAIL_BYTES],
+    );
     let leases: Vec<_> = (0..3)
-        .map(|_| cache.lease("avatar/large").unwrap())
+        .map(|_| cache.lease("link-preview/large").unwrap())
         .collect();
     assert_eq!(
         *cache.lease_bytes.lock().unwrap(),
         MAX_THUMBNAIL_LEASE_BYTES
     );
     assert_eq!(
-        cache.lease("avatar/large").err(),
+        cache.lease("link-preview/large").err(),
         Some(ThumbnailLeaseError::Capacity)
     );
     assert_eq!(
@@ -425,7 +442,7 @@ fn independent_leases_are_conservatively_capped_without_releasing_existing_charg
     );
     drop(leases);
     assert_eq!(*cache.lease_bytes.lock().unwrap(), 0);
-    assert!(cache.lease("avatar/large").is_ok());
+    assert!(cache.lease("link-preview/large").is_ok());
 }
 
 #[test]
@@ -433,9 +450,7 @@ fn insertion_moves_owned_thumbnail_bytes_without_copying() {
     let mut cache = RenderableThumbnailCache::default();
     let bytes = vec![7_u8; 64 * 1024];
     let allocation = bytes.as_ptr();
-    cache
-        .insert("avatar/test".into(), "", bytes, "image/png".into())
-        .unwrap();
+    insert_avatar_entry(&mut cache, "avatar/test", bytes);
     assert_eq!(cache.entries["avatar/test"].bytes.as_ptr(), allocation);
     assert_eq!(cache.stats().retained_bytes, 64 * 1024);
     assert_eq!(
@@ -585,19 +600,17 @@ fn lookup_rejects_uri_and_traversal_instead_of_parsing_adapter_schemes() {
 fn thumbnail_cache_is_bounded_by_entry_count_and_retained_bytes() {
     let mut cache = RenderableThumbnailCache::default();
     for index in 0..=(MAX_RENDERABLE_THUMBNAIL_ENTRIES + 8) {
-        cache
-            .insert(
-                format!("avatar/{index}"),
-                "",
-                vec![u8::try_from(index % 251).unwrap(); 1024],
-                "image/png".to_owned(),
-            )
-            .expect("test entry is within the cache bound");
+        insert_avatar_entry(
+            &mut cache,
+            &format!("avatar/{index}"),
+            vec![u8::try_from(index % 251).unwrap(); 1024],
+        );
     }
 
     let stats = cache.stats();
     assert!(stats.entry_count <= MAX_RENDERABLE_THUMBNAIL_ENTRIES);
-    assert!(stats.retained_bytes <= MAX_RENDERABLE_THUMBNAIL_BYTES);
+    assert!(stats.retained_bytes <= MAX_AVATAR_THUMBNAIL_BYTES);
+    assert!(stats.avatar_retained_bytes <= MAX_AVATAR_THUMBNAIL_BYTES);
     assert!(stats.eviction_count > 0);
     assert!(cache.get("avatar/0").is_none(), "oldest entry is evicted");
 }
@@ -611,14 +624,14 @@ fn oversized_thumbnail_is_rejected_without_publishing_a_ready_url() {
     let result = store_renderable_thumbnail(
         RenderableThumbnailKind::Avatar,
         "mxc://example.test/oversized",
-        vec![0; MAX_RENDERABLE_THUMBNAIL_BYTES + 1],
+        vec![0; MAX_AVATAR_THUMBNAIL_ENTRY_BYTES + 1],
     );
 
     assert_eq!(
         result,
         Err(RenderableThumbnailStoreError::TooLarge {
-            byte_count: MAX_RENDERABLE_THUMBNAIL_BYTES + 1,
-            max_bytes: MAX_RENDERABLE_THUMBNAIL_BYTES,
+            byte_count: MAX_AVATAR_THUMBNAIL_ENTRY_BYTES + 1,
+            max_bytes: MAX_AVATAR_THUMBNAIL_ENTRY_BYTES,
         })
     );
     let stats = renderable_thumbnail_cache_stats();
@@ -749,4 +762,155 @@ fn cleanup_legacy_plaintext_thumbnail_dirs_preserves_media_downloads() {
         fs::read(data_dir.join("media_downloads").join("download.bin")).expect("media file"),
         b"download"
     );
+}
+
+#[test]
+fn stats_export_the_lease_budget_charge_and_named_cache_limits() {
+    let mut cache = RenderableThumbnailCache::default();
+    insert_avatar_entry(&mut cache, "avatar/first", vec![7; 1024]);
+    assert_eq!(cache.stats().lease_charged_bytes, 0);
+
+    let lease = cache.lease("avatar/first").unwrap();
+    // The export reports the conservative lease-budget charge, not unique bytes.
+    assert_eq!(cache.stats().lease_charged_bytes, 1024);
+    let message =
+        koushi_diagnostics::format_event(&renderable_thumbnail_summary_event(cache.stats()));
+    assert!(message.contains("lease_charged_bytes=1024"));
+    assert!(message.contains("max_entry_count=256"));
+    assert!(message.contains("max_avatar_bytes=8388608"));
+    assert!(message.contains("max_avatar_entry_bytes=262144"));
+    assert!(message.contains("max_link_preview_bytes=33554432"));
+    assert!(message.contains("avatar_entry_count=1"));
+    assert!(message.contains("avatar_retained_bytes=1024"));
+    assert!(message.contains("average_entry_bytes=1024"));
+    assert!(message.contains("max_lease_bytes=100663296"));
+    assert!(message.contains("lease_accounting=charged_budget_overlaps_retained_bytes"));
+    assert!(message.contains("cache_scope=named_caches_only"));
+
+    drop(lease);
+    assert_eq!(cache.stats().lease_charged_bytes, 0);
+}
+
+#[test]
+fn cache_keys_distinguish_thumbnail_identity() {
+    let small = renderable_thumbnail_cache_key_for_account(
+        RenderableThumbnailKind::Avatar,
+        "@a",
+        "mxc://x",
+        "fit-64-webp",
+    );
+    let large = renderable_thumbnail_cache_key_for_account(
+        RenderableThumbnailKind::Avatar,
+        "@a",
+        "mxc://x",
+        "fit-120-webp",
+    );
+    assert_ne!(small, large, "two sizes must not collide on one source");
+    assert_eq!(
+        small,
+        renderable_thumbnail_cache_key_for_account(
+            RenderableThumbnailKind::Avatar,
+            "@a",
+            "mxc://x",
+            "fit-64-webp"
+        )
+    );
+    assert_eq!(
+        renderable_thumbnail_cache_key(RenderableThumbnailKind::Avatar, "@a", "mxc://x"),
+        renderable_thumbnail_cache_key_for_account(
+            RenderableThumbnailKind::Avatar,
+            "@a",
+            "mxc://x",
+            AVATAR_THUMBNAIL_IDENTITY
+        )
+    );
+}
+
+#[test]
+fn retiring_a_source_drops_every_identity_of_that_source_only() {
+    let _guard = cache_test_lock();
+    clear_renderable_thumbnail_cache();
+    let small = store_renderable_thumbnail_variant_for_account(
+        RenderableThumbnailKind::Avatar,
+        "@a",
+        "mxc://a",
+        "fit-64-webp",
+        RenderableThumbnailContent::from_bytes(vec![7; 32]),
+    )
+    .expect("small avatar variant");
+    let large = store_renderable_thumbnail_variant_for_account(
+        RenderableThumbnailKind::Avatar,
+        "@a",
+        "mxc://a",
+        AVATAR_THUMBNAIL_IDENTITY,
+        RenderableThumbnailContent {
+            bytes: vec![8; 64],
+            mime_type: Some("image/webp".to_owned()),
+            width: Some(120),
+            height: Some(60),
+        },
+    )
+    .expect("large avatar variant");
+    assert_eq!(
+        (
+            lookup_renderable_thumbnail(match &large {
+                AvatarThumbnailState::Ready { source_ref, .. } => source_ref,
+                other => panic!("expected ready, got {other:?}"),
+            })
+            .expect("stored dimensions are readable")
+            .width,
+            lookup_renderable_thumbnail(match &large {
+                AvatarThumbnailState::Ready { source_ref, .. } => source_ref,
+                other => panic!("expected ready, got {other:?}"),
+            })
+            .expect("stored dimensions are readable")
+            .height,
+        ),
+        (Some(120), Some(60)),
+        "the cached entry records the size that was stored"
+    );
+    let other = store_renderable_thumbnail_variant_for_account(
+        RenderableThumbnailKind::Avatar,
+        "@a",
+        "mxc://b",
+        AVATAR_THUMBNAIL_IDENTITY,
+        RenderableThumbnailContent::from_bytes(vec![9; 16]),
+    )
+    .expect("other avatar");
+    let preview = store_renderable_thumbnail_for_account(
+        RenderableThumbnailKind::LinkPreview,
+        "@a",
+        "https://example.test/a",
+        vec![1; 16],
+    )
+    .expect("link preview");
+
+    let refs = [&small, &large, &other, &preview].map(|state| match state {
+        AvatarThumbnailState::Ready { source_ref, .. } => source_ref.clone(),
+        other => panic!("expected ready, got {other:?}"),
+    });
+
+    assert_eq!(
+        retire_renderable_thumbnail_source_for_account("@a", "mxc://a"),
+        2
+    );
+    assert!(lookup_renderable_thumbnail(&refs[0]).is_none());
+    assert!(lookup_renderable_thumbnail(&refs[1]).is_none());
+    assert!(lookup_renderable_thumbnail(&refs[2]).is_some());
+    assert!(lookup_renderable_thumbnail(&refs[3]).is_some());
+    clear_renderable_thumbnail_cache();
+}
+
+#[test]
+fn avatar_and_link_preview_budgets_are_independent() {
+    let mut cache = RenderableThumbnailCache::default();
+    insert_link_preview_entry(&mut cache, "link-preview/keep", vec![0; 1024]);
+    for index in 0..=(MAX_RENDERABLE_THUMBNAIL_ENTRIES + 8) {
+        insert_avatar_entry(&mut cache, &format!("avatar/{index}"), vec![1; 1024]);
+    }
+    let stats = cache.stats();
+    assert!(stats.avatar_entry_count <= MAX_RENDERABLE_THUMBNAIL_ENTRIES);
+    assert_eq!(stats.link_preview_entry_count, 1);
+    assert_eq!(stats.link_preview_retained_bytes, 1024);
+    assert!(cache.get("link-preview/keep").is_some());
 }

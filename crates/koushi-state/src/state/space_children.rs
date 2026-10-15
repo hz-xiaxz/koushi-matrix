@@ -53,6 +53,9 @@ pub struct SpaceChildSummary {
     pub is_space: bool,
     #[serde(default)]
     pub joined_members: u64,
+    /// Issue #1410: the Space's `m.space.child` marks this child suggested.
+    #[serde(default)]
+    pub suggested: bool,
 }
 
 impl fmt::Debug for SpaceChildSummary {
@@ -67,6 +70,7 @@ impl fmt::Debug for SpaceChildSummary {
             .field("can_join", &self.can_join)
             .field("is_space", &self.is_space)
             .field("joined_members", &self.joined_members)
+            .field("suggested", &self.suggested)
             .finish()
     }
 }
@@ -97,6 +101,24 @@ pub struct SpaceChildrenState {
     pub children: Vec<SpaceChildSummary>,
     #[serde(default)]
     pub load: SpaceChildrenLoadState,
+    /// Issue #1410: whether this account may send `m.space.child` in the
+    /// selected Space, loaded with `children` under the same generation.
+    #[serde(default)]
+    pub can_edit_suggested: bool,
+    /// Issue #1410: the in-flight or failed suggested toggle for the selected
+    /// Space. Reset with the selection.
+    #[serde(default)]
+    pub suggested_edit: SpaceChildSuggestedEditState,
+    /// Issue #1410: the one-time offer to join a newly joined Space's
+    /// suggested rooms. Survives selection changes: an offer being answered
+    /// or joined must not vanish when the user looks elsewhere.
+    #[serde(default)]
+    pub suggested_offer: SuggestedRoomsOffer,
+    /// Issue #1410: rooms this client joined recently, newest last, bounded
+    /// to [`RECENTLY_JOINED_ROOM_LIMIT`]. The first children load of a Space
+    /// found here may make an offer and consumes the entry. Core-internal.
+    #[serde(skip)]
+    pub recently_joined_room_ids: RecentlyJoinedRoomIds,
 }
 
 impl SpaceChildrenState {
@@ -105,6 +127,204 @@ impl SpaceChildrenState {
         match self.selected_space_id.as_deref() {
             Some(selected) if selected == space_id => &self.children,
             _ => &[],
+        }
+    }
+}
+
+/// Issue #1410: how many recently joined room IDs are kept for the
+/// suggested-rooms offer.
+pub const RECENTLY_JOINED_ROOM_LIMIT: usize = 16;
+
+/// Recently joined room IDs (#1410). Debug output never carries the IDs.
+#[derive(Clone, Default, Eq, PartialEq)]
+pub struct RecentlyJoinedRoomIds(pub Vec<String>);
+
+impl fmt::Debug for RecentlyJoinedRoomIds {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RecentlyJoinedRoomIds")
+            .field("len", &self.0.len())
+            .finish()
+    }
+}
+
+impl RecentlyJoinedRoomIds {
+    pub fn record(&mut self, room_id: &str) {
+        self.0.retain(|recorded| recorded != room_id);
+        self.0.push(room_id.to_owned());
+        let excess = self.0.len().saturating_sub(RECENTLY_JOINED_ROOM_LIMIT);
+        self.0.drain(..excess);
+    }
+
+    /// Remove `room_id`, reporting whether it was recorded.
+    pub fn take(&mut self, room_id: &str) -> bool {
+        let before = self.0.len();
+        self.0.retain(|recorded| recorded != room_id);
+        self.0.len() != before
+    }
+}
+
+/// Issue #1410: the selected Space's suggested toggle.
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SpaceChildSuggestedEditState {
+    #[default]
+    Idle,
+    Saving {
+        request_id: u64,
+        child_room_id: String,
+        suggested: bool,
+    },
+    Failed {
+        child_room_id: String,
+        suggested: bool,
+        failure: OperationFailureKind,
+    },
+}
+
+impl fmt::Debug for SpaceChildSuggestedEditState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Idle => formatter.write_str("Idle"),
+            Self::Saving {
+                request_id,
+                suggested,
+                ..
+            } => formatter
+                .debug_struct("Saving")
+                .field("request_id", request_id)
+                .field("child_room_id", &"RoomId(..)")
+                .field("suggested", suggested)
+                .finish(),
+            Self::Failed {
+                suggested, failure, ..
+            } => formatter
+                .debug_struct("Failed")
+                .field("child_room_id", &"RoomId(..)")
+                .field("suggested", suggested)
+                .field("failure", failure)
+                .finish(),
+        }
+    }
+}
+
+/// Issue #1410: a suggested room offered for joining, named as the Space's
+/// children projection named it when the offer was made.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SuggestedRoomCandidate {
+    pub room_id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub display_name_placeholder: Option<super::room::RoomNamePlaceholder>,
+}
+
+impl fmt::Debug for SuggestedRoomCandidate {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SuggestedRoomCandidate")
+            .field("room_id", &"RoomId(..)")
+            .field("display_name", &"RoomName(..)")
+            .finish()
+    }
+}
+
+/// Issue #1410: one room's outcome in a suggested-rooms join, as Core reports
+/// it. `failure` is `None` when the room was joined.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SuggestedRoomJoinOutcome {
+    pub room_id: String,
+    #[serde(default)]
+    pub failure: Option<OperationFailureKind>,
+}
+
+impl fmt::Debug for SuggestedRoomJoinOutcome {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SuggestedRoomJoinOutcome")
+            .field("room_id", &"RoomId(..)")
+            .field("failure", &self.failure)
+            .finish()
+    }
+}
+
+/// Issue #1410: a settled room in a suggested-rooms join, with its name.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SuggestedRoomJoinResult {
+    pub room_id: String,
+    pub display_name: String,
+    #[serde(default)]
+    pub display_name_placeholder: Option<super::room::RoomNamePlaceholder>,
+    #[serde(default)]
+    pub failure: Option<OperationFailureKind>,
+}
+
+impl fmt::Debug for SuggestedRoomJoinResult {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("SuggestedRoomJoinResult")
+            .field("room_id", &"RoomId(..)")
+            .field("display_name", &"RoomName(..)")
+            .field("failure", &self.failure)
+            .finish()
+    }
+}
+
+/// Issue #1410: the opt-in offer to join a newly joined Space's suggested
+/// rooms ([canon](../../../../docs/architecture/state-machine.md)).
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum SuggestedRoomsOffer {
+    #[default]
+    None,
+    Offered {
+        space_id: String,
+        rooms: Vec<SuggestedRoomCandidate>,
+    },
+    Joining {
+        request_id: u64,
+        space_id: String,
+        rooms: Vec<SuggestedRoomCandidate>,
+    },
+    /// At least one room failed; every room's result is listed.
+    Completed {
+        space_id: String,
+        results: Vec<SuggestedRoomJoinResult>,
+    },
+}
+
+impl SuggestedRoomsOffer {
+    pub fn space_id(&self) -> Option<&str> {
+        match self {
+            Self::None => None,
+            Self::Offered { space_id, .. }
+            | Self::Joining { space_id, .. }
+            | Self::Completed { space_id, .. } => Some(space_id),
+        }
+    }
+}
+
+impl fmt::Debug for SuggestedRoomsOffer {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::None => formatter.write_str("None"),
+            Self::Offered { rooms, .. } => formatter
+                .debug_struct("Offered")
+                .field("space_id", &"RoomId(..)")
+                .field("rooms", rooms)
+                .finish(),
+            Self::Joining {
+                request_id, rooms, ..
+            } => formatter
+                .debug_struct("Joining")
+                .field("request_id", request_id)
+                .field("space_id", &"RoomId(..)")
+                .field("rooms", rooms)
+                .finish(),
+            Self::Completed { results, .. } => formatter
+                .debug_struct("Completed")
+                .field("space_id", &"RoomId(..)")
+                .field("results", results)
+                .finish(),
         }
     }
 }

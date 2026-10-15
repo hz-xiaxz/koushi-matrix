@@ -55,6 +55,49 @@ fn file_credential_store_round_trip() {
 }
 
 #[test]
+fn notification_sink_secret_round_trips_in_the_file_store() {
+    let dir = tempdir().expect("tempdir");
+    let backend = CredentialStoreBackend::FileDir(FileCredentialStore::new(dir.path()));
+    let id = koushi_key::NotificationSinkSecretId::parse("qq-mail").expect("id");
+    let secret = koushi_key::NotificationSinkSecret::new("qm-auth-code-value").expect("secret");
+
+    assert!(koushi_key::is_missing_credential_error(
+        &backend.load_notification_sink_secret(&id).unwrap_err()
+    ));
+
+    backend
+        .save_notification_sink_secret(&id, &secret)
+        .expect("save");
+    let restored = backend.load_notification_sink_secret(&id).expect("load");
+    assert_eq!(restored.as_str(), "qm-auth-code-value");
+
+    // The entry is named after the validated sink id, never after the value.
+    let names: Vec<String> = std::fs::read_dir(dir.path())
+        .expect("read credential dir")
+        .map(|entry| {
+            entry
+                .expect("entry")
+                .file_name()
+                .to_string_lossy()
+                .into_owned()
+        })
+        .collect();
+    assert!(!names.is_empty(), "the secret should be persisted");
+    assert!(
+        names
+            .iter()
+            .all(|name| !name.contains("qm-auth-code-value"))
+    );
+
+    backend
+        .delete_notification_sink_secret(&id)
+        .expect("delete");
+    assert!(koushi_key::is_missing_credential_error(
+        &backend.load_notification_sink_secret(&id).unwrap_err()
+    ));
+}
+
+#[test]
 fn os_keychain_does_not_read_legacy_matrix_desktop_service() {
     let data_dir = tempdir().expect("tempdir");
     let backend = koushi_key::InMemoryCredentialBackend::default();

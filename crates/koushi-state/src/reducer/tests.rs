@@ -284,6 +284,8 @@ fn test_room(room_id: &str, avatar: Option<AvatarImage>) -> crate::state::RoomSu
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -533,6 +535,65 @@ fn search_crawler_is_admitted_only_after_authoritative_room_list_readiness() {
     );
 }
 
+#[test]
+fn an_authoritative_room_list_reaches_the_crawler_while_paused_and_when_empty() {
+    use crate::state::SearchCrawlerSpeed;
+
+    // Crawling paused at startup: the notification still carries the account's
+    // content policy, which governs queries, and the room set to prune.
+    let mut state = ready_state();
+    state.settings.values.search_crawler.speed = SearchCrawlerSpeed::Paused;
+    reduce(
+        &mut state,
+        AppAction::RoomListBootstrapStarted {
+            generation: 22,
+            source: crate::state::RoomListSource::Live,
+        },
+    );
+    let effects = reduce(
+        &mut state,
+        AppAction::RoomListSnapshotAuthoritative {
+            generation: 22,
+            source: crate::state::RoomListSource::Live,
+            spaces: Vec::new(),
+            rooms: vec![test_room("!paused:example.invalid", None)],
+            invites: Vec::new(),
+        },
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, AppEffect::NotifySearchCrawlerRoomsAvailable { .. })),
+        "a paused crawler still needs the account's content policy and room set"
+    );
+
+    // Leaving the last room must reach the crawler too, so its commitment is
+    // pruned instead of surviving into the next session.
+    reduce(
+        &mut state,
+        AppAction::RoomListBootstrapStarted {
+            generation: 23,
+            source: crate::state::RoomListSource::Live,
+        },
+    );
+    let effects = reduce(
+        &mut state,
+        AppAction::RoomListSnapshotAuthoritative {
+            generation: 23,
+            source: crate::state::RoomListSource::Live,
+            spaces: Vec::new(),
+            rooms: Vec::new(),
+            invites: Vec::new(),
+        },
+    );
+    assert!(
+        effects
+            .iter()
+            .any(|effect| matches!(effect, AppEffect::NotifySearchCrawlerRoomsAvailable { .. })),
+        "an empty authoritative room list must still reach the crawler"
+    );
+}
+
 fn latest_event(event_id: &str, timestamp_ms: u64) -> RoomLatestEventSummary {
     RoomLatestEventSummary {
         event_id: event_id.to_owned(),
@@ -543,6 +604,7 @@ fn latest_event(event_id: &str, timestamp_ms: u64) -> RoomLatestEventSummary {
         sender_label: Some("Bob".to_owned()),
         sender_avatar: None,
         preview: Some("body".to_owned()),
+        message_text: None,
         timestamp_ms,
         is_redacted: false,
     }
@@ -846,6 +908,8 @@ fn bounded_live_receipt_summary_preserves_exact_total() {
         &mut state,
         AppAction::LiveRoomReceiptSummariesUpdated {
             room_id: "!room:example.invalid".to_owned(),
+            scope: crate::state::ReceiptScope::Main,
+            scoped_event_ids: Vec::new(),
             receipts_by_event: vec![LiveEventReceiptSummaryUpdate {
                 event_id: "$event:example.invalid".to_owned(),
                 readers,
@@ -868,6 +932,7 @@ fn live_signal_actions_update_rust_owned_state() {
         &mut state,
         AppAction::LiveRoomReceiptsWindowReconciled {
             room_id: "!room:example.invalid".to_owned(),
+            scope: crate::state::ReceiptScope::Main,
             scoped_event_ids: Vec::new(),
             receipts_by_event: vec![LiveEventReceipts {
                 event_id: "$event:example.invalid".to_owned(),
@@ -904,6 +969,8 @@ fn live_signal_actions_update_rust_owned_state() {
                 },
             )]
             .into(),
+            focused_receipts_by_event: Default::default(),
+            thread_receipts_by_event: Default::default(),
             fully_read_event_id: None,
             typing_user_ids: Vec::new(),
             typing_users: Vec::new(),
@@ -1154,6 +1221,7 @@ fn room_list_update_refreshes_native_attention_badge_without_initial_sync_sound_
     unread_room.unread_count = 3;
     unread_room.notification_count = 3;
     unread_room.highlight_count = 1;
+    unread_room.latest_event = Some(latest_event("$observed:example.invalid", 42));
 
     let effects = reduce(
         &mut state,
@@ -1170,9 +1238,7 @@ fn room_list_update_refreshes_native_attention_badge_without_initial_sync_sound_
     assert_eq!(state.native_attention.summary.candidate, None);
     assert_eq!(
         state.native_attention.dispatch,
-        crate::state::NativeAttentionDispatchState::Suppressed {
-            reason: crate::state::NativeAttentionSuppressionReason::InitialSync,
-        }
+        crate::state::NativeAttentionDispatchState::Idle
     );
 }
 
@@ -1484,6 +1550,7 @@ fn live_read_receipts_project_reader_profiles_order_and_overflow() {
         &mut state,
         AppAction::LiveRoomReceiptsWindowReconciled {
             room_id: "!room:example.invalid".to_owned(),
+            scope: crate::state::ReceiptScope::Main,
             scoped_event_ids: Vec::new(),
             receipts_by_event: vec![LiveEventReceipts {
                 event_id: "$event:example.invalid".to_owned(),
@@ -1694,4 +1761,70 @@ fn media_download_updated_ignored_without_ready_session() {
 
     assert!(effects.is_empty());
     assert!(state.timeline.media_downloads.is_empty());
+}
+
+/// #1259: the SDK thread-cache unread value stamps the Threads-list row and clears.
+#[test]
+fn thread_unread_observation_stamps_the_threads_list_row() {
+    fn row() -> crate::state::ThreadsListItem {
+        crate::state::ThreadsListItem {
+            room_id: "!r:example.invalid".to_owned(),
+            root_event_id: "$root:example.invalid".to_owned(),
+            root_sender: "@alice:example.invalid".to_owned(),
+            root_sender_label: Some("Alice".to_owned()),
+            root_body_preview: Some("Root".to_owned()),
+            root_timestamp_ms: Some(1_700_000_000_000),
+            latest_event_id: Some("$reply:example.invalid".to_owned()),
+            latest_sender: Some("@bob:example.invalid".to_owned()),
+            latest_sender_label: Some("Bob".to_owned()),
+            latest_body_preview: Some("Reply".to_owned()),
+            latest_timestamp_ms: Some(1_700_000_100_000),
+            reply_count: 1,
+            unread_count: 0,
+        }
+    }
+
+    let mut state = ready_state();
+    state.rooms = vec![test_room("!r:example.invalid", None)];
+    reduce(
+        &mut state,
+        AppAction::OpenThreadsList {
+            request_id: 1,
+            room_id: "home".to_owned(),
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::ThreadsListOpened {
+            request_id: 1,
+            room_id: "home".to_owned(),
+            items: vec![row()],
+            end_reached: true,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::ThreadUnreadObserved {
+            room_id: "!r:example.invalid".to_owned(),
+            root_event_id: "$root:example.invalid".to_owned(),
+            unread: 2,
+            highlight: 0,
+        },
+    );
+    let unread = |state: &AppState| match &state.threads_list {
+        crate::state::ThreadsListState::Open { items, .. } => items[0].unread_count,
+        _ => panic!("threads list should be open"),
+    };
+    assert_eq!(unread(&state), 2);
+
+    reduce(
+        &mut state,
+        AppAction::ThreadUnreadObserved {
+            room_id: "!r:example.invalid".to_owned(),
+            root_event_id: "$root:example.invalid".to_owned(),
+            unread: 0,
+            highlight: 0,
+        },
+    );
+    assert_eq!(unread(&state), 0);
 }

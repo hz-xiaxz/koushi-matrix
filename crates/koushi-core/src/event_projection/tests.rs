@@ -41,6 +41,7 @@ fn timeline_item_fixture(event_id: &str, is_redacted: bool) -> TimelineItem {
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: !is_redacted,
         is_redacted,
@@ -111,6 +112,7 @@ fn timeline_item_serializes_thread_fields_reactions_and_redaction_affordances() 
         thread_root: Some("$root:test".to_owned()),
         thread_summary: Some(ThreadSummaryDto {
             reply_count: 2,
+            unread_count: 0,
             latest_event_id: Some("$latest-reply:test".to_owned()),
             latest_sender: Some("@bob:example.invalid".to_owned()),
             latest_sender_label: None,
@@ -121,6 +123,7 @@ fn timeline_item_serializes_thread_fields_reactions_and_redaction_affordances() 
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: vec![ReactionGroup {
             key: "👍".to_owned(),
             count: 2,
@@ -176,7 +179,8 @@ fn timeline_item_serializes_thread_fields_reactions_and_redaction_affordances() 
                 "latest_sender": "@bob:example.invalid",
                 "latest_sender_label": null,
                 "latest_body_preview": "latest reply",
-                "latest_timestamp_ms": 1456
+                "latest_timestamp_ms": 1456,
+                "unread_count": 0
         })
     );
 }
@@ -202,6 +206,7 @@ fn timeline_item_serializes_reply_quote_without_debugging_body() {
             sender: Some("@bob:example.invalid".to_owned()),
             sender_label: None,
             body_preview: Some("quoted body".to_owned()),
+            mentioned_user_ids: Vec::new(),
             formatted: Some(koushi_state::ReplyQuoteFormattedBody {
                 html: "<p>quoted <strong>body</strong></p>".to_owned(),
                 plain_text: "quoted body".to_owned(),
@@ -215,6 +220,7 @@ fn timeline_item_serializes_reply_quote_without_debugging_body() {
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: true,
         is_redacted: false,
@@ -286,6 +292,7 @@ fn timeline_item_serializes_formatted_body_without_debugging_content() {
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: true,
         is_redacted: false,
@@ -357,6 +364,7 @@ fn timeline_item_serializes_rust_owned_message_actions() {
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: true,
         is_redacted: false,
@@ -532,7 +540,7 @@ fn message_source_and_forward_events_are_typed_and_redacted_in_debug() {
     let loaded = TimelineEvent::MessageSourceLoaded {
         request_id: fake_rid(30),
         key: key.clone(),
-        source: source.clone(),
+        source: Box::new(source.clone()),
     };
     let forwarded = TimelineEvent::MessageForwarded {
         request_id: fake_rid(31),
@@ -619,6 +627,7 @@ fn timeline_item_serializes_outbound_send_state_without_raw_error() {
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: false,
         is_redacted: false,
@@ -694,6 +703,7 @@ fn timeline_item_serializes_media_metadata_without_encryption_secrets() {
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: true,
         is_redacted: false,

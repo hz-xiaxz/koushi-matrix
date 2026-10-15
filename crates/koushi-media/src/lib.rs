@@ -1,8 +1,12 @@
+mod decoded;
+#[cfg(test)]
+mod decoded_tests;
 mod image_kind;
 mod thumbnail;
 #[cfg(test)]
 mod thumbnail_tests;
 
+pub use decoded::{DecodeLimits, DecodedRgbaImage, DecodedRgbaImageError};
 pub use image_kind::{ImageKind, image_kind};
 pub use thumbnail::thumbnail_jpeg;
 
@@ -64,6 +68,11 @@ pub enum ImagePreparationError {
     Decode,
     #[error("image encoding failed")]
     Encode,
+    /// The source format is deliberately not decoded (GIF, animated WebP/PNG,
+    /// unrecognized). Distinct from [`Self::Decode`] so a caller can keep the
+    /// bytes verbatim without also masking a decoder guard rejection (#1396).
+    #[error("image format is not supported")]
+    UnsupportedFormat,
 }
 
 /// Linear scale applied to both dimensions of the source image.
@@ -218,6 +227,103 @@ pub fn prepare_image_output(
     )?;
     variant.recommended = false;
     Ok(variant)
+}
+
+/// Encode one output fitted to a maximum long edge with a concrete encoding.
+///
+/// Unlike [`prepare_image_output`], whose resize is a linear fraction of the
+/// source, the size here is a pixel budget, which is what a display slot needs.
+/// The source is never upscaled: an image already within `target_long_edge`
+/// keeps its own dimensions. Non-decodable content (GIF, animated WebP/PNG)
+/// is reported as [`ImagePreparationError::UnsupportedFormat`] so the caller can
+/// decide its fallback, while a decoder guard rejection stays
+/// [`ImagePreparationError::Decode`] and must not become a pass-through.
+pub fn prepare_image_output_fitted(
+    source: &[u8],
+    filename: &str,
+    target_long_edge: u32,
+    format: ImageOutputFormat,
+    policy: &ImagePreparationPolicy,
+) -> Result<PreparedImageVariant, ImagePreparationError> {
+    if source.is_empty() {
+        return Err(ImagePreparationError::Empty);
+    }
+    let target_format = match format {
+        // Pixels carry no source encoding, so `Keep` cannot be resolved here.
+        ImageOutputFormat::Keep => return Err(ImagePreparationError::Encode),
+        ImageOutputFormat::Png => PreparedImageFormat::Png,
+        ImageOutputFormat::Jpeg => PreparedImageFormat::Jpeg,
+        ImageOutputFormat::WebP => PreparedImageFormat::WebP,
+    };
+    let heif = probe_heif(source);
+    let guessed = image::guess_format(source).ok();
+    let source_format = if heif.is_some() {
+        PreparedImageFormat::Heif
+    } else {
+        prepared_format(guessed)
+    };
+    let decodable = match source_format {
+        PreparedImageFormat::Heif => true,
+        PreparedImageFormat::Png | PreparedImageFormat::Jpeg | PreparedImageFormat::WebP => {
+            !animated_webp(source) && !animated_png(source)
+        }
+        PreparedImageFormat::Gif | PreparedImageFormat::Other => false,
+    };
+    if !decodable {
+        return Err(ImagePreparationError::UnsupportedFormat);
+    }
+    let decoded = match source_format {
+        PreparedImageFormat::Heif => decode_heif(source, heif.expect("recognized HEIF"))?,
+        _ => decode_with_limits(source, guessed.expect("recognized image format"))
+            .map_err(|_| ImagePreparationError::Decode)?,
+    };
+    let long_edge = target_long_edge.max(1);
+    let scaled = resize_to_long_edge(&decoded, long_edge);
+    let mut variant = encoded_variant(
+        &format!("fit-{long_edge}-{}", format.token()),
+        filename,
+        target_format,
+        &scaled,
+        policy.quality_percent,
+    )?;
+    variant.recommended = false;
+    Ok(variant)
+}
+///
+/// `format` must be a concrete encoding: pixels carry no source encoding, so
+/// [`ImageOutputFormat::Keep`] is rejected and callers resolve it first. The
+/// returned variant strips all source metadata, exactly like
+/// [`prepare_image_output`] does for its decoded sources.
+pub fn prepare_decoded_image_output(
+    decoded: DecodedRgbaImage,
+    filename: &str,
+    request: ImageOutputRequest,
+    policy: &ImagePreparationPolicy,
+) -> Result<PreparedImageVariant, ImagePreparationError> {
+    let target_format = match request.format {
+        ImageOutputFormat::Keep => return Err(ImagePreparationError::Encode),
+        ImageOutputFormat::Png => PreparedImageFormat::Png,
+        ImageOutputFormat::Jpeg => PreparedImageFormat::Jpeg,
+        ImageOutputFormat::WebP => PreparedImageFormat::WebP,
+    };
+    let (width, height) = (decoded.width(), decoded.height());
+    let image = DynamicImage::ImageRgba8(
+        RgbaImage::from_raw(width, height, decoded.into_pixels())
+            .ok_or(ImagePreparationError::Decode)?,
+    );
+    // Avoid copying a full-resolution buffer for the unscaled output.
+    let scaled = if request.resize == ImageResizeScale::Original {
+        image
+    } else {
+        scale_linearly(&image, request.resize)
+    };
+    encoded_variant(
+        &request.identity(),
+        filename,
+        target_format,
+        &scaled,
+        policy.quality_percent,
+    )
 }
 
 /// Halve each dimension per scale step, never below one pixel.
@@ -406,6 +512,23 @@ fn encoded_variant(
         thumbnail_refreshed: true,
         recommended: false,
     })
+}
+
+/// Decoded dimensions of `source` without retaining pixels, for content that is
+/// stored verbatim because it cannot be re-encoded (#1396). Returns `None` when
+/// the format is unrecognized or the header cannot be read within the decode
+/// guards.
+pub fn probe_image_dimensions(source: &[u8]) -> Option<(u32, u32)> {
+    if source.is_empty() {
+        return None;
+    }
+    if let Some(heif) = probe_heif(source) {
+        return decode_heif(source, heif)
+            .ok()
+            .map(|image| (image.width(), image.height()));
+    }
+    let format = image::guess_format(source).ok()?;
+    read_dimensions_with_limits(source, format).ok()
 }
 
 fn resize_to_long_edge(image: &DynamicImage, target_long_edge: u32) -> DynamicImage {

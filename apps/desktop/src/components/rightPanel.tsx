@@ -17,6 +17,8 @@ import type {
   RoomNotificationMode,
   RoomJoinRule,
   RoomSettingChange,
+  RoomAccessDraftCommand,
+  RoomAccessPreview,
   SavedSessionInfo,
   SearchResult,
   SettingsPatch,
@@ -35,6 +37,7 @@ import {
 import {
   currentSavedSession,
   forwardDestinationsFromSnapshot,
+  hasScheduledSendPersistenceFailure,
   ICON_SIZE,
   ignoreComposerKeyAction,
   pinnedEventIdsForRoom,
@@ -59,13 +62,16 @@ import {
 } from "./TimelineView";
 import { FilesView } from "./FilesView";
 import { ModalDialog } from "./ModalDialog";
-import { RoomInfoPanel } from "./RoomInfoPanel";
+import { RoomInfoPanel, type RoomInfoRevealRequest } from "./RoomInfoPanel";
+import { sidebarRoomAccess } from "../domain/accessCondition";
+import { Tooltip } from "./Tooltip";
 import type { HistoryExportControls } from "./HistoryExportDialog";
 import { SpaceInfoPanel } from "./SpaceInfoPanel";
 import { ThreadsListView } from "./ThreadsListView";
 import { UserSettingsPanel } from "./UserSettingsPanel";
 import { AccountTabStrip, type RuntimeAlert } from "./Shell";
 import type { AccountNotificationActions } from "./user-settings/AccountNotificationsSections";
+import type { NotificationDeliveryActions } from "./user-settings/NotificationDeliverySection";
 import { PeoplePanel, ProfilePanel } from "./PeoplePanel";
 import type { ContactSecurityActions } from "./ContactSecurityDetails";
 import {
@@ -73,7 +79,7 @@ import {
   type SpaceInviteAvailabilityReason,
   type SpaceInviteCancellationAvailabilityReason
 } from "./SpaceMembersPanel";
-import { MessageArticle, PinnedEventsList, SearchResults } from "./mediaLists";
+import { MessageArticle, PinnedEventsList, ScheduledMessagesList, SearchResults } from "./mediaLists";
 import { ThreadComposer, type ComposerSendingAccount } from "./composer";
 import { UploadStagingDialog, uploadStagingItemsAreSendable } from "./dialogs";
 import type { OpenContextMenu } from "../app/uiShared";
@@ -140,6 +146,8 @@ export function ContextualRightPanel({
   onBackToPeople,
   onRefreshFilesView,
   onPaginateThreadsList,
+  onCancelScheduledSend = () => undefined,
+  onRescheduleScheduledSend = () => undefined,
   onOpenRecovery,
   onManageAccount = () => undefined,
   onRefreshCurrentSessionStatus = () => undefined,
@@ -205,13 +213,20 @@ export function ContextualRightPanel({
   onForceRotateOutboundSession = () => undefined,
   historyExportControls,
   onUpdateRoomSetting = () => undefined,
+  roomAccessPreview = null,
+  roomHistoryPreview = null,
+  onSetRoomAccessDraft = () => undefined,
+  roomInfoReveal = null,
+  onRoomInfoRevealHandled,
   onUpdateSpaceJoinRule,
+  onSetSpaceChildSuggested,
   onIgnoreUser = () => undefined,
   onUnignoreUser = () => undefined,
   onReportUser = () => undefined,
   onLoadAccountManagementCapabilities = () => undefined,
   onChangePassword = () => undefined,
   accountNotificationActions,
+  notificationDeliveryActions,
   contactSecurityActions,
   onDeactivateAccount = () => undefined,
   onSubmitAccountManagementUia = () => undefined,
@@ -284,6 +299,12 @@ export function ContextualRightPanel({
   onBackToPeople?: () => void;
   onRefreshFilesView: (scope: AttachmentScope, filter: AttachmentFilter, sort: AttachmentSort) => void;
   onPaginateThreadsList: (scope: ThreadsListScope) => void;
+  onCancelScheduledSend?: (scheduledId: string) => void;
+  onRescheduleScheduledSend?: (
+    scheduledId: string,
+    body: string,
+    sendAtMs: number
+  ) => void;
   onOpenRecovery: () => void;
   onManageAccount?: () => void;
   onRefreshCurrentSessionStatus?: (trigger: SessionStatusRefreshCommandTrigger) => void;
@@ -365,6 +386,7 @@ export function ContextualRightPanel({
   onLoadAccountManagementCapabilities?: () => void;
   onChangePassword?: (newPassword: string) => void;
   accountNotificationActions?: AccountNotificationActions;
+  notificationDeliveryActions?: NotificationDeliveryActions;
   contactSecurityActions?: ContactSecurityActions;
   onDeactivateAccount?: (eraseData: boolean) => void;
   onSubmitAccountManagementUia?: (flowId: number, password: string) => void;
@@ -378,8 +400,16 @@ export function ContextualRightPanel({
   spaceLocalOverrides?: Record<string, SpaceLocalPresentation>;
   onTimelineDiagnosticLogEntry?: (entry: TimelineDiagnosticLogEntry) => void;
   onUpdateRoomSetting?: (roomId: string, change: RoomSettingChange) => void;
+  roomAccessPreview?: RoomAccessPreview | null;
+  roomHistoryPreview?: RoomAccessPreview | null;
+  onSetRoomAccessDraft?: (command: RoomAccessDraftCommand) => void;
+  /** #1327: what another surface asked the open Room Info panel to reveal. */
+  roomInfoReveal?: RoomInfoRevealRequest | null;
+  onRoomInfoRevealHandled?: () => void;
   /** Issue #935: settles, or rejects when Rust refuses the change. */
   onUpdateSpaceJoinRule?: (spaceId: string, joinRule: RoomJoinRule) => Promise<void>;
+  /** Issue #1410: suggest (or stop suggesting) a Space child to its members. */
+  onSetSpaceChildSuggested?: (spaceId: string, childRoomId: string, suggested: boolean) => void;
   onIgnoreUser?: (userId: string) => void;
   onUnignoreUser?: (userId: string) => void;
   onReportUser?: (userId: string) => void;
@@ -474,7 +504,12 @@ export function ContextualRightPanel({
   );
   const threadEditMentionQueryChangeStable = useStableEvent(onThreadMentionQueryChange);
   const threadMathModeChangeStable = useStableEvent((enabled: boolean) =>
-    onUpdateSettings?.({ composer: { ...composerSettings, math_mode: enabled } })
+    onUpdateSettings?.({
+      // #1244: math mode is app-scoped, so the patch names its scope; otherwise
+      // the closed Settings dialog would stamp it account-scoped and drop it.
+      scope: "app",
+      composer: { ...composerSettings, math_mode: enabled }
+    })
   );
   const threadSendStagedUploadsStable = useStableEvent(() => {
     if (threadPreviewRoomId && threadPreviewRootEventId) {
@@ -586,9 +621,11 @@ export function ContextualRightPanel({
           currentSessionStatus={snapshot.state.domain.current_session_status}
           displayDensity={displayDensity}
           e2eeTrust={snapshot.state.domain.e2ee_trust}
+          secureBackupGate={snapshot.state.domain.secure_backup_gate}
           localEncryption={snapshot.state.domain.local_encryption}
           keyboardLabelProfile={shortcutLabelProfileFromLocaleProfile(snapshot.state.domain.locale_profile)}
           platform={snapshot.state.domain.locale_profile.platform}
+          catalogLocale={snapshot.state.domain.locale_profile.catalog_locale}
           profile={snapshot.state.domain.profile}
           searchCrawlerState={snapshot.state.domain.search_crawler}
           settings={snapshot.state.domain.settings}
@@ -634,12 +671,14 @@ export function ContextualRightPanel({
           onChangePassword={onChangePassword ?? (() => undefined)}
           accountNotifications={snapshot.state.domain.account_notifications}
           accountNotificationActions={accountNotificationActions}
+          notificationDeliveryActions={notificationDeliveryActions}
           onDeactivateAccount={onDeactivateAccount ?? (() => undefined)}
           onSubmitAccountManagementUia={onSubmitAccountManagementUia ?? (() => undefined)}
           onStartCrawlRoom={onStartCrawlRoom}
           onStopCrawlRoom={onStopCrawlRoom}
           onDisplayDensityChange={onDisplayDensityChange}
           rooms={snapshot.state.domain.rooms}
+          spaces={snapshot.state.domain.spaces}
         />
       </ModalDialog>
     );
@@ -658,6 +697,9 @@ export function ContextualRightPanel({
           appSettings={snapshot.state.domain.settings}
           linkPreviewSettings={snapshot.state.domain.link_preview_settings}
           spaces={snapshot.state.domain.spaces}
+          access={
+            activeRoom ? sidebarRoomAccess(snapshot.sidebar, activeRoom.room_id) : null
+          }
           onInvitePeople={
             activeRoom
               ? () =>
@@ -674,6 +716,11 @@ export function ContextualRightPanel({
           }
           onSetRoomNotificationMode={onSetRoomNotificationMode}
           onUpdateRoomSetting={onUpdateRoomSetting}
+          accessPreview={roomAccessPreview}
+          historyPreview={roomHistoryPreview}
+          onSetAccessDraft={onSetRoomAccessDraft}
+          revealSetting={roomInfoReveal}
+          onRevealSettingHandled={onRoomInfoRevealHandled}
           inviteHistoryPolicy={
             snapshot.state.domain.invite_workflow?.query.room_id === activeRoom?.room_id
               ? snapshot.state.domain.invite_workflow?.history_policy ?? null
@@ -809,6 +856,7 @@ export function ContextualRightPanel({
           localName={activeSpace ? spaceLocalOverrides[activeSpace.space_id]?.name ?? "" : ""}
           roomManagement={snapshot.state.domain.room_management}
           rooms={snapshot.state.domain.rooms}
+          roomNotificationSettings={snapshot.state.domain.room_notification_settings}
           space={activeSpace}
           historyExport={snapshot.state.ui.history_export}
           historyExportControls={historyExportControls}
@@ -817,6 +865,18 @@ export function ContextualRightPanel({
             snapshot.state.domain.space_children.selected_space_id === activeSpace.space_id
               ? snapshot.state.domain.space_children.children
               : []
+          }
+          canEditSuggested={
+            activeSpace !== null &&
+            snapshot.state.domain.space_children.selected_space_id === activeSpace.space_id &&
+            snapshot.state.domain.space_children.can_edit_suggested === true
+          }
+          suggestedEdit={snapshot.state.domain.space_children.suggested_edit}
+          onSetChildSuggested={
+            activeSpace && onSetSpaceChildSuggested
+              ? (childRoomId, suggested) =>
+                  onSetSpaceChildSuggested(activeSpace.space_id, childRoomId, suggested)
+              : undefined
           }
           onAcceptInvite={onAcceptInvite}
           onJoinRoom={onJoinRoom}
@@ -896,6 +956,54 @@ export function ContextualRightPanel({
     );
   }
 
+  if (mode === "scheduledMessages") {
+    const scheduledSends =
+      snapshot.state.ui.scheduled_sends_list.kind === "open"
+        ? snapshot.state.ui.scheduled_sends_list
+        : null;
+    const scheduledItems = scheduledSends?.items ?? [];
+    return (
+      <aside className="thread-pane" aria-label={t("panel.context")}>
+        <PanelHeader title={t("scheduled.title")} onClose={onClosePanel} />
+        {scheduledItems.length === 0 ? (
+          <p className="panel-empty-state">{t("scheduled.panelEmpty")}</p>
+        ) : (
+          <ScheduledMessagesList
+            capability={scheduledSends?.capability ?? "unknown"}
+            items={scheduledItems}
+            onCancel={onCancelScheduledSend}
+            onReschedule={onRescheduleScheduledSend}
+            renderItemMeta={(item) => {
+              const destination = snapshot.state.domain.rooms.find(
+                (room) => room.room_id === item.room_id
+              );
+              return (
+                <span className="scheduled-message-context">
+                  {/* Remote/user text: direction is isolated per the i18n
+                      contract, and the name may be long or an address
+                      fallback. */}
+                  <span className="scheduled-message-room" dir="auto">
+                    {destination ? roomDisplayLabel(destination) : item.room_id}
+                  </span>
+                  {item.thread_root_event_id ? (
+                    <>
+                      <span className="scheduled-message-separator" aria-hidden="true">
+                        ·
+                      </span>
+                      <span className="scheduled-message-thread">
+                        {t("scheduled.threadReply")}
+                      </span>
+                    </>
+                  ) : null}
+                </span>
+              );
+            }}
+          />
+        )}
+      </aside>
+    );
+  }
+
   if (mode === "search" || mode === "focusedContext") {
     const focusedContext = snapshot.state.ui.focused_context;
     const currentUserId = snapshot.state.domain.session.user_id ?? null;
@@ -961,6 +1069,8 @@ export function ContextualRightPanel({
               density={snapshot.state.domain.settings.values.appearance.density}
               recentEmojis={composerSettings.recent_emojis}
               onRecentEmojisChange={onRecentEmojisChange}
+              mathModeEnabled={composerSettings.math_mode}
+              onMathModeChange={threadMathModeChangeStable}
               searchHighlightsByEventId={searchHighlightsByEventId}
               mediaDownloads={mediaDownloads}
               editMentionCandidates={focusedEditMentionCandidates}
@@ -1047,6 +1157,9 @@ export function ContextualRightPanel({
             timelineKey={threadTimelineKeyValue}
             transport={timelineTransport}
             onReply={threadReplyStable}
+            onOpenContextMenu={onOpenContextMenu}
+            currentUserId={currentUserId ?? undefined}
+            ignoredUserIds={snapshot.state.domain.profile.ignored_user_ids}
             onOpenMatrixTarget={onOpenMatrixTarget ? threadOpenMatrixTargetStable : undefined}
             onOpenSenderProfile={onOpenSenderProfile ? threadOpenSenderProfileStable : undefined}
             onStartDirectMessage={threadStartDirectMessageStable}
@@ -1072,6 +1185,8 @@ export function ContextualRightPanel({
             density={snapshot.state.domain.settings.values.appearance.density}
             recentEmojis={composerSettings.recent_emojis}
             onRecentEmojisChange={onRecentEmojisChange}
+            mathModeEnabled={composerSettings.math_mode}
+            onMathModeChange={threadMathModeChangeStable}
             searchHighlightsByEventId={searchHighlightsByEventId}
             mediaDownloads={mediaDownloads}
             editMentionCandidates={threadEditMentionCandidates}
@@ -1145,6 +1260,8 @@ export function ContextualRightPanel({
           recentEmojis={composerSettings.recent_emojis}
           onMathModeChange={(enabled) =>
             onUpdateSettings?.({
+              // #1244: math mode is app-scoped, so name the scope explicitly.
+              scope: "app",
               composer: { ...composerSettings, math_mode: enabled }
             })
           }
@@ -1157,6 +1274,9 @@ export function ContextualRightPanel({
         stagedUploadsReady={uploadStagingItemsAreSendable(threadStagedUploads)}
         onSendStagedUploads={threadSendStagedUploadsStable}
         notice={threadComposerNotice}
+        scheduledSendPersistenceFailed={hasScheduledSendPersistenceFailure(
+          snapshot.state.ui.errors
+        )}
         document={threadDocument}
         draftKey={
           threadComposerDraftImeKey ??
@@ -1205,9 +1325,23 @@ export function PanelHeader({
     <header className="thread-header">
       <div className="thread-title">{title}</div>
       {showClose ? (
-        <button className="icon-button" type="button" aria-label={t("action.close", { title })} onClick={onClose}>
-          <X size={ICON_SIZE.panel} />
-        </button>
+        <Tooltip
+          label={t("action.close", { title })}
+          placement="below"
+          align="end"
+        >
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("action.close", { title })}
+              onClick={onClose}
+              {...tooltipProps}
+            >
+              <X size={ICON_SIZE.panel} />
+            </button>
+          )}
+        </Tooltip>
       ) : null}
     </header>
   );

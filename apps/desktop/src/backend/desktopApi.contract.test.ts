@@ -62,6 +62,8 @@ describe("DesktopApi command contract", () => {
         "loadSpaceChildren",
         "dismissEventNavigationFailure",
         "historyExportTimeZone",
+        "chooseRoomKeyExportDestination",
+        "chooseRoomKeyImportSource",
         "exportHistory",
         "stopHistoryExport",
         "retryHistoryExport",
@@ -79,11 +81,25 @@ describe("DesktopApi command contract", () => {
         "cancelNotificationEmail",
         "enableEmailNotifications",
         "disableEmailNotifications",
+        "setNotificationDeliverySecret",
+        "clearNotificationDeliverySecret",
+        "testNotificationDelivery",
+        "addNotificationKeyword",
+        "removeNotificationKeyword",
         "addAccountTab",
         "cancelAddAccountTab",
         "listAccountTabs",
         "removeSignedOutAccountTab",
-        "selectAccountTab"
+        "selectAccountTab",
+        "setRoomAccessDraft",
+        "previewRoomAccess",
+        "previewCreateRoomAccess",
+        "ignoreDesktopUpdate",
+        "saveDiagnosticsReport",
+        "cancelOidcLogin",
+        "setSpaceChildSuggested",
+        "joinSuggestedSpaceRooms",
+        "dismissSuggestedSpaceRooms"
       )
       .sort();
     expect(new Set(current).size).toBe(current.length);

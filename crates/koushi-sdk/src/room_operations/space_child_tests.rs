@@ -411,3 +411,156 @@ async fn an_empty_via_child_is_not_a_child_and_is_rewritten() {
     .unwrap();
     assert!(outcome.child_written);
 }
+
+/// Sync a raw `m.space.child` event into `space_id`: the typed builder cannot
+/// carry the unmodelled fields #1410 must preserve.
+async fn sync_raw_space_child(
+    server: &MatrixMockServer,
+    client: &Client,
+    space_id: &RoomId,
+    child_id: &str,
+    content: serde_json::Value,
+) {
+    let own = client.user_id().unwrap().to_owned();
+    let event: matrix_sdk::ruma::serde::Raw<matrix_sdk::ruma::events::AnySyncStateEvent> =
+        serde_json::from_value(serde_json::json!({
+            "type": "m.space.child",
+            "state_key": child_id,
+            "content": content,
+            "sender": own,
+            "event_id": "$child",
+            "origin_server_ts": 1,
+        }))
+        .unwrap();
+    server
+        .sync_room(
+            client,
+            JoinedRoomBuilder::new(space_id).add_state_event(event),
+        )
+        .await;
+}
+
+/// #1410: marking a child suggested rewrites only `suggested`; `via`, `order`
+/// and fields this client does not model are sent back unchanged.
+#[tokio::test]
+async fn suggesting_a_child_preserves_every_other_field() {
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let space_id = RoomId::parse("!space:example.org").unwrap();
+    sync_fixture(&server, &client, space(space_id.as_str())).await;
+    sync_raw_space_child(
+        &server,
+        &client,
+        &space_id,
+        DOMAINLESS_ROOM_ID,
+        serde_json::json!({
+            "via": ["remote.example", "example.org"],
+            "order": "b",
+            "org.example.extra": { "kept": true },
+        }),
+    )
+    .await;
+    expect_state_put(
+        &server,
+        "m.space.child",
+        serde_json::json!({
+            "via": ["remote.example", "example.org"],
+            "order": "b",
+            "org.example.extra": { "kept": true },
+            "suggested": true,
+        }),
+        1,
+    )
+    .await;
+
+    let written = super::set_space_child_suggested(
+        &session(&server, client),
+        space_id.as_str(),
+        DOMAINLESS_ROOM_ID,
+        true,
+    )
+    .await
+    .unwrap();
+    assert!(written);
+}
+
+/// #1410: unmarking writes `suggested: false` (Element Web parity) and keeps
+/// the rest; asking for the state the event already has sends nothing.
+#[tokio::test]
+async fn unsuggesting_writes_false_and_a_no_op_sends_nothing() {
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let space_id = RoomId::parse("!space:example.org").unwrap();
+    sync_fixture(&server, &client, space(space_id.as_str())).await;
+    sync_raw_space_child(
+        &server,
+        &client,
+        &space_id,
+        DOMAINLESS_ROOM_ID,
+        serde_json::json!({ "via": ["example.org"], "order": "a", "suggested": true }),
+    )
+    .await;
+    expect_state_put(
+        &server,
+        "m.space.child",
+        serde_json::json!({ "via": ["example.org"], "order": "a", "suggested": false }),
+        1,
+    )
+    .await;
+    let session = session(&server, client);
+
+    assert!(
+        !super::set_space_child_suggested(&session, space_id.as_str(), DOMAINLESS_ROOM_ID, true)
+            .await
+            .unwrap(),
+        "already suggested: nothing to send"
+    );
+    assert!(
+        super::set_space_child_suggested(&session, space_id.as_str(), DOMAINLESS_ROOM_ID, false)
+            .await
+            .unwrap()
+    );
+}
+
+/// #1410: the toggle never creates a relationship, and a Space whose power
+/// levels deny `m.space.child` fails before any request.
+#[tokio::test]
+async fn suggesting_requires_a_linked_child_and_permission() {
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let space_id = RoomId::parse("!space:example.org").unwrap();
+    let denied_id = RoomId::parse("!denied:example.org").unwrap();
+    let child_id = RoomId::parse(DOMAINLESS_ROOM_ID).unwrap();
+    sync_fixture(&server, &client, space(space_id.as_str())).await;
+    sync_fixture(
+        &server,
+        &client,
+        RoomFixture {
+            own_power_level: 0,
+            child_event: Some((&child_id, vec!["example.org".try_into().unwrap()])),
+            ..space(denied_id.as_str())
+        },
+    )
+    .await;
+    Mock::given(method("PUT"))
+        .respond_with(ResponseTemplate::new(500))
+        .expect(0)
+        .mount(server.server())
+        .await;
+    let session = session(&server, client);
+
+    assert!(matches!(
+        super::set_space_child_suggested(&session, space_id.as_str(), DOMAINLESS_ROOM_ID, true)
+            .await,
+        Err(MatrixRoomOperationError::Sdk(
+            MatrixRoomOperationFailureKind::WrongRoomState
+        ))
+    ));
+    assert!(matches!(
+        super::set_space_child_suggested(&session, denied_id.as_str(), DOMAINLESS_ROOM_ID, true)
+            .await,
+        Err(MatrixRoomOperationError::Sdk(
+            MatrixRoomOperationFailureKind::Forbidden
+        ))
+    ));
+}

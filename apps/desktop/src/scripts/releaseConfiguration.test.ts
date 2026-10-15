@@ -41,6 +41,42 @@ describe("desktop release scripts", () => {
     }
   );
 
+  test("Windows build entry point exposes the split signing stages", () => {
+    const buildOnly = runScript("scripts/desktop-build-windows.mjs", ["--print-command", "--build-only"]);
+    expect(buildOnly).toContain("tauri -- build --no-bundle");
+    expect(buildOnly).toContain("--target x86_64-pc-windows-msvc");
+
+    const bundleOnly = runScript("scripts/desktop-build-windows.mjs", [
+      "--print-command", "--bundle-only", "--signed-input"
+    ]);
+    expect(bundleOnly).toContain("tauri -- bundle --bundles nsis --no-binary-patching");
+
+    const trial = runScript("scripts/desktop-build-windows.mjs", ["--print-command"]);
+    expect(trial).toContain("tauri -- build --bundles nsis");
+    expect(trial).not.toContain("--no-binary-patching");
+  });
+
+  test("Windows release preparation uses a Tauri CLI that supports no-binary-patching", () => {
+    const packageJson = JSON.parse(
+      readFileSync(new URL("../../../../apps/desktop/package.json", import.meta.url), "utf8")
+    );
+    const version = packageJson.devDependencies["@tauri-apps/cli"].replace(/^\^/, "");
+    const [major, minor] = version.split(".").map(Number);
+    expect(major).toBe(2);
+    expect(minor).toBeGreaterThanOrEqual(12);
+  });
+
+  test("Authenticode verification script fails closed on missing signatures", () => {
+    const script = readFileSync(
+      new URL("../../../../scripts/verify-authenticode.ps1", import.meta.url),
+      "utf8"
+    );
+    expect(script).toContain("Get-AuthenticodeSignature");
+    expect(script).toContain("SignatureStatus]::Valid");
+    expect(script).toContain("No signer certificate");
+    expect(script).toContain("Get-FileHash -Algorithm SHA256");
+  });
+
   test("tracked text artifacts contain no previous branding residue", () => {
     const oldLatinBrand = "Ru" + "ri";
     const oldLowerBrand = oldLatinBrand.toLowerCase();
@@ -88,6 +124,12 @@ describe("desktop release scripts", () => {
 
   test("release preflight validates installer and signing preparation", () => {
     const output = runScript("scripts/desktop-release-preflight.mjs", ["--check-config"]);
+    const tauriConfig = JSON.parse(
+      readFileSync(
+        new URL("../../../../apps/desktop/src-tauri/tauri.conf.json", import.meta.url),
+        "utf8"
+      )
+    );
 
     expect(output).toContain("bundle.active");
     expect(output).toContain("dmg");
@@ -98,6 +140,8 @@ describe("desktop release scripts", () => {
     expect(output).toContain("macOS.updater.endpoint");
     expect(output).toContain("windows.signCommand");
     expect(output).toContain("windows.wix.upgradeCode");
+    expect(output).toContain("windows.minimumWebview2Version");
+    expect(tauriConfig.bundle.windows.minimumWebview2Version).toBe("155.0.4283.45");
     expect(output).toContain("security.assetProtocol.enable");
     expect(output).toContain("security.assetProtocol.scope.noBroadAppdata");
     expect(output).toContain("security.assetProtocol.scope.mediaDownloads");
@@ -199,6 +243,11 @@ describe("desktop release scripts", () => {
       writeFileSync(
         join(desktopDirectory, "package.json"),
         JSON.stringify({ version: packageVersion })
+      );
+      // The npm lockfile root is synchronized as well (#1137).
+      writeFileSync(
+        join(desktopDirectory, "package-lock.json"),
+        JSON.stringify({ version: packageVersion, packages: { "": { version: packageVersion } } })
       );
       writeFileSync(
         join(tauriDirectory, "tauri.conf.json"),
@@ -399,6 +448,7 @@ describe("desktop release scripts", () => {
     }
     for (const manifest of [
       "apps/desktop/package.json",
+      "apps/desktop/package-lock.json",
       "apps/desktop/src-tauri/tauri.conf.json",
       "apps/desktop/src-tauri/Cargo.toml"
     ]) {

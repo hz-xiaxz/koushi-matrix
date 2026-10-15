@@ -16,7 +16,9 @@
  */
 
 import type { CoreEventPayload } from "../domain/coreEvents";
+import { SNAPSHOT_SCHEMA_VERSION } from "../domain/types";
 import type { ViewportSyncReceipt } from "../backend/desktopApi";
+import { sidebarSectionBoundsForFake } from "./sidebarSectionBoundsFixture";
 
 // ---------------------------------------------------------------------------
 // Invocation record
@@ -37,7 +39,12 @@ const SNAPSHOT_READ_COMMANDS = new Set([
   "settlement_snapshot",
   "resync_snapshot"
 ]);
-const RESOURCE_COMMANDS = new Set(["read_receipt_reader_resource"]);
+const RESOURCE_COMMANDS = new Set([
+  "read_receipt_reader_resource",
+  "choose_room_key_export_destination",
+  "choose_room_key_import_source",
+  "save_diagnostics_report"
+]);
 const REQUEST_COMMANDS = new Set(["download_avatar_thumbnail"]);
 const VOID_COMMANDS = new Set([
   "download_avatar_thumbnail",
@@ -54,7 +61,7 @@ const VOID_COMMANDS = new Set([
   "close_receipt_reader"
 ]);
 const ADMISSION_COMMANDS = new Set(
-  `retry_sliding_sync_capability change_homeserver submit_recovery start_device_cleanup submit_device_cleanup_uia erase_local_data_anyway restart_sync update_settings import_legacy_settings update_navigation_preference rebuild_search_index set_room_url_preview_override dismiss_directory_preview select_room_list_filter mark_room_as_read mark_room_as_unread set_room_notification_mode refresh_current_session_status submit_account_management_uia load_account_notifications load_contact_security close_contact_security request_contact_verification set_notification_category set_account_push_enabled request_notification_email_token resend_notification_email_token confirm_notification_email submit_notification_email_uia cancel_notification_email enable_email_notifications disable_email_notifications load_account_management_capabilities change_password deactivate_account probe_local_encryption_health reset_local_data bootstrap_cross_signing enable_key_backup export_room_keys import_room_keys stop_history_export bootstrap_secure_backup recover_secure_backup retry_secure_backup_inspection change_secure_backup_passphrase save_secure_backup_recovery_key confirm_secure_backup_recovery_key_saved accept_verification start_own_user_sas retry_current_device_trust_discovery mismatch_sas_verification start_session_bootstrap confirm_session_bootstrap_saved confirm_sas_verification cancel_verification reset_identity cancel_identity_reset submit_identity_reset_password submit_identity_reset_oauth select_space reorder_spaces cancel_scheduled_send reschedule_scheduled_send retry_send cancel_send send_reaction redact_reaction set_presence set_display_name set_local_user_alias ignore_user unignore_user report_user report_content report_room set_avatar edit_message redact_message load_message_source request_room_key request_late_decryption forward_message load_link_previews hide_link_preview leave_room leave_space forget_room open_activity close_activity set_activity_tab paginate_activity retry_activity_resolution mark_activity_read set_composer_draft open_thread close_thread open_threads_list close_threads_list paginate_threads_list open_files_view close_files_view set_thread_composer_draft start_room_crawl stop_room_crawl repair_room_timeline set_space_child check_room_address_availability clear_room_address_availability set_composer_reply_target cancel_composer_reply`
+  `retry_sliding_sync_capability change_homeserver cancel_oidc_login submit_recovery start_device_cleanup submit_device_cleanup_uia erase_local_data_anyway restart_sync update_settings import_legacy_settings update_navigation_preference rebuild_search_index set_room_url_preview_override dismiss_directory_preview select_room_list_filter mark_room_as_read mark_room_as_unread set_room_notification_mode refresh_current_session_status submit_account_management_uia load_account_notifications load_contact_security close_contact_security request_contact_verification set_notification_category set_account_push_enabled request_notification_email_token resend_notification_email_token confirm_notification_email submit_notification_email_uia cancel_notification_email enable_email_notifications disable_email_notifications set_notification_delivery_secret clear_notification_delivery_secret test_notification_delivery add_notification_keyword remove_notification_keyword load_account_management_capabilities change_password deactivate_account probe_local_encryption_health reset_local_data bootstrap_cross_signing enable_key_backup export_room_keys import_room_keys stop_history_export bootstrap_secure_backup recover_secure_backup retry_secure_backup_inspection change_secure_backup_passphrase save_secure_backup_recovery_key confirm_secure_backup_recovery_key_saved accept_verification start_own_user_sas retry_current_device_trust_discovery mismatch_sas_verification start_session_bootstrap confirm_session_bootstrap_saved confirm_sas_verification cancel_verification reset_identity cancel_identity_reset submit_identity_reset_password submit_identity_reset_oauth select_space reorder_spaces cancel_scheduled_send reschedule_scheduled_send retry_send cancel_send send_reaction redact_reaction set_presence set_display_name set_local_user_alias ignore_user unignore_user report_user report_content report_room set_avatar edit_message redact_message load_message_source request_room_key request_late_decryption forward_message load_link_previews hide_link_preview leave_room leave_space forget_room open_activity close_activity set_activity_tab paginate_activity retry_activity_resolution mark_activity_read set_composer_draft open_thread close_thread open_threads_list close_threads_list open_scheduled_sends_list close_scheduled_sends_list paginate_threads_list open_files_view close_files_view set_thread_composer_draft start_room_crawl stop_room_crawl repair_room_timeline set_space_child set_space_child_suggested join_suggested_space_rooms dismiss_suggested_space_rooms check_room_address_availability clear_room_address_availability set_composer_reply_target cancel_composer_reply`
     .split(" ")
 );
 
@@ -311,6 +318,20 @@ export function defaultSnapshotResponse() {
             send_read_receipts: true,
             send_typing_notifications: true
           },
+          // #1427: the device-local delivery settings block, off and unconfigured.
+          delivery: {
+            enabled: false,
+            direct_messages: true,
+            mentions: true,
+            keywords: true,
+            only_when_unfocused: true,
+            dwell_secs: 300,
+            min_interval_secs: 900,
+            prefix_chars: 0,
+            prefix_consent: null,
+            watched: [],
+            sinks: []
+          },
           display: {
             code_block_wrap: true,
             hide_redacted: true,
@@ -340,7 +361,7 @@ export function defaultSnapshotResponse() {
             include_filenames: true
           },
           thread_list_order: { kind: "latestReply" },
-          room_list_sort: { kind: "activity" },
+          room_list_sort: { kind: "recentFirst" },
           sidebar: {
             category: "rooms",
             collapsed: { favourites: false, low_priority: false, not_joined: false }
@@ -376,7 +397,15 @@ export function defaultSnapshotResponse() {
         ignored_user_update: { kind: "idle" },
         update: { kind: "idle" }
       },
-      space_children: { selected_space_id: null, generation: 0, children: [], load: { kind: "idle" } },
+      space_children: {
+        selected_space_id: null,
+        generation: 0,
+        children: [],
+        load: { kind: "idle" },
+        can_edit_suggested: false,
+        suggested_edit: { kind: "idle" },
+        suggested_offer: { kind: "none" }
+      },
       space_members: {
         selected_space_id: null,
         generation: 0,
@@ -413,7 +442,7 @@ export function defaultSnapshotResponse() {
       room_list: {
         readiness: { kind: "ready", source: "cache", generation: 0 },
         active_filter: { kind: "rooms" },
-        sort: { kind: "activity" },
+        sort: { kind: "recentFirst" },
         items: [
           { room_id: "!room-alpha:example.invalid", kind: "room" },
           { room_id: "!room-beta:example.invalid", kind: "room" },
@@ -431,6 +460,7 @@ export function defaultSnapshotResponse() {
         operation: { kind: "idle" }
       },
       contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
+      notification_delivery: { sinks: [], presets: [] },
       account_management_capabilities: { change_password: { kind: "unknown" } },
       soft_logout_reauth: { kind: "idle" },
       qr_login: { kind: "idle" },
@@ -466,6 +496,7 @@ export function defaultSnapshotResponse() {
       thread: { kind: "closed" },
       thread_attention: { kind: "closed" },
       threads_list: { kind: "closed" },
+      scheduled_sends_list: { kind: "closed" },
       focused_context: { kind: "closed" },
       search: { kind: "closed" },
       files_view: { kind: "closed" }, history_export: { kind: "idle" },
@@ -539,7 +570,7 @@ export function defaultSnapshotResponse() {
     else ui[key] = value;
   }
   return {
-    state: { schema_version: 7, domain, ui },
+    state: { schema_version: SNAPSHOT_SCHEMA_VERSION, domain, ui },
     sidebar: {
       active_space_id: null,
       account_home: {
@@ -558,7 +589,15 @@ export function defaultSnapshotResponse() {
       dm_unread_count: 0,
       space_highlight_count: 0,
       dm_highlight_count: 0,
-      sections: { favourites: [], rooms: [], people: [], low_priority: [], not_joined: [] }
+      sections: { favourites: [], rooms: [], people: [], low_priority: [], not_joined: [] },
+      // #1363/#1366: the packaged DTO always projects the bound for every
+      // visible section, so the default mock snapshot mirrors that shape with
+      // the Rust-authored empty-section projection.
+      section_bounds: sidebarSectionBoundsForFake({
+        sections: { rooms: [], people: [], low_priority: [] },
+        expanded: { rooms: false, dms: false, lowPriority: false },
+        activeRoomId: null
+      })
     },
     timeline: [],
     thread: null

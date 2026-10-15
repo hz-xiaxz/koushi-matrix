@@ -10,6 +10,61 @@ import type { SpaceSummary } from "../domain/types";
 afterEach(cleanup);
 
 describe("SpaceInfoPanel", () => {
+  test("uses main and thread unread for each room and excludes muted rooms from the Space total", () => {
+    const markup = renderToStaticMarkup(
+      <SpaceInfoPanel
+        fallbackName="Workspace"
+        rooms={[
+          {
+            room_id: "!active:example.invalid",
+            display_name: "Active",
+            display_label: "Active",
+            original_display_label: "Active",
+            avatar: null,
+            is_dm: false,
+            dm_user_ids: [],
+            tags: { favourite: null, low_priority: null },
+            parent_space_ids: ["!space:example.invalid"],
+            dm_space_ids: [],
+            is_encrypted: false,
+            unread_count: 1,
+            thread_unread_count: 2
+          },
+          {
+            room_id: "!muted:example.invalid",
+            display_name: "Muted",
+            display_label: "Muted",
+            original_display_label: "Muted",
+            avatar: null,
+            is_dm: false,
+            dm_user_ids: [],
+            tags: { favourite: null, low_priority: null },
+            parent_space_ids: ["!space:example.invalid"],
+            dm_space_ids: [],
+            is_encrypted: false,
+            unread_count: 4
+          }
+        ]}
+        roomNotificationSettings={{
+          "!muted:example.invalid": { mode: { kind: "mute" }, operation: { kind: "idle" } }
+        }}
+        space={{
+          space_id: "!space:example.invalid",
+          raw_name: null,
+          display_name: "Workspace",
+          avatar: null,
+          join_rule: null,
+          child_room_ids: ["!active:example.invalid", "!muted:example.invalid"],
+          parent_side_child_room_ids: []
+        }}
+      />
+    );
+
+    expect(markup).toContain("Unread</span><strong>3</strong>");
+    expect(markup).toContain("3 unread");
+    expect(markup).toContain("4 unread");
+  });
+
   test("renders space identity, child rooms, unread total, and Element-like entries", () => {
     const markup = renderToStaticMarkup(
       <SpaceInfoPanel
@@ -636,6 +691,110 @@ describe("SpaceInfoPanel", () => {
 
     fireEvent.click(open?.querySelector("button") as HTMLButtonElement);
     expect(onJoinRoom).toHaveBeenCalledWith("!open:example.invalid");
+  });
+
+  // Issue #1410: an admin toggles each child's suggested flag; the label names
+  // the room and the Space the change reaches, and the saving/failed states are
+  // Rust's.
+  test("lets an admin suggest a child to the Space's members", () => {
+    const onSetChildSuggested = vi.fn();
+    const space: SpaceSummary = {
+      space_id: "!space-work:example.invalid",
+      raw_name: "Work",
+      display_name: "Work",
+      avatar: null,
+      join_rule: null,
+      child_room_ids: [],
+      parent_side_child_room_ids: []
+    };
+    const children = [
+      {
+        room_id: "!open:example.invalid",
+        display_name: "Open Room",
+        avatar: null,
+        membership: "not_joined" as const,
+        can_join: true,
+        is_space: false,
+        joined_members: 4,
+        suggested: false
+      },
+      {
+        room_id: "!picked:example.invalid",
+        display_name: "Picked Room",
+        avatar: null,
+        membership: "not_joined" as const,
+        can_join: true,
+        is_space: false,
+        joined_members: 2,
+        suggested: true
+      }
+    ];
+    const { rerender } = render(
+      <SpaceInfoPanel
+        fallbackName="Fallback"
+        rooms={[]}
+        space={space}
+        spaceChildren={children}
+        canEditSuggested={false}
+        onSetChildSuggested={onSetChildSuggested}
+      />
+    );
+    expect(screen.queryByRole("checkbox")).toBeNull();
+
+    const panel = (edit?: Parameters<typeof SpaceInfoPanel>[0]["suggestedEdit"]) => (
+      <SpaceInfoPanel
+        fallbackName="Fallback"
+        rooms={[]}
+        space={space}
+        spaceChildren={children}
+        canEditSuggested
+        suggestedEdit={edit}
+        onSetChildSuggested={onSetChildSuggested}
+      />
+    );
+    rerender(panel({ kind: "idle" }));
+    const open = screen.getByRole("checkbox", {
+      name: t("space.suggestToMembersFor", { room: "Open Room", space: "Work" })
+    }) as HTMLInputElement;
+    const picked = screen.getByRole("checkbox", {
+      name: t("space.suggestToMembersFor", { room: "Picked Room", space: "Work" })
+    }) as HTMLInputElement;
+    expect(open.checked).toBe(false);
+    expect(picked.checked).toBe(true);
+    fireEvent.click(open);
+    expect(onSetChildSuggested).toHaveBeenCalledWith("!open:example.invalid", true);
+
+    // One change at a time: while it saves, every toggle waits.
+    rerender(
+      panel({
+        kind: "saving",
+        request_id: 7,
+        child_room_id: "!open:example.invalid",
+        suggested: true
+      })
+    );
+    expect(open.checked).toBe(true);
+    expect(open.disabled).toBe(true);
+    expect(picked.disabled).toBe(true);
+    expect(
+      screen.getByText(t("space.suggestSaving")).closest(".settings-detail-row")?.textContent
+    ).toContain("Open Room");
+
+    rerender(
+      panel({
+        kind: "failed",
+        child_room_id: "!open:example.invalid",
+        suggested: true,
+        failure: "forbidden"
+      })
+    );
+    expect(open.checked).toBe(false);
+    expect(open.disabled).toBe(false);
+    const failure = screen.getByText(
+      t("space.suggestFailed", { reason: t("directory.failureForbidden") })
+    );
+    expect(failure.getAttribute("role")).toBe("alert");
+    expect(failure.closest(".settings-detail-row")?.textContent).toContain("Open Room");
   });
 
   // Issue #1070: an outside child the SDK named with its English calculated

@@ -28,7 +28,7 @@ function makeThreadItem(index: number, rootEventId = "$seed-event:example.invali
   };
 }
 
-test("Activity renders Rust-owned streams and waits for mark-read snapshots", async ({
+test("Activity shows verified room summaries without inferred read targets", async ({
   page
 }) => {
   await gotoReadyShell(page);
@@ -79,29 +79,31 @@ test("Activity renders Rust-owned streams and waits for mark-read snapshots", as
     ];
     const unreadRows = [
       {
-        kind: "event",
+        kind: "roomUnread",
         room_id: "!room-alpha:example.invalid",
-        event_id: "$activity-alpha-unread:example.invalid",
+        event_id: null,
         thread_root_event_id: null,
+        sender_id: null,
         room_label: "Project Alpha",
         context_label: "Room · Project Alpha",
-        sender_label: "Alpha Sender",
+        sender_label: null,
         sender_avatar: null,
-        preview: "Stale unread update",
+        preview: null,
         timestamp_ms: 1_800_000_001_000,
         unread: true,
-        highlight: true
+        highlight: false
       },
       {
-        kind: "event",
+        kind: "roomUnread",
         room_id: "!room-beta:example.invalid",
-        event_id: "$activity-beta-unread:example.invalid",
+        event_id: null,
         thread_root_event_id: null,
+        sender_id: null,
         room_label: "Project Beta",
         context_label: "Room · Project Beta",
-        sender_label: "Beta Sender",
+        sender_label: null,
         sender_avatar: null,
-        preview: "Fresh unread update",
+        preview: null,
         timestamp_ms: 1_800_000_011_000,
         unread: true,
         highlight: false
@@ -246,26 +248,12 @@ test("Activity renders Rust-owned streams and waits for mark-read snapshots", as
     .toEqual({ tab: "unread" });
   expect(await invocationCount(page, "mark_activity_read")).toBe(0);
 
-  const alphaUnreadRow = page.locator(".activity-row").filter({
-    hasText: "Stale unread update"
-  });
-  await expect(page.locator('[data-kind="roomUnread"]')).toHaveCount(0);
-  await expect(alphaUnreadRow).toBeVisible();
-  await alphaUnreadRow.getByRole("button", { name: "Mark room read" }).click();
-
-  await expect.poll(() => invocationCount(page, "mark_activity_read")).toBe(1);
-  await expect
-    .poll(async () =>
-      page.evaluate(() => window.__harness.invocationsOf("mark_activity_read")[0]?.args)
-    )
-    .toEqual({
-      target: {
-        kind: "room",
-        room_id: "!room-alpha:example.invalid",
-        up_to_event_id: "$activity-alpha-unread:example.invalid"
-      }
-    });
-  await expect(alphaUnreadRow).toBeVisible();
+  const roomSummaries = page.locator('[data-kind="roomUnread"]');
+  await expect(roomSummaries).toHaveCount(2);
+  await expect(roomSummaries.first()).not.toHaveAttribute("data-event-id", /.+/);
+  await expect(page.getByRole("button", { name: "Mark all read" })).toHaveCount(0);
+  await expect(page.getByRole("button", { name: "Mark room read" })).toHaveCount(0);
+  expect(await invocationCount(page, "mark_activity_read")).toBe(0);
 
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
@@ -293,15 +281,8 @@ test("Activity renders Rust-owned streams and waits for mark-read snapshots", as
     window.__harness.pushStateUpdate();
   });
 
-  await expect(alphaUnreadRow).toHaveCount(0);
-  await page.getByRole("button", { name: "Mark all read" }).click();
-  await expect.poll(() => invocationCount(page, "mark_activity_read")).toBe(2);
-  await expect
-    .poll(async () =>
-      page.evaluate(() => window.__harness.invocationsOf("mark_activity_read")[1]?.args)
-    )
-    .toEqual({ target: { kind: "all" } });
-  await expect(page.locator(".activity-row").filter({ hasText: "Fresh unread update" })).toBeVisible();
+  await expect(roomSummaries).toHaveCount(1);
+  await expect(roomSummaries.first()).toContainText("Project Beta");
 
   await page.evaluate(() => {
     const snapshot = window.__harness.currentSnapshot();
@@ -327,7 +308,7 @@ test("Activity renders Rust-owned streams and waits for mark-read snapshots", as
   await expect(page.getByText("No unread activity")).toBeVisible();
 });
 
-test("Activity Unread replaces unresolved room placeholders with retryable status", async ({ page }) => {
+test("Activity Unread retains room summaries through retryable status", async ({ page }) => {
   await gotoReadyShell(page);
   await page.evaluate(() => {
     const placeholder = {
@@ -355,7 +336,9 @@ test("Activity Unread replaces unresolved room placeholders with retryable statu
             ...snapshot.state.domain,
             activity: {
               kind: "open",
-              active_tab: "unread",
+              active_tab: snapshot.state.domain.activity.kind === "open"
+                ? snapshot.state.domain.activity.active_tab
+                : "unread",
               recent: { rows: [], next_batch: null, resolution: { kind: "idle" } },
               unread: {
                 rows: [placeholder],
@@ -387,14 +370,28 @@ test("Activity Unread replaces unresolved room placeholders with retryable statu
     .getByRole("navigation", { name: t("workspace.workspaces") })
     .getByRole("button", { name: /^Home/ })
     .click();
-  await expect(page.getByRole("alert")).toContainText("Unread messages could not be loaded");
-  await expect(page.locator('[data-kind="roomUnread"]')).toHaveCount(0);
-  await expect(page.getByRole("button", { name: "Mark all read" })).toBeVisible();
+  await expect(page.getByRole("alert")).toHaveCount(0);
+  await expect(page.locator('[data-kind="roomUnread"]')).toHaveCount(1);
+  await expect(page.getByRole("button", { name: "Mark all read" })).toHaveCount(0);
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    if (snapshot.state.domain.activity.kind !== "open") return;
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          activity: { ...snapshot.state.domain.activity, active_tab: "recent" }
+        }
+      }
+    });
+    window.__harness.pushStateUpdate();
+  });
+  await expect(page.getByRole("alert")).toContainText("Recent history could not be loaded");
   await page.getByRole("button", { name: "Retry" }).click();
   await expect.poll(() => invocationCount(page, "retry_activity_resolution")).toBe(1);
-  await expect(page.getByRole("region", { name: "Unread" }).getByRole("status"))
-    .toContainText("Resolving unread messages");
-  await expect(page.locator('[data-kind="roomUnread"]')).toHaveCount(0);
+  await expect(page.getByRole("status")).toContainText("Loading recent history");
 });
 
 test("selecting a search result opens the anchored main timeline from Rust-owned state", async ({
@@ -1005,6 +1002,7 @@ test("thread attention renders one Rust count in the root and header and clears 
       thread_root: null,
       thread_summary: {
         reply_count: 4,
+        unread_count: 2,
         latest_event_id: "$latest-reply:example.invalid",
         latest_sender: "@reply-sender:example.invalid",
         latest_sender_label: "Reply sender",
@@ -1047,6 +1045,9 @@ test("thread attention renders one Rust count in the root and header and clears 
           ...snapshot.state,
           domain: {
             ...snapshot.state.domain,
+            rooms: snapshot.state.domain.rooms.map((room) =>
+              room.room_id === roomId ? { ...room, thread_unread_count: 2 } : room
+            ),
             thread_attention: {
               kind: "tracking",
               room_id: roomId,
@@ -1067,11 +1068,11 @@ test("thread attention renders one Rust count in the root and header and clears 
     .locator(".channel-actions")
     .getByRole("button", { name: t("threads.title") });
   await expect(threadsButton).toHaveAttribute("data-count", "2");
-  await expect(page.getByRole("button", { name: /Thread notifications · 2/ })).toBeVisible();
+  await expect(page.getByRole("button", { name: /Thread unread · 2/ })).toBeVisible();
 
   // A successful threaded read receipt is projected by Rust as the next
   // snapshot. React must not keep or repair either count locally.
-  await page.evaluate(() => {
+  await page.evaluate((roomId) => {
     const snapshot = window.__harness.currentSnapshot();
     if (snapshot.state.domain.thread_attention.kind !== "tracking") {
       throw new Error("thread attention fixture is not tracking");
@@ -1082,6 +1083,9 @@ test("thread attention renders one Rust count in the root and header and clears 
         ...snapshot.state,
         domain: {
           ...snapshot.state.domain,
+          rooms: snapshot.state.domain.rooms.map((room) =>
+            room.room_id === roomId ? { ...room, thread_unread_count: 0 } : room
+          ),
           thread_attention: {
             ...snapshot.state.domain.thread_attention,
             notification_count: 0,
@@ -1092,6 +1096,19 @@ test("thread attention renders one Rust count in the root and header and clears 
       }
     });
     window.__harness.pushStateUpdate();
+  }, HARNESS_ROOM_ID);
+
+  await page.evaluate(async ({ key, item }) => {
+    await window.__harness.pushCoreEvent({
+      kind: "Timeline",
+      event: {
+        InitialItems: { request_id: null, key, generation: 3, items: [item] }
+      }
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+  }, {
+    key: HARNESS_ROOM_KEY,
+    item: { ...rootItem, thread_summary: { ...rootItem.thread_summary, unread_count: 0 } }
   });
 
   await expect(page.getByRole("button", { name: /View new replies/ })).toHaveCount(0);

@@ -79,7 +79,7 @@ fn room_list_applied_records_without_trace_environment() {
             ),
             (
                 "display_count",
-                koushi_diagnostics::DiagnosticValue::Count(2)
+                koushi_diagnostics::DiagnosticValue::Count(3)
             ),
             (
                 "has_unread_content",
@@ -164,6 +164,7 @@ fn native_attention_recomputed_diagnostic_records_private_safe_fields_child() {
         sender_label: Some("Private sender".to_owned()),
         sender_avatar: None,
         preview: Some(private_message.to_owned()),
+        message_text: None,
         timestamp_ms: 42,
         is_redacted: false,
     });

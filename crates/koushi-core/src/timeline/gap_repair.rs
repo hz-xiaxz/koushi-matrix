@@ -1,4 +1,4 @@
-use std::collections::{BTreeMap, BTreeSet};
+use std::collections::BTreeMap;
 use std::time::{Duration, Instant};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
@@ -35,9 +35,9 @@ use super::actor::{TimelineActor, TimelineActorControl, TimelineActorMessage};
 use super::diagnostics::{
     TimelineGapSelectionDiagnostic, record_live_catchup_gate, record_live_tail_cancellation,
     record_live_tail_commit, record_live_tail_queue, record_live_tail_reconciliation,
-    record_live_tail_refresh, record_live_tail_state, record_timeline_gap_projection,
-    record_timeline_gap_projection_boundary, record_timeline_gap_repair,
-    record_timeline_gap_selection,
+    record_live_tail_refresh, record_live_tail_state, record_timeline_gap_inspection_work,
+    record_timeline_gap_projection, record_timeline_gap_projection_boundary,
+    record_timeline_gap_repair, record_timeline_gap_selection,
 };
 use super::manager::{TimelineManagerActor, TimelineMessage};
 use super::read_state::ReadRetrySource;
@@ -540,42 +540,6 @@ pub(super) fn observe_causal_projection(
             historical_gap_batch_id: None,
             live_tail_batch_id: live_tail.observe(projection, batch_id),
         },
-    }
-}
-
-#[derive(Debug, Default)]
-pub(super) struct RestoreCausalProjectionBuffer {
-    pub(super) projections: BTreeSet<CausalProjectionId>,
-}
-
-impl RestoreCausalProjectionBuffer {
-    pub(super) fn buffer_batch(&mut self, projections: BTreeSet<CausalProjectionId>) {
-        self.projections.extend(projections);
-    }
-
-    pub(super) fn observe_after_publication(
-        &mut self,
-        historical_gap: &mut TimelineGapProjectionCorrelation,
-        live_tail: &mut TimelineGapProjectionCorrelation,
-        published_batch_id: TimelineBatchId,
-    ) -> CausalProjectionObservation {
-        std::mem::take(&mut self.projections).into_iter().fold(
-            CausalProjectionObservation::default(),
-            |mut ready, projection| {
-                let observation = observe_causal_projection(
-                    historical_gap,
-                    live_tail,
-                    projection,
-                    published_batch_id,
-                );
-                ready.historical_gap_batch_id = ready
-                    .historical_gap_batch_id
-                    .or(observation.historical_gap_batch_id);
-                ready.live_tail_batch_id =
-                    ready.live_tail_batch_id.or(observation.live_tail_batch_id);
-                ready
-            },
-        )
     }
 }
 
@@ -1820,8 +1784,6 @@ impl TimelineActor {
             "awaiting_initial_projection"
         } else if self.pagination_task.is_some() {
             "pagination"
-        } else if self.restore_anchor.is_some() {
-            "anchor_restore"
         } else if self.gap_projection_correlation.is_pending()
             || self.pending_gap_projection.is_some()
         {
@@ -1867,7 +1829,6 @@ impl TimelineActor {
     }
     pub(super) async fn start_pending_timeline_gap_inspection(&mut self) {
         if self.pagination_task.is_some()
-            || self.restore_anchor.is_some()
             || self.gap_projection_correlation.is_pending()
             || self.pending_gap_projection.is_some()
         {
@@ -1971,6 +1932,24 @@ impl TimelineActor {
             return;
         }
         self.gap_work_task = None;
+        // Record the completed inspection's content-free counters right after
+        // admission is confirmed, before the checkpoint-staleness gate below:
+        // the SDK inspection already ran and incurred its reads, and a
+        // superseded checkpoint must not hide that work from the counters.
+        if let Ok(inspection) = &result {
+            record_timeline_gap_inspection_work(
+                timeline_gap_repair_trigger_token(trigger),
+                serial,
+                match inspection.continuity {
+                    MatrixTimelineContinuity::Unknown => "unknown",
+                    MatrixTimelineContinuity::Gapped => "gapped",
+                    MatrixTimelineContinuity::Complete => "complete",
+                },
+                inspection.diagnostics.scanned_chunks,
+                inspection.diagnostics.event_bodies_decoded,
+                inspection.diagnostics.duration_ms,
+            );
+        }
         if matches!(trigger, TimelineGapRepairTrigger::LiveEdge)
             && committed_response.as_ref().is_some_and(|inspected| {
                 self.room_subscription_checkpoint

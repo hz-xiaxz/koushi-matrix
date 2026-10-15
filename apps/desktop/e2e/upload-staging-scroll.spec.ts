@@ -53,6 +53,26 @@ test("Escape in the staging emoji picker preserves the attachment and its captio
   await expect(opener).toBeFocused();
 });
 
+test("staging a file opens on its caption editor without explaining the clear action", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await page.getByRole("button", { name: "Attach file", exact: true }).click();
+  await page
+    .locator('input[type="file"][aria-label="Attach file input"]')
+    .setInputFiles(stagedPortraitImage());
+  const staging = page.getByRole("dialog", { name: t("upload.dialogTitle"), exact: true });
+  const caption = staging.getByRole("textbox", { name: "Caption for portrait.png" });
+
+  // Focus belongs where the caption is typed, not on the destructive clear
+  // action whose focus bubble used to appear on every staged attachment.
+  await expect(caption).toBeFocused();
+  await expect(page.getByRole("tooltip")).toHaveCount(0);
+
+  await page.keyboard.type("captioned from the keyboard");
+  await expect(caption).toHaveText("captioned from the keyboard");
+});
+
 /** Rendered geometry of the staging dialog, its scroll list, and its actions. */
 async function stagingGeometry(page: Page) {
   return page.evaluate(() => {
@@ -320,6 +340,24 @@ function expectNaturalCard(card: Awaited<ReturnType<typeof stagingCardGeometry>>
   ).toBeLessThanOrEqual(card.composerContent + 12);
 }
 
+/**
+ * #1234: the staging dialog must hug its content for a previewless file instead
+ * of filling the overlay, so the send action stays near the staged items.
+ */
+async function stagingContentGeometry(page: Page) {
+  return page.evaluate(() => {
+    const dialog = document.querySelector<HTMLElement>(".upload-staging-dialog")!;
+    const list = dialog.querySelector<HTMLElement>(".upload-staging-list")!;
+    const action = dialog.querySelector<HTMLElement>(".upload-staging-actions button")!;
+    return {
+      viewportHeight: window.innerHeight,
+      dialogHeight: dialog.getBoundingClientRect().height,
+      listBottom: list.getBoundingClientRect().bottom,
+      actionTop: action.getBoundingClientRect().top
+    };
+  });
+}
+
 for (const surface of ["main", "thread"] as const) {
   for (const viewport of [STANDARD_VIEWPORT, SHORT_VIEWPORT, { width: 900, height: 440 }]) {
     test(`${surface} single file without a preview keeps its natural height at ${viewport.height}px (#1012)`, async ({ page }) => {
@@ -348,6 +386,16 @@ for (const surface of ["main", "thread"] as const) {
       await expect(caption).toBeInViewport();
       expectStagingBounded((await stagingGeometry(page))!, `${surface} file staging`);
       await expect(dialog.getByRole("button", { name: t("upload.sendAttachments") })).toBeInViewport();
+      const hugging = await stagingContentGeometry(page);
+      const huggingLabel = `${surface} ${viewport.height}px`;
+      // Only the dialog gap and action padding sit between the list and the send
+      // action; spare window height is not inserted between them (#1234).
+      expect(hugging.actionTop - hugging.listBottom, huggingLabel).toBeLessThanOrEqual(32);
+      expect(hugging.dialogHeight, huggingLabel).toBeLessThanOrEqual(hugging.viewportHeight);
+      if (viewport.height >= 800) {
+        // The dialog follows its content rather than the full overlay height.
+        expect(hugging.dialogHeight, huggingLabel).toBeLessThan(hugging.viewportHeight - 120);
+      }
     });
   }
 }

@@ -1,6 +1,31 @@
 export type Locale = "en" | "ja" | "pseudo";
 
 export type MessageId =
+  | "access.public"
+  | "access.inviteOnly"
+  | "access.conditionsApply"
+  | "access.spaceMembersCanJoin"
+  | "access.canRequest"
+  | "access.knockRestrictedLabel"
+  | "access.privateReserved"
+  | "access.unknown"
+  | "access.checking"
+  | "access.publicDescription"
+  | "access.inviteOnlyDescription"
+  | "access.inviteOnlyDmDescription"
+  | "access.conditionsDescription"
+  | "access.spaceMembersCanJoinDescription"
+  | "access.requestDescription"
+  | "access.knockRestrictedDescription"
+  | "access.knockRestrictedSpaceDescription"
+  | "access.privateReservedDescription"
+  | "access.unknownDescription"
+  | "access.checkingDescription"
+  | "access.labelSeparator"
+  | "access.conditionSummarySeparator"
+  | "access.allowedRooms"
+  | "access.restrictedNoUsableConditionsDescription"
+  | "access.restrictedNoUsableConditionsCanRequestDescription"
   | "help.title"
   | "help.askAi"
   | "help.copyRepositoryUrl"
@@ -19,6 +44,7 @@ export type MessageId =
   | "accountTabs.authenticating"
   | "accountTabs.needsVerification"
   | "accountTabs.ready"
+  | "accountTabs.inviteCount"
   | "accountTabs.signedOut"
   | "accountTabs.loggingOut"
   | "accountTabs.error"
@@ -69,8 +95,9 @@ export type MessageId =
   | "app.title"
   | "app.versionMismatch.title"
   | "app.versionMismatch.detail"
+  | "menu.accountSettings"
+  | "menu.appSettings"
   | "menu.aboutKoushi"
-  | "menu.settings"
   | "menu.signOut"
   | "menu.toggleRightPanel"
   | "menu.koushiHelp"
@@ -92,10 +119,14 @@ export type MessageId =
   | "menu.closeWindow"
   | "menu.quit"
   | "auth.failureForbidden"
+  | "auth.failureInvalidCredentials"
   | "auth.failureNetwork"
+  | "auth.failureRateLimited"
   | "auth.failureSdk"
+  | "auth.failureStore"
   | "auth.failureTimeout"
   | "auth.failureUnsupported"
+  | "auth.cancelBrowserSignIn"
   | "auth.flowOidc"
   | "auth.flowPassword"
   | "auth.flowSso"
@@ -195,6 +226,7 @@ export type MessageId =
   | "window.title"
   | "navigation.failed"
   | "navigation.failedDismiss"
+  | "navigation.opening"
   | "context.editMessage"
   | "context.addToFavourites"
   | "context.addToLowPriority"
@@ -219,6 +251,7 @@ export type MessageId =
   | "space.leaveRoomInOtherSpace"
   | "space.leaveConfirmAction"
   | "space.leaveConfirmActionWithRooms"
+  | "context.copySelectedText"
   | "context.openKeyboardSettings"
   | "context.openRoomInfo"
   | "context.openSpaceInfo"
@@ -229,11 +262,11 @@ export type MessageId =
   | "context.removeFromFavourites"
   | "context.removeFromLowPriority"
   | "context.searchInRoom"
+  | "context.searchWebForSelectedText"
   | "context.reportContent"
   | "context.reportRoom"
   | "context.reportUser"
   | "context.selectRoom"
-  | "context.selectSpace"
   | "context.switchAccount"
   | "context.unignoreUser"
   | "dialog.cancel"
@@ -241,7 +274,6 @@ export type MessageId =
   | "dialog.createRoomTitle"
   | "dialog.createSpaceTitle"
   | "dialog.encryptedRoom"
-  | "dialog.invitedOnlyRoom"
   | "dialog.invitedOnlyRoomInSpace"
   | "dialog.inviteCandidates"
   | "dialog.inviteHistory"
@@ -279,14 +311,24 @@ export type MessageId =
   | "dialog.roomAddressSuggestion"
   | "dialog.roomAddressUseSuggestion"
   | "dialog.roomAddressScope"
-  | "dialog.publicRoomInSpace"
   | "dialog.roomAddressAbout"
   | "dialog.roomAddressHelp"
   | "dialog.roomAddressPreview"
   | "dialog.roomAddressEmpty"
-  | "dialog.roomAddressNone"
   | "dialog.roomAddressInvalid"
   | "dialog.roomAddressPending"
+  | "dialog.roomAddressChange"
+  | "dialog.roomAddressChangeLabel"
+  | "dialog.roomAddressNameVsAddress"
+  | "dialog.createWhoCanJoin"
+  | "dialog.createJoinSpaceMembers"
+  | "dialog.createJoinInvite"
+  | "dialog.createJoinPublic"
+  | "dialog.createJoinPublicHint"
+  | "dialog.createEarlierMessages"
+  | "dialog.createHistoryShared"
+  | "dialog.createHistoryInvited"
+  | "dialog.createHistoryWorldReadable"
   | "dialog.roomTopic"
   | "dialog.roomVisibility"
   | "dialog.sendInvite"
@@ -295,8 +337,6 @@ export type MessageId =
   | "dialog.roomNameOptional"
   | "dialog.roomNameOptionalHelp"
   | "dialog.spaceName"
-  | "dialog.standardRoomInSpace"
-  | "dialog.privateRoomDescription"
   | "dialog.startDm"
   | "dialog.reportReasonLabel"
   | "dialog.reportReasonPlaceholder"
@@ -308,6 +348,11 @@ export type MessageId =
   | "diagnostics.copyFailed"
   | "diagnostics.copying"
   | "diagnostics.open"
+  | "diagnostics.privacyNote"
+  | "diagnostics.save"
+  | "diagnostics.saveFailed"
+  | "diagnostics.saved"
+  | "diagnostics.saving"
   | "diagnostics.title"
   | "emoji.category.people"
   | "emoji.category.nature"
@@ -510,6 +555,54 @@ export type MessageId =
   | "room.editAvatar"
   | "room.accessAndHistory"
   | "room.accessAndHistoryHint"
+  | "room.accessChooseLabel"
+  | "room.accessChooseHistory"
+  | "room.accessDetailsLabel"
+  | "room.accessDetailsConfirmed"
+  | "room.accessDetailsUnsaved"
+  | "room.accessChoiceSpaceMembers"
+  | "room.accessChoiceSpaceMembersPinned"
+  | "room.accessChoicePublicSummary"
+  | "room.accessChoiceInviteSummary"
+  | "room.accessChoiceKnockSummary"
+  | "room.accessChoiceSpaceMembersSummary"
+  | "room.accessChoiceConditionsSummary"
+  | "room.accessAllowTargets"
+  | "room.accessAllowTargetsHint"
+  | "room.accessNoJoinedSpaces"
+  | "room.accessUnavailableUnsupported"
+  | "room.accessUnavailableNotInspected"
+  | "room.accessUnavailableNotSettable"
+  | "room.accessRejectionPublicWithRestrictedAccess"
+  | "room.accessRejectionExplicitPolicyWithInvitedOnly"
+  | "room.accessRejectionEmptyAccessTargets"
+  | "room.accessRejectionPublicWithInvitedOnly"
+  | "room.accessRoomVersionPinned"
+  | "room.accessOutcomeJoinNotVerified"
+  | "room.accessOutcomeJoinPublic"
+  | "room.accessOutcomeJoinInvite"
+  | "room.accessOutcomeJoinPrivate"
+  | "room.accessOutcomeJoinKnock"
+  | "room.accessOutcomeJoinUnknown"
+  | "room.accessOutcomeJoinSpaceMembers"
+  | "room.accessOutcomeJoinMembershipRoute"
+  | "room.accessOutcomeJoinNoRoute"
+  | "room.accessOutcomeJoinConditionsUnverifiedContent"
+  | "room.accessOutcomeJoinUnsupportedContent"
+  | "room.accessOutcomeJoinCanRequest"
+  | "room.accessOutcomeHistoryWorldReadable"
+  | "room.accessOutcomeHistoryShared"
+  | "room.accessOutcomeHistoryInvited"
+  | "room.accessOutcomeHistoryJoined"
+  | "room.accessOutcomeEncrypted"
+  | "room.accessOutcomeNotEncrypted"
+  | "room.accessOutcomeDirectoryPublic"
+  | "room.accessOutcomeDirectoryPrivate"
+  | "room.accessOutcomeDirectoryUnavailable"
+  | "room.accessOutcomeDirectoryFailed"
+  | "room.accessOutcomeDirectoryLoading"
+  | "room.accessOutcomeDirectoryWillBePublic"
+  | "room.accessOutcomeDirectoryWillBePrivate"
   | "room.copyShareLink"
   | "room.directMessage"
   | "room.dmList"
@@ -531,6 +624,11 @@ export type MessageId =
   | "room.historyNonRetroactive"
   | "room.historyRecoveryRequired"
   | "room.historyWorldReadableDescription"
+  | "room.statusHistoryLimitedDescription"
+  | "room.statusHistorySharedDescription"
+  | "room.statusHistoryWorldReadableDescription"
+  | "room.encryptedDescription"
+  | "room.notEncryptedDescription"
   | "room.historyWorldReadableWarning"
   | "room.historyWorldReadable"
   | "room.joinRule"
@@ -575,6 +673,8 @@ export type MessageId =
   | "room.operationFailed"
   | "room.settingForbidden"
   | "room.settingNoPermission"
+  | "room.settingUnsupportedPolicyCondition"
+  | "room.settingPolicyNotVerified"
   | "room.people"
   | "room.rolePermissions"
   | "room.memberRole"
@@ -596,8 +696,6 @@ export type MessageId =
   | "room.statusHistoryShared"
   | "room.statusHistoryWorldReadable"
   | "room.statusNotEncrypted"
-  | "room.statusPrivate"
-  | "room.statusPublic"
   | "room.statusShowSetting"
   | "room.saveAccess"
   | "room.saveHistoryVisibility"
@@ -622,6 +720,8 @@ export type MessageId =
   | "room.unbanMember"
   | "room.unread"
   | "room.unreadCount"
+  | "room.unreadBreakdown"
+  | "room.mutedUnreadBreakdown"
   | "roomList.category"
   | "roomList.categoryDms"
   | "roomList.categoryRooms"
@@ -641,11 +741,13 @@ export type MessageId =
   | "roomList.noMatchingConversations"
   | "roomList.sort"
   | "roomList.sortLabel"
-  | "roomList.sortActive"
-  | "roomList.sortAttention"
   | "roomList.sortRecent"
   | "roomList.sortName"
   | "roomList.sectionOptions"
+  | "roomList.showMore"
+  | "roomList.showMoreInSection"
+  | "roomList.showFewer"
+  | "roomList.showFewerInSection"
   | "spaceAddRooms.action"
   | "spaceAddRooms.title"
   | "spaceAddRooms.scope"
@@ -670,6 +772,7 @@ export type MessageId =
   | "roomList.failed"
   | "room.markAsRead"
   | "room.markAsUnread"
+  | "room.manuallyMarkedUnread"
   | "search.indexingPending"
   | "search.noExactMatches"
   | "search.matchAttachmentFileName"
@@ -729,7 +832,6 @@ export type MessageId =
   | "settings.accounts"
   | "settings.appearance"
   | "settings.language"
-  | "settings.languageDefault"
   | "settings.languageEnglish"
   | "settings.languageJapanese"
   | "settings.accountSwitcher"
@@ -774,9 +876,13 @@ export type MessageId =
   | "settings.updateUpToDate"
   | "settings.updateChecking"
   | "settings.updateAvailable"
+  | "settings.updateAvailableManual"
+  | "settings.updateReleasePage"
   | "settings.updateAvailableTitle"
   | "settings.updateAvailableConfirm"
   | "settings.updateDownload"
+  | "settings.updateIgnore"
+  | "settings.updateIgnored"
   | "settings.updateDownloading"
   | "settings.updateReady"
   | "settings.updateRestart"
@@ -845,6 +951,97 @@ export type MessageId =
   | "settings.notificationMessagePreviews"
   | "settings.notificationMessagePreviewsDescription"
   | "settings.notificationSound"
+  | "settings.notificationDelivery"
+  | "settings.notificationDeliveryDescription"
+  | "settings.notificationDeliveryTriggers"
+  | "settings.notificationDeliveryDirectMessages"
+  | "settings.notificationDeliveryMentions"
+  | "settings.notificationDeliveryKeywords"
+  | "settings.notificationDeliveryDwell"
+  | "settings.notificationDeliveryDwellDescription"
+  | "settings.notificationDeliveryInterval"
+  | "settings.notificationDeliveryIntervalDescription"
+  | "settings.notificationDeliveryOnlyUnfocused"
+  | "settings.notificationDeliveryWatched"
+  | "settings.notificationDeliveryWatchedDescription"
+  | "settings.notificationDeliveryWatchedAdd"
+  | "settings.notificationDeliveryWatchedEmpty"
+  | "settings.notificationDeliveryWatchedLimit"
+  | "settings.notificationDeliveryWatchedRemove"
+  | "settings.notificationDeliverySinks"
+  | "settings.notificationDeliveryAddSink"
+  | "settings.notificationDeliverySinkLimit"
+  | "settings.notificationDeliverySinkProvider"
+  | "settings.notificationDeliverySinkName"
+  | "settings.notificationDeliverySinkFrom"
+  | "settings.notificationDeliverySinkTo"
+  | "settings.notificationDeliverySinkHost"
+  | "settings.notificationDeliverySinkPort"
+  | "settings.notificationDeliverySinkUsername"
+  | "settings.notificationDeliverySinkSecret"
+  | "settings.notificationDeliverySinkSecretSet"
+  | "settings.notificationDeliverySinkSecretMissing"
+  | "settings.notificationDeliverySinkTest"
+  | "settings.notificationDeliverySinkTestSending"
+  | "settings.notificationDeliverySinkRemove"
+  | "settings.notificationDeliveryLastResult"
+  | "settings.notificationDeliveryNeverSent"
+  | "settings.notificationDeliveryResultDelivered"
+  | "settings.notificationDeliveryResultInvalidSecret"
+  | "settings.notificationDeliveryResultNotPermitted"
+  | "settings.notificationDeliveryResultRejected"
+  | "settings.notificationDeliveryResultRateLimited"
+  | "settings.notificationDeliveryResultTransport"
+  | "settings.notificationDeliveryPrefix"
+  | "settings.notificationDeliveryPrefixDescription"
+  | "settings.notificationDeliveryPrefixChars"
+  | "settings.notificationDeliveryPrefixConsentTitle"
+  | "settings.notificationDeliveryPrefixConsentBody"
+  | "settings.notificationDeliveryPrefixConsentAccept"
+  | "settings.notificationDeliveryPrefixConsentLink"
+  | "settings.notificationSource"
+  | "settings.notificationDeviceSource"
+  | "settings.notificationHomeserverSource"
+  | "settings.notificationDeliveryEnable"
+  | "settings.notificationDeliveryKeywordsHint"
+  | "settings.notificationDeliveryWatchedPick"
+  | "settings.notificationDeliveryWatchedRooms"
+  | "settings.notificationDeliveryWatchedSpaces"
+  | "settings.notificationDeliveryWatchedUnknown"
+  | "settings.notificationDeliverySinkEnabled"
+  | "settings.notificationDeliverySinkKindResend"
+  | "settings.notificationDeliverySinkKindSmtp"
+  | "settings.notificationDeliverySinkEndpoint"
+  | "settings.notificationDeliverySinkEndpointDefault"
+  | "settings.notificationDeliverySinkPreset"
+  | "settings.notificationDeliverySinkPresetCustom"
+  | "settings.notificationDeliverySinkPresetHint"
+  | "settings.notificationDeliverySinkTls"
+  | "settings.notificationDeliverySinkTlsImplicit"
+  | "settings.notificationDeliverySinkTlsStartTls"
+  | "settings.notificationDeliverySinkUsernameFullAddress"
+  | "settings.notificationDeliverySinkSaveSecret"
+  | "settings.notificationDeliverySinkClearSecret"
+  | "settings.notificationDeliverySinkSecretRetired"
+  | "settings.notificationDeliverySinkEmpty"
+  | "settings.notificationDeliverySinkFailed"
+  | "settings.notificationDeliveryResultRateLimitedAfter"
+  | "settings.notificationDeliveryPrefixConsentAcknowledge"
+  | "settings.notificationDeliveryPrefixConsentRequired"
+  | "settings.notificationDeliverySecretHint.qqMail"
+  | "settings.notificationDeliverySecretHint.gmail"
+  | "settings.notificationDeliverySecretHint.icloud"
+  | "settings.notificationKeywordHeading"
+  | "settings.notificationKeywordEmpty"
+  | "settings.notificationKeywordAdd"
+  | "settings.notificationKeywordRemove"
+  | "settings.notificationKeywordDisabled"
+  | "settings.notificationKeywordHint"
+  | "settings.notificationKeywordErrorEmpty"
+  | "settings.notificationKeywordErrorTooLong"
+  | "settings.notificationKeywordErrorDuplicate"
+  | "settings.notificationKeywordErrorLimit"
+  | "settings.notificationKeywordErrorUnknownRule"
   | "settings.sendReadReceipts"
   | "settings.sendTypingNotifications"
   | "settings.notifications"
@@ -961,11 +1158,19 @@ export type MessageId =
   | "scheduled.edit"
   | "scheduled.localFallback"
   | "scheduled.localFallbackNotice"
+  | "scheduled.panelEmpty"
+  | "scheduled.persistenceFailed"
   | "scheduled.save"
   | "scheduled.schedule"
   | "scheduled.sendLater"
+  | "scheduled.sendLaterWithCount"
   | "scheduled.serverDelayedEvents"
+  | "scheduled.threadReply"
   | "scheduled.timeInput"
+  | "scheduled.timeEarlierHour"
+  | "scheduled.timeEarlierTenMinutes"
+  | "scheduled.timeLaterTenMinutes"
+  | "scheduled.timeLaterHour"
   | "scheduled.title"
   | "scheduled.unknownCapability"
   | "trust.acceptVerification"
@@ -1051,7 +1256,6 @@ export type MessageId =
   | "gate.mismatch"
   | "gate.recoverySecret"
   | "gate.recover"
-  | "gate.destination"
   | "gate.passphrase"
   | "gate.bootstrap"
   | "gate.saved"
@@ -1125,6 +1329,19 @@ export type MessageId =
   | "gate.secureBackupFailureForbidden"
   | "gate.secureBackupFailureTimeout"
   | "gate.secureBackupFailureSdk"
+  | "gate.secureBackupFailureServerResponse"
+  | "gate.secureBackupFailureUnauthorized"
+  | "gate.secureBackupDetailNoResponse"
+  | "gate.secureBackupDetailTimeout"
+  | "gate.secureBackupDetailHttpStatus"
+  | "gate.secureBackupDetailHttpResponse"
+  | "gate.secureBackupDetailLocal"
+  | "gate.secureBackupActionRetry"
+  | "gate.secureBackupActionWaitAndRetry"
+  | "gate.secureBackupActionRetryLater"
+  | "gate.secureBackupActionSignInAgain"
+  | "gate.secureBackupActionContactAdmin"
+  | "gate.secureBackupActionLocalRetry"
   | "gate.secureBackupRetry"
   | "gate.secureBackupDiagnostics"
   | "gate.secureBackupCommandFailed"
@@ -1233,7 +1450,7 @@ export type MessageId =
   | "shortcut.noteCallsDeferred"
   | "shortcut.noteGoHomeAdapted"
   | "shortcut.noteUploadUiDeferred"
-  | "shortcut.openUserSettings"
+  | "shortcut.openAppSettings"
   | "shortcut.parityAdapted"
   | "shortcut.parityDeferred"
   | "shortcut.parityNotApplicable"
@@ -1426,6 +1643,7 @@ export type MessageId =
   | "timeline.resendAll"
   | "timeline.cancelAll"
   | "timeline.downloadMedia"
+  | "timeline.downloadDefaultImageName"
   | "timeline.encryptedMedia"
   | "timeline.mediaUploadProgress"
   | "timeline.mediaDownloadPending"
@@ -1462,10 +1680,28 @@ export type MessageId =
   | "roomList.membershipKnocked"
   | "roomList.membershipNotJoined"
   | "roomList.membershipUnknown"
+  | "roomList.suggested"
+  | "roomList.suggestedDescription"
+  | "space.suggestToMembers"
+  | "space.suggestToMembersFor"
+  | "space.suggestSaving"
+  | "space.suggestFailed"
+  | "suggestedRooms.offerTitle"
+  | "suggestedRooms.offerCopy"
+  | "suggestedRooms.listLabel"
+  | "suggestedRooms.joinAll"
+  | "suggestedRooms.skip"
+  | "suggestedRooms.joining"
+  | "suggestedRooms.resultTitle"
+  | "suggestedRooms.resultCopy"
+  | "suggestedRooms.joined"
+  | "suggestedRooms.failed"
+  | "suggestedRooms.done"
   | "workspace.people"
   | "workspace.rooms"
   | "workspace.resizeRoomList"
   | "workspace.resizeRightPanel"
+  | "workspace.scheduledMessages"
   | "workspace.search"
   | "workspace.searchEverywhere"
   | "workspace.searchInRoom"
@@ -1511,6 +1747,7 @@ export type MessageId =
   | "threads.loading"
   | "threads.open"
   | "threads.replyCount"
+  | "threads.openUnreadRoot"
   | "threads.title"
   | "settings.searchHistory"
   | "settings.searchHistoryCrawler"
@@ -1745,6 +1982,43 @@ export function pseudoLocalize(input: string, mode: PseudoLocaleMode = "accented
 }
 
 const en: Catalog = {
+  // #1327: one access-condition vocabulary for rooms and Spaces. A padlock means
+  // encryption only, so participation uses its own icons and labels.
+  "access.public": "Public",
+  "access.inviteOnly": "Invite only",
+  "access.conditionsApply": "Conditions apply",
+  "access.spaceMembersCanJoin": "Space members can join",
+  "access.canRequest": "Can request",
+  "access.knockRestrictedLabel": "Space / request",
+  "access.privateReserved": "Not joinable",
+  "access.unknown": "Unknown",
+  "access.checking": "Checking",
+  "access.publicDescription":
+    "Public. Anyone can join. Who can read message history is a separate setting.",
+  "access.inviteOnlyDescription":
+    "Invite only. Only invited people can join. Being a member of the Space is not enough.",
+  "access.inviteOnlyDmDescription": "Invite only. Only invited people can join.",
+  "access.conditionsDescription":
+    "Conditions apply. People who meet the room's join conditions, or who are invited, can join.",
+  "access.spaceMembersCanJoinDescription":
+    "Space members can join. Members of {space}, or invited people, can join. Joining the Space does not join this room automatically.",
+  "access.requestDescription":
+    "Join request. You can ask to join, and you join once a member approves the request.",
+  "access.knockRestrictedDescription":
+    "Space / request. People who meet the room's join conditions, or whose join request is approved, can join.",
+  "access.knockRestrictedSpaceDescription":
+    "Space / request. Members of {space}, or people whose join request is approved, can join. Joining the Space does not join this room automatically.",
+  "access.privateReservedDescription":
+    "Not joinable. There is no ordinary way to join this room, and an invitation alone may not be enough.",
+  "access.unknownDescription": "Unknown. This app does not recognize these join conditions.",
+  "access.checkingDescription": "Checking. The join conditions are not available yet.",
+  "access.labelSeparator": ", ",
+  "access.conditionSummarySeparator": " — ",
+  "access.allowedRooms": "Allowed: {rooms}",
+  "access.restrictedNoUsableConditionsDescription":
+    "Conditions apply. No usable join condition is configured. Only invited people can join.",
+  "access.restrictedNoUsableConditionsCanRequestDescription":
+    "Space / request. No usable join condition is configured, but you can ask to join.",
   "help.title": "Koushi Help",
   "help.askAi": "Copy this GitHub URL and ask ChatGPT or another AI assistant how to use Koushi. Include your Koushi version, operating system, and question.",
   "help.copyRepositoryUrl": "Copy GitHub URL",
@@ -1763,6 +2037,7 @@ const en: Catalog = {
   "accountTabs.authenticating": "Signing in",
   "accountTabs.needsVerification": "Needs verification",
   "accountTabs.ready": "Ready",
+  "accountTabs.inviteCount": "{count} pending invitations",
   "accountTabs.signedOut": "Sign in again",
   "accountTabs.loggingOut": "Signing out",
   "accountTabs.error": "Account error",
@@ -1788,8 +2063,8 @@ const en: Catalog = {
   "activity.highlightBadge": "Mention",
   "activity.loadMore": "Load more activity",
   "activity.loading": "Loading activity",
-  "activity.resolvingUnread": "Resolving unread messages…",
-  "activity.resolveFailed": "Unread messages could not be loaded.",
+  "activity.resolvingUnread": "Loading recent history…",
+  "activity.resolveFailed": "Recent history could not be loaded.",
   "activity.retryResolution": "Retry",
   "activity.markAllRead": "Mark all read",
   "activity.markReadFailed": "Mark read failed",
@@ -1800,7 +2075,7 @@ const en: Catalog = {
   "activity.openItem": "Open activity item {room}",
   "activity.recent": "Recent",
   "activity.tabs": "Activity views",
-  "activity.unread": "Unread",
+  "activity.unread": "Unread conversations",
   "activity.unreadBadge": "Unread",
   "auth.checking": "Checking",
   "auth.checkLoginMethods": "Check login methods",
@@ -1817,7 +2092,8 @@ const en: Catalog = {
   // Native menu bar. Title Case matches the platform menu convention, so these
   // are separate from the sentence-case shortcut sheet labels.
   "menu.aboutKoushi": "About Koushi",
-  "menu.settings": "Settings…",
+  "menu.accountSettings": "Account Settings…",
+  "menu.appSettings": "App Settings…",
   "menu.signOut": "Sign Out",
   "menu.toggleRightPanel": "Toggle Right Panel",
   "menu.koushiHelp": "Koushi Help",
@@ -1839,10 +2115,14 @@ const en: Catalog = {
   "menu.closeWindow": "Close Window",
   "menu.quit": "Quit Koushi",
   "auth.failureForbidden": "Login methods are not available for this account",
+  "auth.failureInvalidCredentials": "Incorrect Matrix ID or password",
   "auth.failureNetwork": "Could not reach the homeserver",
+  "auth.failureRateLimited": "Too many sign-in attempts. Wait a moment and try again",
   "auth.failureSdk": "Could not check login methods",
+  "auth.failureStore": "Could not open the local encryption store",
   "auth.failureTimeout": "Login method check timed out",
   "auth.failureUnsupported": "Unsupported homeserver",
+  "auth.cancelBrowserSignIn": "Cancel browser sign-in",
   "auth.flowOidc": "OIDC",
   "auth.flowPassword": "Password",
   "auth.flowSso": "Single sign-on",
@@ -1944,6 +2224,7 @@ const en: Catalog = {
   "window.title": "Koushi",
   "navigation.failed": "Navigation failed. Please try again.",
   "navigation.failedDismiss": "Dismiss the navigation failure message",
+  "navigation.opening": "Opening message…",
   "context.editMessage": "Edit",
   "context.addToFavourites": "Add to Favourites",
   "context.addToLowPriority": "Move to Low priority",
@@ -1974,6 +2255,8 @@ const en: Catalog = {
   "context.openRoomInfo": "Room info",
   "context.openSpaceInfo": "Space info",
   "context.openThread": "Reply in thread",
+  "context.copySelectedText": "Copy selected text",
+  "context.searchWebForSelectedText": "Search selected text on DuckDuckGo",
   "context.openUserInfo": "User info",
   "context.openUserSettings": "Account Settings",
   "context.redactMessage": "Redact",
@@ -1981,7 +2264,6 @@ const en: Catalog = {
   "context.removeFromLowPriority": "Remove from Low priority",
   "context.searchInRoom": "Search in room",
   "context.selectRoom": "Open",
-  "context.selectSpace": "Open Space",
   "context.switchAccount": "Switch account",
   "context.reportContent": "Report content",
   "context.reportRoom": "Report room",
@@ -1992,13 +2274,12 @@ const en: Catalog = {
   "dialog.createRoomTitle": "Create room",
   "dialog.createSpaceTitle": "Create space",
   "dialog.encryptedRoom": "Encrypted room",
-  "dialog.invitedOnlyRoom": "Invited only",
   "dialog.invitedOnlyRoomInSpace": "Invite-only room in {spaceName}: only explicitly invited people can join.",
   "dialog.inviteCandidates": "Invite candidates",
   "dialog.inviteHistory": "History visibility for invitees",
   "dialog.inviteHistoryCurrent": "Current room setting. Change it in Room Info before sending the invite.",
   "dialog.inviteHistoryCurrentBadge": "Current",
-  "dialog.inviteHistoryEncryptedShared": "Encrypted shared history may require sharing past room keys with invitees.",
+  "dialog.inviteHistoryEncryptedShared": "Past room keys may be shared with an invitee automatically. The share needs verification on both sides and may be skipped, so some or all earlier messages may stay unreadable.",
   "dialog.inviteHistoryNonRetroactive": "This is not retroactive, and already shared events or keys cannot be revoked.",
   "dialog.inviteHistoryRecovery": "Recovery is incomplete; the invite can still proceed, but encrypted history sharing may be limited.",
   "dialog.inviteHistoryWorldReadableWarning":
@@ -2023,7 +2304,7 @@ const en: Catalog = {
   "room.shareLinkCopyFailed": "Could not copy the link. Select and copy the URL instead.",
   "dialog.roomAddress": "Room address",
   "dialog.roomAddressInUse": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. You can keep the room name ‘{roomName}’; change only the room address, for example by adding a project name or number.",
-  "dialog.roomAddressInUseUnnamed": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. Change the room address, for example by adding a project name or number, or clear it to create the room without an address.",
+  "dialog.roomAddressInUseUnnamed": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. Change the room address, for example by adding a project name or number.",
   "dialog.roomAddressChecking": "Checking whether {address} is in use…",
   "dialog.roomAddressAvailable": "{address} was not in use when checked. This does not reserve it; the server confirms the address when you create the room.",
   "dialog.roomAddressTaken": "{address} is already in use on {server}. Keep the room name and change only the address.",
@@ -2031,14 +2312,24 @@ const en: Catalog = {
   "dialog.roomAddressSuggestion": "Suggestion (not checked yet): {address}",
   "dialog.roomAddressUseSuggestion": "Use this address",
   "dialog.roomAddressScope": "The room name can repeat, but this address must be unique on {server}, across all Spaces. Starting it with the Space name makes a conflict less likely but does not reserve it.",
-  "dialog.publicRoomInSpace": "Public room in {spaceName}: it is listed in the public room directory, and anyone, including people outside the space, can find and join it. Space membership does not limit who can join.",
   "dialog.roomAddressAbout": "About room addresses ↗",
   "dialog.roomAddressHelp": "This address lets people find and share this room. Enter only the room-specific name, without # or a server name. Availability is confirmed when you create the room.",
   "dialog.roomAddressPreview": "Full address: {address}",
   "dialog.roomAddressEmpty": "Enter an address for this public room.",
-  "dialog.roomAddressNone": "This room will be created without an address. People can still find it in the room directory and join it.",
   "dialog.roomAddressInvalid": "Use a room-specific name without spaces, # at the start, or a server suffix. Shorten it if needed.",
   "dialog.roomAddressPending": "Waiting for the address preview.",
+  "dialog.roomAddressChange": "Change",
+  "dialog.roomAddressChangeLabel": "Change room address",
+  "dialog.roomAddressNameVsAddress": "The name is what people see in their room list. The address is the link that opens the room, for example in a message or on a web page.",
+  "dialog.createWhoCanJoin": "Who can join",
+  "dialog.createJoinSpaceMembers": "Members of {spaceName}",
+  "dialog.createJoinInvite": "Only people you invite",
+  "dialog.createJoinPublic": "Anyone",
+  "dialog.createJoinPublicHint": "Anyone, including people outside your Spaces, can find this room in the public room directory and join it. A public room is not encrypted.",
+  "dialog.createEarlierMessages": "Earlier messages",
+  "dialog.createHistoryShared": "New members can read earlier messages",
+  "dialog.createHistoryInvited": "New members read from when they were invited",
+  "dialog.createHistoryWorldReadable": "Let people read without joining",
   "dialog.roomTopic": "Topic",
   "dialog.roomVisibility": "Room visibility",
   "dialog.sendInvite": "Send invite",
@@ -2047,8 +2338,6 @@ const en: Catalog = {
   "dialog.roomNameOptional": "Room name (optional)",
   "dialog.roomNameOptionalHelp": "Leave the name empty to show a name based on the room's address or members. You can set a name later.",
   "dialog.spaceName": "Space name",
-  "dialog.standardRoomInSpace": "Standard room in {spaceName}: space members can join without approval.",
-  "dialog.privateRoomDescription": "Only explicitly invited people can join.",
   "dialog.startDm": "Start DM",
   "dialog.reportReasonLabel": "Reason",
   "dialog.reportReasonPlaceholder": "Why are you reporting this?",
@@ -2060,6 +2349,11 @@ const en: Catalog = {
   "diagnostics.copyFailed": "Could not copy diagnostics. Try again.",
   "diagnostics.copying": "Copying diagnostics…",
   "diagnostics.open": "Open diagnostics",
+  "diagnostics.privacyNote": "Diagnostics contain no private data: no message text, room or member names, Matrix IDs, email addresses, or file paths. The report is long, so save it as a file and attach the file to your report.",
+  "diagnostics.save": "Save to file…",
+  "diagnostics.saveFailed": "Could not save diagnostics. Try again.",
+  "diagnostics.saved": "Diagnostics saved.",
+  "diagnostics.saving": "Saving diagnostics…",
   "diagnostics.title": "Diagnostics",
   "emoji.category.people": "Smileys & People",
   "emoji.category.nature": "Animals & Nature",
@@ -2269,6 +2563,54 @@ const en: Catalog = {
   "room.directMessage": "Direct message",
   "room.accessAndHistory": "Access and history",
   "room.accessAndHistoryHint": "Join rules decide who may enter; history visibility decides what they can see. These settings are independent.",
+  "room.accessChooseLabel": "Choose who can join",
+  "room.accessChooseHistory": "Choose who can read history",
+  "room.accessDetailsLabel": "What this means",
+  "room.accessDetailsConfirmed": "These details describe the saved values.",
+  "room.accessDetailsUnsaved": "These details describe unsaved changes.",
+  "room.accessChoiceSpaceMembers": "Members of a Space",
+  "room.accessChoiceSpaceMembersPinned": "Members of {space}",
+  "room.accessChoicePublicSummary": "Anyone with the address can join.",
+  "room.accessChoiceInviteSummary": "Only invited people can join.",
+  "room.accessChoiceKnockSummary": "People can ask to join; a member must approve.",
+  "room.accessChoiceSpaceMembersSummary": "Members of a Space you choose can join.",
+  "room.accessChoiceConditionsSummary": "This room uses join conditions this app cannot edit as one rule.",
+  "room.accessAllowTargets": "Spaces whose members can join",
+  "room.accessAllowTargetsHint": "Choose the Spaces whose members may join. The attachment Space is independent.",
+  "room.accessNoJoinedSpaces": "You are not in any Space yet.",
+  "room.accessUnavailableUnsupported": "This room's current conditions include content this app does not model, so it cannot rewrite them safely.",
+  "room.accessUnavailableNotInspected": "This room's current conditions could not be verified.",
+  "room.accessUnavailableNotSettable": "This rule cannot be set from this app.",
+  "room.accessRejectionPublicWithRestrictedAccess": "A public room cannot also be limited to members of a Space.",
+  "room.accessRejectionExplicitPolicyWithInvitedOnly": "Turn off invite-only before choosing an explicit access rule.",
+  "room.accessRejectionEmptyAccessTargets": "Choose at least one Space for this rule.",
+  "room.accessRejectionPublicWithInvitedOnly": "A public room cannot be invite-only.",
+  "room.accessRoomVersionPinned": "This rule creates the room with room version 9.",
+  "room.accessOutcomeJoinNotVerified": "Join rule not verified",
+  "room.accessOutcomeJoinPublic": "Anyone can join",
+  "room.accessOutcomeJoinInvite": "Invite only",
+  "room.accessOutcomeJoinPrivate": "Private",
+  "room.accessOutcomeJoinKnock": "Anyone can request to join",
+  "room.accessOutcomeJoinUnknown": "Join rule not recognised",
+  "room.accessOutcomeJoinSpaceMembers": "Members of {space} can join",
+  "room.accessOutcomeJoinMembershipRoute": "Members of the listed rooms or Spaces can join",
+  "room.accessOutcomeJoinNoRoute": "No join route is defined",
+  "room.accessOutcomeJoinConditionsUnverifiedContent": "Join conditions include content this app cannot verify",
+  "room.accessOutcomeJoinUnsupportedContent": "Join conditions use content this app does not support",
+  "room.accessOutcomeJoinCanRequest": "You can request to join",
+  "room.accessOutcomeHistoryWorldReadable": "Anyone can read history, including before they joined",
+  "room.accessOutcomeHistoryShared": "Members can read all history, including before they joined",
+  "room.accessOutcomeHistoryInvited": "Members can read history from the point they were invited",
+  "room.accessOutcomeHistoryJoined": "Members can read history from the point they joined",
+  "room.accessOutcomeEncrypted": "Encrypted",
+  "room.accessOutcomeNotEncrypted": "Not encrypted",
+  "room.accessOutcomeDirectoryPublic": "Listed in the public directory",
+  "room.accessOutcomeDirectoryPrivate": "Not listed in the directory",
+  "room.accessOutcomeDirectoryUnavailable": "Directory listing unavailable",
+  "room.accessOutcomeDirectoryFailed": "Could not check the directory listing",
+  "room.accessOutcomeDirectoryLoading": "Checking the directory listing",
+  "room.accessOutcomeDirectoryWillBePublic": "Will be listed in the public directory",
+  "room.accessOutcomeDirectoryWillBePrivate": "Will not be listed in the directory",
   "room.dmList": "DM list",
   "room.editRoles": "Edit roles",
   "room.editSettings": "Edit settings",
@@ -2283,7 +2625,7 @@ const en: Catalog = {
   "room.historyInvitedDescription": "People can see messages sent after they are invited.",
   "room.historyJoinedDescription": "People can see messages sent after they join.",
   "room.historySharedDescription": "People can see the room history that is shared with members.",
-  "room.historySharedEncryptedHint": "In an encrypted room, inviting can share past room keys so eligible invitees can decrypt the shared history.",
+  "room.historySharedEncryptedHint": "Past room keys may be shared with an invitee automatically so they can read the shared history. The share needs verification on both sides and may be skipped, leaving some or all earlier messages unreadable.",
   "room.historyNonRetroactive": "Changing this does not rewrite the past or revoke events and keys already shared.",
   "room.historyRecoveryRequired": "Device recovery is incomplete. Inviting can continue, but encrypted history sharing may be limited.",
   "room.historyWorldReadableDescription": "Anyone who can discover the room may read its history, including people who are not members.",
@@ -2327,6 +2669,8 @@ const en: Catalog = {
   "room.notifyModeMute": "Mute",
   "room.operationFailed": "Operation failed",
   "room.settingForbidden": "You no longer have permission to change this setting.",
+  "room.settingUnsupportedPolicyCondition": "This room's current conditions include content this app does not model, so it cannot rewrite them safely.",
+  "room.settingPolicyNotVerified": "This room's current conditions could not be verified, so the change was not attempted.",
   "room.settingNoPermission": "Your role in this room cannot change this setting.",
   "room.people": "People",
   "room.roleAdministrator": "Administrator",
@@ -2349,12 +2693,20 @@ const en: Catalog = {
   "room.repairTimelineHint": "Detect and repair missing timeline ranges without deleting existing messages.",
   "room.status": "Room status",
   "room.statusEncrypted": "Encrypted",
+  "room.statusNotEncrypted": "Not encrypted",
+  "room.encryptedDescription":
+    "End-to-end encryption is on for this conversation. Decryption keys are required to read encrypted messages.",
+  "room.notEncryptedDescription":
+    "End-to-end encryption is not on for this conversation.",
   "room.statusHistoryLimited": "New members do not see history",
   "room.statusHistoryShared": "New members see history",
   "room.statusHistoryWorldReadable": "Anyone can see history",
-  "room.statusNotEncrypted": "Not encrypted",
-  "room.statusPrivate": "Private",
-  "room.statusPublic": "Public",
+  "room.statusHistoryLimitedDescription":
+    "New members cannot read message history from before they joined.",
+  "room.statusHistorySharedDescription":
+    "New members can read message history from before they joined. Decryption keys are required to read encrypted messages.",
+  "room.statusHistoryWorldReadableDescription":
+    "Anyone who can reach this room can read its history, including people who are not members.",
   "room.statusShowSetting": "{status}: show setting",
   "room.saveAccess": "Save access",
   "room.saveHistoryVisibility": "Save history visibility",
@@ -2379,6 +2731,8 @@ const en: Catalog = {
   "room.unbanMember": "Unban {name}",
   "room.unread": "Unread",
   "room.unreadCount": "{count} unread",
+  "room.unreadBreakdown": "Room messages {main} · thread replies {threads}",
+  "room.mutedUnreadBreakdown": "Muted, excluded from totals · room messages {main} · thread replies {threads}",
   "roomList.category": "Room list category",
   "roomList.categoryDms": "DMs",
   "roomList.categoryRooms": "Rooms",
@@ -2399,11 +2753,13 @@ const en: Catalog = {
   "roomList.noMatchingConversations": "No matching conversations",
   "roomList.sort": "Room list sort",
   "roomList.sortLabel": "Sort",
-  "roomList.sortActive": "Active",
-  "roomList.sortAttention": "Unread & mentions first",
-  "roomList.sortRecent": "Recent messages",
+  "roomList.sortRecent": "Recent",
   "roomList.sortName": "Name",
   "roomList.sectionOptions": "Options for {section}",
+  "roomList.showMore": "Show {count} more",
+  "roomList.showMoreInSection": "Show {count} more in {section}",
+  "roomList.showFewer": "Show fewer",
+  "roomList.showFewerInSection": "Show fewer in {section}",
   "spaceAddRooms.action": "Add existing room",
   "spaceAddRooms.title": "Add existing rooms to {spaceName}",
   "spaceAddRooms.scope": "Rooms you have joined are listed. Adding a room lists it in this space for its members; it does not change who can join the room. You need permission to manage this space's rooms.",
@@ -2426,8 +2782,9 @@ const en: Catalog = {
   "roomList.sectionUnreadAccessible": "{section} unread: {count}",
   "roomList.loading": "Loading rooms…",
   "roomList.failed": "Rooms could not be loaded",
-  "room.markAsRead": "Mark as read",
+  "room.markAsRead": "Mark room timeline as read",
   "room.markAsUnread": "Mark as unread",
+  "room.manuallyMarkedUnread": "Manually marked unread",
   "search.indexingPending": "Indexing message history. More matches may appear shortly.",
   "search.noExactMatches": "No exact matches",
   "search.matchAttachmentFileName": "attachment filename",
@@ -2487,9 +2844,8 @@ const en: Catalog = {
   "settings.accounts": "Accounts",
   "settings.appearance": "Appearance",
   "settings.language": "Language",
-  "settings.languageDefault": "Default (English)",
   "settings.languageEnglish": "English",
-  "settings.languageJapanese": "Japanese",
+  "settings.languageJapanese": "日本語",
   "settings.accountSwitcher": "Account switcher",
   "settings.current": "Current",
   "settings.autoLoadOlderMessages": "Automatically load older messages",
@@ -2522,7 +2878,7 @@ const en: Catalog = {
     "Keep Koushi running in the tray when the window is closed. Quit from the tray menu to exit.",
   "settings.autoUpdate": "Automatically check for updates",
   "settings.autoUpdateDescription":
-    "Notify you about verified macOS updates. You choose whether to download and restart.",
+    "Notify you when a newer Koushi release is available.",
   "settings.includePrereleases": "Include pre-release versions",
   "settings.includePrereleasesDescription":
     "Also check releases whose SemVer contains a pre-release identifier such as -beta.1 or -rc.1.",
@@ -2535,9 +2891,14 @@ const en: Catalog = {
   "settings.updateUpToDate": "Koushi is up to date (v{version}).",
   "settings.updateChecking": "Checking for updates…",
   "settings.updateAvailable": "Koushi {version} is available.",
+  "settings.updateAvailableManual": "Koushi {version} is available. Download it from the Release page.",
+  "settings.updateReleasePage": "Open Release page",
   "settings.updateAvailableTitle": "Update available",
   "settings.updateAvailableConfirm": "Download and install Koushi {version}?",
   "settings.updateDownload": "Download update",
+  "settings.updateIgnore": "Ignore this version",
+  "settings.updateIgnored":
+    "Automatic reminders are off for this version until Koushi restarts. You can still download it.",
   "settings.updateDownloading": "Downloading and verifying Koushi {version}…",
   "settings.updateReady": "Koushi {version} is ready to install.",
   "settings.updateRestart": "Restart to install",
@@ -2621,6 +2982,134 @@ const en: Catalog = {
   "settings.notificationMessagePreviewsDescription":
     "Message text will appear in banners and in your operating system's notification centre. This is a device-local setting.",
   "settings.notificationSound": "Sound",
+  "settings.notificationDelivery": "Notify me from this device",
+  "settings.notificationDeliveryDescription":
+    "Koushi sends this itself, through a service you configure, so it works on a homeserver that has no email support. A room is sent only while it is still unread.",
+  "settings.notificationDeliveryTriggers": "Send for",
+  "settings.notificationDeliveryDirectMessages": "Direct messages",
+  "settings.notificationDeliveryMentions": "Mentions and replies",
+  "settings.notificationDeliveryKeywords": "Your keywords",
+  "settings.notificationDeliveryDwell": "Wait before sending",
+  "settings.notificationDeliveryDwellDescription":
+    "A room is included only if it is still unread after this long, so a conversation you are reading is never sent.",
+  "settings.notificationDeliveryInterval": "Shortest gap between sends",
+  "settings.notificationDeliveryIntervalDescription":
+    "Further notifications wait this long, so a busy room cannot fill your mailbox.",
+  "settings.notificationDeliveryOnlyUnfocused": "Only while Koushi is not focused",
+  "settings.notificationDeliveryWatched": "Also send for these rooms and spaces",
+  "settings.notificationDeliveryWatchedDescription":
+    "A chosen room is sent even when its kind is off above. Choosing a space covers every room in it, including rooms added later. A room you read or mute is still skipped.",
+  "settings.notificationDeliveryWatchedAdd": "Add a room or space",
+  "settings.notificationDeliveryWatchedEmpty": "No rooms or spaces chosen",
+  // The watch list is capped in Rust; the form says so instead of letting a choice
+  // disappear in canonicalization.
+  "settings.notificationDeliveryWatchedLimit":
+    "The watch list holds up to {count} rooms and spaces. Remove one to add another.",
+  "settings.notificationDeliveryWatchedRemove": "Remove {room}",
+  "settings.notificationDeliverySinks": "Send through",
+  "settings.notificationDeliveryAddSink": "Add a service",
+  "settings.notificationDeliverySinkLimit":
+    "Up to {count} sending services. Remove one to add another.",
+  "settings.notificationDeliverySinkProvider": "Service",
+  "settings.notificationDeliverySinkName": "Name",
+  "settings.notificationDeliverySinkFrom": "From address",
+  "settings.notificationDeliverySinkTo": "Send to",
+  "settings.notificationDeliverySinkHost": "Server",
+  "settings.notificationDeliverySinkPort": "Port",
+  "settings.notificationDeliverySinkUsername": "Username",
+  "settings.notificationDeliverySinkSecret": "App password or API key",
+  "settings.notificationDeliverySinkSecretSet": "Saved. Enter a new value to replace it.",
+  "settings.notificationDeliverySinkSecretMissing": "Not set",
+  "settings.notificationDeliverySinkTest": "Send a test",
+  "settings.notificationDeliverySinkTestSending": "Sending…",
+  "settings.notificationDeliverySinkRemove": "Remove",
+  "settings.notificationDeliveryLastResult": "Last send",
+  "settings.notificationDeliveryNeverSent": "Not sent yet",
+  "settings.notificationDeliveryResultDelivered": "Delivered",
+  "settings.notificationDeliveryResultInvalidSecret":
+    "The service rejected the key. Enter it again.",
+  "settings.notificationDeliveryResultNotPermitted":
+    "The service refused this sender or this account. Check the from address and the account status.",
+  "settings.notificationDeliveryResultRejected": "The service refused the message.",
+  "settings.notificationDeliveryResultRateLimited":
+    "The service is limiting how often it accepts messages. Koushi will try again later.",
+  "settings.notificationDeliveryResultTransport": "Could not reach the service.",
+  "settings.notificationDeliveryPrefix": "Include the start of the message",
+  "settings.notificationDeliveryPrefixDescription":
+    "Off by default. The first characters of the message are added as plain text, so anyone who can read the message can read them.",
+  "settings.notificationDeliveryPrefixChars": "Characters",
+  "settings.notificationDeliveryPrefixConsentTitle": "Send message text unencrypted?",
+  "settings.notificationDeliveryPrefixConsentBody":
+    "The start of the message leaves this device as plain text and passes through {service} to {destination} without end-to-end encryption. Whether, and for how long, that service keeps it depends on that service's own terms, so read them before turning this on. Room names and counts are sent either way.",
+  "settings.notificationDeliveryPrefixConsentAccept": "Turn on and accept",
+  "settings.notificationDeliveryPrefixConsentLink": "Read the service's terms",
+  // The two notification sources are different owners; the tab list says which
+  // source is showing, and each body says in one line who sends it.
+  "settings.notificationSource": "Notification source",
+  "settings.notificationDeviceSource":
+    "Koushi sends these from this device, through the mailbox or relay configured here.",
+  "settings.notificationHomeserverSource":
+    "Your homeserver sends these, and they apply to every device on the account.",
+  "settings.notificationDeliveryEnable": "Send notifications from this device",
+  "settings.notificationDeliveryKeywordsHint":
+    "A message that matches one of your keywords arrives as a mention, so either this switch or Mentions and replies sends it.",
+  "settings.notificationDeliveryWatchedPick": "Choose a room or space",
+  "settings.notificationDeliveryWatchedRooms": "Rooms",
+  "settings.notificationDeliveryWatchedSpaces": "Spaces",
+  "settings.notificationDeliveryWatchedUnknown": "Not in the room list right now",
+  "settings.notificationDeliverySinkEnabled": "Send through this service",
+  "settings.notificationDeliverySinkKindResend": "Resend (email API)",
+  "settings.notificationDeliverySinkKindSmtp": "SMTP relay",
+  "settings.notificationDeliverySinkEndpoint": "Endpoint",
+  // Rust fills `DEFAULT_RESEND_ENDPOINT` when this is left empty; the form says so
+  // rather than repeating the URL, which Rust owns.
+  "settings.notificationDeliverySinkEndpointDefault":
+    "Leave this blank to use the endpoint this service documents for its email API.",
+  "settings.notificationDeliverySinkPreset": "Mailbox preset",
+  "settings.notificationDeliverySinkPresetCustom": "Other server",
+  "settings.notificationDeliverySinkPresetHint":
+    "A preset fills in the relay the provider documents. Check it against the provider's own documentation; Koushi does not keep it up to date for you.",
+  "settings.notificationDeliverySinkTls": "Connection security",
+  "settings.notificationDeliverySinkTlsImplicit": "TLS from the first byte (usually port 465)",
+  "settings.notificationDeliverySinkTlsStartTls": "STARTTLS after connecting (usually port 587)",
+  "settings.notificationDeliverySinkUsernameFullAddress":
+    "The mailbox's full address",
+  "settings.notificationDeliverySinkSaveSecret": "Save",
+  "settings.notificationDeliverySinkClearSecret": "Clear",
+  // The credential is gone because the sink is no longer the server it was entered for;
+  // saying so keeps the empty field from reading as data loss.
+  "settings.notificationDeliverySinkSecretRetired":
+    "The saved password was removed because the server or account changed. Enter it again.",
+  "settings.notificationDeliverySinkEmpty":
+    "No service is configured yet. Nothing leaves this device until one is added and turned on.",
+  "settings.notificationDeliverySinkFailed": "This service is not sending",
+  "settings.notificationDeliveryResultRateLimitedAfter":
+    "The service is limiting how often it accepts messages. The next attempt waits about {seconds} seconds.",
+  "settings.notificationDeliveryPrefixConsentAcknowledge": "I have read those terms",
+  "settings.notificationDeliveryPrefixConsentRequired":
+    "Confirm that you have read the terms to turn this on.",
+  "settings.notificationDeliverySecretHint.qqMail":
+    "QQ Mail expects the authorization code from its own settings, not the account password.",
+  "settings.notificationDeliverySecretHint.gmail":
+    "Gmail expects a Google app password, which Google only issues while 2-Step Verification is on.",
+  "settings.notificationDeliverySecretHint.icloud":
+    "iCloud Mail expects an app-specific password created for this app in your Apple Account.",
+  // #1427: the rules are the account's own push rules on the homeserver, while
+  // the switch next to them is about what this device mails.
+  "settings.notificationKeywordHeading": "Keywords on your homeserver",
+  "settings.notificationKeywordEmpty": "No keywords yet.",
+  "settings.notificationKeywordAdd": "Add a keyword",
+  "settings.notificationKeywordRemove": "Remove {keyword}",
+  "settings.notificationKeywordDisabled": "Off on your account",
+  "settings.notificationKeywordHint":
+    "Keywords are saved on your homeserver, so this app and your other devices highlight them too. The switch above decides what this device sends mail about. A keyword matches a whole word, ignoring case.",
+  "settings.notificationKeywordErrorEmpty": "Enter a keyword.",
+  "settings.notificationKeywordErrorTooLong": "That keyword is too long.",
+  "settings.notificationKeywordErrorDuplicate": "That keyword is already in the list.",
+  "settings.notificationKeywordErrorLimit":
+    "Your keyword list is full. Remove one to add another.",
+  "settings.notificationKeywordErrorUnknownRule":
+    "That keyword is no longer on the server. Reopen this page and try again.",
   "settings.sendReadReceipts": "Send read receipts",
   "settings.sendTypingNotifications": "Send typing notifications",
   "settings.notifications": "Notifications",
@@ -2734,12 +3223,22 @@ const en: Catalog = {
   "scheduled.bodyInput": "Scheduled message",
   "scheduled.edit": "Edit scheduled send",
   "scheduled.localFallback": "Local fallback",
+  "scheduled.persistenceFailed":
+    "Local scheduled-send changes could not be saved; they may not survive restarting the app.",
   "scheduled.localFallbackNotice": "Will send only while this app is running.",
+  "scheduled.panelEmpty": "No scheduled messages",
   "scheduled.save": "Save scheduled send",
   "scheduled.schedule": "Schedule send",
   "scheduled.sendLater": "Send later",
+  "scheduled.sendLaterWithCount": "Send later ({count} scheduled)",
   "scheduled.serverDelayedEvents": "Server scheduled",
+  "scheduled.threadReply": "Thread reply",
   "scheduled.timeInput": "Scheduled send time",
+  // #1124: mouse-driven adjustments for the native scheduled-send time field.
+  "scheduled.timeEarlierHour": "1 hour earlier",
+  "scheduled.timeEarlierTenMinutes": "10 minutes earlier",
+  "scheduled.timeLaterTenMinutes": "10 minutes later",
+  "scheduled.timeLaterHour": "1 hour later",
   "scheduled.title": "Scheduled messages",
   "scheduled.unknownCapability": "Checking support",
   "trust.acceptVerification": "Accept",
@@ -2826,7 +3325,6 @@ const en: Catalog = {
   "gate.mismatch": "They do not match",
   "gate.recoverySecret": "Recovery secret",
   "gate.recover": "Recover",
-  "gate.destination": "Recovery key destination",
   "gate.passphrase": "Backup passphrase",
   "gate.bootstrap": "Create secure backup",
   "gate.saved": "I saved the recovery key",
@@ -2854,7 +3352,7 @@ const en: Catalog = {
   "gate.resetForNewDeviceConfirm": "Reset this session's local data and sign in again with a new device ID? This removes the local encrypted store, cached history, and saved credentials on this computer. It does not remove messages from the homeserver. This cannot be undone.",
   "gate.signOut": "Sign out",
   "gate.secureBackupTitle": "Secure backup required",
-  "gate.secureBackupChecking": "Checking secure backup…",
+  "gate.secureBackupChecking": "Checking the backup of your decryption keys on the homeserver…",
   "gate.secureBackupInactive": "Secure backup status is unavailable. Encrypted messaging stays locked until it can be checked.",
   "gate.secureBackupNeedsRecovery": "Recover your existing secure backup to continue.",
   "gate.secureBackupRecoveryKey": "Secure backup recovery key",
@@ -2902,6 +3400,19 @@ const en: Catalog = {
   "gate.secureBackupFailureForbidden": "This account is not allowed to use secure backup.",
   "gate.secureBackupFailureTimeout": "Secure backup took too long to respond.",
   "gate.secureBackupFailureSdk": "Secure backup failed.",
+  "gate.secureBackupFailureServerResponse": "The homeserver reported a problem with secure backup.",
+  "gate.secureBackupFailureUnauthorized": "The homeserver rejected the sign-in for secure backup.",
+  "gate.secureBackupDetailNoResponse": "The homeserver could not be reached, so this secure backup request never received a response.",
+  "gate.secureBackupDetailTimeout": "The homeserver did not answer this secure backup request in time.",
+  "gate.secureBackupDetailHttpStatus": "The homeserver answered this secure backup request with an error (HTTP {status}).",
+  "gate.secureBackupDetailHttpResponse": "The homeserver answered this secure backup request with an error.",
+  "gate.secureBackupDetailLocal": "Secure backup could not be prepared on this device.",
+  "gate.secureBackupActionRetry": "Check your connection, then retry.",
+  "gate.secureBackupActionWaitAndRetry": "Wait a few minutes, then retry.",
+  "gate.secureBackupActionRetryLater": "Try again in a few minutes.",
+  "gate.secureBackupActionSignInAgain": "Sign out and sign in again.",
+  "gate.secureBackupActionContactAdmin": "Ask your homeserver administrator to check secure backup.",
+  "gate.secureBackupActionLocalRetry": "Retry; if it keeps failing, sign out and sign in again.",
   "gate.secureBackupRetry": "Retry secure backup",
   "gate.secureBackupDiagnostics": "Open secure backup diagnostics",
   "gate.secureBackupCommandFailed": "Secure backup action failed. Try again.",
@@ -3010,7 +3521,7 @@ const en: Catalog = {
   "shortcut.noteCallsDeferred": "Calls are out of scope for this milestone.",
   "shortcut.noteGoHomeAdapted": "macOS uses Ctrl+Shift+H in some Matrix clients; this prototype keeps one cross-platform row.",
   "shortcut.noteUploadUiDeferred": "Upload UI is not implemented yet.",
-  "shortcut.openUserSettings": "Account Settings",
+  "shortcut.openAppSettings": "App Settings",
   "shortcut.parityAdapted": "adapted",
   "shortcut.parityDeferred": "deferred",
   "shortcut.parityNotApplicable": "not applicable",
@@ -3204,6 +3715,10 @@ const en: Catalog = {
   "timeline.resendAll": "Resend all",
   "timeline.cancelAll": "Cancel all",
   "timeline.downloadMedia": "Download {filename}",
+  // #1135: prefix of a generated save name for an image whose own name is a
+  // generic upload default. Deliberately identical in every locale: it is part
+  // of a locale-independent filename, not prose.
+  "timeline.downloadDefaultImageName": "Koushi_Image",
   "timeline.encryptedMedia": "Encrypted",
   "timeline.mediaUploadProgress": "{percent}%",
   "timeline.mediaDownloadPending": "Downloading…",
@@ -3220,7 +3735,7 @@ const en: Catalog = {
   "timeline.threadSummaryWithBody": "{count} · {preview}",
   "timeline.threadSummaryWithPreview": "{count} · {sender}: {preview}",
   "timeline.threadSummaryWithSender": "{count} · {sender}",
-  "timeline.threadNotificationCount": "Thread notifications · {count}",
+  "timeline.threadNotificationCount": "Thread unread · {count}",
   "timeline.typingMany": "{count} people are typing",
   "timeline.typingOne": "{user} is typing",
   "timeline.openThreadSummary": "Open thread, {summary}",
@@ -3240,10 +3755,28 @@ const en: Catalog = {
   "roomList.membershipKnocked": "Knock requested",
   "roomList.membershipNotJoined": "Not joined",
   "roomList.membershipUnknown": "Unavailable",
+  "roomList.suggested": "Suggested",
+  "roomList.suggestedDescription": "Suggested by this Space",
+  "space.suggestToMembers": "Suggest to {space} members",
+  "space.suggestToMembersFor": "Suggest {room} to {space} members",
+  "space.suggestSaving": "Saving…",
+  "space.suggestFailed": "Could not update the suggestion: {reason}",
+  "suggestedRooms.offerTitle": "Join the suggested rooms in {space}?",
+  "suggestedRooms.offerCopy": "The Space suggests these rooms. Nothing is joined unless you choose Join all.",
+  "suggestedRooms.listLabel": "Suggested rooms",
+  "suggestedRooms.joinAll": "Join all",
+  "suggestedRooms.skip": "Skip",
+  "suggestedRooms.joining": "Joining…",
+  "suggestedRooms.resultTitle": "Some suggested rooms could not be joined",
+  "suggestedRooms.resultCopy": "The other suggested rooms were joined.",
+  "suggestedRooms.joined": "Joined",
+  "suggestedRooms.failed": "Not joined: {reason}",
+  "suggestedRooms.done": "Close",
   "workspace.people": "Direct Messages",
   "workspace.rooms": "Rooms",
   "workspace.resizeRoomList": "Resize room list",
   "workspace.resizeRightPanel": "Resize right panel",
+  "workspace.scheduledMessages": "Scheduled messages",
   "workspace.search": "Search",
   "workspace.searchEverywhere": "Search everywhere",
   "workspace.searchInRoom": "Search in {roomName}",
@@ -3289,6 +3822,7 @@ const en: Catalog = {
   "threads.loading": "Loading threads…",
   "threads.open": "Open thread",
   "threads.replyCount": "{count} replies",
+  "threads.openUnreadRoot": "Open unread thread",
   "threads.title": "Threads",
   "settings.searchHistory": "Search history",
   "settings.searchHistoryCrawler": "Crawler",
@@ -3418,6 +3952,43 @@ const en: Catalog = {
 
 const ja: Catalog = {
   ...en,
+  // #1327: 参加条件の表示語彙。錠前は暗号化だけを意味するため、参加条件は
+  // 専用のアイコンとラベルで示す。
+  "access.public": "公開",
+  "access.inviteOnly": "招待制",
+  "access.conditionsApply": "参加条件有",
+  "access.spaceMembersCanJoin": "Space参加可",
+  "access.canRequest": "参加申請",
+  "access.knockRestrictedLabel": "Space/申請",
+  "access.privateReserved": "非公開",
+  "access.unknown": "不明",
+  "access.checking": "確認中",
+  "access.publicDescription":
+    "公開。誰でも参加できます。メッセージ履歴の閲覧範囲は別の設定です。",
+  "access.inviteOnlyDescription":
+    "招待制。招待された人のみ参加できます。Space のメンバーでも招待が必要です。",
+  "access.inviteOnlyDmDescription": "招待制。招待された人のみ参加できます。",
+  "access.conditionsDescription":
+    "参加条件有。このルームが定めた参加条件を満たす人、または招待された人が参加できます。",
+  "access.spaceMembersCanJoinDescription":
+    "Space 参加可。指定 Space のメンバー、または招待された人が参加できます。Space への参加だけではルームに自動参加しません。",
+  "access.requestDescription":
+    "参加申請。参加を申請でき、メンバーが承認すると参加できます。",
+  "access.knockRestrictedDescription":
+    "Space/申請。このルームが定めた参加条件を満たす人、または参加申請が承認された人が参加できます。",
+  "access.knockRestrictedSpaceDescription":
+    "Space/申請。指定 Space のメンバー、または参加申請が承認された人が参加できます。Space への参加だけではルームに自動参加しません。",
+  "access.privateReservedDescription":
+    "非公開。通常の方法では参加できません。招待があっても参加できない場合があります。",
+  "access.unknownDescription": "不明。この参加条件はこのアプリでは認識できません。",
+  "access.checkingDescription": "確認中。参加条件をまだ取得できていません。",
+  "access.labelSeparator": "、",
+  "access.conditionSummarySeparator": " — ",
+  "access.allowedRooms": "指定: {rooms}",
+  "access.restrictedNoUsableConditionsDescription":
+    "参加条件有。有効な参加条件が設定されていません。招待された人のみ参加できます。",
+  "access.restrictedNoUsableConditionsCanRequestDescription":
+    "Space/申請。有効な参加条件は設定されていませんが、参加申請はできます。",
   "help.title": "Koushiのヘルプ",
   "help.askAi": "このGitHub URLをコピーして、ChatGPTなどのAIにKoushiの使い方を質問してください。利用バージョン、OS、知りたいことを添えてください。",
   "help.copyRepositoryUrl": "GitHub URLをコピー",
@@ -3436,6 +4007,7 @@ const ja: Catalog = {
   "accountTabs.authenticating": "サインイン中",
   "accountTabs.needsVerification": "本人確認が必要",
   "accountTabs.ready": "利用可能",
+  "accountTabs.inviteCount": "保留中の招待 {count} 件",
   "accountTabs.signedOut": "再サインイン",
   "accountTabs.loggingOut": "サインアウト中",
   "accountTabs.error": "アカウントエラー",
@@ -3461,8 +4033,8 @@ const ja: Catalog = {
   "activity.highlightBadge": "メンション",
   "activity.loadMore": "アクティビティをさらに読み込む",
   "activity.loading": "アクティビティを読み込み中",
-  "activity.resolvingUnread": "未読メッセージを取得中…",
-  "activity.resolveFailed": "未読メッセージを読み込めませんでした。",
+  "activity.resolvingUnread": "最近の履歴を読み込み中…",
+  "activity.resolveFailed": "最近の履歴を読み込めませんでした。",
   "activity.retryResolution": "再試行",
   "activity.markAllRead": "すべて既読",
   "activity.markReadFailed": "既読化に失敗しました",
@@ -3473,7 +4045,7 @@ const ja: Catalog = {
   "activity.openItem": "{room}のアクティビティを開く",
   "activity.recent": "最近",
   "activity.tabs": "アクティビティ表示",
-  "activity.unread": "未読",
+  "activity.unread": "未読の会話",
   "activity.unreadBadge": "未読",
   "auth.checking": "確認中",
   "auth.checkLoginMethods": "ログイン方法を確認",
@@ -3483,10 +4055,14 @@ const ja: Catalog = {
   "auth.deviceName": "デバイス名",
   "auth.encryptionRecovery": "暗号化リカバリ",
   "auth.failureForbidden": "このアカウントではログイン方法を利用できません",
+  "auth.failureInvalidCredentials": "Matrix ID またはパスワードが正しくありません",
   "auth.failureNetwork": "ホームサーバーに接続できませんでした",
+  "auth.failureRateLimited": "サインインの試行が多すぎます。しばらく待って再試行してください",
   "auth.failureSdk": "ログイン方法を確認できませんでした",
+  "auth.failureStore": "ローカルの暗号化ストアを開けませんでした",
   "auth.failureTimeout": "ログイン方法の確認がタイムアウトしました",
   "auth.failureUnsupported": "対応していないホームサーバーです",
+  "auth.cancelBrowserSignIn": "ブラウザーでのサインインを中止",
   "auth.flowPassword": "パスワード",
   "auth.flowSso": "シングルサインオン",
   "auth.flowUnknown": "不明な方法",
@@ -3496,7 +4072,8 @@ const ja: Catalog = {
   "app.versionMismatch.detail":
     "コンポーネントの同期が取れていないため、このセッションを読み込めませんでした。Koushi を完全に終了してから、もう一度開いてください。",
   "menu.aboutKoushi": "Koushi について",
-  "menu.settings": "設定…",
+  "menu.accountSettings": "アカウント設定…",
+  "menu.appSettings": "アプリ設定…",
   "menu.signOut": "サインアウト",
   "menu.toggleRightPanel": "右パネルを切り替え",
   "menu.koushiHelp": "Koushi ヘルプ",
@@ -3613,6 +4190,7 @@ const ja: Catalog = {
   "window.title": "Koushi（光子・格子）",
   "navigation.failed": "移動に失敗しました。もう一度お試しください。",
   "navigation.failedDismiss": "移動失敗のメッセージを閉じる",
+  "navigation.opening": "メッセージを開いています…",
   "context.editMessage": "編集",
   "context.addToFavourites": "お気に入りに追加",
   "context.addToLowPriority": "低優先度に移動",
@@ -3643,6 +4221,8 @@ const ja: Catalog = {
   "context.openRoomInfo": "ルーム情報",
   "context.openSpaceInfo": "スペース情報",
   "context.openThread": "スレッドで返信",
+  "context.copySelectedText": "選択したテキストをコピー",
+  "context.searchWebForSelectedText": "選択したテキストをDuckDuckGoで検索",
   "context.openUserInfo": "ユーザー情報",
   "context.openUserSettings": "アカウント設定",
   "context.redactMessage": "削除",
@@ -3650,7 +4230,6 @@ const ja: Catalog = {
   "context.removeFromLowPriority": "低優先度から削除",
   "context.searchInRoom": "ルーム内を検索",
   "context.selectRoom": "開く",
-  "context.selectSpace": "スペースを開く",
   "context.switchAccount": "アカウントを切り替え",
   "context.reportContent": "コンテンツを報告",
   "context.reportRoom": "ルームを報告",
@@ -3661,13 +4240,12 @@ const ja: Catalog = {
   "dialog.createRoomTitle": "ルームを作成",
   "dialog.createSpaceTitle": "スペースを作成",
   "dialog.encryptedRoom": "暗号化ルーム",
-  "dialog.invitedOnlyRoom": "招待された人のみ",
   "dialog.invitedOnlyRoomInSpace": "{spaceName}内の招待専用ルーム：明示的に招待された人だけが参加できます",
   "dialog.inviteCandidates": "招待候補",
   "dialog.inviteHistory": "招待先に見える履歴",
   "dialog.inviteHistoryCurrent": "現在のルーム設定です。招待を送る前にRoom Infoから変更できます。",
   "dialog.inviteHistoryCurrentBadge": "現在",
-  "dialog.inviteHistoryEncryptedShared": "暗号化された共有履歴では、招待先へ過去のルーム鍵を共有する必要がある場合があります。",
+  "dialog.inviteHistoryEncryptedShared": "過去のルーム鍵は招待者へ自動的に共有される場合があります。共有には双方の検証が必要で、共有されないこともあるため、それ以前のメッセージが読めないままになる場合があります。",
   "dialog.inviteHistoryNonRetroactive": "この設定は過去に遡らず、すでに共有されたイベントや鍵を取り消すこともできません。",
   "dialog.inviteHistoryRecovery": "復旧が完了していません。招待は続行できますが、暗号化履歴の共有が制限される場合があります。",
   "dialog.inviteHistoryWorldReadableWarning":
@@ -3692,7 +4270,7 @@ const ja: Catalog = {
   "room.shareLinkCopyFailed": "リンクをコピーできませんでした。URLを選択してコピーしてください。",
   "dialog.roomAddress": "ルームアドレス",
   "dialog.roomAddressInUse": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルーム名『{roomName}』はそのままで、ルームアドレスにプロジェクト名や数字などを追加してください。",
-  "dialog.roomAddressInUseUnnamed": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルームアドレスにプロジェクト名や数字などを追加するか、空欄にしてアドレスなしでルームを作成してください。",
+  "dialog.roomAddressInUseUnnamed": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルームアドレスにプロジェクト名や数字などを追加してください。",
   "dialog.roomAddressChecking": "{address} が使われているか確認しています…",
   "dialog.roomAddressAvailable": "{address} は確認時点では使われていません。予約ではありません。アドレスはルーム作成時にサーバーで確定します。",
   "dialog.roomAddressTaken": "{address} は {server} ですでに使われています。ルーム名はそのままで、アドレスだけを変更してください。",
@@ -3700,14 +4278,24 @@ const ja: Catalog = {
   "dialog.roomAddressSuggestion": "候補（未確認）: {address}",
   "dialog.roomAddressUseSuggestion": "このアドレスを使う",
   "dialog.roomAddressScope": "ルーム名は重複してもかまいませんが、このアドレスは {server} 上のすべてのスペースを通じて一意である必要があります。スペース名で始めると重複しにくくなりますが、予約されるわけではありません。",
-  "dialog.publicRoomInSpace": "{spaceName}内の公開ルーム：公開ルームディレクトリに掲載され、スペース外の人を含め誰でも見つけて参加できます。スペースのメンバーかどうかで参加できる人は制限されません。",
   "dialog.roomAddressAbout": "ルームアドレスについて ↗",
   "dialog.roomAddressHelp": "このアドレスでルームを見つけたり共有したりできます。# やサーバー名を付けず、ルーム固有の名前だけ入力してください。使用可能かどうかは作成時に確認されます。",
   "dialog.roomAddressPreview": "完全なアドレス: {address}",
   "dialog.roomAddressEmpty": "公開ルームのアドレスを入力してください。",
-  "dialog.roomAddressNone": "このルームはアドレスなしで作成されます。ルームディレクトリから見つけて参加することはできます。",
   "dialog.roomAddressInvalid": "空白、先頭の #、サーバー名を除いたルーム固有の名前を入力してください。長すぎる場合は短くしてください。",
   "dialog.roomAddressPending": "アドレスのプレビューを待っています。",
+  "dialog.roomAddressChange": "変更",
+  "dialog.roomAddressChangeLabel": "ルームアドレスを変更",
+  "dialog.roomAddressNameVsAddress": "名前はルーム一覧に表示されるものです。アドレスは、メッセージやウェブページなどからルームを開くためのリンクです。",
+  "dialog.createWhoCanJoin": "参加できる人",
+  "dialog.createJoinSpaceMembers": "{spaceName} のメンバー",
+  "dialog.createJoinInvite": "招待した人だけ",
+  "dialog.createJoinPublic": "誰でも",
+  "dialog.createJoinPublicHint": "スペース外の人も含め、誰でも公開ルームディレクトリからこのルームを見つけて参加できます。公開ルームは暗号化されません。",
+  "dialog.createEarlierMessages": "過去のメッセージ",
+  "dialog.createHistoryShared": "新しいメンバーも過去のメッセージを読める",
+  "dialog.createHistoryInvited": "新しいメンバーは招待された時点から読める",
+  "dialog.createHistoryWorldReadable": "参加しなくても読めるようにする",
   "dialog.roomTopic": "トピック",
   "dialog.roomVisibility": "ルーム公開範囲",
   "dialog.sendInvite": "招待を送信",
@@ -3716,8 +4304,6 @@ const ja: Catalog = {
   "dialog.roomNameOptional": "ルーム名（任意）",
   "dialog.roomNameOptionalHelp": "名前を空欄にすると、ルームのアドレスやメンバーに基づく名前が表示されます。名前は後から設定できます。",
   "dialog.spaceName": "スペース名",
-  "dialog.standardRoomInSpace": "{spaceName}内の標準ルーム：スペースメンバーは承認なしで参加できます",
-  "dialog.privateRoomDescription": "明示的に招待された人だけが参加できます",
   "dialog.startDm": "DMを開始",
   "dialog.reportReasonLabel": "理由",
   "dialog.reportReasonPlaceholder": "報告理由を入力してください",
@@ -3729,6 +4315,11 @@ const ja: Catalog = {
   "diagnostics.copyFailed": "診断情報をコピーできませんでした。もう一度お試しください。",
   "diagnostics.copying": "診断情報をコピー中…",
   "diagnostics.open": "診断情報を開く",
+  "diagnostics.privacyNote": "診断情報には、メッセージ本文、ルーム名やメンバー名、Matrix ID、メールアドレス、ファイルパスなどの個人情報が含まれないように設計されています。内容が長いため、ファイルとして保存し、不具合報告に添付してください。",
+  "diagnostics.save": "ファイルに保存…",
+  "diagnostics.saveFailed": "診断情報を保存できませんでした。もう一度お試しください。",
+  "diagnostics.saved": "診断情報を保存しました。",
+  "diagnostics.saving": "診断情報を保存中…",
   "diagnostics.title": "診断情報",
   "emoji.category.people": "顔と人",
   "emoji.category.nature": "動物と自然",
@@ -3938,6 +4529,54 @@ const ja: Catalog = {
   "room.directMessage": "ダイレクトメッセージ",
   "room.accessAndHistory": "アクセスと履歴",
   "room.accessAndHistoryHint": "参加ルールは入室できる人を、履歴の表示範囲は見える内容を決めます。両者は独立しています。",
+  "room.accessChooseLabel": "参加できる人を選ぶ",
+  "room.accessChooseHistory": "履歴を読める人を選ぶ",
+  "room.accessDetailsLabel": "この設定の意味",
+  "room.accessDetailsConfirmed": "この内容は保存済みの値を示しています。",
+  "room.accessDetailsUnsaved": "この内容は未保存の変更を示しています。",
+  "room.accessChoiceSpaceMembers": "スペースのメンバー",
+  "room.accessChoiceSpaceMembersPinned": "{space} のメンバー",
+  "room.accessChoicePublicSummary": "アドレスを知っている人は誰でも参加できます。",
+  "room.accessChoiceInviteSummary": "招待された人だけが参加できます。",
+  "room.accessChoiceKnockSummary": "参加をリクエストでき、メンバーが承認します。",
+  "room.accessChoiceSpaceMembersSummary": "選んだスペースのメンバーが参加できます。",
+  "room.accessChoiceConditionsSummary": "このルームは、このアプリでは一つのルールとして編集できない参加条件を使っています。",
+  "room.accessAllowTargets": "メンバーの参加を許可するスペース",
+  "room.accessAllowTargetsHint": "参加を許可するスペースを選びます。添付先のスペースとは独立しています。",
+  "room.accessNoJoinedSpaces": "まだどのスペースにも参加していません。",
+  "room.accessUnavailableUnsupported": "現在の参加条件にこのアプリが扱えない内容が含まれるため、安全に書き換えられません。",
+  "room.accessUnavailableNotInspected": "現在の参加条件を確認できませんでした。",
+  "room.accessUnavailableNotSettable": "このルールはこのアプリから設定できません。",
+  "room.accessRejectionPublicWithRestrictedAccess": "公開ルームをスペースのメンバー限定にすることはできません。",
+  "room.accessRejectionExplicitPolicyWithInvitedOnly": "明示的な参加ルールを選ぶ前に、招待制をオフにしてください。",
+  "room.accessRejectionEmptyAccessTargets": "このルールには少なくとも一つのスペースを選んでください。",
+  "room.accessRejectionPublicWithInvitedOnly": "公開ルームを招待制にすることはできません。",
+  "room.accessRoomVersionPinned": "このルールではルームバージョン 9 でルームが作成されます。",
+  "room.accessOutcomeJoinNotVerified": "参加ルールは未確認",
+  "room.accessOutcomeJoinPublic": "誰でも参加できます",
+  "room.accessOutcomeJoinInvite": "招待制",
+  "room.accessOutcomeJoinPrivate": "プライベート",
+  "room.accessOutcomeJoinKnock": "誰でも参加をリクエストできます",
+  "room.accessOutcomeJoinUnknown": "参加ルールを認識できません",
+  "room.accessOutcomeJoinSpaceMembers": "{space} のメンバーが参加できます",
+  "room.accessOutcomeJoinMembershipRoute": "一覧のルームまたはスペースのメンバーが参加できます",
+  "room.accessOutcomeJoinNoRoute": "参加ルートが定義されていません",
+  "room.accessOutcomeJoinConditionsUnverifiedContent": "参加条件にこのアプリでは確認できない内容が含まれます",
+  "room.accessOutcomeJoinUnsupportedContent": "参加条件にこのアプリが対応していない内容が使われています",
+  "room.accessOutcomeJoinCanRequest": "参加をリクエストできます",
+  "room.accessOutcomeHistoryWorldReadable": "参加前を含め、誰でも履歴を読めます",
+  "room.accessOutcomeHistoryShared": "参加前を含め、メンバーはすべての履歴を読めます",
+  "room.accessOutcomeHistoryInvited": "メンバーは招待された時点以降の履歴を読めます",
+  "room.accessOutcomeHistoryJoined": "メンバーは参加した時点以降の履歴を読めます",
+  "room.accessOutcomeEncrypted": "暗号化",
+  "room.accessOutcomeNotEncrypted": "暗号化なし",
+  "room.accessOutcomeDirectoryPublic": "公開ディレクトリに掲載",
+  "room.accessOutcomeDirectoryPrivate": "ディレクトリに未掲載",
+  "room.accessOutcomeDirectoryUnavailable": "ディレクトリ掲載状況は不明",
+  "room.accessOutcomeDirectoryFailed": "ディレクトリ掲載状況を確認できませんでした",
+  "room.accessOutcomeDirectoryLoading": "ディレクトリ掲載状況を確認中",
+  "room.accessOutcomeDirectoryWillBePublic": "公開ディレクトリに掲載予定",
+  "room.accessOutcomeDirectoryWillBePrivate": "ディレクトリに未掲載予定",
   "room.dmList": "DM一覧",
   "room.editRoles": "ロールを編集",
   "room.editSettings": "設定を編集",
@@ -3952,7 +4591,7 @@ const ja: Catalog = {
   "room.historyInvitedDescription": "招待された後に送信されたメッセージを閲覧できます。",
   "room.historyJoinedDescription": "参加した後に送信されたメッセージを閲覧できます。",
   "room.historySharedDescription": "メンバーに共有されたルーム履歴を閲覧できます。",
-  "room.historySharedEncryptedHint": "暗号化ルームでは、共有履歴を復号できるよう、対象となる招待者へ過去のルーム鍵を共有する場合があります。",
+  "room.historySharedEncryptedHint": "過去のルーム鍵は、共有履歴を読めるよう招待者へ自動的に共有される場合があります。共有には双方の検証が必要で、共有されないこともあり、それ以前のメッセージが読めないままになる場合があります。",
   "room.historyNonRetroactive": "この設定を変更しても過去は書き換わらず、すでに共有されたイベントや鍵を取り消すこともできません。",
   "room.historyRecoveryRequired": "デバイスの復旧が完了していません。招待は続行できますが、暗号化履歴の共有が制限される場合があります。",
   "room.historyWorldReadableDescription": "ルームを発見できる人は、メンバーでなくても履歴を閲覧できます。",
@@ -3996,6 +4635,8 @@ const ja: Catalog = {
   "room.notifyModeMute": "ミュート",
   "room.operationFailed": "操作に失敗しました",
   "room.settingForbidden": "この設定を変更する権限がありません。",
+  "room.settingUnsupportedPolicyCondition": "現在の参加条件にこのアプリが扱えない内容が含まれるため、安全に書き換えられません。",
+  "room.settingPolicyNotVerified": "現在の参加条件を確認できなかったため、変更は行われませんでした。",
   "room.settingNoPermission": "このルームでのあなたの役割では、この設定を変更できません。",
   "room.people": "ユーザー",
   "room.roleAdministrator": "管理者",
@@ -4017,13 +4658,21 @@ const ja: Catalog = {
   "room.repairTimeline": "ルームのタイムラインを修復",
   "room.repairTimelineHint": "既存のメッセージを削除せず、欠けている範囲を検出して修復します。",
   "room.status": "ルーム状態",
-  "room.statusEncrypted": "暗号化済み",
+  "room.statusEncrypted": "暗号化",
+  "room.statusNotEncrypted": "未暗号化",
+  "room.encryptedDescription":
+    "この会話ではエンドツーエンド暗号化が有効です。暗号化されたメッセージを読むには復号鍵が必要です。",
+  "room.notEncryptedDescription":
+    "この会話ではエンドツーエンド暗号化が有効ではありません。",
   "room.statusHistoryLimited": "新規メンバーは履歴を閲覧不可",
   "room.statusHistoryShared": "新規メンバーも履歴を閲覧可",
   "room.statusHistoryWorldReadable": "誰でも履歴を閲覧可",
-  "room.statusNotEncrypted": "未暗号化",
-  "room.statusPrivate": "非公開",
-  "room.statusPublic": "公開",
+  "room.statusHistoryLimitedDescription":
+    "新規メンバーは、参加前のメッセージ履歴を閲覧できません。",
+  "room.statusHistorySharedDescription":
+    "新規メンバーも参加前のメッセージ履歴を閲覧できます。暗号化されたメッセージを読むには復号鍵が必要です。",
+  "room.statusHistoryWorldReadableDescription":
+    "このルームに到達できる人は、メンバーでなくても履歴を閲覧できます。",
   "room.statusShowSetting": "{status}：設定を表示",
   "room.saveAccess": "アクセス設定を保存",
   "room.saveHistoryVisibility": "履歴の表示範囲を保存",
@@ -4048,6 +4697,8 @@ const ja: Catalog = {
   "room.unbanMember": "{name}のBANを解除",
   "room.unread": "未読",
   "room.unreadCount": "未読 {count} 件",
+  "room.unreadBreakdown": "ルーム本文 {main} 件・スレッド返信 {threads} 件",
+  "room.mutedUnreadBreakdown": "ミュート中（合計の対象外）・ルーム本文 {main} 件・スレッド返信 {threads} 件",
   "roomList.category": "ルームリストのカテゴリ",
   "roomList.categoryDms": "DM",
   "roomList.categoryRooms": "ルーム",
@@ -4068,11 +4719,13 @@ const ja: Catalog = {
   "roomList.noMatchingConversations": "一致する会話がありません",
   "roomList.sort": "ルームリストの並び順",
   "roomList.sortLabel": "並び順",
-  "roomList.sortActive": "アクティブ",
-  "roomList.sortAttention": "未読・メンション優先",
-  "roomList.sortRecent": "新着メッセージ",
+  "roomList.sortRecent": "新着順",
   "roomList.sortName": "名前",
   "roomList.sectionOptions": "{section}のオプション",
+  "roomList.showMore": "残り {count} 件を表示",
+  "roomList.showMoreInSection": "{section}の残り {count} 件を表示",
+  "roomList.showFewer": "表示を減らす",
+  "roomList.showFewerInSection": "{section}の表示を減らす",
   "spaceAddRooms.action": "既存のルームを追加",
   "spaceAddRooms.title": "{spaceName}に既存のルームを追加",
   "spaceAddRooms.scope": "参加中のルームが表示されます。追加すると、このスペースのメンバーに表示されます。ルームに参加できる人は変わりません。このスペースのルームを管理する権限が必要です。",
@@ -4095,8 +4748,9 @@ const ja: Catalog = {
   "roomList.sectionUnreadAccessible": "{section}の未読 {count} 件",
   "roomList.loading": "ルームを読み込み中…",
   "roomList.failed": "ルームを読み込めませんでした",
-  "room.markAsRead": "既読にする",
+  "room.markAsRead": "ルーム本文を既読にする",
   "room.markAsUnread": "未読にする",
+  "room.manuallyMarkedUnread": "手動で未読に設定",
   "search.indexingPending": "メッセージ履歴をインデックス中です。まもなく追加の一致が表示される場合があります。",
   "search.noExactMatches": "完全一致はありません",
   "search.matchAttachmentFileName": "添付ファイル名",
@@ -4156,8 +4810,7 @@ const ja: Catalog = {
   "settings.accounts": "アカウント",
   "settings.appearance": "外観",
   "settings.language": "言語",
-  "settings.languageDefault": "標準（英語）",
-  "settings.languageEnglish": "英語",
+  "settings.languageEnglish": "English",
   "settings.languageJapanese": "日本語",
   "settings.accountSwitcher": "アカウント切り替え",
   "settings.current": "現在",
@@ -4190,7 +4843,7 @@ const ja: Catalog = {
     "ウィンドウを閉じても Koushi をトレイで実行し続けます。終了するにはトレイメニューの終了を使います。",
   "settings.autoUpdate": "アップデートを自動確認",
   "settings.autoUpdateDescription":
-    "検証済みのmacOSアップデートを通知します。ダウンロードと再起動は選択できます。",
+    "Koushiの新しいリリースを通知します。",
   "settings.includePrereleases": "プレリリース版を含める",
   "settings.includePrereleasesDescription":
     "-beta.1 や -rc.1 など、SemVerのプレリリース識別子を含むリリースも確認します。",
@@ -4203,9 +4856,14 @@ const ja: Catalog = {
   "settings.updateUpToDate": "Koushiは最新です（v{version}）。",
   "settings.updateChecking": "アップデートを確認しています…",
   "settings.updateAvailable": "Koushi {version}が利用可能です。",
+  "settings.updateAvailableManual": "Koushi {version}を利用できます。Releaseページからダウンロードしてください。",
+  "settings.updateReleasePage": "Releaseページを開く",
   "settings.updateAvailableTitle": "アップデートがあります",
   "settings.updateAvailableConfirm": "Koushi {version}をダウンロードしてインストールしますか？",
   "settings.updateDownload": "アップデートをダウンロード",
+  "settings.updateIgnore": "このバージョンを無視",
+  "settings.updateIgnored":
+    "Koushiを再起動するまで、このバージョンの自動通知はオフになります。ダウンロードは引き続き可能です。",
   "settings.updateDownloading": "Koushi {version}をダウンロードして検証しています…",
   "settings.updateReady": "Koushi {version}をインストールできます。",
   "settings.updateRestart": "再起動してインストール",
@@ -4289,6 +4947,125 @@ const ja: Catalog = {
   "settings.notificationMessagePreviewsDescription":
     "バナーとOSの通知センターにメッセージ本文が表示されます。この設定はこの端末だけに保存されます。",
   "settings.notificationSound": "サウンド",
+  "settings.notificationDelivery": "この端末から通知する",
+  "settings.notificationDeliveryDescription":
+    "メール送信サービスを設定すると、Koushiがこの端末から直接送信します。メール通知に対応していないホームサーバーでも使えます。送信するのは、未読のままのルームだけです。",
+  "settings.notificationDeliveryTriggers": "送信する対象",
+  "settings.notificationDeliveryDirectMessages": "ダイレクトメッセージ",
+  "settings.notificationDeliveryMentions": "メンション・返信",
+  "settings.notificationDeliveryKeywords": "設定したキーワード",
+  "settings.notificationDeliveryDwell": "送信までの待ち時間",
+  "settings.notificationDeliveryDwellDescription":
+    "この時間が過ぎても未読のままのルームだけを送信します。読んでいる途中の会話は送信されません。",
+  "settings.notificationDeliveryInterval": "送信の最短間隔",
+  "settings.notificationDeliveryIntervalDescription":
+    "続けて通知があるときは、この間隔が過ぎるまでまとめて待ちます。にぎやかなルームでメールボックスがあふれるのを防ぎます。",
+  "settings.notificationDeliveryOnlyUnfocused": "Koushiが非アクティブのときだけ",
+  "settings.notificationDeliveryWatched": "これらのルーム・スペースも送信する",
+  "settings.notificationDeliveryWatchedDescription":
+    "選んだルームは、上の種類がオフでも送信します。スペースを選ぶと、その中のすべてのルーム（後から追加されたルームも）が対象になります。既読にしたルームやミュートしたルームは送信しません。",
+  "settings.notificationDeliveryWatchedAdd": "ルーム・スペースを追加",
+  "settings.notificationDeliveryWatchedEmpty": "選択されたルーム・スペースはありません",
+  "settings.notificationDeliveryWatchedLimit":
+    "ウォッチリストに登録できるルーム・スペースは{count}件までです。追加するには1件削除してください。",
+  "settings.notificationDeliveryWatchedRemove": "{room}を削除",
+  "settings.notificationDeliverySinks": "送信方法",
+  "settings.notificationDeliveryAddSink": "サービスを追加",
+  "settings.notificationDeliverySinkLimit":
+    "送信方法は{count}件までです。追加するには1件削除してください。",
+  "settings.notificationDeliverySinkProvider": "サービス",
+  "settings.notificationDeliverySinkName": "名前",
+  "settings.notificationDeliverySinkFrom": "差出人アドレス",
+  "settings.notificationDeliverySinkTo": "送信先",
+  "settings.notificationDeliverySinkHost": "サーバー",
+  "settings.notificationDeliverySinkPort": "ポート",
+  "settings.notificationDeliverySinkUsername": "ユーザー名",
+  "settings.notificationDeliverySinkSecret": "アプリパスワードまたはAPIキー",
+  "settings.notificationDeliverySinkSecretSet":
+    "保存済みです。変更するには新しい値を入力してください。",
+  "settings.notificationDeliverySinkSecretMissing": "未設定",
+  "settings.notificationDeliverySinkTest": "テスト送信",
+  "settings.notificationDeliverySinkTestSending": "送信中…",
+  "settings.notificationDeliverySinkRemove": "削除",
+  "settings.notificationDeliveryLastResult": "前回の送信",
+  "settings.notificationDeliveryNeverSent": "まだ送信していません",
+  "settings.notificationDeliveryResultDelivered": "送信しました",
+  "settings.notificationDeliveryResultInvalidSecret":
+    "サービスがキーを受け付けませんでした。もう一度入力してください。",
+  "settings.notificationDeliveryResultNotPermitted":
+    "サービスがこの差出人またはアカウントを受け付けませんでした。差出人アドレスとアカウントの状態を確認してください。",
+  "settings.notificationDeliveryResultRejected": "サービスがメッセージを拒否しました。",
+  "settings.notificationDeliveryResultRateLimited":
+    "送信回数が制限されています。しばらくしてから再試行します。",
+  "settings.notificationDeliveryResultTransport": "サービスに接続できませんでした。",
+  "settings.notificationDeliveryPrefix": "メッセージの冒頭を含める",
+  "settings.notificationDeliveryPrefixDescription":
+    "初期設定ではオフです。メッセージの冒頭が平文で追加されるため、メッセージを読める人には読まれます。",
+  "settings.notificationDeliveryPrefixChars": "文字数",
+  "settings.notificationDeliveryPrefixConsentTitle":
+    "メッセージ本文を暗号化せずに送信しますか？",
+  "settings.notificationDeliveryPrefixConsentBody":
+    "メッセージの冒頭は平文でこの端末を離れ、エンドツーエンド暗号化なしで{service}から{destination}へ送られます。そのサービスが本文を保持するかどうか、また保持期間は、そのサービスの規約によります。オンにする前に規約を確認してください。ルーム名と件数はどちらでも送信されます。",
+  "settings.notificationDeliveryPrefixConsentAccept": "オンにして同意する",
+  "settings.notificationDeliveryPrefixConsentLink": "サービスの規約を読む",
+  "settings.notificationSource": "通知の送信元",
+  "settings.notificationDeviceSource":
+    "これらはKoushiがこの端末から、ここで設定したメールボックスまたはリレーを通して送信します。",
+  "settings.notificationHomeserverSource":
+    "これらはホームサーバーが送信し、アカウントのすべての端末に適用されます。",
+  "settings.notificationDeliveryEnable": "この端末から通知を送信する",
+  "settings.notificationDeliveryKeywordsHint":
+    "キーワードに一致したメッセージはメンションとして届くため、「設定したキーワード」と「メンション・返信」のどちらをオンにしても送信されます。",
+  "settings.notificationDeliveryWatchedPick": "ルームまたはスペースを選択",
+  "settings.notificationDeliveryWatchedRooms": "ルーム",
+  "settings.notificationDeliveryWatchedSpaces": "スペース",
+  "settings.notificationDeliveryWatchedUnknown": "現在のルーム一覧にありません",
+  "settings.notificationDeliverySinkEnabled": "このサービスで送信する",
+  "settings.notificationDeliverySinkKindResend": "Resend（メールAPI）",
+  "settings.notificationDeliverySinkKindSmtp": "SMTPリレー",
+  "settings.notificationDeliverySinkEndpoint": "エンドポイント",
+  "settings.notificationDeliverySinkEndpointDefault":
+    "空欄のままにすると、このサービスがメールAPI用に案内しているエンドポイントを使用します。",
+  "settings.notificationDeliverySinkPreset": "メールボックスのプリセット",
+  "settings.notificationDeliverySinkPresetCustom": "その他のサーバー",
+  "settings.notificationDeliverySinkPresetHint":
+    "プリセットは、提供元が公開しているリレー情報を入力します。最新かどうかは提供元の資料で確認してください。Koushiが代わりに更新することはありません。",
+  "settings.notificationDeliverySinkTls": "接続の保護",
+  "settings.notificationDeliverySinkTlsImplicit": "最初からTLSで接続（通常はポート465）",
+  "settings.notificationDeliverySinkTlsStartTls": "接続後にSTARTTLS（通常はポート587）",
+  "settings.notificationDeliverySinkUsernameFullAddress": "メールアドレス全体",
+  "settings.notificationDeliverySinkSaveSecret": "保存",
+  "settings.notificationDeliverySinkClearSecret": "消去",
+  "settings.notificationDeliverySinkSecretRetired":
+    "サーバーまたはアカウントが変更されたため、保存されていたパスワードは削除されました。もう一度入力してください。",
+  "settings.notificationDeliverySinkEmpty":
+    "送信方法がまだ設定されていません。追加してオンにするまで、この端末から何も送信されません。",
+  "settings.notificationDeliverySinkFailed": "このサービスは送信できていません",
+  "settings.notificationDeliveryResultRateLimitedAfter":
+    "送信回数が制限されています。次は約{seconds}秒後に試します。",
+  "settings.notificationDeliveryPrefixConsentAcknowledge": "上記の規約を確認しました",
+  "settings.notificationDeliveryPrefixConsentRequired":
+    "規約を確認して同意するとオンにできます。",
+  "settings.notificationDeliverySecretHint.qqMail":
+    "QQ Mail では、アカウントのパスワードではなく、メール設定で発行する認証コードを入力します。",
+  "settings.notificationDeliverySecretHint.gmail":
+    "Gmail では Google のアプリパスワードを使用します。2段階認証を有効にしている場合のみ発行できます。",
+  "settings.notificationDeliverySecretHint.icloud":
+    "iCloud Mail では、Apple Account でこのアプリ用に発行したアプリ用パスワードを使用します。",
+  "settings.notificationKeywordHeading": "ホームサーバー上のキーワード",
+  "settings.notificationKeywordEmpty": "キーワードはまだありません。",
+  "settings.notificationKeywordAdd": "キーワードを追加",
+  "settings.notificationKeywordRemove": "{keyword}を削除",
+  "settings.notificationKeywordDisabled": "アカウントではオフ",
+  "settings.notificationKeywordHint":
+    "キーワードはホームサーバーに保存されるため、このアプリでも他の端末でも強調表示されます。上のスイッチは、この端末がメールで通知する対象を決めます。キーワードは大文字小文字を区別せず、単語単位で一致します。",
+  "settings.notificationKeywordErrorEmpty": "キーワードを入力してください。",
+  "settings.notificationKeywordErrorTooLong": "キーワードが長すぎます。",
+  "settings.notificationKeywordErrorDuplicate": "そのキーワードはすでに一覧にあります。",
+  "settings.notificationKeywordErrorLimit":
+    "キーワードの一覧がいっぱいです。追加するには1件削除してください。",
+  "settings.notificationKeywordErrorUnknownRule":
+    "そのキーワードはサーバー上にありません。このページを開き直してからお試しください。",
   "settings.sendReadReceipts": "既読を送信",
   "settings.sendTypingNotifications": "入力通知を送信",
   "settings.notifications": "通知",
@@ -4406,11 +5183,20 @@ const ja: Catalog = {
   "scheduled.edit": "予約送信を編集",
   "scheduled.localFallback": "ローカルフォールバック",
   "scheduled.localFallbackNotice": "このアプリが起動中のときだけ送信されます。",
+  "scheduled.panelEmpty": "予約メッセージはありません",
+  "scheduled.persistenceFailed":
+    "予約送信の変更をこの端末に保存できませんでした。アプリを再起動すると失われる可能性があります。",
   "scheduled.save": "予約送信を保存",
   "scheduled.schedule": "予約送信",
   "scheduled.sendLater": "あとで送信",
+  "scheduled.sendLaterWithCount": "あとで送信（予約 {count} 件）",
   "scheduled.serverDelayedEvents": "サーバー予約",
+  "scheduled.threadReply": "スレッド返信",
   "scheduled.timeInput": "予約送信日時",
+  "scheduled.timeEarlierHour": "1 時間前",
+  "scheduled.timeEarlierTenMinutes": "10 分前",
+  "scheduled.timeLaterTenMinutes": "10 分後",
+  "scheduled.timeLaterHour": "1 時間後",
   "scheduled.title": "予約メッセージ",
   "scheduled.unknownCapability": "対応状況を確認中",
   "trust.acceptVerification": "承認",
@@ -4497,7 +5283,6 @@ const ja: Catalog = {
   "gate.mismatch": "一致していません",
   "gate.recoverySecret": "リカバリーシークレット",
   "gate.recover": "復旧",
-  "gate.destination": "リカバリーキーの保存先",
   "gate.passphrase": "バックアップ用パスフレーズ",
   "gate.bootstrap": "安全なバックアップを作成",
   "gate.saved": "リカバリーキーを保存しました",
@@ -4523,7 +5308,7 @@ const ja: Catalog = {
   "gate.cleanupCommandFailed": "デバイスのクリーンアップに失敗しました。もう一度お試しください。",
   "gate.signOut": "サインアウト",
   "gate.secureBackupTitle": "安全なバックアップが必要です",
-  "gate.secureBackupChecking": "安全なバックアップを確認中…",
+  "gate.secureBackupChecking": "ホームサーバー上の復号鍵のバックアップを確認中…",
   "gate.secureBackupInactive": "安全なバックアップの状態を確認できません。確認が完了するまで暗号化メッセージはロックされます。",
   "gate.secureBackupNeedsRecovery": "続行するには既存の安全なバックアップを復旧してください。",
   "gate.secureBackupRecoveryKey": "安全なバックアップのリカバリーキー",
@@ -4571,6 +5356,19 @@ const ja: Catalog = {
   "gate.secureBackupFailureForbidden": "このアカウントでは安全なバックアップを使用できません。",
   "gate.secureBackupFailureTimeout": "安全なバックアップの応答がタイムアウトしました。",
   "gate.secureBackupFailureSdk": "安全なバックアップに失敗しました。",
+  "gate.secureBackupFailureServerResponse": "ホームサーバーが安全なバックアップの問題を報告しました。",
+  "gate.secureBackupFailureUnauthorized": "ホームサーバーが安全なバックアップのサインインを拒否しました。",
+  "gate.secureBackupDetailNoResponse": "ホームサーバーに到達できなかったため、この安全なバックアップの要求は応答を受け取りませんでした。",
+  "gate.secureBackupDetailTimeout": "ホームサーバーがこの安全なバックアップの要求に時間内に応答しませんでした。",
+  "gate.secureBackupDetailHttpStatus": "ホームサーバーがこの安全なバックアップの要求にエラーで応答しました（HTTP {status}）。",
+  "gate.secureBackupDetailHttpResponse": "ホームサーバーがこの安全なバックアップの要求にエラーで応答しました。",
+  "gate.secureBackupDetailLocal": "この端末で安全なバックアップを準備できませんでした。",
+  "gate.secureBackupActionRetry": "接続を確認してから再試行してください。",
+  "gate.secureBackupActionWaitAndRetry": "数分待ってから再試行してください。",
+  "gate.secureBackupActionRetryLater": "数分後に再試行してください。",
+  "gate.secureBackupActionSignInAgain": "サインアウトして、もう一度サインインしてください。",
+  "gate.secureBackupActionContactAdmin": "ホームサーバーの管理者に安全なバックアップの確認を依頼してください。",
+  "gate.secureBackupActionLocalRetry": "再試行してください。失敗が続く場合は、サインアウトして再度サインインしてください。",
   "gate.secureBackupRetry": "安全なバックアップを再試行",
   "gate.secureBackupDiagnostics": "安全なバックアップの診断を開く",
   "gate.secureBackupCommandFailed": "安全なバックアップの操作に失敗しました。もう一度お試しください。",
@@ -4679,7 +5477,7 @@ const ja: Catalog = {
   "shortcut.noteCallsDeferred": "通話はこのマイルストーンの範囲外です。",
   "shortcut.noteGoHomeAdapted": "一部のMatrixクライアントのmacOS版ではCtrl+Shift+Hですが、この試作ではクロスプラットフォームの1行に統一しています。",
   "shortcut.noteUploadUiDeferred": "アップロードUIはまだ実装されていません。",
-  "shortcut.openUserSettings": "アカウント設定",
+  "shortcut.openAppSettings": "アプリ設定",
   "shortcut.parityAdapted": "調整済み",
   "shortcut.parityDeferred": "延期",
   "shortcut.parityNotApplicable": "対象外",
@@ -4873,6 +5671,7 @@ const ja: Catalog = {
   "timeline.resendAll": "すべて再送信",
   "timeline.cancelAll": "すべてキャンセル",
   "timeline.downloadMedia": "{filename}をダウンロード",
+  "timeline.downloadDefaultImageName": "Koushi_Image",
   "timeline.encryptedMedia": "暗号化済み",
   "timeline.mediaDownloadPending": "ダウンロード中…",
   "timeline.mediaDownloadFailed": "ダウンロードに失敗しました",
@@ -4888,7 +5687,7 @@ const ja: Catalog = {
   "timeline.threadSummaryWithBody": "{count} · {preview}",
   "timeline.threadSummaryWithPreview": "{count} · {sender}: {preview}",
   "timeline.threadSummaryWithSender": "{count} · {sender}",
-  "timeline.threadNotificationCount": "スレッド通知 · {count}",
+  "timeline.threadNotificationCount": "スレッドの未読 · {count}",
   "timeline.typingMany": "{count} 人が入力中",
   "timeline.typingOne": "{user} が入力中",
   "timeline.openThreadSummary": "スレッドを開く、{summary}",
@@ -4908,10 +5707,28 @@ const ja: Catalog = {
   "roomList.membershipKnocked": "参加申請中",
   "roomList.membershipNotJoined": "未入室",
   "roomList.membershipUnknown": "参照不可",
+  "roomList.suggested": "おすすめ",
+  "roomList.suggestedDescription": "このスペースのおすすめルーム",
+  "space.suggestToMembers": "{space} のメンバーにおすすめする",
+  "space.suggestToMembersFor": "{room} を {space} のメンバーにおすすめする",
+  "space.suggestSaving": "保存中…",
+  "space.suggestFailed": "おすすめ設定を更新できませんでした: {reason}",
+  "suggestedRooms.offerTitle": "{space} のおすすめルームに一括入室しますか？",
+  "suggestedRooms.offerCopy": "このスペースがおすすめしているルームです。「すべて入室」を選ぶまで入室しません。",
+  "suggestedRooms.listLabel": "おすすめルーム",
+  "suggestedRooms.joinAll": "すべて入室",
+  "suggestedRooms.skip": "スキップ",
+  "suggestedRooms.joining": "入室中…",
+  "suggestedRooms.resultTitle": "一部のおすすめルームに入室できませんでした",
+  "suggestedRooms.resultCopy": "ほかのおすすめルームには入室しました。",
+  "suggestedRooms.joined": "入室済み",
+  "suggestedRooms.failed": "未入室: {reason}",
+  "suggestedRooms.done": "閉じる",
   "workspace.people": "Direct Messages",
   "workspace.rooms": "ルーム",
   "workspace.resizeRoomList": "ルームリストの幅を変更",
   "workspace.resizeRightPanel": "右パネルの幅を変更",
+  "workspace.scheduledMessages": "予約メッセージ",
   "workspace.search": "検索",
   "workspace.searchEverywhere": "すべてを検索",
   "workspace.searchInRoom": "{roomName}内を検索",
@@ -4957,6 +5774,7 @@ const ja: Catalog = {
   "threads.loading": "スレッドを読み込み中…",
   "threads.open": "スレッドを開く",
   "threads.replyCount": "{count}件の返信",
+  "threads.openUnreadRoot": "未読スレッドを開く",
   "threads.title": "スレッド",
   "settings.searchHistory": "検索履歴",
   "settings.searchHistoryCrawler": "クローラー",
@@ -5090,6 +5908,23 @@ const pseudo: Catalog = Object.fromEntries(
 
 export const catalogs: Record<Locale, Catalog> = { en, ja, pseudo };
 
+/**
+ * Resolve a catalog-owned string that becomes part of a generated artifact and
+ * must not be translated or pseudo-localized (#1135). The id stays in the
+ * catalog so product text keeps one owner.
+ */
+export function tInvariant(id: MessageId): string {
+  return en[id];
+}
+
+/**
+ * The `{name}` placeholder grammar of a catalog template. Owned here so a
+ * caller that has to render a template's parts itself (for example to give a
+ * remote-text value its own `dir="auto"` element) parses exactly what `t`
+ * interpolates.
+ */
+export const MESSAGE_PLACEHOLDER_PATTERN = /\{([a-zA-Z0-9_]+)\}/g;
+
 export function t(
   id: MessageId,
   values: MessageValues = {},
@@ -5101,7 +5936,7 @@ export function t(
     selectedLocale === "pseudo" && pseudoMode === "bidi"
       ? pseudoLocalize(catalogs.en[id], "bidi")
       : catalogs[selectedLocale][id] ?? catalogs.en[id];
-  return template.replace(/\{([a-zA-Z0-9_]+)\}/g, (_, key: string) =>
+  return template.replace(MESSAGE_PLACEHOLDER_PATTERN, (_, key: string) =>
     String(values[key] ?? `{${key}}`)
   );
 }

@@ -6,9 +6,15 @@ use koushi_protocol::command::{
 use koushi_protocol::ids::{RequestId, TimelineKind};
 use koushi_state::{AppAction, AppState, OperationFailureKind, admit_space_leave_room_ids};
 
+/// Protocol message accompanying a failed search, shared by the routing layer
+/// and the search actor so both settle the UI the same way.
+pub(crate) const SEARCH_UNAVAILABLE_MESSAGE: &str = "search unavailable";
+
 /// Narrow a `LeaveSpace` command's child rooms to the Space's current leave
 /// candidates, so a stale or forged ID never leaves a room outside the Space.
-/// Every other command passes through unchanged.
+/// A `JoinSuggestedSpaceRooms` command joins exactly the rooms of the admitted
+/// offer (#1410), whatever the caller sent. Every other command passes through
+/// unchanged.
 pub(crate) fn admit_leave_space_command(
     state: &AppState,
     command: koushi_protocol::command::RoomCommand,
@@ -24,6 +30,27 @@ pub(crate) fn admit_leave_space_command(
                 request_id,
                 space_id,
                 child_room_ids,
+            }
+        }
+        koushi_protocol::command::RoomCommand::JoinSuggestedSpaceRooms {
+            request_id,
+            space_id,
+            room_ids: _,
+        } => {
+            let room_ids = match &state.space_children.suggested_offer {
+                koushi_state::SuggestedRoomsOffer::Joining {
+                    request_id: admitted,
+                    space_id: offered,
+                    rooms,
+                } if *admitted == request_id.sequence && *offered == space_id => {
+                    rooms.iter().map(|room| room.room_id.clone()).collect()
+                }
+                _ => Vec::new(),
+            };
+            koushi_protocol::command::RoomCommand::JoinSuggestedSpaceRooms {
+                request_id,
+                space_id,
+                room_ids,
             }
         }
         other => other,
@@ -109,6 +136,33 @@ pub(crate) fn space_member_forward_failure_action(
                 projection: None,
             },
         )),
+        koushi_protocol::command::RoomCommand::SetSpaceChildSuggested {
+            request_id,
+            space_id,
+            child_room_id,
+            suggested,
+        } => Some((
+            *request_id,
+            AppAction::SpaceChildSuggestedUpdateSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                child_room_id: child_room_id.clone(),
+                suggested: *suggested,
+                failure: Some(OperationFailureKind::Sdk),
+            },
+        )),
+        koushi_protocol::command::RoomCommand::JoinSuggestedSpaceRooms {
+            request_id,
+            space_id,
+            ..
+        } => Some((
+            *request_id,
+            AppAction::SuggestedRoomsJoinSettled {
+                request_id: request_id.sequence,
+                space_id: space_id.clone(),
+                outcomes: Vec::new(),
+            },
+        )),
         _ => None,
     }
 }
@@ -135,15 +189,9 @@ pub(crate) fn native_artifact_for_account_command(
         AccountCommand::ExportHistory { request_id, .. } => {
             Some((*request_id, NativeArtifactKind::HistoryExportDirectory))
         }
-        AccountCommand::StartSessionBootstrap {
-            request_id,
-            request,
-            ..
-        } if request.recovery_key_destination_requested => {
-            Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
-        }
-        // Secure Backup setup and passphrase change reveal the key on screen
-        // (#927); only the optional save command consumes a destination.
+        // Secure Backup setup, passphrase change (#927), and the identity
+        // bootstrap (#1049) reveal the key on screen; only the optional save
+        // command consumes a destination.
         AccountCommand::SaveSecureBackupRecoveryKey { request_id, .. } => {
             Some((*request_id, NativeArtifactKind::RecoveryKeyDestination))
         }
@@ -270,6 +318,8 @@ impl CoreCommandPolicy for CoreCommand {
                         | AppCommand::OpenThreadsList { .. }
                         | AppCommand::CloseThreadsList { .. }
                         | AppCommand::PaginateThreadsList { .. }
+                        | AppCommand::OpenScheduledSendsList { .. }
+                        | AppCommand::CloseScheduledSendsList { .. }
                         | AppCommand::TimelineScrollAnchorUpdated { .. }
                 )
             )
@@ -360,182 +410,5 @@ pub(crate) fn search_scope_to_state(scope: &SearchScope) -> koushi_state::Search
 }
 
 #[cfg(test)]
-mod tests {
-    use super::*;
-    use koushi_protocol::{RuntimeConnectionId, SyncCommand};
-
-    fn request(sequence: u64) -> RequestId {
-        RequestId {
-            connection_id: RuntimeConnectionId(1),
-            sequence,
-        }
-    }
-
-    #[test]
-    fn ready_admission_policy_stays_in_core() {
-        let id = request(1);
-        for command in [
-            CoreCommand::Account(AccountCommand::SoftLogoutReauth {
-                request_id: id,
-                password: koushi_state::AuthSecret::new("synthetic"),
-            }),
-            CoreCommand::Account(AccountCommand::RetrySlidingSyncCapability { request_id: id }),
-            CoreCommand::Account(AccountCommand::ResetLocalData { request_id: id }),
-            CoreCommand::Account(AccountCommand::ChangeHomeserver { request_id: id }),
-            CoreCommand::Account(AccountCommand::StartDeviceCleanup { request_id: id }),
-            CoreCommand::Account(AccountCommand::EraseDeviceCleanupLocalDataAnyway {
-                request_id: id,
-            }),
-            // Closing User info only tears down; it must settle quietly after
-            // sign-out, lock, or account switch unmounts the panel (#1024).
-            CoreCommand::Account(AccountCommand::ContactSecurity {
-                request_id: id,
-                request: koushi_protocol::command::ContactSecurityRequest::Close,
-            }),
-        ] {
-            assert!(!command.requires_ready_session());
-        }
-
-        for command in [
-            CoreCommand::Sync(SyncCommand::Start { request_id: id }),
-            CoreCommand::Account(AccountCommand::ContactSecurity {
-                request_id: id,
-                request: koushi_protocol::command::ContactSecurityRequest::Load {
-                    user_id: "@contact:example.invalid".to_owned(),
-                },
-            }),
-            CoreCommand::App(AppCommand::OpenTimelineAtTimestamp {
-                request_id: id,
-                room_id: "!room:example.invalid".to_owned(),
-                timestamp_ms: 1,
-            }),
-            CoreCommand::App(AppCommand::ClearUploadStaging {
-                request_id: id,
-                target: koushi_state::ComposerTarget::Main {
-                    room_id: "!room:example.invalid".to_owned(),
-                },
-            }),
-        ] {
-            assert!(command.requires_ready_session());
-        }
-    }
-
-    #[test]
-    fn composer_scope_and_timeline_account_fence_are_core_policy() {
-        let expected_account = koushi_protocol::SessionKeyId {
-            homeserver: "https://example.invalid".to_owned(),
-            user_id: "@user:example.invalid".to_owned(),
-            device_id: "DEVICE".to_owned(),
-        };
-        let id = request(2);
-        let command = CoreCommand::App(AppCommand::SetComposerDraft {
-            request_id: id,
-            expected_account: expected_account.clone(),
-            room_id: "!room:example.invalid".to_owned(),
-            document: koushi_state::ComposerDocument::default(),
-            revision: 1.into(),
-        });
-        assert!(command.composer_draft_scope().is_some());
-
-        let timeline = TimelineCommand::SubmitText {
-            request_id: id,
-            expected_account: expected_account.clone(),
-            submission_id: koushi_state::SubmissionId::new("submission"),
-            key: koushi_protocol::TimelineKey::room(
-                koushi_protocol::AccountKey("@user:example.invalid".to_owned()),
-                "!room:example.invalid",
-            ),
-            transaction_id: "transaction".to_owned(),
-            document: koushi_state::ComposerDocument::default(),
-            draft_revision: 1.into(),
-        };
-        assert_eq!(
-            timeline_composer_account_fence(&timeline),
-            Some((id, &expected_account))
-        );
-    }
-
-    fn synthetic_room(room_id: &str) -> koushi_state::RoomSummary {
-        koushi_state::RoomSummary {
-            display_name_placeholder: None,
-            display_label_placeholder: None,
-            room_id: room_id.to_owned(),
-            display_name: "Synthetic".to_owned(),
-            display_label: "Synthetic".to_owned(),
-            original_display_label: "Synthetic".to_owned(),
-            avatar: None,
-            is_dm: false,
-            dm_user_ids: Vec::new(),
-            tags: koushi_state::RoomTags::default(),
-            unread_count: 0,
-            notification_count: 0,
-            highlight_count: 0,
-            marked_unread: false,
-            recency_stamp: None,
-            conversation_activity: None,
-            latest_event: None,
-            parent_space_ids: Vec::new(),
-            dm_space_ids: Vec::new(),
-            is_encrypted: false,
-            joined_members: 1,
-        }
-    }
-
-    #[test]
-    fn leave_space_admission_keeps_only_joined_children_of_that_space() {
-        let space_id = "!space:example.invalid";
-        let state = AppState {
-            spaces: vec![koushi_state::SpaceSummary {
-                space_id: space_id.to_owned(),
-                raw_name: None,
-                display_name: "Synthetic Workspace".to_owned(),
-                avatar: None,
-                join_rule: None,
-                child_room_ids: vec!["!child:example.invalid".to_owned()],
-                parent_side_child_room_ids: vec!["!child:example.invalid".to_owned()],
-            }],
-            rooms: vec![
-                synthetic_room("!child:example.invalid"),
-                synthetic_room("!outside:example.invalid"),
-            ],
-            ..AppState::default()
-        };
-        let id = request(7);
-        let admitted = admit_leave_space_command(
-            &state,
-            koushi_protocol::command::RoomCommand::LeaveSpace {
-                request_id: id,
-                space_id: space_id.to_owned(),
-                child_room_ids: vec![
-                    "!outside:example.invalid".to_owned(),
-                    "!child:example.invalid".to_owned(),
-                ],
-            },
-        );
-        match admitted {
-            koushi_protocol::command::RoomCommand::LeaveSpace {
-                request_id,
-                space_id: admitted_space_id,
-                child_room_ids,
-            } => {
-                assert_eq!(request_id, id);
-                assert_eq!(admitted_space_id, space_id);
-                assert_eq!(child_room_ids, ["!child:example.invalid"]);
-            }
-            other => panic!("unexpected command: {other:?}"),
-        }
-
-        let passthrough = admit_leave_space_command(
-            &state,
-            koushi_protocol::command::RoomCommand::LeaveRoom {
-                request_id: id,
-                room_id: "!outside:example.invalid".to_owned(),
-            },
-        );
-        assert!(matches!(
-            passthrough,
-            koushi_protocol::command::RoomCommand::LeaveRoom { room_id, .. }
-                if room_id == "!outside:example.invalid"
-        ));
-    }
-}
+#[path = "command_policy/tests.rs"]
+mod tests;

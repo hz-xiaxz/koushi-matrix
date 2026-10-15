@@ -13,6 +13,19 @@ import {
 } from "./messages";
 
 describe("i18n message catalog", () => {
+  test("names the sidebar sort selector Recent and Name only (#542)", () => {
+    expect(catalogs.en["roomList.sortRecent"]).toBe("Recent");
+    expect(catalogs.ja["roomList.sortRecent"]).toBe("新着順");
+    expect(catalogs.en["roomList.sortName"]).toBeTruthy();
+    expect(catalogs.ja["roomList.sortName"]).toBeTruthy();
+    // The attention-first choice is legacy-only; it must not be offered and
+    // must not leave a stale "Active" label behind.
+    for (const locale of Object.keys(catalogs) as Locale[]) {
+      expect("roomList.sortActive" in catalogs[locale]).toBe(false);
+      expect("roomList.sortAttention" in catalogs[locale]).toBe(false);
+    }
+  });
+
   test("ships secure backup gate copy in both locales, including the account-wide warning", () => {
     const secureBackupIds = [
       "gate.secureBackupTitle",
@@ -259,10 +272,10 @@ describe("i18n message catalog", () => {
 
   test("localizes thread notification count copy", () => {
     expect(t("timeline.threadNotificationCount", { count: 3 })).toBe(
-      "Thread notifications · 3"
+      "Thread unread · 3"
     );
     expect(t("timeline.threadNotificationCount", { count: 3 }, "ja")).toBe(
-      "スレッド通知 · 3"
+      "スレッドの未読 · 3"
     );
   });
 
@@ -410,6 +423,9 @@ const japaneseInheritedMessageAllowlist = new Set<MessageId>([
 ]);
 
 const japaneseIdenticalMessageAllowlist = new Set<MessageId>([
+  // #1166: the access-condition summary uses the same em dash in both locales,
+  // matching the bilingual example in the issue ("スペース例 — 招待制。...").
+  "access.conditionSummarySeparator",
   // Scale fractions and image-format names are not prose: "1/2" and "JPEG"
   // read the same in both catalogs, and translating them would be wrong.
   "upload.resizeHalf",
@@ -417,6 +433,8 @@ const japaneseIdenticalMessageAllowlist = new Set<MessageId>([
   "upload.resizeEighth",
   "upload.previewActualSize",
   "upload.formatWebp",
+  // #1135: part of a generated, locale-independent filename rather than prose.
+  "timeline.downloadDefaultImageName",
   "upload.formatJpeg",
   "upload.formatPng",
   "auth.flowOidc",
@@ -427,6 +445,10 @@ const japaneseIdenticalMessageAllowlist = new Set<MessageId>([
   "space.directMessages",
   "settings.fontInter",
   "settings.twemojiColr",
+  // #1221: the language dropdown shows each language's self-name in every
+  // locale, so "English" and "日本語" read the same in both catalogs.
+  "settings.languageEnglish",
+  "settings.languageJapanese",
   "timeline.mediaUploadProgress",
   "workspace.people",
   // Templates combine a localized reply count with user-provided sender/body text.

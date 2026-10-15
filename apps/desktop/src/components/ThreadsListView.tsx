@@ -36,22 +36,37 @@ export function ThreadsListView({
       {threadsList.kind === "loading" ? (
         <div className="threads-list-empty">{t("threads.loading")}</div>
       ) : threadsList.kind === "failed" ? (
-        <div className="threads-list-empty threads-list-error">{t("threads.error")}</div>
-      ) : threadsList.items.length === 0 ? (
-        <div className="threads-list-empty">{t("threads.empty")}</div>
+        <>
+          <div className="threads-list-empty threads-list-error">{t("threads.error")}</div>
+          {threadsList.items.length > 0 ? (
+            <ul className="threads-list" aria-label={t("threads.title")}>
+              {threadsList.items.map((item) => (
+                <ThreadsListRow
+                  key={`${item.room_id}:${item.root_event_id}`}
+                  item={item}
+                  onClick={() => onOpenThread(item.room_id, item.root_event_id, "existingThread")}
+                />
+              ))}
+            </ul>
+          ) : null}
+        </>
       ) : (
         <>
-          <ul className="threads-list" aria-label={t("threads.title")}>
-            {threadsList.items.map((item) => (
-              <ThreadsListRow
-                key={`${item.room_id}:${item.root_event_id}`}
-                item={item}
-                onClick={() => {
-                  onOpenThread(item.room_id, item.root_event_id, "existingThread");
-                }}
-              />
-            ))}
-          </ul>
+          {threadsList.items.length === 0 ? (
+            <div className="threads-list-empty">{t("threads.empty")}</div>
+          ) : (
+            <ul className="threads-list" aria-label={t("threads.title")}>
+              {threadsList.items.map((item) => (
+                <ThreadsListRow
+                  key={`${item.room_id}:${item.root_event_id}`}
+                  item={item}
+                  onClick={() => {
+                    onOpenThread(item.room_id, item.root_event_id, "existingThread");
+                  }}
+                />
+              ))}
+            </ul>
+          )}
           {!threadsList.end_reached && !threadsList.is_paginating ? (
             <button
               className="threads-list-load-more"
@@ -85,9 +100,9 @@ function ThreadsListRow({
         </span>
         <span className="threads-list-row-main">
           <span className="threads-list-row-preview" dir="auto">
-            {item.root_body_preview ?? t("activity.noPreview")}
+            {item.root_sender.length === 0 ? t("threads.openUnreadRoot") : (item.root_body_preview ?? t("activity.noPreview"))}
           </span>
-          <span className="threads-list-row-meta">
+          {item.root_sender.length > 0 ? <span className="threads-list-row-meta">
             <span dir="auto">{peopleFacingLabel(item.root_sender_label)}</span>
             {item.latest_body_preview ? (
               <>
@@ -98,8 +113,17 @@ function ThreadsListRow({
             ) : null}
             {" · "}
             {t("threads.replyCount", { count: item.reply_count })}
-          </span>
+          </span> : null}
         </span>
+        {/* #1259: the same per-root unread value the room timeline chip shows. */}
+        {item.unread_count > 0 ? (
+          <span
+            className="threads-list-row-unread"
+            aria-label={t("timeline.threadNotificationCount", { count: item.unread_count })}
+          >
+            {item.unread_count}
+          </span>
+        ) : null}
       </button>
     </li>
   );

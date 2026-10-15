@@ -61,6 +61,7 @@ fn patch(
             section,
             collapsed,
             sort,
+            expanded: None,
         }),
         ..Default::default()
     }
@@ -202,7 +203,14 @@ fn repeated_and_effectively_unchanged_preferences_do_not_publish_sidebar() {
         for section in [SidebarSectionKind::Rooms, SidebarSectionKind::Dms] {
             let previous = fixture(active);
             let mut next = previous.clone();
-            let same = patch(active, section, Some(false), Some(RoomListSort::Activity));
+            // #542: `RecentFirst` is the default, so this patch is the
+            // effectively-unchanged preference the test is about.
+            let same = patch(
+                active,
+                section,
+                Some(false),
+                Some(RoomListSort::RecentFirst),
+            );
             update(&mut next, same.clone());
             assert!(
                 build_state_delta(1, &previous, &next)
@@ -230,6 +238,7 @@ fn loading_space_children_publishes_the_not_joined_sidebar_lane() {
         avatar: None,
         membership: SpaceChildMembership::NotJoined,
         can_join: false,
+        suggested: false,
         is_space: false,
         joined_members: 1,
     }];
@@ -396,4 +405,161 @@ fn a_low_priority_tag_change_republishes_sections_and_native_attention() {
     assert_eq!(sidebar.space_unread_count, 0);
     assert_eq!(sidebar.account_home.unread_count, 1, "the DM still counts");
     assert!(next.native_attention.summary.candidate.is_none());
+}
+
+/// #1166: a room's projected access condition is visible on its sidebar row, so
+/// changing only that slice must publish a sidebar delta.
+#[test]
+fn access_condition_change_alone_publishes_the_sidebar() {
+    let previous = fixture(None);
+    let mut next = previous.clone();
+    next.room_access.insert(
+        "!A-false:example.invalid".to_owned(),
+        koushi_state::RoomAccessCondition {
+            join_rule: Some(koushi_state::RoomJoinRule::Public),
+            restricted: None,
+            allow_targets: Vec::new(),
+        },
+    );
+
+    let sidebar = build_state_delta(1, &previous, &next)
+        .expect("an access-condition change is a delta")
+        .changed
+        .sidebar
+        .expect("the sidebar carries the row's access condition");
+
+    assert_eq!(sidebar, compose_sidebar_for_state(&next));
+    let row = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "!A-false:example.invalid")
+        .expect("the room is in the sidebar");
+    assert_eq!(
+        row.access_join_rule,
+        Some(koushi_state::RoomJoinRule::Public)
+    );
+}
+
+/// #1363/#1366: the active row and the session reveal are sidebar inputs, so a
+/// selection that moves the open conversation past the bound republishes the
+/// bound even when no scope, setting, or room list changed.
+#[test]
+fn an_open_room_past_the_bound_republishes_the_sidebar_bound() {
+    let mut previous = fixture(Some(SPACE));
+    previous.session = ready_session();
+    for index in 0..4 {
+        previous.rooms.push(
+            serde_json::from_value::<RoomSummary>(serde_json::json!({
+                "room_id": format!("!extra-{index}:example.invalid"),
+                "display_name": format!("Extra {index}"),
+                "display_label": format!("Extra {index}"),
+                "is_dm": false,
+                "unread_count": 0, "notification_count": 0, "highlight_count": 0,
+                "parent_space_ids": [SPACE], "dm_space_ids": [],
+                "conversation_activity": {"timestamp_ms": 10 + index, "source": "message"}
+            }))
+            .unwrap(),
+        );
+    }
+    // The Space scope reaches its rows through `child_room_ids`, so the extras
+    // must be children too or the bound would have only three rows to bound.
+    for space in &mut previous.spaces {
+        space
+            .child_room_ids
+            .extend((0..4).map(|index| format!("!extra-{index}:example.invalid")));
+    }
+    assert!(
+        !compose_sidebar_for_state(&previous)
+            .section_bounds
+            .rooms
+            .expect("projected bound")
+            .expanded
+    );
+
+    let mut next = previous.clone();
+    // `!A-false` is the oldest room, so it sits past the five-row bound.
+    reduce(
+        &mut next,
+        AppAction::SelectRoom {
+            room_id: "!A-false:example.invalid".to_owned(),
+        },
+    );
+    assert_eq!(
+        next.navigation.active_space_id.as_deref(),
+        Some(SPACE),
+        "the selection must not move the scope, or this test would pass for the wrong reason"
+    );
+
+    let sidebar = build_state_delta(1, &previous, &next)
+        .expect("selecting a conversation is a delta")
+        .changed
+        .sidebar
+        .expect("the sidebar carries the bound for the open conversation");
+    assert_eq!(sidebar, compose_sidebar_for_state(&next));
+    let bound = sidebar.section_bounds.rooms.expect("projected bound");
+    assert!(bound.expanded_by_active_room);
+    assert!(!bound.shows_expand_control);
+}
+
+/// #1363/#1366: the user's own collapse toggle ends the session reveal. The
+/// stored preference is unchanged by that toggle, so the reveal must be a
+/// sidebar input in its own right or the UI would keep the stale revealed state.
+#[test]
+fn clearing_a_reveal_republishes_the_sidebar_collapse() {
+    let mut state = fixture(Some(SPACE));
+    state.session = ready_session();
+    update(
+        &mut state,
+        patch(Some(SPACE), SidebarSectionKind::Rooms, Some(true), None),
+    );
+    reduce(
+        &mut state,
+        AppAction::SelectRoom {
+            room_id: "!A-false:example.invalid".to_owned(),
+        },
+    );
+    assert!(
+        !compose_sidebar_for_state(&state).rooms_collapsed,
+        "the selection reveals the collapsed section"
+    );
+
+    let previous = state.clone();
+    reduce(
+        &mut state,
+        AppAction::SettingsUpdateRequested {
+            request_id: 1,
+            patch: SettingsPatch {
+                sidebar_section: Some(SidebarSectionPatch {
+                    scope: SPACE.to_owned(),
+                    section: SidebarSectionKind::Rooms,
+                    collapsed: Some(true),
+                    sort: None,
+                    expanded: None,
+                }),
+                ..Default::default()
+            },
+        },
+    );
+    assert_eq!(
+        state.settings.values.sidebar.scope_preferences,
+        previous.settings.values.sidebar.scope_preferences,
+        "the repeated collapse choice does not change the stored preference"
+    );
+
+    let sidebar = build_state_delta(2, &previous, &state)
+        .expect("clearing the reveal is a delta")
+        .changed
+        .sidebar
+        .expect("the sidebar carries the collapse the reveal was masking");
+    assert_eq!(sidebar, compose_sidebar_for_state(&state));
+    assert!(sidebar.rooms_collapsed);
+}
+
+fn ready_session() -> koushi_state::SessionState {
+    koushi_state::SessionState::Ready(koushi_state::SessionInfo {
+        homeserver: "https://matrix.example.org".to_owned(),
+        user_id: "@user:example.invalid".to_owned(),
+        device_id: "DEVICE".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    })
 }

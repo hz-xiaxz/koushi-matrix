@@ -18,7 +18,11 @@ use ruma::{RoomId, room::JoinRuleSummary};
 use crate::{
     client_session::MatrixClientSession,
     room_operations::MatrixRoomOperationError,
-    room_projection::{matrix_room, matrix_room_name_placeholder, matrix_space_child_room_ids},
+    room_operations::space_child_events_permitted,
+    room_projection::{
+        matrix_room, matrix_room_name_placeholder, matrix_space_child_room_ids,
+        matrix_space_child_suggested_flags,
+    },
 };
 
 /// The account's relationship to a Space child room.
@@ -49,6 +53,8 @@ pub struct MatrixSpaceChildEntry {
     pub can_join: bool,
     pub is_space: bool,
     pub joined_members: u64,
+    /// Issue #1410: the Space's `m.space.child` marks this child suggested.
+    pub suggested: bool,
 }
 
 /// Every child `space_id` advertises, as the server is willing to describe it.
@@ -62,6 +68,7 @@ pub async fn matrix_space_children_projection(
 ) -> Result<Vec<MatrixSpaceChildEntry>, MatrixRoomOperationError> {
     let space_room = matrix_room(session, space_id)?;
     let advertised_child_room_ids = matrix_space_child_room_ids(&space_room).await;
+    let local_suggested = matrix_space_child_suggested_flags(&space_room).await;
 
     let room_list = SpaceRoomList::new(session.client(), space_room.room_id().to_owned()).await;
     loop {
@@ -100,6 +107,10 @@ pub async fn matrix_space_children_projection(
             can_join: can_join(room.state, room.join_rule.as_ref()),
             is_space: room.room_type == Some(ruma::room::RoomType::Space),
             joined_members,
+            suggested: local_suggested
+                .get(room.room_id.as_str())
+                .copied()
+                .unwrap_or(room.suggested),
         });
     }
 
@@ -140,6 +151,7 @@ pub async fn matrix_space_children_projection(
             let join_rule = room.join_rule().map(JoinRuleSummary::from);
             let can_join = can_join(Some(state), join_rule.as_ref());
             entries.push(MatrixSpaceChildEntry {
+                suggested: local_suggested.get(&room_id).copied().unwrap_or(false),
                 room_id,
                 raw_name,
                 display_name,
@@ -154,6 +166,7 @@ pub async fn matrix_space_children_projection(
         }
 
         entries.push(MatrixSpaceChildEntry {
+            suggested: local_suggested.get(&room_id).copied().unwrap_or(false),
             room_id: room_id.clone(),
             raw_name: None,
             display_name: room_id,
@@ -173,6 +186,24 @@ pub async fn matrix_space_children_projection(
     // actionable even when the room has no joined members.
     entries.retain(space_child_is_visible);
     Ok(entries)
+}
+
+/// Issue #1410: whether this account may change which children `space_id`
+/// suggests, i.e. send `m.space.child` there. The homeserver stays the final
+/// authority; this only decides whether the control is offered.
+pub async fn matrix_space_can_edit_children(
+    session: &MatrixClientSession,
+    space_id: &str,
+) -> Result<bool, MatrixRoomOperationError> {
+    let space_room = matrix_room(session, space_id)?;
+    let client = session.client();
+    let Some(user_id) = client.user_id() else {
+        return Ok(false);
+    };
+    if space_room.state() != RoomState::Joined {
+        return Ok(false);
+    }
+    Ok(space_child_events_permitted(&space_room, user_id).await)
 }
 
 /// The structured form of a hierarchy child's calculated empty-room name
@@ -304,6 +335,7 @@ mod tests {
             can_join,
             is_space: false,
             joined_members,
+            suggested: false,
         }
     }
 

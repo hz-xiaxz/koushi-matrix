@@ -2,13 +2,16 @@ import { ChevronRight, FileText, MailPlus, Settings, Users } from "lucide-react"
 import { type ReactNode, useEffect, useRef, useState } from "react";
 
 import { t } from "../i18n/messages";
+import { operationFailureLabel } from "../app/uiShared";
 import { roomDisplayLabel, spaceChildLabel } from "../domain/roomDisplayLabel";
 import type {
   HistoryExportState,
   RoomJoinRule,
   RoomManagementState,
+  RoomNotificationSettings,
   RoomSummary,
   SpaceChildMembership,
+  SpaceChildSuggestedEditState,
   SpaceChildSummary,
   SpaceSummary
 } from "../domain/types";
@@ -33,15 +36,19 @@ export function SpaceInfoPanel({
   localIcon = "",
   localName = "",
   rooms,
+  roomNotificationSettings = {},
   roomManagement,
   space,
   spaceChildren = [],
+  canEditSuggested = false,
+  suggestedEdit,
   onAcceptInvite,
   onInvitePeople,
   onJoinRoom,
   onOpenFiles,
   onOpenMembers,
   onSetLocalPresentation,
+  onSetChildSuggested,
   onUpdateJoinRule
 }: {
   fallbackName: string;
@@ -50,10 +57,14 @@ export function SpaceInfoPanel({
   localIcon?: string;
   localName?: string;
   rooms: RoomSummary[];
+  roomNotificationSettings?: Record<string, RoomNotificationSettings>;
   roomManagement?: RoomManagementState;
   space: SpaceSummary | null;
   /** Issue #961: every child the Space advertises, joined or not. */
   spaceChildren?: readonly SpaceChildSummary[];
+  /** Issue #1410: whether this account may change the children's suggested flags. */
+  canEditSuggested?: boolean;
+  suggestedEdit?: SpaceChildSuggestedEditState;
   onAcceptInvite?: (roomId: string) => void;
   onInvitePeople?: () => void;
   onJoinRoom?: (roomId: string) => void;
@@ -66,6 +77,8 @@ export function SpaceInfoPanel({
   onSetLocalPresentation?: (
     override: { name?: string | null; icon?: string | null } | null
   ) => void | Promise<unknown>;
+  /** Issue #1410: suggest (or stop suggesting) one child to the Space's members. */
+  onSetChildSuggested?: (childRoomId: string, suggested: boolean) => void;
   /** Issue #935: change who can join the selected Space. */
   onUpdateJoinRule?: (spaceId: string, joinRule: RoomJoinRule) => void | Promise<void>;
 }) {
@@ -84,7 +97,16 @@ export function SpaceInfoPanel({
         .map((roomId) => rooms.find((room) => room.room_id === roomId))
         .filter((room): room is RoomSummary => Boolean(room && !room.is_dm))
     : rooms.filter((room) => !room.is_dm);
-  const unreadTotal = childRooms.reduce((sum, room) => sum + room.unread_count, 0);
+  const roomUnreadCount = (room: RoomSummary) =>
+    room.unread_count + (room.thread_unread_count ?? 0);
+  const unreadTotal = childRooms.reduce(
+    (sum, room) =>
+      sum +
+      (room.tags.low_priority || roomNotificationSettings[room.room_id]?.mode.kind === "mute"
+        ? 0
+        : roomUnreadCount(room)),
+    0
+  );
   const childRoomIds = new Set([
     ...childRooms.map((room) => room.room_id),
     ...spaceChildren.map((child) => child.room_id)
@@ -114,6 +136,26 @@ export function SpaceInfoPanel({
     },
     []
   );
+
+  const childSummaries = new Map(spaceChildren.map((child) => [child.room_id, child]));
+  // The Space the toggle applies to is named in its label, so an admin of
+  // several Spaces sees which one a change reaches.
+  const suggestSpaceName = space?.display_name || title;
+  function suggestedToggle(roomId: string, roomLabel: string) {
+    const child = childSummaries.get(roomId);
+    if (!space || !child || !canEditSuggested || !onSetChildSuggested) {
+      return null;
+    }
+    return (
+      <SuggestedToggle
+        child={child}
+        edit={suggestedEdit}
+        roomLabel={roomLabel}
+        spaceName={suggestSpaceName}
+        onChange={(suggested) => onSetChildSuggested(child.room_id, suggested)}
+      />
+    );
+  }
 
   function openAccessSettings() {
     const heading = accessHeadingRef.current;
@@ -268,7 +310,8 @@ export function SpaceInfoPanel({
           {childRooms.map((room) => (
             <div className="settings-detail-row" key={room.room_id}>
               <span dir="auto">{roomDisplayLabel(room)}</span>
-              <small dir="auto">{room.unread_count ? t("room.unreadCount", { count: room.unread_count }) : room.room_id}</small>
+              <small dir="auto">{roomUnreadCount(room) ? t("room.unreadCount", { count: roomUnreadCount(room) }) : room.room_id}</small>
+              {suggestedToggle(room.room_id, roomDisplayLabel(room))}
             </div>
           ))}
           {/*
@@ -306,6 +349,7 @@ export function SpaceInfoPanel({
                   </button>
                 ) : null}
               </small>
+              {suggestedToggle(child.room_id, spaceChildLabel(child))}
             </div>
           ))}
         </div>
@@ -316,7 +360,7 @@ export function SpaceInfoPanel({
         <div className="settings-detail-list">
           <DetailRow label={t("space.roomMembership")} value={space ? t("space.childRooms") : t("space.allRooms")} />
           <DetailRow label={t("space.directMessages")} value={t("room.globalDmList")} />
-          <DetailRow label={t("room.notifications")} value={unreadTotal ? t("room.unreadCount", { count: unreadTotal }) : t("space.noUnread")} />
+          <DetailRow label={t("room.unread")} value={unreadTotal ? t("room.unreadCount", { count: unreadTotal }) : t("space.noUnread")} />
         </div>
       </section>
 
@@ -344,6 +388,49 @@ export function SpaceInfoPanel({
         ]}
       />
     </section>
+  );
+}
+
+function SuggestedToggle({
+  child,
+  edit,
+  roomLabel,
+  spaceName,
+  onChange
+}: {
+  child: SpaceChildSummary;
+  edit?: SpaceChildSuggestedEditState;
+  roomLabel: string;
+  spaceName: string;
+  onChange: (suggested: boolean) => void;
+}) {
+  const saving = edit?.kind === "saving" ? edit : null;
+  const failed = edit?.kind === "failed" && edit.child_room_id === child.room_id ? edit : null;
+  const isSavingThis = saving?.child_room_id === child.room_id;
+  // Only one change is in flight at a time; Rust rejects a second one, so
+  // every toggle waits while any save runs.
+  const checked = isSavingThis ? saving.suggested : child.suggested === true;
+  return (
+    <span className="space-child-suggest">
+      <label>
+        <input
+          type="checkbox"
+          checked={checked}
+          disabled={saving !== null}
+          aria-label={t("space.suggestToMembersFor", { room: roomLabel, space: spaceName })}
+          onChange={(event) => onChange(event.currentTarget.checked)}
+        />
+        <span aria-hidden="true" dir="auto">
+          {t("space.suggestToMembers", { space: spaceName })}
+        </span>
+      </label>
+      {isSavingThis ? <small role="status">{t("space.suggestSaving")}</small> : null}
+      {failed ? (
+        <small className="space-child-suggest-error" role="alert">
+          {t("space.suggestFailed", { reason: operationFailureLabel(failed.failure) })}
+        </small>
+      ) : null}
+    </span>
   );
 }
 

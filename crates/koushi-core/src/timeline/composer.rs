@@ -76,17 +76,6 @@ pub(super) fn build_room_message_content_without_relation_from_composer_document
     Ok(content)
 }
 
-pub(crate) fn build_room_message_content_from_composer_body(
-    body: &str,
-    mentions: MentionIntent,
-) -> Result<RoomMessageEventContent, TimelineFailureKind> {
-    build_room_message_content_from_composer_body_with_options(
-        body,
-        mentions,
-        ComposerFormattingOptions::default(),
-    )
-}
-
 pub(crate) fn build_room_message_content_from_composer_body_with_options(
     body: &str,
     mentions: MentionIntent,

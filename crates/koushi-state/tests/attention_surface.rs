@@ -3,9 +3,9 @@ use koushi_state::{
     NativeAttentionCapability, NativeAttentionDispatchId, NativeAttentionDispatchState,
     NativeAttentionObservationKind, NativeAttentionProjectionInput, NativeAttentionSoundOutcome,
     NativeAttentionSuppressionReason, NotificationSettings, RoomAttentionKind,
-    RoomNotificationMode, RoomSummary, RoomTagInfo, RoomTags, SessionInfo, SessionState,
-    SettingsPatch, native_attention_capabilities_for_platform, native_attention_state_from_rooms,
-    reduce, room_attention_summary,
+    RoomLatestEventSummary, RoomNotificationMode, RoomSummary, RoomTagInfo, RoomTags, SessionInfo,
+    SessionState, SettingsPatch, native_attention_capabilities_for_platform,
+    native_attention_state_from_rooms, reduce, room_attention_summary,
 };
 use serde_json::json;
 
@@ -43,10 +43,24 @@ fn room(
         unread_count,
         notification_count,
         highlight_count,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
-        latest_event: None,
+        latest_event: Some(RoomLatestEventSummary {
+            event_id: "$observed:example.invalid".to_owned(),
+            relation_type: None,
+            relation_event_id: None,
+            thread_root_event_id: None,
+            sender_id: Some("@sender:example.invalid".to_owned()),
+            sender_label: Some("Sender".to_owned()),
+            sender_avatar: None,
+            preview: Some("Observed message".to_owned()),
+            message_text: None,
+            timestamp_ms: 1,
+            is_redacted: false,
+        }),
         parent_space_ids: Vec::new(),
         dm_space_ids: Vec::new(),
         is_encrypted: false,
@@ -158,7 +172,7 @@ fn room_attention_kind_prefers_mentions_over_dm_and_message() {
 }
 
 #[test]
-fn native_attention_candidate_prioritizes_mentions_dm_then_messages_and_badges() {
+fn native_attention_candidate_uses_verified_room_unread_and_generic_kind() {
     let rooms = vec![
         room("!message:example.invalid", "Room", false, 8, 8, 0),
         room("!dm:example.invalid", "Direct", true, 3, 3, 0),
@@ -184,10 +198,10 @@ fn native_attention_candidate_prioritizes_mentions_dm_then_messages_and_badges()
     assert_eq!(
         state.summary.candidate,
         Some(NativeAttentionCandidate {
-            room_display_name: "Mention".to_owned(),
-            kind: RoomAttentionKind::Mention,
-            unread_count: 1,
-            highlight_count: 1,
+            room_display_name: "Direct".to_owned(),
+            kind: RoomAttentionKind::Dm,
+            unread_count: 3,
+            highlight_count: 0,
         })
     );
     assert_eq!(state.dispatch, NativeAttentionDispatchState::Idle);
@@ -213,14 +227,14 @@ fn native_attention_includes_plain_unread_counts_in_content_and_badge_totals() {
         capabilities: available_capabilities(),
     });
 
-    assert_eq!(state.summary.unread_count, 2);
+    assert_eq!(state.summary.unread_count, 5);
     assert_eq!(state.summary.badge_count, 5);
     assert_eq!(
         state.summary.candidate,
         Some(NativeAttentionCandidate {
             room_display_name: "Notified".to_owned(),
             kind: RoomAttentionKind::Message,
-            unread_count: 2,
+            unread_count: 4,
             highlight_count: 0,
         })
     );
@@ -250,14 +264,21 @@ fn native_attention_tracks_plain_unread_count_transitions() {
             capabilities: available_capabilities(),
         });
 
-        assert_eq!(state.summary.unread_count, 0);
+        assert_eq!(state.summary.unread_count, unread_count);
         assert_eq!(state.summary.badge_count, unread_count);
-        assert_eq!(state.summary.candidate, None);
+        assert_eq!(
+            state
+                .summary
+                .candidate
+                .as_ref()
+                .map(|candidate| candidate.unread_count),
+            Some(unread_count)
+        );
     }
 }
 
 #[test]
-fn native_attention_badge_deduplicates_rooms_and_excludes_manual_marks() {
+fn native_attention_badge_deduplicates_rooms_without_inventing_manual_counts() {
     let mut marked = room("!marked:example.invalid", "Marked", false, 0, 0, 0);
     marked.marked_unread = true;
     let rooms = vec![
@@ -453,7 +474,7 @@ fn native_attention_projection_excludes_effectively_muted_rooms_from_badge() {
 }
 
 #[test]
-fn native_attention_badge_policy_preserves_non_muted_raw_unread() {
+fn native_attention_badge_policy_preserves_non_muted_conversation_attention() {
     let mut ignored_dm = room("!ignored:example.invalid", "Ignored", true, 4, 4, 0);
     ignored_dm.dm_user_ids = vec!["@ignored:example.invalid".to_owned()];
     let mut marked = room("!marked:example.invalid", "Marked", false, 0, 0, 0);
@@ -472,7 +493,7 @@ fn native_attention_badge_policy_preserves_non_muted_raw_unread() {
             2,
         ),
         (ignored_dm, None, true, 4),
-        (marked, None, false, 0),
+        (marked, None, true, 0),
     ];
 
     for (room, mode, candidate_suppressed, expected_badge) in cases {

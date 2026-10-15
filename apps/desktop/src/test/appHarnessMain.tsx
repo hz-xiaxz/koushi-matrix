@@ -52,10 +52,13 @@ import {
   type LocaleDisplayProfile,
   type LocaleSettings,
   type NavigationPreferenceUpdate,
+  type NotificationDeliverySinkState,
+  type NotificationSinkSettings,
   type RoomNotificationMode,
   type RoomNotificationSettings,
   type StageUploadBytesRequestItem,
   type SettingsPatch,
+  type SettingsState,
   type SidebarScopeSettings,
   type SidebarSectionKind,
   type StagedUploadItem,
@@ -63,6 +66,7 @@ import {
   type StagedUploadCompressionChoice
 } from "../domain/types";
 import { TauriIpcMock, type IpcInvocation } from "./tauriIpcMock";
+import { withSectionBounds } from "./withSectionBounds";
 import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
 import { avatarInitial } from "../app/uiShared";
 import {
@@ -115,6 +119,8 @@ interface AppHarnessControl {
   resolveDeferredCommand(command: string, index: number, value: unknown): void;
   rejectDeferredCommand(command: string, index: number): void;
   setNextTextSendPendingBody(body: string): void;
+  /** Test-only: report `consumedDraft: true` for the next prepared send (#1204). */
+  setPreparedSendConsumesDraft(value: boolean): void;
   setSnapshot(snapshot: DesktopSnapshot): void;
   pushCoreEvent(event: CoreEventPayload): Promise<void>;
   pushDesktopMenu(action: string): Promise<void>;
@@ -272,7 +278,7 @@ function readySnapshot(
   return {
     state_generation: 0,
     state: {
-        schema_version: 7,
+        schema_version: SNAPSHOT_SCHEMA_VERSION,
         domain: {
           session: { kind: "ready", homeserver: HOMESERVER, user_id: USER_ID, device_id: DEVICE_ID },
           session_lock_reason: null,
@@ -286,7 +292,15 @@ function readySnapshot(
           locale_profile: defaultLocaleDisplayProfile(),
           typography_profile: defaultTypographyDisplayProfile(),
           profile: { own: { display_name: "Harness User", avatar: null }, users: {}, room_users: {}, local_aliases: {}, local_alias_update: { kind: "idle" }, ignored_user_ids: [], ignored_user_update: { kind: "idle" }, update: { kind: "idle" } },
-          space_children: { selected_space_id: null, generation: 0, children: [], load: { kind: "idle" } },
+          space_children: {
+            selected_space_id: null,
+            generation: 0,
+            children: [],
+            load: { kind: "idle" },
+            can_edit_suggested: false,
+            suggested_edit: { kind: "idle" },
+            suggested_offer: { kind: "none" }
+          },
           space_members: { selected_space_id: activeSpaceId, generation: 1, space_joined: [], space_invited: [], child_room_only: [], child_room_count: 0, complete_child_room_count: 0, incomplete_child_room_count: 0, power_levels_revision: null, can_edit_roles: false, operation: { kind: "idle" } },
           sync: "running",
           spaces, rooms, invites,
@@ -307,6 +321,7 @@ function readySnapshot(
             pending_email: null,
             operation: { kind: "idle" }
           },
+          notification_delivery: { sinks: [], presets: defaultNotificationDeliveryPresets() },
           contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
           account_management_capabilities: { change_password: { kind: "unknown" } },
           soft_logout_reauth: { kind: "idle" }, qr_login: { kind: "idle" },
@@ -343,7 +358,7 @@ function readySnapshot(
             items: [{ room_id: ROOM_ID, kind: "room" }]
           },
           timeline: { room_id: ROOM_ID, is_subscribed: true, is_paginating_backwards: false, composer: { accepted_submission_ids: [], pending_transaction_id: null, draft_revision: COMPOSER_DRAFT_REVISION_ZERO, last_accepted_clear_revision: COMPOSER_DRAFT_REVISION_ZERO, draft: "", document: { version: 2, inlines: [] }, mode: composerMode }, submission_registry: { accepted_submission_ids: [], settled_submission_ids: [] }, scheduled_send_capability: "unknown", scheduled_sends: [], staged_uploads: [], media_gallery: [], media_downloads: {}, continuity: { kind: "unknown" } },
-          thread: { kind: "closed" }, threads_list: { kind: "closed" }, focused_context: { kind: "closed" },
+          thread: { kind: "closed" }, threads_list: { kind: "closed" }, scheduled_sends_list: { kind: "closed" }, focused_context: { kind: "closed" },
           files_view: { kind: "closed" }, history_export: { kind: "idle" }, errors: [], basic_operation: basicOperation,
           room_address_availability: { kind: "idle" }
         }
@@ -368,6 +383,19 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         message_previews: false,
         send_read_receipts: true,
         send_typing_notifications: true
+      },
+      delivery: {
+        enabled: false,
+        direct_messages: true,
+        mentions: true,
+        keywords: true,
+        only_when_unfocused: true,
+        dwell_secs: 300,
+        min_interval_secs: 900,
+        prefix_chars: 80,
+        prefix_consent: null,
+        watched: [],
+        sinks: []
       },
       display: {
         code_block_wrap: true,
@@ -490,15 +518,20 @@ function applySettingsPatch(
   const sidebarSection = patch.sidebar_section;
   const nextSidebar = sidebarSection
     ? (() => {
-        const scope = sidebar.scope_preferences?.[sidebarSection.scope] ?? {
-          rooms: { collapsed: false, sort: values.room_list_sort },
-          dms: { collapsed: false, sort: values.room_list_sort }
+        const scope: SidebarScopeSettings = sidebar.scope_preferences?.[
+          sidebarSection.scope
+        ] ?? {
+          rooms: { collapsed: false, sort: values.room_list_sort, expanded: false },
+          dms: { collapsed: false, sort: values.room_list_sort, expanded: false }
         };
         // `SidebarSectionKind` is camelCase on the wire; the stored scope keys
         // are the snake_case Rust field names.
         const field = SIDEBAR_SECTION_FIELD[sidebarSection.section];
-        const currentSection =
-          scope[field] ?? { collapsed: false, sort: scope.rooms?.sort ?? values.room_list_sort };
+        const currentSection = scope[field] ?? {
+          collapsed: false,
+          sort: scope.rooms?.sort ?? values.room_list_sort,
+          expanded: false
+        };
         return {
           ...sidebar,
           scope_preferences: {
@@ -510,7 +543,10 @@ function applySettingsPatch(
                 ...(sidebarSection.collapsed === undefined
                   ? {}
                   : { collapsed: sidebarSection.collapsed }),
-                ...(sidebarSection.sort === undefined ? {} : { sort: sidebarSection.sort })
+                ...(sidebarSection.sort === undefined ? {} : { sort: sidebarSection.sort }),
+                ...(sidebarSection.expanded === undefined
+                  ? {}
+                  : { expanded: sidebarSection.expanded })
               }
             }
           }
@@ -524,6 +560,7 @@ function applySettingsPatch(
     keyboard: patch.keyboard ?? values.keyboard,
     composer: patch.composer ?? values.composer,
     notifications: patch.notifications ?? values.notifications,
+    delivery: patch.delivery ?? values.delivery,
     display: patch.display ?? values.display,
     window: patch.window ?? values.window,
     updates: patch.updates ?? values.updates,
@@ -539,6 +576,33 @@ function applySettingsPatch(
 
 function defaultLocaleDisplayProfile(): LocaleDisplayProfile {
   return resolveLocaleDisplayProfile({ language_tag: null, text_direction: "auto" });
+}
+
+/**
+ * #1427: mirrors the relay presets Rust ships. The hosts are reserved names, not any real
+ * provider's, because a fixture is not a place to advertise a live relay.
+ */
+function defaultNotificationDeliveryPresets(): DesktopSnapshot["state"]["domain"]["notification_delivery"]["presets"] {
+  return [
+    {
+      id: "harness-implicit",
+      label: "Harness Implicit",
+      host: "smtp.example.invalid",
+      port: 465,
+      tls: "implicit",
+      username_is_full_address: true,
+      secret_hint: "settings.notificationDeliverySecretHint.gmail"
+    },
+    {
+      id: "harness-starttls",
+      label: "Harness STARTTLS",
+      host: "relay.example.invalid",
+      port: 587,
+      tls: "startTls",
+      username_is_full_address: false,
+      secret_hint: "settings.notificationDeliverySecretHint.icloud"
+    }
+  ];
 }
 
 function defaultTypographyDisplayProfile(): DesktopSnapshot["state"]["domain"]["typography_profile"] {
@@ -793,7 +857,7 @@ function harnessAccountTabsSnapshot() {
 // harness. Individual dialog behavior belongs in focused unit tests; existing
 // end-to-end flows should continue past an explicit destructive confirmation.
 mock.setCommandResponse("plugin:dialog|message", "Ok");
-let currentSnapshot = readySnapshot();
+let currentSnapshot = withSectionBounds(readySnapshot());
 let lastStateUpdateGeneration = currentSnapshot.state_generation ?? 0;
 
 type HarnessReceiptReaderScope = {
@@ -816,9 +880,16 @@ function receiptReaderRows(source: ReceiptSourceRef): {
   rows: ReaderRow[];
   totalCount: number;
 } {
+  const roomSignals =
+    currentSnapshot.state.domain.live_signals.rooms[receiptSourceRoomId(source)];
+  // Issue #1255: read the summary for this source's own scope.
+  const kind = source.key.kind;
   const summary =
-    currentSnapshot.state.domain.live_signals.rooms[receiptSourceRoomId(source)]
-      ?.receipts_by_event[source.event_id];
+    "Thread" in kind
+      ? roomSignals?.thread_receipts_by_event?.[kind.Thread.root_event_id]?.[source.event_id]
+      : "Focused" in kind
+        ? roomSignals?.focused_receipts_by_event?.[kind.Focused.event_id]?.[source.event_id]
+        : roomSignals?.receipts_by_event[source.event_id];
   const locale = currentSnapshot.state.domain.locale_profile.catalog_locale === "ja" ? "ja" : "en";
   const rows = (summary?.readers ?? []).map((reader): ReaderRow => {
     const displayLabel = (reader.display_name ?? reader.original_display_label) || reader.user_id;
@@ -939,12 +1010,39 @@ function replaceStagedUploadsForTarget(
   };
 }
 
+/// Stands in for the converted bytes the Rust pipeline produces for an
+/// Original+Keep HEIC selection: the selection still uploads the exact HEIC
+/// payload, but the preview must be an image the WebView can render (#1147).
+/// The production pipeline caches a JPEG, so the harness fabricates a real
+/// JPEG rather than an arbitrary renderable image.
+const HEIC_ORIGINAL_PREVIEW_FALLBACK_BYTES = [
+  137, 80, 78, 71, 13, 10, 26, 10, 0, 0, 0, 13, 73, 72, 68, 82, 0, 0, 0, 1, 0, 0, 0, 1, 8, 6, 0,
+  0, 0, 31, 21, 196, 137, 0, 0, 0, 13, 73, 68, 65, 84, 120, 156, 99, 248, 207, 192, 240, 31, 0,
+  5, 0, 1, 255, 137, 153, 61, 29, 0, 0, 0, 0, 73, 69, 78, 68, 174, 66, 96, 130
+];
+
+function heicOriginalPreviewBytes(): number[] {
+  const canvas = document.createElement("canvas");
+  canvas.width = 2;
+  canvas.height = 2;
+  const context = canvas.getContext("2d");
+  if (!context) {
+    // jsdom has no 2d context; the WebKit/Chromium lanes always do.
+    return HEIC_ORIGINAL_PREVIEW_FALLBACK_BYTES;
+  }
+  context.fillStyle = "#2d6fef";
+  context.fillRect(0, 0, 2, 2);
+  const encoded = canvas.toDataURL("image/jpeg", 0.9).split(",")[1] ?? "";
+  return Array.from(atob(encoded), (character) => character.charCodeAt(0));
+}
+
 function preparedHarnessItem(
   target: ComposerTarget,
   item: StageUploadBytesRequestItem
 ): StagedUploadItem {
   const originalMime = item.mimeType.trim() || "application/octet-stream";
   const image = originalMime.startsWith("image/");
+  const heicOriginal = image && (originalMime === "image/heic" || originalMime === "image/heif");
   const original = {
     variant_id: "original-keep",
     resize: "original" as const,
@@ -979,10 +1077,14 @@ function preparedHarnessItem(
       ]
     : [original];
   for (const variant of variants) {
+    const originalKeep =
+      variant.resize === "original" && variant.format_choice === "keep";
     preparedUploadBytes.set(
       preparedUploadKey(target, item.stagedId, variant.variant_id),
-      variant.resize === "original" && variant.format_choice === "keep"
-        ? [...item.bytes]
+      originalKeep
+        ? heicOriginal
+          ? heicOriginalPreviewBytes()
+          : [...item.bytes]
         : item.bytes.slice(0, variant.byte_count)
     );
   }
@@ -1130,7 +1232,7 @@ function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
     sort: { kind: "activity" as const },
     items: []
   };
-  currentSnapshot = {
+  currentSnapshot = withSectionBounds({
     ...next,
     state_generation: Math.max(
       previousSnapshot.state_generation ?? 0,
@@ -1149,14 +1251,93 @@ function setCurrentSnapshot(next: DesktopSnapshot): DesktopSnapshot {
         room_list: roomList
       },
     }
-  };
+  });
   reconcilePreparedUploadBytes(previousSnapshot, currentSnapshot);
   reconcileComposerLeases(currentSnapshot);
   return currentSnapshot;
 }
 
-function sidebarForSelection(activeSpaceId: string | null): DesktopSnapshot["sidebar"] {
+/**
+ * #1427: the runtime half of one sink — whether a credential exists, and how the last send
+ * went. The harness only ever mirrors a Rust answer; it never invents a stored secret.
+ */
+function setNotificationDeliverySinkState(
+  sinkId: string,
+  change: {
+    secret_configured?: boolean;
+    secret_retired?: boolean;
+    last_outcome?: NotificationDeliverySinkState["last_outcome"];
+    /** `undefined` keeps Rust's binding rule; `null` records that the credential went away. */
+    secret_binding?: string | null;
+  }
+): DesktopSnapshot {
+  const { secret_binding, ...stateChange } = change;
+  const existing = currentSnapshot.state.domain.notification_delivery.sinks.find(
+    (sink) => sink.sink_id === sinkId
+  );
+  const next: NotificationDeliverySinkState = {
+    sink_id: sinkId,
+    secret_configured: existing?.secret_configured ?? false,
+    secret_retired: existing?.secret_retired ?? false,
+    last_outcome: existing?.last_outcome ?? null,
+    ...stateChange
+  };
+  return setCurrentSnapshot({
+    ...currentSnapshot,
+    state: {
+      ...currentSnapshot.state,
+      domain: {
+        ...currentSnapshot.state.domain,
+        notification_delivery: {
+          ...currentSnapshot.state.domain.notification_delivery,
+          sinks: [
+            ...currentSnapshot.state.domain.notification_delivery.sinks.filter(
+              (sink) => sink.sink_id !== sinkId
+            ),
+            next
+          ]
+        },
+        settings: withNotificationSinkBinding(currentSnapshot.state.domain.settings, sinkId, secret_binding)
+      }
+    }
+  });
+}
+
+/**
+ * #1427: the harness's mirror of `NotificationSinkSettings::credential_identity` and the
+ * binding rule that goes with it. A real runtime owns both; the harness only has to stamp a
+ * saved credential with the sink's own server and account, and drop a binding that no longer
+ * names them, so the sink stops reading as configured exactly when Rust would say so.
+ */
+function notificationSinkBinding(sink: NotificationSinkSettings): string {
+  return sink.config.kind === "resend"
+    ? `resend:${sink.config.endpoint}`
+    : `smtp:${sink.config.host}:${sink.config.port}:${sink.config.username}`;
+}
+
+function withNotificationSinkBinding(
+  settings: SettingsState,
+  sinkId: string,
+  binding: string | null | undefined
+): SettingsState {
+  if (binding === undefined) {
+    return settings;
+  }
   return {
+    ...settings,
+    values: {
+      ...settings.values,
+      delivery: {
+        ...settings.values.delivery,
+        sinks: settings.values.delivery.sinks.map((sink: NotificationSinkSettings) =>
+          sink.id === sinkId ? { ...sink, secret_binding: binding } : sink
+        )
+      }
+    }
+  };
+}
+
+function sidebarForSelection(activeSpaceId: string | null): DesktopSnapshot["sidebar"] {  return {
     ...currentSnapshot.sidebar,
     active_space_id: activeSpaceId,
     account_home: {
@@ -1290,9 +1471,47 @@ function rejectDeferredCommand(command: string, index: number): void {
   if (entry) entry.reject(new Error("synthetic deferred rejection"));
 }
 
+/** A well-formed access outcome for the harness previews (#1177). */
+function harnessAccessOutcome() {
+  return {
+    join: { messageId: "room.accessOutcomeJoinInvite" },
+    history: { messageId: "room.accessOutcomeHistoryShared" },
+    encryption: { messageId: "room.accessOutcomeNotEncrypted" },
+    directory: { messageId: "room.accessOutcomeDirectoryPrivate" },
+    nonRetroactive: { messageId: "room.historyNonRetroactive" }
+  };
+}
+
 // Snapshot-returning commands the App calls. Default snapshot stays ready so
 // any unanticipated snapshot read still renders the shell.
 mock.setCommandResponse("get_snapshot", () => currentSnapshot);
+// #1177 fixture-only browser contract: the harness must not reimplement the
+// Rust draft reducer, its canonicalization or Create's normalization. A spec
+// seeds the Rust-shaped snapshot/result fixture for the transition it tests and
+// asserts on the dispatched command; these defaults only keep an unrelated
+// snapshot read rendering a well-formed editor.
+mock.setCommandResponse("set_room_access_draft", () => ({
+  kind: "admitted",
+  request_id: 0
+}));
+mock.setCommandResponse(
+  "preview_room_access",
+  ({ scope, context }: { scope: unknown; context: unknown }) => ({
+    scope,
+    context,
+    confirmed: true,
+    outcome: harnessAccessOutcome()
+  })
+);
+mock.setCommandResponse("preview_create_room_access", ({ scope }: { scope: unknown }) => ({
+  scope,
+  confirmed: false,
+  outcome: harnessAccessOutcome(),
+  effectiveRule: "invite",
+  effectiveHistory: "shared",
+  rejection: null,
+  roomVersionPinned: false
+}));
 mock.setCommandResponse("list_account_tabs", harnessAccountTabsSnapshot);
 mock.setCommandResponse("select_account_tab", harnessAccountTabsSnapshot);
 // Explicit adapter projections: tests publish later states rather than emulate the updater.
@@ -1300,6 +1519,7 @@ mock.setCommandResponse("get_desktop_update_state", () => ({ kind: "idle" }));
 mock.setCommandResponse("check_for_desktop_update", () => null);
 mock.setCommandResponse("download_desktop_update", () => null);
 mock.setCommandResponse("restart_to_install_desktop_update", () => null);
+mock.setCommandResponse("ignore_desktop_update", () => null);
 mock.setCommandResponse("subscribe_receipt_reader", ({
   source,
 }: {
@@ -1579,6 +1799,7 @@ mock.setCommandResponse("select_room", ({ roomId }: { roomId: string }) => {
         },
         thread: { kind: "closed" },
         threads_list: { kind: "closed" },
+        scheduled_sends_list: { kind: "closed" },
         focused_context: { kind: "closed" }
       }
     },
@@ -1725,6 +1946,17 @@ mock.setCommandResponse("import_legacy_settings", ({ patch }: { patch: SettingsP
 });
 mock.setCommandResponse("update_settings", ({ patch }: { patch: SettingsPatch }) => {
   const values = applySettingsPatch(currentSnapshot.state.domain.settings.values, patch);
+  // Rust drops a binding that no longer names the sink's own server and account, and with it
+  // the credential the store held; the harness applies the same rule to what it hands back.
+  const droppedSinkIds = values.delivery.sinks
+    .filter((sink: NotificationSinkSettings) => sink.secret_binding !== null && sink.secret_binding !== notificationSinkBinding(sink))
+    .map((sink: NotificationSinkSettings) => sink.id);
+  values.delivery = {
+    ...values.delivery,
+    sinks: values.delivery.sinks.map((sink: NotificationSinkSettings) =>
+      droppedSinkIds.includes(sink.id) ? { ...sink, secret_binding: null } : sink
+    )
+  };
   const sidebarSection = patch.sidebar_section;
   const appliesToVisibleSidebar =
     sidebarSection && sidebarSection.scope === (currentSnapshot.sidebar.active_space_id ?? "__home__");
@@ -1759,14 +1991,25 @@ mock.setCommandResponse("update_settings", ({ patch }: { patch: SettingsPatch })
       ...currentSnapshot.state,
       domain: {
         ...currentSnapshot.state.domain,
-      settings: {
-        ...currentSnapshot.state.domain.settings,
-        values,
-        persistence: { kind: "idle" }
-      },
-      locale_profile: resolveLocaleDisplayProfile(values.locale),
-      typography_profile: resolveTypographyDisplayProfile(values.typography)
-      },
+        settings: {
+          ...currentSnapshot.state.domain.settings,
+          values,
+          persistence: { kind: "idle" }
+        },
+        // The credential Rust retired is no longer in the store, and Rust is what says a
+        // retirement happened, so a sink that had one reads as retired rather than as never
+        // configured.
+        notification_delivery: {
+          ...currentSnapshot.state.domain.notification_delivery,
+          sinks: currentSnapshot.state.domain.notification_delivery.sinks.map((sink) =>
+            droppedSinkIds.includes(sink.sink_id)
+              ? { ...sink, secret_configured: false, secret_retired: sink.secret_configured }
+              : sink
+          )
+        },
+        locale_profile: resolveLocaleDisplayProfile(values.locale),
+        typography_profile: resolveTypographyDisplayProfile(values.typography)
+      }
     }
   });
 });
@@ -2057,7 +2300,10 @@ mock.setCommandResponse("load_account_notifications", () =>
             },
             email_management: "available",
             emails: [{ address: "harness@example.invalid", notifications_active: false }],
-            unverified_email_pusher_count: 0
+            unverified_email_pusher_count: 0,
+            // #1427: the keyword editor reads this projection; the harness does
+            // not exercise the write commands, so the list starts empty.
+            keywords: []
           },
           pending_email: null,
           operation: { kind: "idle" }
@@ -2065,6 +2311,43 @@ mock.setCommandResponse("load_account_notifications", () =>
       }
     }
   })
+);
+/**
+ * #1427: the harness answers the three write-only sink commands the way they are meant to be
+ * answered — with the secret reported as configured, and the secret itself dropped on the
+ * floor. Nothing in the harness, in a log, or in a snapshot ever holds the value.
+ */
+mock.setCommandResponse(
+  "set_notification_delivery_secret",
+  ({ sinkId, secret }: { sinkId: string; secret: string }) => {
+    void secret;
+    // Saving a password is also what stamps the identity Rust will check it against. The
+    // harness reads the sink's own server and account the way Rust does, so a password saved
+    // for the current configuration is the one that stays usable.
+    const sink = currentSnapshot.state.domain.settings.values.delivery.sinks.find(
+      (candidate) => candidate.id === sinkId
+    );
+    return setNotificationDeliverySinkState(sinkId, {
+      secret_configured: true,
+      secret_retired: false,
+      secret_binding: sink ? notificationSinkBinding(sink) : null
+    });
+  }
+);
+mock.setCommandResponse(
+  "clear_notification_delivery_secret",
+  ({ sinkId }: { sinkId: string }) =>
+    setNotificationDeliverySinkState(sinkId, {
+      secret_configured: false,
+      secret_retired: false,
+      last_outcome: null,
+      secret_binding: null
+    })
+);
+mock.setCommandResponse(
+  "test_notification_delivery",
+  ({ sinkId }: { sinkId: string }) =>
+    setNotificationDeliverySinkState(sinkId, { last_outcome: { kind: "delivered", at_ms: 1 } })
 );
 mock.setCommandResponse(
   "change_password",
@@ -2398,17 +2681,26 @@ mock.setCommandResponse("mismatch_sas_verification", ({ flowId }: { flowId: numb
   if (session.kind === "verifying" && session.flow_id === flowId) next.state.domain.session = { kind: "awaitingVerification", homeserver: session.homeserver, user_id: session.user_id, device_id: session.device_id, gate: { ...session.gate, failureKind: "mismatch" } };
   return setCurrentSnapshot(next);
 });
-mock.setCommandResponse("start_session_bootstrap", ({ recoveryKeyDestinationPath }: { recoveryKeyDestinationPath: string }) => {
+// #1049: the identity bootstrap reveals its key through the #927 reveal slot
+// keyed by the flow id; it never takes a destination.
+mock.setCommandResponse("start_session_bootstrap", () => {
   const flowId = nextGateFlowId++;
   const next = structuredClone(currentSnapshot);
   const session = next.state.domain.session;
-  if (session.kind === "awaitingVerification" && recoveryKeyDestinationPath.trim()) next.state.domain.session = { kind: "awaitingBootstrapConfirmation", homeserver: session.homeserver, user_id: session.user_id, device_id: session.device_id, gate: { ...session.gate, failureKind: null }, flow_id: flowId, destination_written: true };
+  if (session.kind === "awaitingVerification") {
+    next.state.domain.session = { kind: "awaitingBootstrapConfirmation", homeserver: session.homeserver, user_id: session.user_id, device_id: session.device_id, gate: { ...session.gate, failureKind: null }, flow_id: flowId };
+    next.state.domain.e2ee_trust.key_management.secure_backup_setup = { kind: "recoveryKeyReady", request_id: flowId, recovery_key: HARNESS_RECOVERY_KEY, delivery: { kind: "notWritten" }, confirmation_failed: false };
+  }
   return setCurrentSnapshot(next);
 });
 mock.setCommandResponse("confirm_session_bootstrap_saved", ({ flowId }: { flowId: number }) => {
   const next = structuredClone(currentSnapshot);
   const session = next.state.domain.session;
-  if (session.kind === "awaitingBootstrapConfirmation" && session.flow_id === flowId) next.state.domain.session = { kind: "provisional", homeserver: session.homeserver, user_id: session.user_id, device_id: session.device_id, phase: { recheckingTrust: {} } };
+  const setup = next.state.domain.e2ee_trust.key_management.secure_backup_setup;
+  if (session.kind === "awaitingBootstrapConfirmation" && session.flow_id === flowId) {
+    next.state.domain.session = { kind: "provisional", homeserver: session.homeserver, user_id: session.user_id, device_id: session.device_id, phase: { recheckingTrust: {} } };
+    if (setup.kind === "recoveryKeyReady" && setup.request_id === flowId) next.state.domain.e2ee_trust.key_management.secure_backup_setup = { kind: "enabled", request_id: flowId };
+  }
   return setCurrentSnapshot(next);
 });
 mock.setCommandResponse("confirm_sas_verification", ({ flowId }: { flowId: number }) => {
@@ -2717,6 +3009,8 @@ mock.setCommandResponse("cancel_composer_reply", () => setCurrentSnapshot(readyS
 // send_reply / send_text return a correlated accepted response with the
 // Rust-shaped revision tombstone.
 let nextTextSendPendingBody: string | null = null;
+/// Test-only: makes the next prepared send report `consumedDraft: true` (#1204).
+let preparedSendConsumesDraftForTesting = false;
 for (const command of ["send_reply", "send_text"] as const) {
   mock.setCommandResponse(command, async ({
     accountHomeserver,
@@ -2933,14 +3227,14 @@ mock.setCommandResponse(
 );
 mock.setCommandResponse(
   "send_thread_reply",
-  ({ accountHomeserver, accountUserId, accountDeviceId, submissionId, roomId, rootEventId, body, draftRevision }: {
+  ({ accountHomeserver, accountUserId, accountDeviceId, submissionId, roomId, rootEventId, document, draftRevision }: {
     accountHomeserver: string;
     accountUserId: string;
     accountDeviceId: string;
     submissionId: string;
     roomId: string;
     rootEventId: string;
-    body: string;
+    document: ComposerDocument;
     draftRevision: ComposerDraftRevision;
   }) => {
     if (!composerCommandAccountMatches({
@@ -2957,7 +3251,7 @@ mock.setCommandResponse(
       thread.root_event_id !== rootEventId ||
       !thread.composer ||
       thread.composer.pending_transaction_id ||
-      body.trim().length === 0
+      plainBodyFromDocument(document).trim().length === 0
     ) {
       return { submissionId, outcome: "rejected", snapshot: currentSnapshot };
     }
@@ -3492,6 +3786,8 @@ mock.setCommandResponse("stage_upload_bytes", ({ target, items }: {
 }) => {
   const existing = stagedUploadsForTarget(currentSnapshot, target);
   if (existing === null) return currentSnapshot;
+  // Caption seeding is Core's decision (#1194); this fake only stages, so the
+  // harness never grows a second implementation of that policy.
   const next = replaceStagedUploadsForTarget(currentSnapshot, target, [
     ...existing,
     ...items.map((item) => preparedHarnessItem(target, item))
@@ -3593,13 +3889,16 @@ mock.setCommandResponse("send_prepared_uploads", ({
     accountUserId,
     accountDeviceId
   })) {
-    return { acceptedRevision: null, snapshot: currentSnapshot };
+    return currentSnapshot;
   }
   for (const key of preparedUploadBytes.keys()) {
     if (key.startsWith(`${composerTargetKey(target)}:`)) preparedUploadBytes.delete(key);
   }
+  // #1130: the staged-attachment send settles the composer draft revision
+  // without consuming its text, so it removes the sent items and leaves the
+  // typed draft in the composer.
   const withoutUploads = replaceStagedUploadsForTarget(currentSnapshot, target, []);
-  const next =
+  const settled =
     target.kind === "main"
       ? {
           ...withoutUploads,
@@ -3611,80 +3910,52 @@ mock.setCommandResponse("send_prepared_uploads", ({
                 ...withoutUploads.state.ui.timeline,
                 composer: {
                   ...withoutUploads.state.ui.timeline.composer,
-                  draft:
-                    compareComposerDraftRevisions(
-                      withoutUploads.state.ui.timeline.composer.draft_revision,
-                      draftRevision
-                    ) > 0
-                      ? withoutUploads.state.ui.timeline.composer.draft
-                      : "",
                   draft_revision: nextComposerDraftRevision(
                     withoutUploads.state.ui.timeline.composer.draft_revision,
                     draftRevision
-                  ),
-                  last_accepted_clear_revision:
-                    compareComposerDraftRevisions(
-                      withoutUploads.state.ui.timeline.composer.draft_revision,
-                      draftRevision
-                    ) <= 0
-                      ? nextComposerDraftRevision(
-                          withoutUploads.state.ui.timeline.composer.draft_revision,
-                          draftRevision
-                        )
-                      : withoutUploads.state.ui.timeline.composer.last_accepted_clear_revision
+                  )
                 }
               }
             }
           }
         }
-      : withoutUploads.state.ui.thread.kind === "open" &&
-          withoutUploads.state.ui.thread.composer
-        ? {
-            ...withoutUploads,
-            state: {
-              ...withoutUploads.state,
-              ui: {
-                ...withoutUploads.state.ui,
-                thread: {
-                  ...withoutUploads.state.ui.thread,
-                  composer: {
-                    ...withoutUploads.state.ui.thread.composer,
-                    draft:
-                      compareComposerDraftRevisions(
-                        withoutUploads.state.ui.thread.composer.draft_revision,
-                        draftRevision
-                      ) > 0
-                        ? withoutUploads.state.ui.thread.composer.draft
-                        : "",
-                    draft_revision: nextComposerDraftRevision(
-                      withoutUploads.state.ui.thread.composer.draft_revision,
-                      draftRevision
-                    ),
-                    last_accepted_clear_revision:
-                      compareComposerDraftRevisions(
-                        withoutUploads.state.ui.thread.composer.draft_revision,
-                        draftRevision
-                      ) <= 0
-                        ? nextComposerDraftRevision(
-                            withoutUploads.state.ui.thread.composer.draft_revision,
-                            draftRevision
-                          )
-                        : withoutUploads.state.ui.thread.composer
-                            .last_accepted_clear_revision
-                  }
+      : withoutUploads;
+  // #1130/#1204: Core owns whether a send consumed the draft; this fake reports the
+  // switch below — never a policy of its own. A consuming send is modelled as the
+  // Rust-shaped settlement it is: the composer draft is empty and the accepted clear
+  // token has advanced, so the renderer's fallback agrees with the cleared overlay.
+  const settledSnapshot =
+    preparedSendConsumesDraftForTesting && target.kind === "main"
+      ? {
+          ...settled,
+          state: {
+            ...settled.state,
+            ui: {
+              ...settled.state.ui,
+              timeline: {
+                ...settled.state.ui.timeline,
+                composer: {
+                  ...settled.state.ui.timeline.composer,
+                  draft: "",
+                  document: { version: 2 as const, inlines: [] },
+                  last_accepted_clear_revision:
+                    settled.state.ui.timeline.composer.draft_revision
                 }
               }
             }
           }
-        : withoutUploads;
-  const snapshot = setCurrentSnapshot(next);
-  const acceptedRevision =
-    target.kind === "main"
-      ? snapshot.state.ui.timeline.composer.draft_revision
-      : snapshot.state.ui.thread.kind === "open" && snapshot.state.ui.thread.composer
-        ? snapshot.state.ui.thread.composer.draft_revision
-        : null;
-  return { acceptedRevision, snapshot };
+        }
+      : settled;
+  setCurrentSnapshot(settledSnapshot);
+  // Publish the settled snapshot through the harness's own state update (which bumps
+  // the generation the receipt must carry), so the renderer applies it through the
+  // real receipt reconciliation path.
+  harnessControl.pushStateUpdate();
+  return {
+    protocolVersion: 1,
+    publishedGeneration: currentSnapshot.state_generation ?? 0,
+    consumedDraft: preparedSendConsumesDraftForTesting
+  };
 });
 mock.setCommandResponse("update_staged_upload_caption", ({ target, stagedId, document }: {
   target: ComposerTarget;
@@ -3964,6 +4235,9 @@ const harnessControl: AppHarnessControl = {
   rejectDeferredCommand,
   setNextTextSendPendingBody: (body) => {
     nextTextSendPendingBody = body;
+  },
+  setPreparedSendConsumesDraft: (value) => {
+    preparedSendConsumesDraftForTesting = value;
   },
   setSnapshot: (snapshot) => {
     setCurrentSnapshot(snapshot);

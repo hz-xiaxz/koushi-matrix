@@ -31,7 +31,8 @@ use koushi_state::SessionInfo;
 
 use super::super::actor::TimelineActorMessage;
 use super::super::diagnostics::{
-    TimelineGapSelectionDiagnostic, record_timeline_gap_demand, record_timeline_gap_projection,
+    TimelineGapSelectionDiagnostic, record_timeline_gap_demand,
+    record_timeline_gap_inspection_work, record_timeline_gap_projection,
     record_timeline_gap_projection_boundary, record_timeline_gap_repair_evaluation,
     record_timeline_gap_selection,
 };
@@ -86,6 +87,7 @@ fn event_item(event_id: &str, body: &str) -> TimelineItem {
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: false,
         is_redacted: false,
@@ -110,11 +112,11 @@ fn projected_gap_position(
     }
 }
 fn timeline_gap_repair_diagnostic_count_since(
-    diagnostic_start: usize,
+    diagnostic_start: koushi_diagnostics::test_support::DetailCursor,
     stage: &str,
     demand_revision: u64,
 ) -> usize {
-    koushi_diagnostics::test_support::detail_snapshot().records[diagnostic_start..]
+    koushi_diagnostics::test_support::detail_records_since(diagnostic_start)
         .iter()
         .filter(|record| {
             record.event.source == "core.timeline_gap_repair"
@@ -160,6 +162,130 @@ fn global_commit_fence_admits_one_omitted_room_inspection_per_new_commit() {
         GlobalCommitDecision::IgnoredStaleOrDuplicate,
         "a retired core generation cannot reopen live-edge work"
     );
+}
+
+#[test]
+fn in_flight_live_edge_inspection_keeps_newest_commit_for_reinspection() {
+    let mut fence = GlobalCommitFence::default();
+    let mut tracker = TimelineGapRepairTracker::default();
+
+    let first = GlobalResponseCommit::new(8, 40);
+    assert_eq!(
+        fence.observe(first),
+        GlobalCommitDecision::InspectNewestLiveEdge
+    );
+    assert_eq!(
+        fence.take_pending_inspection(),
+        Some(first),
+        "the omitted room admits exactly one inspection"
+    );
+
+    // Admission is exclusive while the inspection is in flight: no duplicate
+    // inspection can start under the same serial.
+    let serial = tracker.begin_inspection().expect("inspection starts");
+    assert!(
+        tracker.begin_inspection().is_none(),
+        "no duplicate in-flight inspection"
+    );
+
+    // A newer committed response arrives during the in-flight inspection: it
+    // must neither be dropped nor run concurrently.
+    let newer = GlobalResponseCommit::new(8, 41);
+    assert_eq!(
+        fence.observe(newer),
+        GlobalCommitDecision::InspectNewestLiveEdge,
+        "the newer commit still demands a live-edge check"
+    );
+    assert!(
+        tracker.begin_inspection().is_none(),
+        "the in-flight inspection still owns admission"
+    );
+
+    // And then an even newer one supersedes the pending re-inspection while
+    // the first is still in flight: newest-commit replacement, one pending at
+    // a time, admission still exclusive.
+    let newest = GlobalResponseCommit::new(8, 42);
+    assert_eq!(
+        fence.observe(newest),
+        GlobalCommitDecision::InspectNewestLiveEdge,
+        "the newest commit replaces the pending re-inspection"
+    );
+    assert!(
+        tracker.begin_inspection().is_none(),
+        "the in-flight inspection still owns admission"
+    );
+
+    // Once the inspection finishes, the newest commit drives the re-inspection
+    // instead of being lost, and exactly one bounded inspection admits.
+    assert!(tracker.finish_work(serial));
+    assert_eq!(
+        fence.take_pending_inspection(),
+        Some(newest),
+        "the newest eligible commit is retained for re-inspection"
+    );
+    assert_eq!(
+        fence.take_pending_inspection(),
+        None,
+        "one commit still permits only one bounded inspection"
+    );
+    let re_inspection = tracker
+        .begin_inspection()
+        .expect("the re-inspection admits");
+    assert!(tracker.begin_inspection().is_none());
+    assert!(tracker.finish_work(re_inspection));
+}
+
+#[test]
+fn gap_inspection_work_diagnostics_are_content_free_counts() {
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
+    let diagnostic_start = koushi_diagnostics::test_support::detail_cursor();
+
+    record_timeline_gap_inspection_work("live_edge", 9, "complete", 37, 0, 12);
+
+    let records = koushi_diagnostics::test_support::detail_records_since(diagnostic_start);
+    let work = records
+        .iter()
+        .filter(|record| {
+            record.event.source == "core.timeline_gap_inspection"
+                && record.event.stage == "finished"
+        })
+        .collect::<Vec<_>>();
+    assert_eq!(work.len(), 1);
+
+    let fields = work[0]
+        .event
+        .fields
+        .iter()
+        .map(|field| (field.key, &field.value))
+        .collect::<HashMap<_, _>>();
+    assert_eq!(
+        fields.get(&"scanned_chunks"),
+        Some(&&koushi_diagnostics::DiagnosticValue::Count(37))
+    );
+    assert_eq!(
+        fields.get(&"event_bodies_decoded"),
+        Some(&&koushi_diagnostics::DiagnosticValue::Count(0))
+    );
+    assert_eq!(
+        fields.get(&"duration_ms"),
+        Some(&&koushi_diagnostics::DiagnosticValue::Count(12))
+    );
+    assert_eq!(
+        fields.get(&"trigger"),
+        Some(&&koushi_diagnostics::DiagnosticValue::Token("live_edge"))
+    );
+    assert_eq!(
+        fields.get(&"continuity"),
+        Some(&&koushi_diagnostics::DiagnosticValue::Token("complete"))
+    );
+    // Privacy: no private identifiers appear in the emitted record.
+    for field in work[0].event.fields.iter() {
+        assert!(
+            matches!(field.value, koushi_diagnostics::DiagnosticValue::Count(_))
+                || matches!(field.value, koushi_diagnostics::DiagnosticValue::Token(_)),
+            "diagnostics stay content-free"
+        );
+    }
 }
 
 #[test]
@@ -1547,9 +1673,7 @@ fn gap_repair_attempt_diagnostics_classify_attempt_resets() {
 #[test]
 fn gap_repair_attempt_diagnostics_emit_once_per_changed_admission() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let diagnostic_start = koushi_diagnostics::test_support::detail_cursor();
     let demand_revision = 9_004_001;
     let mut tracker = TimelineGapRepairTracker::default();
 
@@ -1579,8 +1703,8 @@ fn gap_repair_attempt_diagnostics_emit_once_per_changed_admission() {
         demand_revision + 1,
     ));
 
-    let records = koushi_diagnostics::test_support::detail_snapshot().records;
-    let admissions = records[diagnostic_start..]
+    let records = koushi_diagnostics::test_support::detail_records_since(diagnostic_start);
+    let admissions = records
         .iter()
         .filter(|record| {
             record.event.source == "core.timeline_gap_repair"
@@ -1616,9 +1740,7 @@ fn gap_repair_attempt_diagnostics_emit_once_per_changed_admission() {
 #[test]
 fn gap_repair_attempt_diagnostics_emit_one_budget_update_per_sdk_result() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let diagnostic_start = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let diagnostic_start = koushi_diagnostics::test_support::detail_cursor();
     let demand_revision = 9_004_101;
     let mut tracker = TimelineGapRepairTracker::default();
     tracker

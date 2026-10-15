@@ -15,11 +15,14 @@
 mod account_settings;
 pub(crate) mod composer_drafts;
 mod navigation;
+pub(crate) mod notification_delivery;
 mod read_state;
+mod room_activity;
 mod room_preferences;
 mod scheduled_sends;
+pub(crate) mod search_progress;
 #[cfg(test)]
-mod test_support;
+pub(crate) mod test_support;
 
 use std::collections::HashSet;
 use std::path::{Path, PathBuf};
@@ -48,6 +51,9 @@ use composer_drafts::{
     decode_payload_json as decode_composer_draft_payload_json,
     encode_payload_json as encode_composer_draft_payload_json,
 };
+/// Test/QA callers pass an explicit backend to [`StoreActor::with_backend`].
+#[cfg(any(test, feature = "test-hooks"))]
+pub use koushi_store::CredentialStoreBackend as TestCredentialStoreBackend;
 use koushi_store::{local_secret_error_health, record_local_unlock_secret};
 
 /// Service name used for OS keyring entries. This is user-visible in macOS
@@ -147,6 +153,8 @@ pub struct AccountSearchIndexConfig {
 pub struct StoreActor {
     pub(crate) credential_store: CredentialStoreBackend,
     data_dir: PathBuf,
+    /// #1134: whether this process is the only owner of the SDK store root.
+    exclusive_store_root: bool,
     #[cfg(any(test, feature = "test-hooks"))]
     composer_draft_io_probe: Arc<Mutex<Option<ComposerDraftIoProbe>>>,
     #[cfg(test)]
@@ -666,7 +674,15 @@ struct ComposerDraftIoProbe {
     save_completed: Option<tokio::sync::oneshot::Sender<()>>,
     load_started: Option<tokio::sync::oneshot::Sender<()>>,
     load_completed: Option<tokio::sync::oneshot::Sender<()>>,
-    load_attempt_count: Arc<AtomicUsize>,
+    load_counts: ComposerDraftLoadCounts,
+}
+
+/// Per-probe load attempt and failure counters shared with the test barrier.
+#[cfg(any(test, feature = "test-hooks"))]
+#[derive(Clone, Default)]
+pub(crate) struct ComposerDraftLoadCounts {
+    pub(crate) attempts: Arc<AtomicUsize>,
+    pub(crate) failures: Arc<AtomicUsize>,
 }
 
 impl StoreActor {
@@ -676,9 +692,20 @@ impl StoreActor {
     /// Uses the **in-memory** credential store by default (keyring-free).
     /// Production builds must use `with_os_backend` to inject the OS adapter.
     pub fn new(data_dir: impl Into<PathBuf>) -> Self {
+        let data_dir = data_dir.into();
+        // Unit tests never follow `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR` from
+        // the developer's shell; QA binaries (never `cfg(test)`) still do.
+        #[cfg(test)]
+        let credential_store = {
+            crate::test_isolation::assert_not_user_profile(&data_dir);
+            CredentialStoreBackend::in_memory()
+        };
+        #[cfg(not(test))]
+        let credential_store = CredentialStoreBackend::resolve();
         Self {
-            credential_store: CredentialStoreBackend::resolve(),
-            data_dir: data_dir.into(),
+            credential_store,
+            data_dir,
+            exclusive_store_root: false,
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_io_probe: Arc::new(Mutex::new(None)),
             #[cfg(test)]
@@ -693,12 +720,18 @@ impl StoreActor {
         os_backend: Arc<dyn koushi_key::CredentialBackend>,
     ) -> Self {
         let data_dir = data_dir.into();
+        #[cfg(test)]
+        let credential_store = {
+            crate::test_isolation::assert_not_user_profile(&data_dir);
+            CredentialStoreBackend::os_keychain(data_dir.clone(), os_backend)
+        };
+        #[cfg(not(test))]
+        let credential_store =
+            CredentialStoreBackend::resolve_with_os_backend(data_dir.clone(), os_backend);
         Self {
-            credential_store: CredentialStoreBackend::resolve_with_os_backend(
-                data_dir.clone(),
-                os_backend,
-            ),
+            credential_store,
             data_dir,
+            exclusive_store_root: false,
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_io_probe: Arc::new(Mutex::new(None)),
             #[cfg(test)]
@@ -707,6 +740,18 @@ impl StoreActor {
     }
 
     /// Access the credential store backend (for session persistence in AccountActor).
+    /// Declare that this process is the only owner of every store root this actor
+    /// derives (#1134).
+    ///
+    /// Only the packaged desktop app may: the shell refuses a second instance for
+    /// its identifier and each account has its own store directory. Entry points
+    /// that accept a reusable data directory (QA, smoke, tests) leave this off and
+    /// keep the SDK's cross-process store coordination.
+    pub fn with_exclusive_store_root(mut self) -> Self {
+        self.exclusive_store_root = true;
+        self
+    }
+
     pub fn credential_backend(&self) -> &CredentialStoreBackend {
         &self.credential_store
     }
@@ -723,13 +768,17 @@ impl StoreActor {
     /// env-global `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR` race between unit tests
     /// and lets the headless QA binary isolate same-user device fixtures.
     #[cfg(any(test, feature = "test-hooks"))]
-    pub(crate) fn with_backend(
+    pub fn with_backend(
         credential_store: CredentialStoreBackend,
         data_dir: impl Into<PathBuf>,
     ) -> Self {
+        let data_dir = data_dir.into();
+        crate::test_isolation::assert_not_user_profile(&data_dir);
         Self {
             credential_store,
-            data_dir: data_dir.into(),
+            data_dir,
+            // Test/QA fixtures may be pointed at a reusable data directory.
+            exclusive_store_root: false,
             #[cfg(any(test, feature = "test-hooks"))]
             composer_draft_io_probe: Arc::new(Mutex::new(None)),
             #[cfg(test)]
@@ -807,12 +856,16 @@ impl StoreActor {
             .join("accounts")
             .join("v2")
             .join(store_id.as_str());
-        MatrixClientStoreConfig::new(root.join("store"), store_key)
+        let mut store_config = MatrixClientStoreConfig::new(root.join("store"), store_key)
             .with_cache_path(root.join("cache"))
             .with_search_index_store(MatrixSearchIndexStoreConfig::new(
-                root.join("search-index"),
+                root.join(search_index_dir_name()),
                 MatrixSearchIndexKey::new(search_key.as_str()),
-            ))
+            ));
+        if self.exclusive_store_root {
+            store_config = store_config.with_exclusive_store_root();
+        }
+        store_config
     }
 
     /// Derive the encrypted ngram search index configuration for the given
@@ -858,7 +911,12 @@ impl StoreActor {
             Err(error) if error.kind() == std::io::ErrorKind::NotFound => true,
             Err(_) => false,
         };
-        if credential_deleted && directory_deleted {
+        // A sign-in that never reached promotion (device cleanup or reset from
+        // the verification gate) still has its bound pending-login record.
+        // Its root is gone now, and a live record without a root fails every
+        // later journal validation, blocking all further sign-ins.
+        let journal_released = self.pending_login_owner().complete_bound(key_id).is_ok();
+        if credential_deleted && directory_deleted && journal_released {
             Ok(())
         } else {
             Err(AccountCleanupIncomplete)
@@ -1025,8 +1083,29 @@ impl StoreActor {
     }
 
     fn account_search_index_dir(&self, key_id: &SessionKeyId) -> PathBuf {
-        self.account_root_dir(key_id).join("search-index")
+        self.account_root_dir(key_id).join(search_index_dir_name())
     }
+}
+
+/// Version of the persistent search-index contract.
+///
+/// Bump when an index or extraction change means documents written by the old
+/// behavior must not be reused. The version names the account's index directory,
+/// so a bump opens a fresh index: `RoomIndex::add` skips an event that is already
+/// present, so re-crawling alone would never rewrite it.
+pub(crate) const SEARCH_INDEX_CONTRACT_VERSION: u32 = 2;
+
+/// Directory name of the per-account persistent ngram index.
+///
+/// Carries the index contract version, so a version bump opens a fresh empty
+/// index instead of reusing documents extracted under the old behavior:
+/// `RoomIndex::add` skips an event that is already present, so re-crawling alone
+/// would never rewrite them. Crawling restarts in each session and fills the new
+/// extraction generation. The previous version's directory is left on disk rather than
+/// deleted here (it goes away with the account store root on logout), because
+/// deleting files under a possibly still-open encrypted index is not safe.
+fn search_index_dir_name() -> String {
+    format!("search-index.v{SEARCH_INDEX_CONTRACT_VERSION}")
 }
 
 /// Convert a `SessionInfo` (from koushi-state) into a `SessionKeyId`

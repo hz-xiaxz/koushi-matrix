@@ -2,13 +2,69 @@ use super::{
     MatrixConversationActivity, MatrixConversationActivitySource, MatrixRoomTagInfo,
     MatrixRoomTags, SdkUnreadTrace, SpaceMemberLookupStatus, classify_space_member_ids,
     matrix_conversation_activity_from_timeline_event, matrix_conversation_activity_source,
-    matrix_room_latest_event_projection, matrix_room_list_room_from_counts,
-    matrix_timeline_event_is_redacted, newest_conversation_activity, people_scope_diagnostic_event,
+    matrix_message_text_from_msgtype, matrix_room_latest_event_projection,
+    matrix_room_list_room_from_counts, matrix_timeline_event_is_redacted,
+    newest_conversation_activity, people_scope_diagnostic_event,
     space_members_scope_diagnostic_event, trace_sdk_unread_snapshot,
 };
 
 use koushi_diagnostics::DiagnosticValue;
 use std::collections::BTreeMap;
+
+/// #1427: only the msgtypes whose body is what the sender typed may become a delivery
+/// prefix. A media body is a filename or a caption, and a custom or server-notice body is
+/// not a message this device can vouch for.
+#[test]
+fn only_text_notice_and_emote_bodies_are_message_text() {
+    use matrix_sdk::ruma::events::room::message::{
+        AudioMessageEventContent, EmoteMessageEventContent, FileMessageEventContent,
+        ImageMessageEventContent, MessageType, NoticeMessageEventContent, TextMessageEventContent,
+    };
+    let mxc = |uri: &str| matrix_sdk::ruma::OwnedMxcUri::from(uri);
+
+    let text = MessageType::Text(TextMessageEventContent::plain("the code is 1234"));
+    assert_eq!(
+        matrix_message_text_from_msgtype(&text, text.body()).as_deref(),
+        Some("the code is 1234"),
+    );
+    let notice = MessageType::Notice(NoticeMessageEventContent::plain("a notice"));
+    assert_eq!(
+        matrix_message_text_from_msgtype(&notice, notice.body()).as_deref(),
+        Some("a notice"),
+    );
+    let emote = MessageType::Emote(EmoteMessageEventContent::plain("waves"));
+    assert_eq!(
+        matrix_message_text_from_msgtype(&emote, emote.body()).as_deref(),
+        Some("waves"),
+    );
+
+    for msgtype in [
+        MessageType::Image(ImageMessageEventContent::plain(
+            "photo.png".to_owned(),
+            mxc("mxc://example.invalid/photo"),
+        )),
+        MessageType::File(FileMessageEventContent::plain(
+            "report.pdf".to_owned(),
+            mxc("mxc://example.invalid/report"),
+        )),
+        MessageType::Audio(AudioMessageEventContent::plain(
+            "note.ogg".to_owned(),
+            mxc("mxc://example.invalid/note"),
+        )),
+        MessageType::new(
+            "com.example.unknown",
+            "custom body".to_owned(),
+            serde_json::Map::new(),
+        )
+        .expect("a custom msgtype is constructible"),
+    ] {
+        assert_eq!(
+            matrix_message_text_from_msgtype(&msgtype, msgtype.body()),
+            None,
+            "{msgtype:?} must not become a delivery prefix",
+        );
+    }
+}
 #[test]
 fn people_scope_diagnostic_distinguishes_direct_space_members_from_child_room_aggregate() {
     let event = people_scope_diagnostic_event(true, 7, 3);
@@ -53,6 +109,12 @@ fn conversation_activity_classifies_messages_encryption_and_threads_only() {
         ("m.room.encrypted", Some("m.thread"), Some(ThreadReply)),
         ("m.room.message", Some("m.replace"), None),
         ("m.room.message", Some("m.annotation"), None),
+        // #542: an encrypted edit or reaction carries its relation inside the
+        // ciphertext. When the decrypted event is what the client holds, the
+        // visible relation must classify it the same way as a plaintext one
+        // instead of counting as an ordinary encrypted message.
+        ("m.room.encrypted", Some("m.replace"), None),
+        ("m.room.encrypted", Some("m.annotation"), None),
         ("m.room.redaction", None, None),
         ("m.room.member", None, None),
         ("m.room.name", None, None),
@@ -70,6 +132,53 @@ fn conversation_activity_classifies_messages_encryption_and_threads_only() {
         );
     }
 }
+#[test]
+fn decrypted_encrypted_relation_events_do_not_create_conversation_activity() {
+    let encrypted = |content: serde_json::Value| {
+        matrix_sdk::deserialized_responses::TimelineEvent::from_plaintext(
+            matrix_sdk::ruma::serde::Raw::from_json_string(
+                serde_json::json!({
+                    "content": content,
+                    "event_id": "$encrypted:example.invalid",
+                    "origin_server_ts": 42,
+                    "sender": "@sender:example.invalid",
+                    "type": "m.room.encrypted"
+                })
+                .to_string(),
+            )
+            .expect("synthetic encrypted timeline event"),
+        )
+    };
+    let relation = |rel_type: &str| {
+        encrypted(serde_json::json!({
+            "algorithm": "m.megolm.v1.aes-sha2",
+            "ciphertext": "synthetic",
+            "m.relates_to": {
+                "rel_type": rel_type,
+                "event_id": "$target:example.invalid"
+            }
+        }))
+    };
+
+    for rel_type in ["m.replace", "m.annotation"] {
+        assert!(
+            matrix_conversation_activity_from_timeline_event(&relation(rel_type)).is_none(),
+            "{rel_type} must not count as conversation activity"
+        );
+    }
+
+    let message = encrypted(serde_json::json!({
+        "algorithm": "m.megolm.v1.aes-sha2",
+        "ciphertext": "synthetic",
+        "device_id": "DEVICE",
+        "sender_key": "synthetic"
+    }));
+    assert_eq!(
+        matrix_conversation_activity_from_timeline_event(&message).map(|activity| activity.source),
+        Some(MatrixConversationActivitySource::EncryptedMessage)
+    );
+}
+
 #[test]
 fn redacted_raw_latest_is_classified_without_private_diagnostics() {
     let event = matrix_sdk::deserialized_responses::TimelineEvent::from_plaintext(
@@ -496,6 +605,352 @@ async fn explicit_empty_direct_map_overrides_cached_room_direct_targets() {
     assert_eq!(snapshot.rooms.len(), 1);
     assert!(!snapshot.rooms[0].is_dm);
 }
+/// #1176: a cold-start room list caches a single event per room, so the SDK's
+/// client-side counters are a lower bound while no own read receipt is anchored
+/// in the loaded timeline. The server counts that are already in hand must top
+/// the notification projection up.
+async fn mock_room_with_unread_state(
+    room_id: &matrix_sdk::ruma::RoomId,
+    receipts: matrix_sdk_base::read_receipts::ReadReceipts,
+    server_counts: matrix_sdk_base::sync::UnreadNotificationsCount,
+) -> (
+    matrix_sdk::test_utils::mocks::MatrixMockServer,
+    matrix_sdk::Room,
+) {
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room = server.sync_joined_room(&client, room_id).await;
+    room.update_room_info(|mut info| {
+        info.set_read_receipts(receipts);
+        info.update_notification_count(server_counts);
+        (
+            info,
+            matrix_sdk_base::RoomInfoNotableUpdateReasons::READ_RECEIPT,
+        )
+    })
+    .await;
+    (server, room)
+}
+
+async fn projected_single_room(room: matrix_sdk::Room) -> super::MatrixRoomListRoom {
+    super::room_list_snapshot_from_sdk_rooms(vec![room])
+        .await
+        .rooms
+        .into_iter()
+        .next()
+        .expect("one joined room must project into the room list")
+}
+
+fn read_receipts(
+    num_unread: u64,
+    num_notifications: u64,
+    num_mentions: u64,
+    latest_active: Option<&str>,
+) -> matrix_sdk_base::read_receipts::ReadReceipts {
+    matrix_sdk_base::read_receipts::ReadReceipts {
+        num_unread,
+        num_notifications,
+        num_mentions,
+        latest_active: latest_active.map(|event_id| {
+            matrix_sdk_base::read_receipts::LatestReadReceipt {
+                event_id: matrix_sdk::ruma::OwnedEventId::try_from(event_id)
+                    .expect("test receipt event id"),
+            }
+        }),
+        ..Default::default()
+    }
+}
+
+fn server_counts(
+    notification_count: u64,
+    highlight_count: u64,
+) -> matrix_sdk_base::sync::UnreadNotificationsCount {
+    matrix_sdk_base::sync::UnreadNotificationsCount {
+        notification_count,
+        highlight_count,
+    }
+}
+
+#[tokio::test]
+async fn cold_start_notification_lower_bound_is_topped_up_by_server_counts() {
+    use matrix_sdk::ruma::room_id;
+
+    let (_server, room) = mock_room_with_unread_state(
+        room_id!("!cold-unread:example.invalid"),
+        read_receipts(1, 1, 0, None),
+        server_counts(3, 0),
+    )
+    .await;
+
+    let projected = projected_single_room(room).await;
+    // The unread-message projection stays the SDK's own value: the server has no
+    // unread-message count (see `effective_room_notification_counts`).
+    assert_eq!(projected.unread_count, 1);
+    assert_eq!(projected.notification_count, 3);
+    assert_eq!(projected.highlight_count, 0);
+}
+
+/// #1176: the cold-start counter top-up also reaches the standalone attention
+/// summary (`room_attention_summary_from_room`), which the SDK re-exports as
+/// public consistency API. This helper has no first-party production caller; the
+/// room list projects its own counters and additionally suppresses a count
+/// covered by a read marker.
+#[tokio::test]
+async fn cold_start_attention_summary_uses_the_topped_up_server_count() {
+    use matrix_sdk::ruma::room_id;
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let own = client.user_id().expect("own user").to_owned();
+    let room_id = room_id!("!cold-summary:example.invalid");
+    let room = server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(room_id)
+                .add_state_event(EventFactory::new().room_name("Cold Room").sender(&own)),
+        )
+        .await;
+    room.update_room_info(|mut info| {
+        info.set_read_receipts(read_receipts(1, 1, 0, None));
+        info.update_notification_count(server_counts(3, 0));
+        (
+            info,
+            matrix_sdk_base::RoomInfoNotableUpdateReasons::READ_RECEIPT,
+        )
+    })
+    .await;
+
+    let summary = super::room_attention_summary_from_room(&room)
+        .expect("a named room must project an attention summary");
+    assert_eq!(summary.notification_count, 3);
+    assert_eq!(summary.unread_count, 3);
+    assert_eq!(summary.highlight_count, 0);
+}
+
+#[tokio::test]
+async fn pending_receipts_do_not_top_up_an_anchored_client_count() {
+    use matrix_sdk::ruma::room_id;
+
+    // A pending receipt only means some receipt is still unmatched; the client
+    // counters are still counted from the newest boundary the SDK found, so the
+    // higher server count must not replace them.
+    let mut receipts = read_receipts(1, 0, 0, Some("$anchored:example.invalid"));
+    receipts
+        .pending
+        .push(matrix_sdk::ruma::OwnedEventId::try_from("$unmatched:example.invalid").unwrap());
+    let (_server, room) = mock_room_with_unread_state(
+        room_id!("!pending-receipt:example.invalid"),
+        receipts,
+        server_counts(2, 0),
+    )
+    .await;
+
+    let projected = projected_single_room(room).await;
+    assert_eq!(projected.unread_count, 1);
+    assert_eq!(projected.notification_count, 0);
+}
+
+#[tokio::test]
+async fn anchored_own_receipt_keeps_client_counts_over_higher_server_counts() {
+    use matrix_sdk::ruma::room_id;
+
+    // The server values are deliberately higher: an anchored client receipt must
+    // not be topped up at all, or a stale server count would inflate a room the
+    // client has already accounted for.
+    let (_server, room) = mock_room_with_unread_state(
+        room_id!("!anchored-receipt:example.invalid"),
+        read_receipts(3, 3, 1, Some("$anchored:example.invalid")),
+        server_counts(9, 9),
+    )
+    .await;
+
+    let projected = projected_single_room(room).await;
+    assert_eq!(projected.unread_count, 3);
+    assert_eq!(projected.notification_count, 3);
+    assert_eq!(projected.highlight_count, 1);
+}
+
+#[tokio::test]
+async fn client_counts_above_the_server_keep_the_client_values() {
+    use matrix_sdk::ruma::room_id;
+
+    let (_server, room) = mock_room_with_unread_state(
+        room_id!("!client-above-server:example.invalid"),
+        read_receipts(4, 4, 2, None),
+        server_counts(2, 1),
+    )
+    .await;
+
+    let projected = projected_single_room(room).await;
+    assert_eq!(projected.unread_count, 4);
+    assert_eq!(projected.notification_count, 4);
+    assert_eq!(projected.highlight_count, 2);
+}
+
+/// #1176 ordering: the server top-up runs before the read-marker suppression,
+/// so a stale positive server count cannot outlive a marker that covers the
+/// projected latest event.
+#[tokio::test]
+async fn stale_server_counts_still_lose_to_a_matching_read_marker() {
+    use matrix_sdk::ruma::{event_id, room_id, serde::Raw, user_id};
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    let room_id = room_id!("!stale-server-counts:example.invalid");
+    let sender = user_id!("@sender:example.invalid");
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    client
+        .event_cache()
+        .subscribe()
+        .expect("event cache subscription");
+    let room = server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(room_id)
+                .add_state_event(EventFactory::new().room_name("Stale Room").sender(sender)),
+        )
+        .await;
+
+    let message = EventFactory::new()
+        .room(room_id)
+        .sender(sender)
+        .server_ts(42)
+        .text_msg("already read")
+        .event_id(event_id!("$read-msg:example.invalid"))
+        .into_raw_sync();
+    let fully_read: Raw<matrix_sdk::ruma::events::AnyRoomAccountDataEvent> = Raw::from_json(
+        serde_json::value::to_raw_value(&serde_json::json!({
+            "type": "m.fully_read",
+            "content": { "event_id": "$read-msg:example.invalid" }
+        }))
+        .expect("raw fully read marker"),
+    );
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(room_id)
+                .add_timeline_bulk(vec![message])
+                .add_account_data(fully_read),
+        )
+        .await;
+    // Wait for the fixture itself, so a broken marker/event setup fails as that,
+    // not as an unrelated count mismatch.
+    let mut projected_event_id = None;
+    for _ in 0..100 {
+        projected_event_id = super::matrix_room_latest_event_projection(&room)
+            .await
+            .0
+            .map(|latest| latest.event_id);
+        if projected_event_id.is_some() {
+            break;
+        }
+        tokio::time::sleep(std::time::Duration::from_millis(20)).await;
+    }
+    assert_eq!(
+        projected_event_id.as_deref(),
+        Some("$read-msg:example.invalid")
+    );
+    assert_eq!(
+        super::matrix_room_fully_read_event_id(&room)
+            .await
+            .as_deref(),
+        Some("$read-msg:example.invalid")
+    );
+
+    room.update_room_info(|mut info| {
+        info.set_read_receipts(read_receipts(1, 1, 0, None));
+        info.update_notification_count(server_counts(5, 0));
+        (
+            info,
+            matrix_sdk_base::RoomInfoNotableUpdateReasons::READ_RECEIPT,
+        )
+    })
+    .await;
+
+    let projected = projected_single_room(room.clone()).await;
+    assert_eq!(projected.unread_count, 0);
+    assert_eq!(projected.notification_count, 0);
+    assert_eq!(projected.highlight_count, 0);
+
+    // #1176 known difference: the standalone attention summary applies the same
+    // counter top-up but not the room list's read-marker suppression, so it
+    // still reports the stale server count for this room state.
+    let summary = super::room_attention_summary_from_room(&room)
+        .expect("a named room must project an attention summary");
+    assert_eq!(summary.notification_count, 5);
+    assert_eq!(summary.unread_count, 5);
+    assert_eq!(summary.highlight_count, 0);
+}
+
+#[tokio::test]
+async fn dummy_zero_server_counts_leave_client_counts_alone() {
+    use matrix_sdk::ruma::room_id;
+
+    let (_server, room) = mock_room_with_unread_state(
+        room_id!("!synapse-dummy-counts:example.invalid"),
+        read_receipts(2, 2, 1, None),
+        server_counts(0, 0),
+    )
+    .await;
+
+    let projected = projected_single_room(room).await;
+    assert_eq!(projected.unread_count, 2);
+    assert_eq!(projected.notification_count, 2);
+    assert_eq!(projected.highlight_count, 1);
+}
+
+#[tokio::test]
+async fn server_highlight_count_is_projected_when_client_accounting_is_incomplete() {
+    use matrix_sdk::ruma::room_id;
+
+    let (_server, room) = mock_room_with_unread_state(
+        room_id!("!server-highlight:example.invalid"),
+        read_receipts(0, 0, 0, None),
+        server_counts(0, 2),
+    )
+    .await;
+
+    let projected = projected_single_room(room).await;
+    assert_eq!(projected.unread_count, 0);
+    assert_eq!(projected.notification_count, 0);
+    assert_eq!(projected.highlight_count, 2);
+}
+
+#[test]
+fn room_list_room_from_counts_keeps_manual_unread_over_a_covered_marker() {
+    // The server fallback passes nonzero counts into the constructor; a manual
+    // mark must keep them instead of being zeroed by the marker suppression.
+    let room = matrix_room_list_room_from_counts(
+        "!room:example.invalid".to_owned(),
+        "Room".to_owned(),
+        None,
+        false,
+        Vec::new(),
+        MatrixRoomTags::default(),
+        5,
+        0,
+        5,
+        true,
+        None,
+        None,
+        Some(test_latest_event("$event:example.invalid")),
+        Some("$event:example.invalid".to_owned()),
+        None,
+        vec![],
+        false,
+        0,
+    );
+
+    assert_eq!(room.unread_count, 5);
+    assert_eq!(room.notification_count, 5);
+    assert!(room.marked_unread);
+}
+
 #[test]
 fn room_list_room_from_counts_carries_notification_metadata() {
     let room = matrix_room_list_room_from_counts(
@@ -585,12 +1040,14 @@ fn room_list_room_from_counts_carries_room_tags() {
 }
 #[test]
 fn unread_diagnostic_snapshot_rejects_private_synthetic_inputs() {
+    let _diagnostic_lock = koushi_diagnostics::test_support::lock();
     let latest_event = Some(crate::MatrixRoomLatestEventSummary {
         event_id: "$event:example.invalid".to_owned(),
         sender_id: Some("@user:example.invalid".to_owned()),
         sender_label: None,
         sender_avatar_mxc_uri: None,
         preview: Some("secret message".to_owned()),
+        message_text: Some("secret message".to_owned()),
         timestamp_ms: 42,
         event_type: Some("m.room.message".to_owned()),
         relation_type: None,
@@ -642,6 +1099,7 @@ fn test_latest_event(event_id: &str) -> crate::MatrixRoomLatestEventSummary {
         sender_label: None,
         sender_avatar_mxc_uri: None,
         preview: None,
+        message_text: None,
         timestamp_ms: 42,
         event_type: Some("m.room.message".to_owned()),
         relation_type: None,
@@ -765,4 +1223,357 @@ fn room_name_placeholder_maps_only_the_sdk_empty_room_names() {
     ] {
         assert_eq!(super::matrix_room_name_placeholder(&name), None);
     }
+}
+
+/// #1220: a restricted rule's allow list is classified without guessing, and an
+/// unavailable rule is never defaulted to `Invite`.
+#[tokio::test]
+async fn restricted_rule_completeness_distinguishes_the_five_cases() {
+    use matrix_sdk::ruma::{
+        events::room::join_rules::{AllowRule, JoinRule, Restricted},
+        room_id,
+    };
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let own = client.user_id().expect("own user").to_owned();
+    let factory = EventFactory::new();
+    let synced = |room_id: &'static str, rule: Option<JoinRule>| {
+        let server = &server;
+        let client = &client;
+        let factory = &factory;
+        let own = &own;
+        async move {
+            let room_id = matrix_sdk::ruma::RoomId::parse(room_id).expect("room id");
+            let mut builder = JoinedRoomBuilder::new(&room_id);
+            if let Some(rule) = rule {
+                builder = builder.add_state_event(factory.room_join_rules(rule).sender(own));
+            }
+            server.sync_room(client, builder).await;
+            client.get_room(&room_id).expect("joined room")
+        }
+    };
+
+    // The rule content is unavailable: nothing was inspected, so it must not be
+    // reported as an inspected `Invite`.
+    let unavailable = synced("!unavailable:example.invalid", None).await;
+    assert_eq!(
+        super::matrix_room_access_facts(&unavailable).await,
+        super::MatrixRoomAccessFacts {
+            join_rule: None,
+            restricted: Some(super::MatrixRestrictedCompleteness::NotInspected),
+            allow_targets: Vec::new(),
+            history_visibility: crate::MatrixRoomHistoryVisibility::Shared,
+        }
+    );
+
+    let empty = synced(
+        "!empty:example.invalid",
+        Some(JoinRule::Restricted(Restricted::new(Vec::new()))),
+    )
+    .await;
+    assert_eq!(
+        super::matrix_room_access_facts(&empty).await.restricted,
+        Some(super::MatrixRestrictedCompleteness::ConfirmedEmpty)
+    );
+
+    let membership_only = synced(
+        "!membership-only:example.invalid",
+        Some(JoinRule::Restricted(Restricted::new(vec![
+            AllowRule::room_membership(room_id!("!allowed:example.invalid").to_owned()),
+        ]))),
+    )
+    .await;
+    assert_eq!(
+        super::matrix_room_access_facts(&membership_only)
+            .await
+            .restricted,
+        Some(super::MatrixRestrictedCompleteness::MembershipOnly)
+    );
+
+    let custom: AllowRule =
+        serde_json::from_value(serde_json::json!({ "type": "m.custom_allow_rule" }))
+            .expect("custom allow rule deserializes");
+    let unsupported_only = synced(
+        "!unsupported-only:example.invalid",
+        Some(JoinRule::Restricted(Restricted::new(vec![custom.clone()]))),
+    )
+    .await;
+    assert_eq!(
+        super::matrix_room_access_facts(&unsupported_only)
+            .await
+            .restricted,
+        Some(super::MatrixRestrictedCompleteness::UnsupportedOnly)
+    );
+
+    // A membership route beside an unmodelled entry keeps both facts apart.
+    let mixed = synced(
+        "!mixed:example.invalid",
+        Some(JoinRule::KnockRestricted(Restricted::new(vec![
+            AllowRule::room_membership(room_id!("!allowed:example.invalid").to_owned()),
+            custom,
+        ]))),
+    )
+    .await;
+    assert_eq!(
+        super::matrix_room_access_facts(&mixed).await.restricted,
+        Some(super::MatrixRestrictedCompleteness::MembershipPlusUnsupported)
+    );
+
+    // A non-restricted rule claims nothing about allow lists.
+    let public = synced("!public-rule:example.invalid", Some(JoinRule::Public)).await;
+    let public_facts = super::matrix_room_access_facts(&public).await;
+    assert_eq!(
+        public_facts.join_rule,
+        Some(super::MatrixRoomJoinRule::Public)
+    );
+    assert_eq!(public_facts.restricted, None);
+    assert!(public_facts.allow_targets.is_empty());
+}
+
+/// #1220: each distinct allow target is counted before unnamed ones are dropped,
+/// and its kind is verified from the local room's create event.
+#[tokio::test]
+async fn restricted_allow_targets_verify_kind_and_keep_unnamed_identities() {
+    use matrix_sdk::ruma::{
+        RoomVersionId,
+        events::room::join_rules::{AllowRule, JoinRule, Restricted},
+        room_id,
+    };
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let own = client.user_id().expect("own user").to_owned();
+    let factory = EventFactory::new();
+
+    // A local Space target: its create event proves the type.
+    let space_target = room_id!("!target-space:example.invalid");
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(space_target)
+                .add_state_event(factory.create(&own, RoomVersionId::V10).with_space_type()),
+        )
+        .await;
+    // An ordinary room target: an available create event without a Space type.
+    let room_target = room_id!("!target-room:example.invalid");
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(room_target)
+                .add_state_event(factory.create(&own, RoomVersionId::V10)),
+        )
+        .await;
+    // A missing create event stays Unknown rather than being guessed at.
+    let unknown_target = room_id!("!target-unknown:example.invalid");
+    server
+        .sync_room(&client, JoinedRoomBuilder::new(unknown_target))
+        .await;
+
+    let rule = JoinRule::Restricted(Restricted::new(vec![
+        AllowRule::room_membership(space_target.to_owned()),
+        AllowRule::room_membership(room_target.to_owned()),
+        AllowRule::room_membership(unknown_target.to_owned()),
+        // A repeated entry for one Space is still one distinct target.
+        AllowRule::room_membership(space_target.to_owned()),
+    ]));
+    let host_id = room_id!("!host:example.invalid");
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(host_id)
+                .add_state_event(factory.room_join_rules(rule).sender(&own)),
+        )
+        .await;
+    let host = client.get_room(host_id).expect("joined room");
+
+    let facts = super::matrix_room_access_facts(&host).await;
+    assert_eq!(
+        facts.restricted,
+        Some(super::MatrixRestrictedCompleteness::MembershipOnly)
+    );
+    assert_eq!(
+        facts.allow_targets,
+        vec![
+            super::MatrixAllowTarget {
+                kind: super::MatrixAllowTargetKind::Space,
+                room_id: space_target.to_string(),
+            },
+            super::MatrixAllowTarget {
+                kind: super::MatrixAllowTargetKind::Room,
+                room_id: room_target.to_string(),
+            },
+            super::MatrixAllowTarget {
+                kind: super::MatrixAllowTargetKind::Unknown,
+                room_id: unknown_target.to_string(),
+            },
+        ],
+        "every distinct target is kept, including the one whose create event is missing"
+    );
+}
+
+/// #1220: a redacted pre-v11 create event keeps its defaulted fields, so
+/// `create_content()` alone would call the target an ordinary room. The raw
+/// state event still records the redaction, and an unproven kind is `Unknown`.
+#[tokio::test]
+async fn restricted_allow_targets_reject_a_redacted_create_event() {
+    use matrix_sdk::ruma::{
+        events::{
+            room::create::RoomCreateEventContent,
+            room::join_rules::{AllowRule, JoinRule, Restricted},
+        },
+        room_id,
+    };
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let own = client.user_id().expect("own user").to_owned();
+    let factory = EventFactory::new();
+
+    // A pre-v11 room whose Space create event was redacted: `create_content()`
+    // still returns it, but with every field defaulted, and the raw event
+    // carries `unsigned.redacted_because`.
+    let redacted_target = room_id!("!target-redacted:example.invalid");
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(redacted_target).add_state_event(factory.redacted_state(
+                &own,
+                "",
+                RoomCreateEventContent::new_v1(own.clone()),
+            )),
+        )
+        .await;
+
+    let rule = JoinRule::Restricted(Restricted::new(vec![AllowRule::room_membership(
+        redacted_target.to_owned(),
+    )]));
+    let host_id = room_id!("!host-redacted:example.invalid");
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(host_id)
+                .add_state_event(factory.room_join_rules(rule).sender(&own)),
+        )
+        .await;
+    let host = client.get_room(host_id).expect("joined room");
+
+    let facts = super::matrix_room_access_facts(&host).await;
+    assert_eq!(
+        facts.allow_targets,
+        vec![super::MatrixAllowTarget {
+            kind: super::MatrixAllowTargetKind::Unknown,
+            room_id: redacted_target.to_string(),
+        }],
+        "a redacted create event is not positive proof of an ordinary room"
+    );
+}
+
+/// #1220: the distinct-target count is what gates the specific sentence, so a
+/// rule that repeats one Space must still reduce to a single verified route.
+#[tokio::test]
+async fn restricted_allow_targets_count_one_space_once() {
+    use matrix_sdk::ruma::{
+        RoomVersionId,
+        events::room::join_rules::{AllowRule, JoinRule, Restricted},
+        room_id,
+    };
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use matrix_sdk_test::{JoinedRoomBuilder, event_factory::EventFactory};
+
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let own = client.user_id().expect("own user").to_owned();
+    let factory = EventFactory::new();
+
+    let space_target = room_id!("!only-space:example.invalid");
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(space_target)
+                .add_state_event(factory.create(&own, RoomVersionId::V10).with_space_type()),
+        )
+        .await;
+
+    let rule = JoinRule::Restricted(Restricted::new(vec![
+        AllowRule::room_membership(space_target.to_owned()),
+        // The same Space twice is one distinct target, not two.
+        AllowRule::room_membership(space_target.to_owned()),
+    ]));
+    let host_id = room_id!("!host-single-space:example.invalid");
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(host_id)
+                .add_state_event(factory.room_join_rules(rule).sender(&own)),
+        )
+        .await;
+    let host = client.get_room(host_id).expect("joined room");
+
+    let facts = super::matrix_room_access_facts(&host).await;
+    assert_eq!(
+        facts.restricted,
+        Some(super::MatrixRestrictedCompleteness::MembershipOnly)
+    );
+    assert_eq!(
+        facts.allow_targets,
+        vec![super::MatrixAllowTarget {
+            kind: super::MatrixAllowTargetKind::Space,
+            room_id: space_target.to_string(),
+        }],
+        "a duplicate entry does not make a single Space two targets"
+    );
+}
+
+#[test]
+fn access_policy_builds_a_restricted_join_rule_with_canonical_membership_targets() {
+    use matrix_sdk::ruma::events::room::join_rules::{AllowRule, JoinRule};
+
+    let rule = super::sdk_join_rule_for_access_policy(
+        super::MatrixRoomJoinRule::Restricted,
+        &[
+            "!b:example.invalid".to_owned(),
+            "!a:example.invalid".to_owned(),
+            "!a:example.invalid".to_owned(),
+            String::new(),
+        ],
+    )
+    .expect("restricted with a target is settable");
+    let JoinRule::Restricted(restricted) = rule else {
+        panic!("expected a restricted rule, got {rule:?}");
+    };
+    assert_eq!(
+        restricted.allow,
+        vec![
+            AllowRule::room_membership(matrix_sdk::ruma::room_id!("!a:example.invalid").into()),
+            AllowRule::room_membership(matrix_sdk::ruma::room_id!("!b:example.invalid").into()),
+        ]
+    );
+
+    assert!(
+        super::sdk_join_rule_for_access_policy(super::MatrixRoomJoinRule::Restricted, &[]).is_err(),
+        "an explicitly empty allow list is rejected"
+    );
+    assert!(
+        super::sdk_join_rule_for_access_policy(
+            super::MatrixRoomJoinRule::Public,
+            &["!a:example.invalid".to_owned()],
+        )
+        .is_err(),
+        "a non-restricted rule carries no allow list"
+    );
+    assert!(
+        super::sdk_join_rule_for_access_policy(super::MatrixRoomJoinRule::Private, &[]).is_err(),
+        "private stays reserved"
+    );
+    assert!(matches!(
+        super::sdk_join_rule_for_access_policy(super::MatrixRoomJoinRule::Public, &[]),
+        Ok(JoinRule::Public)
+    ));
 }

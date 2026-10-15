@@ -12,7 +12,8 @@
 use std::collections::BTreeMap;
 
 use koushi_protocol::{
-    CoreCommandAdmission, RoomLiveSignalMetadata, StateDelta, VersionedAppStateSnapshot,
+    CoreCommandAdmission, RoomLiveSignalMetadata, ScopedReceiptSummaryChanges, StateDelta,
+    VersionedAppStateSnapshot,
 };
 use koushi_state::{
     AccountManagementCapabilities, AccountManagementState, AccountManagementUrl, ActivityState,
@@ -24,13 +25,14 @@ use koushi_state::{
     NativeAttentionCapabilities, NativeAttentionState, NavigationState, OwnProfile, PresenceKind,
     ProfileState, ProfileUpdateState, ProvisionalPhase, QrLoginState, RoomInteractionState,
     RoomListProjection, RoomLiveSignals, RoomManagementState, RoomNotificationSettings,
-    RoomPreferencesState, RoomSummary, SearchCrawlerLastActive, SearchCrawlerRoomState,
-    SearchCrawlerState, SearchMatchField, SearchMatchKind, SearchResult, SearchScope, SearchState,
-    SecureBackupGateState, SessionLockReason, SessionState, SettingsState, SidebarModel,
-    SoftLogoutReauthState, SpaceChildrenState, SpaceMembersState, SpaceSummary, StagedUploadItem,
-    SyncState, ThreadAttentionState, ThreadPaneState, ThreadsListState, TimelinePaneState,
-    TypographyDisplayProfile, UserProfile, VerificationGateRejectReason, VerificationGateState,
-    VerificationMethod, native_attention_capabilities_for_platform, resolve_locale_display_profile,
+    RoomPreferencesState, RoomSummary, ScheduledSendsListState, SearchCrawlerLastActive,
+    SearchCrawlerRoomState, SearchCrawlerState, SearchMatchField, SearchMatchKind, SearchResult,
+    SearchScope, SearchState, SecureBackupGateState, SessionLockReason, SessionState,
+    SettingsState, SidebarModel, SoftLogoutReauthState, SpaceChildrenState, SpaceMembersState,
+    SpaceSummary, StagedUploadItem, SyncState, ThreadAttentionState, ThreadPaneState,
+    ThreadsListState, TimelinePaneState, TypographyDisplayProfile, UserProfile,
+    VerificationGateRejectReason, VerificationGateState, VerificationMethod,
+    native_attention_capabilities_for_platform, resolve_locale_display_profile,
     resolve_typography_display_profile,
 };
 use serde::{Deserialize, Serialize};
@@ -336,6 +338,10 @@ pub struct FrontendDomainStateChangedSlices {
     pub live_signals_receipts_by_room_event:
         Option<BTreeMap<String, BTreeMap<String, Option<LiveEventReceiptSummary>>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_signals_focused_receipts_by_room_event: Option<ScopedReceiptSummaryChanges>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub live_signals_thread_receipts_by_room_event: Option<ScopedReceiptSummaryChanges>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub live_signals_room_metadata_by_id: Option<BTreeMap<String, Option<RoomLiveSignalMetadata>>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub live_signals_presence_by_user: Option<BTreeMap<String, Option<PresenceKind>>>,
@@ -345,6 +351,8 @@ pub struct FrontendDomainStateChangedSlices {
     pub local_encryption: Option<LocalEncryptionState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub native_attention: Option<NativeAttentionState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub notification_delivery: Option<koushi_state::NotificationDeliveryState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub cjk_text_policy: Option<CjkTextPolicyState>,
 }
@@ -404,11 +412,14 @@ impl FrontendDomainStateChangedSlices {
             && self.live_signals.is_none()
             && self.live_signals_rooms.is_none()
             && self.live_signals_receipts_by_room_event.is_none()
+            && self.live_signals_focused_receipts_by_room_event.is_none()
+            && self.live_signals_thread_receipts_by_room_event.is_none()
             && self.live_signals_room_metadata_by_id.is_none()
             && self.live_signals_presence_by_user.is_none()
             && self.e2ee_trust.is_none()
             && self.local_encryption.is_none()
             && self.native_attention.is_none()
+            && self.notification_delivery.is_none()
             && self.cjk_text_policy.is_none()
     }
 }
@@ -432,6 +443,8 @@ pub struct FrontendUiStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub threads_list: Option<ThreadsListState>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub scheduled_sends_list: Option<ScheduledSendsListState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub basic_operation: Option<BasicOperationState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub room_address_availability: Option<koushi_state::RoomAddressAvailabilityState>,
@@ -449,6 +462,7 @@ impl FrontendUiStateChangedSlices {
             && self.files_view.is_none()
             && self.history_export.is_none()
             && self.threads_list.is_none()
+            && self.scheduled_sends_list.is_none()
             && self.basic_operation.is_none()
             && self.room_address_availability.is_none()
             && self.errors.is_none()
@@ -523,6 +537,10 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         domain.live_signals = changed.live_signals;
         domain.live_signals_rooms = changed.live_signals_rooms;
         domain.live_signals_receipts_by_room_event = changed.live_signals_receipts_by_room_event;
+        domain.live_signals_focused_receipts_by_room_event =
+            changed.live_signals_focused_receipts_by_room_event;
+        domain.live_signals_thread_receipts_by_room_event =
+            changed.live_signals_thread_receipts_by_room_event;
         domain.live_signals_room_metadata_by_id = changed.live_signals_room_metadata_by_id;
         domain.live_signals_presence_by_user = changed.live_signals_presence_by_user;
         domain.e2ee_trust = changed.e2ee_trust;
@@ -535,6 +553,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
             }
             domain.native_attention = Some(native_attention);
         }
+        domain.notification_delivery = changed.notification_delivery;
         domain.cjk_text_policy = changed.cjk_text_policy;
 
         ui.navigation = changed.navigation;
@@ -545,6 +564,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         ui.files_view = changed.files_view;
         ui.history_export = changed.history_export;
         ui.threads_list = changed.threads_list;
+        ui.scheduled_sends_list = changed.scheduled_sends_list;
         ui.basic_operation = changed.basic_operation;
         ui.room_address_availability = changed.room_address_availability;
         ui.errors = changed.errors;
@@ -624,6 +644,9 @@ pub struct FrontendDomainState {
     pub e2ee_trust: E2eeTrustState,
     pub local_encryption: LocalEncryptionState,
     pub native_attention: NativeAttentionState,
+    /// #1427: which device-local delivery sinks hold a credential and how their last send
+    /// ended. App scope, never persisted, and never a secret value.
+    pub notification_delivery: koushi_state::NotificationDeliveryState,
     pub cjk_text_policy: CjkTextPolicyState,
 }
 
@@ -638,6 +661,7 @@ pub struct FrontendUiState {
     pub files_view: FilesViewState,
     pub history_export: koushi_state::HistoryExportState,
     pub threads_list: ThreadsListState,
+    pub scheduled_sends_list: ScheduledSendsListState,
     pub basic_operation: BasicOperationState,
     pub room_address_availability: koushi_state::RoomAddressAvailabilityState,
     pub errors: Vec<AppError>,
@@ -701,6 +725,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
             e2ee_trust: state.e2ee_trust,
             local_encryption: state.local_encryption,
             native_attention,
+            notification_delivery: state.notification_delivery,
             cjk_text_policy: state.cjk_text_policy,
         },
         ui: FrontendUiState {
@@ -712,6 +737,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
             files_view: state.files_view,
             history_export: state.history_export,
             threads_list: state.threads_list,
+            scheduled_sends_list: state.scheduled_sends_list,
             basic_operation: state.basic_operation,
             room_address_availability: state.room_address_availability,
             errors: state.errors,
@@ -719,8 +745,12 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
     }
 }
 
-/// IPC snapshot contract version. Version 7 adds the desktop update preference.
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 7;
+/// IPC snapshot contract version. Version 10 adds the device-local notification
+/// delivery projection (`NotificationDeliveryState`), which carries only whether
+/// each sink holds a credential and how its last send ended. Version 11 adds the
+/// keyword-rule projection (`AccountNotificationsSnapshot.keywords`), which
+/// carries the account's own `content` rules and their server-owned enabled flag.
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 11;
 
 pub(crate) fn frontend_display_platform() -> DisplayPlatform {
     #[cfg(target_os = "macos")]
@@ -778,7 +808,6 @@ pub enum FrontendSessionState {
         device_id: String,
         gate: VerificationGateState,
         flow_id: u64,
-        destination_written: bool,
     },
     Rejecting {
         homeserver: String,
@@ -862,14 +891,12 @@ impl From<SessionState> for FrontendSessionState {
                 info,
                 gate,
                 flow_id,
-                destination_written,
             } => Self::AwaitingBootstrapConfirmation {
                 homeserver: info.homeserver,
                 user_id: info.user_id,
                 device_id: info.device_id,
                 gate,
                 flow_id,
-                destination_written,
             },
             SessionState::Rejecting { info, reason } => Self::Rejecting {
                 homeserver: info.homeserver,

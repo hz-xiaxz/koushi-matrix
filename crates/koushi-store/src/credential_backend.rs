@@ -14,8 +14,9 @@ use koushi_state::LocalEncryptionHealth;
 use crate::CREDENTIAL_STORE_SERVICE_NAME;
 
 /// Env var for QA/debug file-based credential store override.
-/// Only honored in debug/test/test-hooks builds; production release builds ignore it.
-#[cfg(any(debug_assertions, test, feature = "test-hooks"))]
+/// Only honored in debug/test-hooks builds outside unit tests; production
+/// release builds ignore it.
+#[cfg(all(any(debug_assertions, feature = "test-hooks"), not(test)))]
 const ENV_FILE_CREDENTIAL_STORE_DIR: &str = "KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR";
 
 /// Credential store backend. Production = either OS keychain (injected from
@@ -31,12 +32,19 @@ pub enum CredentialStoreBackend {
 
 impl CredentialStoreBackend {
     pub fn resolve() -> Self {
-        #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
+        // Unit tests never follow the variable from the developer's shell;
+        // QA binaries (debug or `test-hooks`, never `cfg(test)`) still do.
+        #[cfg(all(any(debug_assertions, feature = "test-hooks"), not(test)))]
         if let Ok(dir) = std::env::var(ENV_FILE_CREDENTIAL_STORE_DIR) {
             let dir = PathBuf::from(dir);
             record_file_credential_store_active();
             return Self::FileDir(FileCredentialStore::new(dir));
         }
+        Self::in_memory()
+    }
+
+    /// A keyring-free store with no environment override.
+    pub fn in_memory() -> Self {
         Self::InMemory(CredentialStore::with_backend(
             CREDENTIAL_STORE_SERVICE_NAME,
             koushi_key::InMemoryCredentialBackend::default(),
@@ -47,12 +55,20 @@ impl CredentialStoreBackend {
         data_dir: PathBuf,
         os_backend: Arc<dyn koushi_key::CredentialBackend>,
     ) -> Self {
-        #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
+        #[cfg(all(any(debug_assertions, feature = "test-hooks"), not(test)))]
         if let Ok(dir) = std::env::var(ENV_FILE_CREDENTIAL_STORE_DIR) {
             let dir = PathBuf::from(dir);
             record_file_credential_store_active();
             return Self::FileDir(FileCredentialStore::new(dir));
         }
+        Self::os_keychain(data_dir, os_backend)
+    }
+
+    /// The injected OS backend with no environment override.
+    pub fn os_keychain(
+        data_dir: PathBuf,
+        os_backend: Arc<dyn koushi_key::CredentialBackend>,
+    ) -> Self {
         Self::OsKeychain(OsCredentialStore::with_backend(data_dir, os_backend))
     }
 
@@ -272,6 +288,51 @@ impl CredentialStoreBackend {
             #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
             Self::FileDir(store) => store.delete_named(&key_id.matrix_session_account_name()),
             Self::InMemory(store) => store.delete_matrix_session(key_id),
+        }
+    }
+
+    // --- Device-local notification sink secrets (#1427) ---
+
+    /// A sink secret is app-scoped, not account-scoped, so it belongs to no vault
+    /// entry: it goes to the injected backend under its own validated credential
+    /// name, the way the vault master key does.
+    pub fn save_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+        secret: &koushi_key::NotificationSinkSecret,
+    ) -> Result<(), koushi_key::LocalSecretError> {
+        match self {
+            Self::OsKeychain(store) => store.save_notification_sink_secret(id, secret),
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
+            Self::FileDir(store) => store.save_named(&id.account_name(), secret.as_str()),
+            Self::InMemory(store) => store.save_notification_sink_secret(id, secret),
+        }
+    }
+
+    pub fn load_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+    ) -> Result<koushi_key::NotificationSinkSecret, koushi_key::LocalSecretError> {
+        match self {
+            Self::OsKeychain(store) => store.load_notification_sink_secret(id),
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
+            Self::FileDir(store) => {
+                let value = store.load_named(&id.account_name())?;
+                koushi_key::NotificationSinkSecret::new(value)
+            }
+            Self::InMemory(store) => store.load_notification_sink_secret(id),
+        }
+    }
+
+    pub fn delete_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+    ) -> Result<(), koushi_key::LocalSecretError> {
+        match self {
+            Self::OsKeychain(store) => store.delete_notification_sink_secret(id),
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
+            Self::FileDir(store) => store.delete_named(&id.account_name()),
+            Self::InMemory(store) => store.delete_notification_sink_secret(id),
         }
     }
 
@@ -616,6 +677,30 @@ impl OsCredentialStore {
         self.mutate_vault(|data| data.delete_matrix_session(key_id))
     }
 
+    /// See `CredentialStoreBackend::save_notification_sink_secret`: the sink secret
+    /// stays out of the vault and is written through the injected backend.
+    fn save_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+        secret: &koushi_key::NotificationSinkSecret,
+    ) -> Result<(), koushi_key::LocalSecretError> {
+        self.primary.save_notification_sink_secret(id, secret)
+    }
+
+    fn load_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+    ) -> Result<koushi_key::NotificationSinkSecret, koushi_key::LocalSecretError> {
+        self.primary.load_notification_sink_secret(id)
+    }
+
+    fn delete_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+    ) -> Result<(), koushi_key::LocalSecretError> {
+        self.primary.delete_notification_sink_secret(id)
+    }
+
     fn save_last_session(&self, key_id: &SessionKeyId) -> Result<(), koushi_key::LocalSecretError> {
         self.mutate_vault(|data| data.set_last_session(Some(key_id.clone())))
     }
@@ -923,6 +1008,12 @@ pub fn local_secret_error_health(error: &koushi_key::LocalSecretError) -> LocalE
         koushi_key::LocalSecretError::CredentialBackend(
             koushi_key::CredentialBackendErrorKind::LockedOrInaccessible,
         ) => LocalEncryptionHealth::LockedOrInaccessible,
+        // Sink-secret validation errors are caller mistakes, not storage-health
+        // facts: they are reported as unknown rather than as a corrupt store.
+        koushi_key::LocalSecretError::InvalidNotificationSinkSecretId
+        | koushi_key::LocalSecretError::InvalidNotificationSinkSecret => {
+            LocalEncryptionHealth::Unknown
+        }
     }
 }
 

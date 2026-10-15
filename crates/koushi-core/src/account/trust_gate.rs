@@ -670,6 +670,9 @@ impl AccountActor {
                 .field(DiagnosticField::token("state", "promoted")),
         );
         self.start_secure_backup_observer(session.clone());
+        // #1361: replay a Secure Backup admission whose proven connectivity
+        // edge arrived while this session was still unpromoted.
+        self.replay_secure_backup_admission_on_promotion();
         for event in std::mem::take(&mut self.pending_ready_events) {
             self.emit(event);
         }
@@ -1487,6 +1490,9 @@ impl AccountActor {
                 .field(DiagnosticField::token("state", "promoted")),
         );
         self.start_secure_backup_observer(session.clone());
+        // #1361: replay a Secure Backup admission whose proven connectivity
+        // edge arrived while this session was still unpromoted.
+        self.replay_secure_backup_admission_on_promotion();
         for event in std::mem::take(&mut self.pending_ready_events) {
             self.emit(event);
         }

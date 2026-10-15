@@ -79,6 +79,10 @@ pub struct ReplyQuote {
     pub body_preview: Option<String>,
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub formatted: Option<ReplyQuoteFormattedBody>,
+    /// #1328: the quoted message's `m.mentions` user ids, so the quote preview
+    /// marks its anchors as the pills its own row would.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub mentioned_user_ids: Vec<String>,
     pub state: ReplyQuoteState,
 }
 
@@ -103,6 +107,7 @@ impl fmt::Debug for ReplyQuote {
                     .as_ref()
                     .map(|_| "ReplyQuoteFormattedBody(..)"),
             )
+            .field("mentioned_user_ids", &self.mentioned_user_ids.len())
             .field("state", &self.state)
             .finish()
     }

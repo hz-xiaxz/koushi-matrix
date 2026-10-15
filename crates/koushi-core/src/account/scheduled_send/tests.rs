@@ -305,6 +305,7 @@ async fn stale_server_delayed_schedule_is_rejected_after_account_replacement() {
                 send_at_ms: crate::time::current_epoch_ms().saturating_add(60_000),
                 draft_revision: 4.into(),
                 composer_permit: forwarded_permit,
+                formatting_options: koushi_state::ComposerFormattingOptions::default(),
             })
             .await
     );
@@ -371,6 +372,7 @@ fn scheduled_thread_message_content_preserves_the_thread_relation() {
     let content = build_scheduled_message_content(
         "scheduled thread body",
         Some("$thread-root:example.invalid"),
+        koushi_state::ComposerFormattingOptions::default(),
     )
     .expect("thread content should build");
     let value = serde_json::to_value(content).expect("content should serialize");
@@ -380,6 +382,208 @@ fn scheduled_thread_message_content_preserves_the_thread_relation() {
         value["m.relates_to"]["event_id"],
         "$thread-root:example.invalid"
     );
+}
+
+/// #1348: a scheduled send is admitted under the composer's own formatting
+/// options, so `math_mode` off must not produce math-formatted content.
+#[test]
+fn scheduled_message_content_follows_the_composer_math_mode() {
+    use matrix_sdk::ruma::events::room::message::MessageType;
+
+    let math_on = build_scheduled_message_content(
+        "Energy $E=mc^2$",
+        None,
+        koushi_state::ComposerFormattingOptions { math_mode: true },
+    )
+    .expect("math-enabled content should build");
+    let MessageType::Text(text) = &math_on.msgtype else {
+        panic!("expected text content");
+    };
+    assert!(
+        text.formatted
+            .as_ref()
+            .is_some_and(|formatted| formatted.body.contains("data-mx-maths")),
+        "math mode on must keep the math span: {:?}",
+        text.formatted
+    );
+
+    let math_off = build_scheduled_message_content(
+        "Energy $E=mc^2$",
+        None,
+        koushi_state::ComposerFormattingOptions { math_mode: false },
+    )
+    .expect("math-disabled content should build");
+    let MessageType::Text(text) = &math_off.msgtype else {
+        panic!("expected text content");
+    };
+    assert_eq!(text.body, "Energy $E=mc^2$");
+    assert!(
+        text.formatted.is_none(),
+        "math mode off must not format the formula: {:?}",
+        text.formatted
+    );
+}
+
+/// #1348: the delayed event the homeserver stores must carry the formatting the
+/// scheduling command was admitted under, not the builder's default.
+#[tokio::test]
+async fn server_delayed_schedule_uses_the_command_formatting_options() {
+    use matrix_sdk::ruma::room_id;
+
+    let server = MatrixMockServer::new().await;
+    server
+        .mock_versions()
+        .with_feature(crate::scheduled_send::MSC4140_FEATURE, true)
+        .with_feature("org.matrix.simplified_msc3575", true)
+        .ok()
+        .mount()
+        .await;
+    server
+        .mock_room_send()
+        .respond_with(
+            ResponseTemplate::new(200)
+                .set_body_json(serde_json::json!({ "delay_id": "synthetic-delay" })),
+        )
+        .mount()
+        .await;
+
+    let account = SessionKeyId {
+        homeserver: server.uri(),
+        user_id: "@schedule-math:localhost".to_owned(),
+        device_id: "SCHEDULE-MATH".to_owned(),
+    };
+    let client = server.client_builder().build().await;
+    let room = room_id!("!scheduled-math:localhost");
+    // The server-delayed path is only admitted for an authoritatively
+    // unencrypted room, so the encryption state must be reachable.
+    server.mock_room_state_encryption().plain().mount().await;
+    server.sync_joined_room(&client, room).await;
+    // The SDK caches server versions; make the cache reflect the capabilities
+    // the mock advertises so the server-delayed path is reachable.
+    client
+        .reset_supported_versions()
+        .await
+        .expect("reset versions cache");
+    let session = MatrixClientSession::from_client_for_testing(
+        client,
+        SessionInfo {
+            homeserver: account.homeserver.clone(),
+            user_id: account.user_id.clone(),
+            device_id: account.device_id.clone(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        },
+    );
+    let credential_dir = tempdir().expect("credential tempdir");
+    let data_dir = tempdir().expect("data tempdir");
+    let registry = Arc::new(ComposerDraftLeaseRegistry::new());
+    let (handle, mut action_rx, _event_rx) = spawn_actor_with_dirs_and_registry(
+        credential_dir.path(),
+        data_dir.path(),
+        registry.clone(),
+    );
+
+    configure_synthetic_oidc_session(
+        &handle,
+        session,
+        RequestId {
+            connection_id: RuntimeConnectionId(61),
+            sequence: 1,
+        },
+    )
+    .await;
+    loop {
+        let actions = recv_account_action_with_sliding_sync_effects(&handle, &mut action_rx).await;
+        if matches!(
+            actions.as_slice(),
+            [AppAction::LoginSucceeded { info, .. }]
+                if info.user_id == account.user_id && info.device_id == account.device_id
+        ) {
+            break;
+        }
+    }
+
+    let request_id = RequestId {
+        connection_id: RuntimeConnectionId(61),
+        sequence: 2,
+    };
+    let scope = crate::composer_draft_lifecycle::ComposerDraftScope {
+        account: account.clone(),
+        target: koushi_state::ComposerTarget::Main {
+            room_id: room.to_string(),
+        },
+    };
+    let renderer_generation = registry
+        .begin_renderer_generation()
+        .expect("begin renderer generation");
+    let lease_id = registry
+        .acquire(renderer_generation, scope.clone())
+        .expect("acquire schedule lease");
+    let command_permit = registry
+        .try_command_permit(renderer_generation, lease_id, &scope)
+        .expect("admit schedule command");
+    registry
+        .release(renderer_generation, lease_id)
+        .expect("release activation after schedule admission");
+    let (rejected_tx, _rejected_rx) = mpsc::unbounded_channel();
+    let forwarded_permit =
+        ForwardedComposerDraftPermit::new(request_id, command_permit, rejected_tx);
+    assert!(
+        handle
+            .send(AccountMessage::ScheduleServerDelayedSend {
+                request_id,
+                expected_account: account.clone(),
+                scheduled_id: "scheduled-math-off".to_owned(),
+                room_id: room.to_string(),
+                thread_root_event_id: None,
+                body: "Energy $E=mc^2$".to_owned(),
+                send_at_ms: crate::time::current_epoch_ms().saturating_add(60_000),
+                draft_revision: 1.into(),
+                composer_permit: forwarded_permit,
+                formatting_options: koushi_state::ComposerFormattingOptions { math_mode: false },
+            })
+            .await
+    );
+
+    // Wait for the accepted server handle before reading the wire: the account
+    // actor performs the delayed request asynchronously.
+    let created = tokio::time::timeout(std::time::Duration::from_secs(5), async {
+        loop {
+            let Some(actions) = action_rx.recv().await else {
+                panic!("account actor stopped before answering the schedule command");
+            };
+            for action in &actions {
+                if let AppAction::ScheduledSendCreatedAtRevision { item, .. } = action {
+                    return item.clone();
+                }
+            }
+        }
+    })
+    .await
+    .expect("the schedule command must be answered");
+    assert!(
+        matches!(created.handle, ScheduledSendHandle::Server { .. }),
+        "the unencrypted delayed path must accept the schedule: {:?}",
+        created.handle
+    );
+
+    let requests = server
+        .server()
+        .received_requests()
+        .await
+        .unwrap_or_default();
+    let delayed = requests
+        .iter()
+        .find(|request| request.url.path().contains("/send/m.room.message/"))
+        .expect("the delayed message request must reach the homeserver");
+    let body: serde_json::Value =
+        serde_json::from_slice(&delayed.body).expect("delayed request body is JSON");
+    assert_eq!(body["body"], "Energy $E=mc^2$");
+    assert!(
+        body.get("formatted_body").is_none(),
+        "math mode off must not store a formatted delayed body: {body}"
+    );
+
+    let _ = handle.send(AccountMessage::Shutdown).await;
 }
 
 #[test]

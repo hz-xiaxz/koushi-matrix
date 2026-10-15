@@ -18,6 +18,7 @@ fn first_section_patch_inherits_global_sort_and_preserves_existing_preferences()
                             section,
                             collapsed: Some(true),
                             sort,
+                            expanded: None,
                         }),
                         ..Default::default()
                     });
@@ -40,6 +41,7 @@ fn first_section_patch_inherits_global_sort_and_preserves_existing_preferences()
                             section,
                             collapsed: Some(true),
                             sort: None,
+                            expanded: None,
                         }),
                         ..Default::default()
                     });
@@ -74,14 +76,17 @@ fn low_priority_section_patch_stores_collapse_and_follows_the_rooms_sort() {
                 rooms: SidebarSectionSettings {
                     collapsed: false,
                     sort: RoomListSort::RecentFirst,
+                    expanded: false,
                 },
                 dms: SidebarSectionSettings {
                     collapsed: false,
                     sort: RoomListSort::RecentFirst,
+                    expanded: false,
                 },
                 low_priority: Some(SidebarSectionSettings {
                     collapsed: true,
                     sort: RoomListSort::RecentFirst,
+                    expanded: false,
                 }),
             },
             "an unedited scope inherits the legacy collapse flag"
@@ -94,6 +99,7 @@ fn low_priority_section_patch_stores_collapse_and_follows_the_rooms_sort() {
                 section: SidebarSectionKind::LowPriority,
                 collapsed: Some(false),
                 sort: Some(RoomListSort::Activity),
+                expanded: None,
             }),
             ..Default::default()
         });
@@ -105,6 +111,7 @@ fn low_priority_section_patch_stores_collapse_and_follows_the_rooms_sort() {
             Some(SidebarSectionSettings {
                 collapsed: false,
                 sort: RoomListSort::NormalLocale,
+                expanded: false,
             }),
             "the scoped collapse wins and the sort follows Rooms"
         );
@@ -117,6 +124,7 @@ fn low_priority_section_patch_stores_collapse_and_follows_the_rooms_sort() {
                 section: SidebarSectionKind::Rooms,
                 collapsed: None,
                 sort: Some(RoomListSort::Activity),
+                expanded: None,
             }),
             ..Default::default()
         });
@@ -159,6 +167,7 @@ fn a_legacy_scope_preference_without_low_priority_deserializes_and_falls_back() 
         Some(SidebarSectionSettings {
             collapsed: true,
             sort: RoomListSort::NormalLocale,
+            expanded: false,
         })
     );
 }

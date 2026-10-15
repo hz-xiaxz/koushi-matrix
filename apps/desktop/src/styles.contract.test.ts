@@ -154,7 +154,12 @@ describe("styles.css token system", () => {
   test("attachment layout separates fitted staging from actual-size scrolling", () => {
     const dialog = selectorBlock(".upload-staging-dialog");
     expect(dialog).toMatch(/grid-template-rows:\s*auto\s+minmax\(0,\s*1fr\)\s+auto/);
-    expect(dialog).toMatch(/block-size:\s*100%/);
+    // #1234: the dialog sizes to its content unless a preview is staged.
+    expect(dialog).toMatch(/block-size:\s*auto/);
+    expect(dialog).toMatch(/max-block-size:\s*100%/);
+    expect(css).toMatch(
+      /\.upload-staging-dialog:has\(\.upload-staging-item\.has-preview\)\s*\{\s*block-size:\s*100%/
+    );
     expect(dialog).toMatch(/overflow:\s*hidden/);
     const list = selectorBlock(".upload-staging-list");
     expect(list).toMatch(/overflow-y:\s*auto/);
@@ -165,6 +170,19 @@ describe("styles.css token system", () => {
     const actual = selectorBlock(".upload-actual-size-viewport img");
     expect(actual).toMatch(/max-inline-size:\s*none/);
     expect(actual).toMatch(/max-block-size:\s*none/);
+  });
+
+  test("scheduled-message destination metadata isolates, truncates and separates", () => {
+    const context = selectorBlock(".scheduled-message-context");
+    expect(context).toContain("display: flex;");
+    expect(context).toContain("min-width: 0;");
+    const room = selectorBlock(".scheduled-message-room");
+    expect(room).toContain("min-width: 0;");
+    expect(room).toContain("overflow: hidden;");
+    expect(room).toContain("text-overflow: ellipsis;");
+    expect(room).toContain("white-space: nowrap;");
+    expect(selectorBlock(".scheduled-message-separator")).toContain("flex: 0 0 auto;");
+    expect(selectorBlock(".scheduled-message-thread")).toContain("white-space: nowrap;");
   });
 
   test("selected room row uses a logical brand start bar", () => {
@@ -336,18 +354,11 @@ describe("styles.css token system", () => {
       "--activity-row-action-radius"
     ]);
     expectBlockUses(selectorBlock(".workspace-button[data-count]::after"), ["--nav-badge-font-size"]);
-    expectBlockUses(selectorBlock(".nav-item[data-count]::after"), [
+    expectBlockUses(selectorBlock(".workspace-header-badge"), [
       "--nav-badge-size",
       "--nav-badge-padding-inline",
       "--nav-badge-font-size"
     ]);
-    expectBlockUses(
-      groupedSelectorBlock(
-        /\.nav-item\[data-mention-count\]\s+\.nav-label::after,\s*\.nav-item\[data-live-count\]\s+\.nav-label::before/,
-        "nav notification dots"
-      ),
-      ["--nav-dot-size", "--nav-dot-margin-inline-start"]
-    );
     expectBlockUses(selectorBlock(".room-mention-dot"), ["--nav-dot-size"]);
     expectBlockUses(selectorBlock(".room-count"), ["--room-count-min-inline-size", "--room-count-font-size"]);
     expectBlockUses(selectorBlock(".room-count:not(:empty)"), [

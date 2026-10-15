@@ -254,13 +254,6 @@ pub enum TimelineCommand {
         request_id: RequestId,
         key: TimelineKey,
     },
-    RestoreTimelineAnchor {
-        request_id: RequestId,
-        key: TimelineKey,
-        event_id: String,
-        max_batches: u16,
-        event_count: u16,
-    },
     ObserveViewport {
         request_id: RequestId,
         key: TimelineKey,
@@ -357,12 +350,6 @@ pub enum TimelineCommand {
         request_id: RequestId,
         key: TimelineKey,
         event_id: String,
-    },
-    ToggleReaction {
-        request_id: RequestId,
-        key: TimelineKey,
-        event_id: String,
-        reaction_key: String,
     },
     SendReaction {
         request_id: RequestId,
@@ -465,19 +452,6 @@ impl fmt::Debug for TimelineCommand {
                 .debug_struct("CancelLinkPreviews")
                 .field("request_id", request_id)
                 .field("key", key)
-                .finish(),
-            Self::RestoreTimelineAnchor {
-                request_id,
-                max_batches,
-                event_count,
-                ..
-            } => formatter
-                .debug_struct("RestoreTimelineAnchor")
-                .field("request_id", request_id)
-                .field("key", &"TimelineKey(..)")
-                .field("event_id", &"EventId(..)")
-                .field("max_batches", max_batches)
-                .field("event_count", event_count)
                 .finish(),
             Self::ObserveViewport { request_id, .. } => formatter
                 .debug_struct("ObserveViewport")
@@ -636,15 +610,6 @@ impl fmt::Debug for TimelineCommand {
                 .field("request_id", request_id)
                 .field("key", key)
                 .field("event_id", &"EventId(..)")
-                .finish(),
-            Self::ToggleReaction {
-                request_id, key, ..
-            } => formatter
-                .debug_struct("ToggleReaction")
-                .field("request_id", request_id)
-                .field("key", key)
-                .field("event_id", &"EventId(..)")
-                .field("reaction_key", &"ReactionKey(..)")
                 .finish(),
             Self::SendReaction {
                 request_id, key, ..

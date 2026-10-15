@@ -82,6 +82,7 @@ pub(super) fn timeline_item(
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: false,
         is_redacted: false,
@@ -202,6 +203,7 @@ pub(super) fn live_tail_test_manager(
         thread_root_projection_fetches: ThreadRootProjectionFetchRegistry::default(),
         timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
         live_tail_refreshes: LiveTailRefreshCoordinator::new(),
+        focused_builds: Default::default(),
         test_session_available: true,
     }
 }

@@ -104,6 +104,7 @@ fn settings_loaded_replaces_values_without_requiring_a_session() {
             url_previews_enabled: true,
             encrypted_url_previews_enabled: true,
         },
+        delivery: Box::default(),
         media: MediaSettings {
             ..MediaSettings::default()
         },
@@ -644,9 +645,11 @@ fn thread_list_ordering_setting_defaults_to_latest_reply() {
 }
 
 #[test]
-fn room_list_sort_setting_defaults_to_activity_and_supports_recent_and_locale() {
+fn room_list_sort_setting_defaults_to_recent_and_still_reads_activity_and_locale() {
     let values = SettingsValues::default();
-    assert_eq!(values.room_list_sort, RoomListSort::Activity);
+    // #542: recent conversation order is the product default; `Activity` is
+    // retained for a settings document an older build persisted.
+    assert_eq!(values.room_list_sort, RoomListSort::RecentFirst);
 
     let mut state = AppState::default();
     reduce(
@@ -749,6 +752,8 @@ fn test_room(room_id: &str, display_name: &str, activity_timestamp_ms: u64) -> R
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: Some(activity_timestamp_ms),
         conversation_activity: Some(koushi_state::ConversationActivity {
@@ -787,6 +792,7 @@ fn settings_loaded_recomputes_room_list_projection_and_sorts_open_threads() {
                     latest_body_preview: None,
                     latest_timestamp_ms: Some(200),
                     reply_count: 0,
+                    unread_count: 0,
                 },
                 koushi_state::ThreadsListItem {
                     room_id: "room-a".to_owned(),
@@ -801,6 +807,7 @@ fn settings_loaded_recomputes_room_list_projection_and_sorts_open_threads() {
                     latest_body_preview: None,
                     latest_timestamp_ms: Some(100),
                     reply_count: 0,
+                    unread_count: 0,
                 },
             ],
             is_paginating: false,
@@ -874,6 +881,7 @@ fn settings_update_recomputes_room_list_projection_and_resorts_open_threads() {
                     latest_body_preview: None,
                     latest_timestamp_ms: Some(200),
                     reply_count: 0,
+                    unread_count: 0,
                 },
                 koushi_state::ThreadsListItem {
                     room_id: "room-a".to_owned(),
@@ -888,6 +896,7 @@ fn settings_update_recomputes_room_list_projection_and_resorts_open_threads() {
                     latest_body_preview: None,
                     latest_timestamp_ms: Some(100),
                     reply_count: 0,
+                    unread_count: 0,
                 },
             ],
             is_paginating: false,

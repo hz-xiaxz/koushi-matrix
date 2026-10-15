@@ -2,12 +2,15 @@ import { useCallback, useEffect, useRef, useState } from "react";
 import { RefreshCcw } from "lucide-react";
 import { api } from "../backend/appRuntime";
 import { desktopEventPort } from "../backend/desktopEventRuntime";
+import { openExternalHttpUrl } from "../backend/linkMediaRuntime";
 import { isTauriRuntime } from "../backend/runtimeEnvironment";
 import { getAppStoreSnapshot, setAppStoreSnapshot, useAppStore } from "../domain/appStore";
 import { createCommandReceiptReconciler } from "../domain/commandWatermark";
 import { SNAPSHOT_SCHEMA_VERSION, type DesktopUpdateState, type SettingsPatch, type UpdatesSettings } from "../domain/types";
 import { t } from "../i18n/messages";
 import { ModalDialog } from "./ModalDialog";
+
+const RELEASE_PAGE_URL = "https://github.com/shinaoka/koushi-matrix/releases";
 
 /** Application-level presentation over the single Rust updater owner. */
 export function DesktopUpdates() {
@@ -17,7 +20,7 @@ export function DesktopUpdates() {
   const [presentationKey, setPresentationKey] = useState(0);
   const [commandFailed, setCommandFailed] = useState(false);
   const mounted = useRef(false);
-  const offeredVersion = useRef<string | null>(null);
+  const offered = useRef<{ version: string; generation: number } | null>(null);
   const reconcile = useRef(createCommandReceiptReconciler({
     currentGeneration: () => getAppStoreSnapshot()?.state_generation ?? null,
     settlementSnapshot: () => api.settlementSnapshot(),
@@ -28,9 +31,9 @@ export function DesktopUpdates() {
       setAppStoreSnapshot(snapshot);
     }
   }));
-  const run = useCallback((operation: Promise<unknown>) => {
+  const run = useCallback((operation: Promise<unknown>, onSuccess?: () => void) => {
     setCommandFailed(false);
-    void operation.catch(() => {
+    void operation.then(onSuccess).catch(() => {
       if (mounted.current) setCommandFailed(true);
     });
   }, []);
@@ -49,9 +52,12 @@ export function DesktopUpdates() {
       if (disposed) return;
       setState(next);
       setCommandFailed(false);
-      if (next.kind === "available" && offeredVersion.current !== next.version) {
-        offeredVersion.current = next.version;
-        setOpen(true);
+      if (next.kind === "available") {
+        // Re-present on every fresh offer generation so dismissing the dialog is
+        // temporary; an explicitly ignored version stays quiet (#1205).
+        const isNewOffer = offered.current?.generation !== next.generation;
+        offered.current = { version: next.version, generation: next.generation };
+        if (isNewOffer && !next.ignored) setOpen(true);
       }
     };
     const updatesReady = desktopEventPort.listenDesktopUpdates(next => {
@@ -89,6 +95,7 @@ export function DesktopUpdates() {
           <DesktopUpdateControls
             current={settings.values.updates}
             state={state}
+            notificationOnly={state.kind === "available" && state.notification_only}
             disabled={settings.persistence.kind === "saving"}
             onSelect={patch => run(api.updateSettings(patch).then(receipt => reconcile.current(receipt)))}
             onCheck={() => run(api.checkForDesktopUpdate())}
@@ -96,6 +103,20 @@ export function DesktopUpdates() {
               if (state.kind === "available") run(api.downloadDesktopUpdate(state.generation));
             }}
             onRestart={() => run(api.restartToInstallDesktopUpdate())}
+            onOpenReleasePage={() => {
+              if (state.kind === "available") {
+                run(openExternalHttpUrl(state.release_url ?? RELEASE_PAGE_URL));
+              }
+            }}
+            onIgnore={() => {
+              if (state.kind !== "available") return;
+              const ignoredVersion = state.version;
+              run(api.ignoreDesktopUpdate(ignoredVersion), () => {
+                // A newer offer may have replaced the dialog while the IPC was
+                // pending; only close the dialog still showing the ignored version.
+                if (offered.current?.version === ignoredVersion) setOpen(false);
+              });
+            }}
           />
         ) : <p role="status">{t("settings.updateChecking")}</p>}
       </div>
@@ -110,6 +131,9 @@ export function DesktopUpdateControls({
   onCheck,
   onDownload,
   onRestart,
+  onIgnore,
+  notificationOnly = false,
+  onOpenReleasePage = () => undefined,
   disabled = false
 }: {
   current: UpdatesSettings;
@@ -118,6 +142,9 @@ export function DesktopUpdateControls({
   onCheck: () => void;
   onDownload: () => void;
   onRestart: () => void;
+  onIgnore: () => void;
+  notificationOnly?: boolean;
+  onOpenReleasePage?: () => void;
   disabled?: boolean;
 }) {
   return (
@@ -167,7 +194,13 @@ export function DesktopUpdateControls({
         </span>
       </button>
       <div className="settings-update-status" aria-live="polite">
-          <p className="settings-status-text">{desktopUpdateStatusText(state)}</p>
+          {state.kind === "available" && state.check_failed ? (
+            <p role="alert">{t("settings.updateCheckFailed")}</p>
+          ) : null}
+          <p className="settings-status-text">{desktopUpdateStatusText(state, notificationOnly)}</p>
+          {state.kind === "available" && state.ignored ? (
+            <p className="settings-status-note">{t("settings.updateIgnored")}</p>
+          ) : null}
           {state.kind === "idle" || state.kind === "up_to_date" || state.kind === "failed" ? (
             <button className="profile-settings-action" type="button" onClick={onCheck}>
               <RefreshCcw size={14} aria-hidden="true" />
@@ -175,10 +208,17 @@ export function DesktopUpdateControls({
             </button>
           ) : null}
           {state.kind === "available" ? (
-            <button className="profile-settings-action" type="button" onClick={onDownload}>
-              <RefreshCcw size={14} aria-hidden="true" />
-              {t("settings.updateDownload")}
-            </button>
+            <>
+              <button className="profile-settings-action" type="button" onClick={notificationOnly ? onOpenReleasePage : onDownload}>
+                <RefreshCcw size={14} aria-hidden="true" />
+                {t(notificationOnly ? "settings.updateReleasePage" : "settings.updateDownload")}
+              </button>
+              {state.ignored ? null : (
+                <button className="profile-settings-action" type="button" onClick={onIgnore}>
+                  {t("settings.updateIgnore")}
+                </button>
+              )}
+            </>
           ) : null}
           {state.kind === "ready" ? (
             <button className="profile-settings-action" type="button" onClick={onRestart}>
@@ -191,7 +231,7 @@ export function DesktopUpdateControls({
   );
 }
 
-function desktopUpdateStatusText(state: DesktopUpdateState): string {
+function desktopUpdateStatusText(state: DesktopUpdateState, notificationOnly = false): string {
   switch (state.kind) {
     case "idle":
       return t("settings.updateIdle");
@@ -200,7 +240,7 @@ function desktopUpdateStatusText(state: DesktopUpdateState): string {
     case "checking":
       return t("settings.updateChecking");
     case "available":
-      return t("settings.updateAvailable", { version: state.version });
+      return t(notificationOnly ? "settings.updateAvailableManual" : "settings.updateAvailable", { version: state.version });
     case "downloading":
       return t("settings.updateDownloading", { version: state.version });
     case "ready":

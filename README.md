@@ -100,6 +100,7 @@ after all platform builds succeed:
 - [Linux x64 RPM package](https://github.com/shinaoka/koushi-matrix/releases/latest/download/Koushi-linux-x64.rpm) — untested
 - [Latest release and checksums](https://github.com/shinaoka/koushi-matrix/releases/latest)
 - [Maintainer release runbook](docs/releases/desktop-release.md)
+- [Windows code signing policy](docs/security/code-signing-policy.md)
 
 Verify the adjacent `.sha256` file when testing any downloaded installer.
 
@@ -235,304 +236,250 @@ data directory or Keychain entries.
 
 ### Build on Linux / WSL (Ubuntu 24.04)
 
-Initial setup was completed on an x86_64 WSL 2 / Ubuntu 24.04 environment on
-2026-09-27, using Node.js 24.21.0 and Rust 1.96.0. The dependency checks and
-both development and release native builds succeeded. The release binary was
-also launched through WSLg and its `Koushi` window was observed with
-`xwininfo`/`xprop`. The user subsequently confirmed successful SSO after
-creating and unlocking a default keyring and restarting Koushi on the same
-desktop D-Bus session as that keyring. Packaged installers remain unverified.
-The installation steps below are for a fresh machine; an already configured
-checkout can start with the dependency check and build commands.
+Copy each block below into a Linux **Bash** terminal, in order. On WSL 2,
+use WSLg and keep the source in the Linux filesystem. Run Koushi as your
+normal user. The standalone release binary has been verified on x86_64
+Ubuntu 24.04 / WSL2; native Linux and installer packages remain unverified.
 
-Run these commands in a Linux terminal, from the repository root. In WSL,
-use Linux installations of Node.js and Rust, and keep the checkout in the
-Linux filesystem (for example, `~/src/koushi-matrix`). This builds a Linux
-application; use the Windows instructions below for a Windows executable.
-
-Install the native compiler and development libraries first. Rust alone is
-not enough: Cargo needs the system C/C++ compiler, and Tauri needs GTK and
-WebKitGTK development files. On Ubuntu 24.04:
+**1. Install build tools (once).** This installs Node.js 24 through
+[nvm](https://github.com/nvm-sh/nvm#installing-and-updating) and Rust through
+[rustup](https://rustup.rs/). Each block stops if a command fails.
 
 ```bash
-sudo apt-get update
-sudo apt-get install -y build-essential ca-certificates curl wget file git \
-  dbus-x11 x11-utils xdg-utils \
-  pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev \
-  libayatana-appindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev \
-  libxdo-dev patchelf
+(
+  set -eo pipefail
+
+  sudo apt-get update
+  sudo apt-get install -y build-essential ca-certificates curl wget file git \
+    dbus-x11 x11-utils xdg-utils \
+    pkg-config libwebkit2gtk-4.1-dev libgtk-3-dev \
+    libayatana-appindicator3-dev librsvg2-dev libssl-dev libdbus-1-dev \
+    libxdo-dev patchelf gnome-keyring seahorse hunspell-en-us
+
+  export NVM_DIR="$HOME/.nvm"
+  if [ ! -s "$NVM_DIR/nvm.sh" ]; then
+    curl -fsSL https://raw.githubusercontent.com/nvm-sh/nvm/v0.40.8/install.sh | bash
+  fi
+  . "$NVM_DIR/nvm.sh"
+  nvm install 24
+
+  if ! command -v rustup >/dev/null 2>&1; then
+    curl --proto '=https' --tlsv1.2 -fsSL https://sh.rustup.rs | \
+      sh -s -- -y --profile minimal
+  fi
+)
 ```
 
-For other distributions, see the
-[Tauri Linux prerequisites](https://v2.tauri.app/start/prerequisites/#linux);
-Koushi also needs D-Bus development headers for its Secret Service integration.
+For other distributions, install the equivalent
+[Tauri prerequisites](https://v2.tauri.app/start/prerequisites/#linux), including
+D-Bus development headers.
 
-Install [Node.js 24 LTS](https://nodejs.org/en/download) (including npm) and
-[Rust via rustup](https://rustup.rs/) inside Linux if they are not installed.
-The checked-in `rust-toolchain.toml` selects the project's Rust version.
-Then prepare the checkout:
+#### Build and run the Linux release
+
+**2. Build and install.** If you already have a checkout, open a terminal at
+its repository root. Otherwise, the block clones it into `~/src/koushi-matrix`.
+The first build needs network access and may take a while. Close any running
+Koushi before replacing its executable.
 
 ```bash
-git submodule update --init --recursive vendor/matrix-rust-sdk
-node scripts/check-sdk-submodule.mjs
-rustup show
-node --version
-npm --prefix apps/desktop ci
-npm --prefix apps/desktop audit --package-lock-only --audit-level=high
-node scripts/check-linux-build-deps.mjs
+(
+  set -eo pipefail
+
+  export NVM_DIR="$HOME/.nvm"
+  . "$NVM_DIR/nvm.sh"
+  nvm use 24
+  if [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+  fi
+
+  if [ ! -f scripts/check-sdk-submodule.mjs ]; then
+    mkdir -p "$HOME/src"
+    cd "$HOME/src"
+    if [ ! -d koushi-matrix ]; then
+      git clone https://github.com/shinaoka/koushi-matrix.git
+    fi
+    cd koushi-matrix
+  fi
+
+  git submodule update --init --recursive vendor/matrix-rust-sdk
+  node scripts/check-sdk-submodule.mjs
+  rustup show
+  npm --prefix apps/desktop audit --package-lock-only --audit-level=high
+  npm --prefix apps/desktop ci
+  npm --prefix apps/desktop audit --audit-level=high
+  npm --prefix apps/desktop audit --omit=dev --audit-level=high
+  node scripts/check-linux-build-deps.mjs
+
+  unset CARGO_TARGET_DIR
+  npm --prefix apps/desktop run tauri -- build --no-bundle
+  install -Dm755 target/release/koushi-desktop "$HOME/.local/bin/koushi"
+)
 ```
 
-Stop and resolve any high/critical audit findings before building. The first
-build needs network access for Rust crates and may take a while. On a WSL VM
-with limited memory, reduce concurrent Rust compilation:
-
-```bash
-export CARGO_BUILD_JOBS=2
-```
-
-#### Run the Linux development build
-
-For live development with Vite hot reload, run the Tauri development command
-from the repository root. It starts the Vite server at `127.0.0.1:5173` for
-you; do not start the binary in `target/debug` separately in this mode:
-
-```bash
-npm --prefix apps/desktop run tauri -- dev
-```
-
-For sign-in, first complete [Prepare the Linux keyring and retry SSO](#prepare-the-linux-keyring-and-retry-sso).
-Reuse the existing desktop D-Bus session. If the shell has no usable desktop
-session bus, start a shared shell first, then prepare the keyring and launch
-Koushi from that shell:
-
-```bash
-dbus-run-session -- bash
-# Prepare and unlock the keyring in this shell before starting Koushi.
-npm --prefix apps/desktop run tauri -- dev
-```
-
-To test a standalone development binary with the web assets embedded, without
-creating installers, use the Tauri build command instead:
-
-```bash
-npm --prefix apps/desktop run tauri -- build --debug --no-bundle
-./target/debug/koushi-desktop
-```
-
-The path above assumes the default Cargo target directory. `npm run build` alone
-builds only the web assets; `npm run dev` alone starts only the browser shell.
-
-Do not launch `target/debug/koushi-desktop` after a plain `cargo build`: that
-debug profile intentionally uses the Tauri `devUrl` and expects a Vite server at
-`127.0.0.1:5173`. Without that server the window shows “Could not connect to
-127.0.0.1 — Connection refused”. For a standalone GUI, use the Tauri build
-command above. If you need to build with Cargo directly, first build the web
-assets and enable Tauri's custom protocol:
-
-```bash
-npm --prefix apps/desktop run build
-cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml \
-  --profile dev --features tauri/custom-protocol
-./target/debug/koushi-desktop
-```
-
-Compiling does not require a display. Running the app requires a graphical
-session (WSLg on WSL 2) and a session D-Bus with an unlocked Secret Service
-provider such as GNOME Keyring or KWallet. A minimal WSL installation may lack
-that desktop session setup; successful compilation does not establish that
-login or credential storage is ready. Do not run the app with `sudo`.
-
-If Cargo reports `linker cc not found`, install `build-essential`. If a
-`pkg-config` probe fails, rerun the dependency check above and install the
-reported development package. If the compiler is killed with `SIGKILL`, check
-available WSL memory/swap and retry with `CARGO_BUILD_JOBS=1`.
-
-To build the release binary used for a final local launch check, omit
-`--debug`:
-
-```bash
-npm --prefix apps/desktop run tauri -- build --no-bundle
-test -x target/release/koushi-desktop
-```
-
-This checkout produces `koushi-desktop`. `target/release/koushi-matrix` is not
-an output of the current build, so do not launch an older binary with that name;
-launch the `target/release/koushi-desktop` shown above. A binary made with only
-`cargo build --release` also uses `127.0.0.1:5173` when Tauri's
-`custom-protocol` feature is not enabled. If you build with Cargo directly, run
-`npm --prefix apps/desktop run build` first and pass
-`--features tauri/custom-protocol`.
-
-```bash
-npm --prefix apps/desktop run build
-cargo build --manifest-path apps/desktop/src-tauri/Cargo.toml \
-  --release --features tauri/custom-protocol
-./target/release/koushi-desktop
-```
-
-WSLg normally provides `DISPLAY` and `WAYLAND_DISPLAY`. On the WSL2 setup used
-for this verification, forcing the X11 backend and software rendering avoids a
-Mesa/WebKit initialization problem and makes the window visible to the X11
-inspection tools. Start the release binary as your normal user in the same
-desktop D-Bus session as the unlocked keyring:
-
-```bash
-GDK_BACKEND=x11 \
-LIBGL_ALWAYS_SOFTWARE=1 \
-WEBKIT_DISABLE_COMPOSITING_MODE=1 \
-./target/release/koushi-desktop
-```
-
-Leave that command running. In a second WSL terminal, confirm that the GUI
-window exists:
-
-```bash
-xwininfo -root -tree | grep -F '"Koushi"'
-```
-
-The first command should print a child window named `"Koushi"`. `Ctrl-C` in
-the launch terminal closes the app. A WSL installation without WSLg cannot
-display this window; compilation and package creation still work there, while
-GUI verification requires WSLg or another X11/Wayland desktop session. Do not
-run the desktop app with `sudo`.
-
-On a minimal WSLg installation, `xdg-desktop-portal` can also print a document
-portal/FUSE permission warning when the session starts. That warning did not
-prevent the Koushi window from opening in the verification above; file-dialog
-behavior depends on the WSLg portal setup.
-
-SSO must be completed while Koushi is still running in the same Linux desktop
-session. Use the existing desktop session bus when available; use
-`dbus-run-session` only when there is no usable desktop session bus. Starting
-a new bus alone does not create or unlock a persistent credential keyring.
-Koushi registers the
-`com.github.shinaoka.koushi-matrix:` callback scheme when it starts. If an older
-build left a quoted `Exec` entry in
-`~/.local/share/applications/koushi-desktop-handler.desktop`, launching the
-current build once repairs it for WSL's `xdg-open` when the executable path has
-no spaces; do not edit the file while Koushi is running. A startup `session
-restore failed` message indicates that a previous local session could not be
-reopened; set `KOUSHI_RESTORE_SESSION=false` for one signed-out launch, then
-sign in again after fixing the D-Bus/Secret Service session.
+If an audit reports high/critical vulnerabilities, resolve them before
+building; do not bypass the check.
 
 #### Prepare the Linux keyring and retry SSO
 
-If the auth panel says **Could not start single sign-on**, authorization has
-not reached the browser-launch step, or its command could not be reconciled.
-One Linux/WSL prerequisite is an unlocked, persistent default Secret Service
-keyring: Koushi stores pending authentication data before requesting the
-authorization URL. Check its existence without reading any credentials:
+**3. Prepare sign-in storage and launch.** Open the keyring manager:
 
 ```bash
-gdbus call --session --dest org.freedesktop.secrets \
-  --object-path /org/freedesktop/secrets \
-  --method org.freedesktop.Secret.Service.ReadAlias default
-```
-
-`(objectpath '/',)` means there is no default keyring. This was observed in
-the WSL setup during troubleshooting; having `gnome-keyring` installed alone
-does not establish that a default keyring exists. A collection path confirms
-existence, but does not prove the keyring is unlocked.
-
-Close the running Koushi app. On Ubuntu, install the keyring manager and open
-it from your Linux terminal:
-
-```bash
-sudo apt install gnome-keyring seahorse
 seahorse &
 ```
 
-In **Passwords and Keys** (Seahorse):
+In **Passwords and Keys**, create a password-protected **Password Keyring** if
+needed, select **Set as default**, and unlock it. Enter its password only in
+the system dialog. Installing GNOME Keyring alone does not complete this step.
 
-1. Create a **Password Keyring** with a password if none exists.
-2. Right-click that keyring and select **Set as default**.
-3. Unlock it if it is locked. Enter the keyring password only in the system
-   dialog; it is not your Matrix password and should not be pasted into logs
-   or a support conversation.
+Then launch Koushi from the **same terminal and desktop D-Bus session**:
 
-Run Seahorse and Koushi from the same desktop session; do not wrap just Koushi
-in a new `dbus-run-session`. If you need a new bus, run
-`dbus-run-session -- bash` before opening Seahorse, and launch both programs
-from that shell.
+```bash
+"$HOME/.local/bin/koushi"
+```
 
-In the verified WSL setup, creating and unlocking the keyring was not enough:
-the already-running Koushi process still used a different D-Bus session, and
-its Secret Service queries timed out. Restarting it on the working keyring's
-session resolved the failure, and the user confirmed that SSO worked.
-An existing process keeps its original session bus even after you prepare the
-keyring in another terminal. Fully exit that process before relaunching;
-opening another instance is not a substitute for restarting it.
+Select **Single sign-on** and keep Koushi running until the browser returns.
+If Koushi was running before you prepared the keyring, fully exit and restart
+it. No rebuild is needed.
 
-After preparing the keyring, run the following from the same terminal, at the
-repository root. This assumes the standalone release binary has already been
-built using the commands above; no rebuild is needed just for keyring setup.
+If there is no usable session D-Bus, run `dbus-run-session -- bash` first,
+then open Seahorse and launch Koushi inside that shell. A new bus alone does
+not create or unlock a keyring.
+
+On WSLg, if the window does not appear, try:
 
 ```bash
 GDK_BACKEND=x11 \
 LIBGL_ALWAYS_SOFTWARE=1 \
 WEBKIT_DISABLE_COMPOSITING_MODE=1 \
-./target/release/koushi-desktop
+"$HOME/.local/bin/koushi"
 ```
 
-Select **Single sign-on**, complete sign-in in the external browser, and keep
-Koushi running until the browser returns to it. If **Could not start single
-sign-on** still appears with an unlocked default keyring, report the
-**Homeserver** value and the approximate number of seconds between clicking
-the button and seeing the error. This generic message alone does not identify
-the cause; homeserver, authorization, and command failures also need checking.
+App data lives in `~/.local/share/koushi-desktop`; credentials use the
+freedesktop Secret Service with service name `koushi-desktop`.
 
 #### Check external browser launch
 
-If **Single sign-on** does not open an external browser, verify the Linux
-browser handoff before retrying:
+If SSO does not open a browser, run these in the same desktop session:
 
 ```bash
-command -v xdg-open
 xdg-open https://example.com
 xdg-settings get default-web-browser
 ```
 
-Install `xdg-utils` if `xdg-open` is missing, and set a default browser if the
-last command prints no desktop entry. Under WSLg, run Koushi and the test above
-in the same desktop session as the unlocked keyring; Koushi tries the WSLg
-Linux browser first and falls back to the native desktop opener. A successful handoff opens the
-provider page in the browser and leaves Koushi running so the registered
-`com.github.shinaoka.koushi-matrix:` callback can return to it. If the button
-returns an in-app browser-launch error, fix the default-browser setup and
-select **Single sign-on** again; the pending authorization is reused.
+Set a default browser if the second command prints no desktop entry. If SSO
+still fails with an unlocked default keyring, report the homeserver and the
+approximate time until the error appears.
+
+#### Run the Linux development build
+
+For development, run this at the repository root after setup and keyring
+preparation. It starts Vite and the native app together:
+
+```bash
+npm --prefix apps/desktop run tauri -- dev
+```
+
+For a standalone debug binary:
+
+```bash
+(
+  set -eo pipefail
+  unset CARGO_TARGET_DIR
+  npm --prefix apps/desktop run tauri -- build --debug --no-bundle
+  ./target/debug/koushi-desktop
+)
+```
+
+`npm run build` builds only web assets. A plain Cargo build expects a Vite
+server; use the Tauri commands above to embed the assets in a standalone app.
 
 #### Build Linux packages
 
-The WSL2 release-binary check above does not verify every Linux distribution or
-installer format; contributions from Linux users are welcome. After completing
-the setup above, on x86_64 Linux build the unsigned AppImage, deb, and RPM
-packages through the desktop package:
+To install Koushi in the desktop application menu on Ubuntu, build a `.deb`.
+After installing the build tools above, close Koushi and paste this block at
+the repository root:
+
+```bash
+(
+  set -eo pipefail
+
+  export NVM_DIR="$HOME/.nvm"
+  . "$NVM_DIR/nvm.sh"
+  nvm use 24
+  if [ -f "$HOME/.cargo/env" ]; then
+    . "$HOME/.cargo/env"
+  fi
+  unset CARGO_TARGET_DIR
+
+  git submodule update --init --recursive vendor/matrix-rust-sdk
+  node scripts/check-sdk-submodule.mjs
+  npm --prefix apps/desktop audit --package-lock-only --audit-level=high
+  npm --prefix apps/desktop ci
+  npm --prefix apps/desktop audit --audit-level=high
+  npm --prefix apps/desktop audit --omit=dev --audit-level=high
+  node scripts/check-linux-build-deps.mjs
+
+  npm --prefix apps/desktop run tauri -- build --bundles deb
+
+  version=$(node -p \
+    "JSON.parse(require('fs').readFileSync('apps/desktop/src-tauri/tauri.conf.json','utf8')).version")
+  arch=$(dpkg --print-architecture)
+  sudo apt install -y \
+    "./target/release/bundle/deb/Koushi_${version}_${arch}.deb"
+)
+```
+
+The `.deb` is created in `target/release/bundle/deb/`. After installation,
+search for **Koushi** in your desktop application menu, or launch it from a
+terminal:
+
+```bash
+/usr/bin/koushi-desktop
+```
+
+Sign-in still requires the [unlocked default keyring](#prepare-the-linux-keyring-and-retry-sso).
+On WSL, launching the Linux desktop app requires WSLg. These packages remain
+unverified.
+
+To build AppImage, deb, and RPM together on x86_64 Linux instead:
 
 ```bash
 npm --prefix apps/desktop run build:linux
 ```
 
-The script prints the generated artifact paths and SHA-256 checksums when the
-build completes. The outputs are under
+Outputs and checksums are printed after the build. Packages are under
 `target/x86_64-unknown-linux-gnu/release/bundle/{appimage,deb,rpm}/`.
-Installed-app data is stored under
-`~/.local/share/koushi-desktop`; credentials use the freedesktop Secret
-Service (GNOME Keyring / KWallet) with the service name `koushi-desktop`. Composer
-spell checking uses WebKitGTK's Enchant backend and checks the system locale
-plus US English; it needs a Hunspell dictionary for each language, such as
-`hunspell-en-us` on Debian/Ubuntu or `hunspell-en_us` on Arch.
 
 ### Windows users
 
-Just run the following commands.
+Close Koushi, then run the following commands from the repository root. The
+commands remove previous generated NSIS installers before building and select
+the installer matching the checked-out source version. PowerShell must check
+each external command's exit code so a failed build cannot install an old file.
 
 ```powershell
+$ErrorActionPreference = 'Stop'
 git submodule update --init --recursive vendor/matrix-rust-sdk
+if ($LASTEXITCODE -ne 0) { throw 'SDK submodule update failed' }
 node scripts/check-sdk-submodule.mjs
+if ($LASTEXITCODE -ne 0) { throw 'SDK submodule check failed' }
+npm --prefix apps/desktop audit --package-lock-only --audit-level=high
+if ($LASTEXITCODE -ne 0) { throw 'Dependency security audit failed' }
 npm --prefix apps/desktop ci
+if ($LASTEXITCODE -ne 0) { throw 'Dependency installation failed' }
+
+$nsisDir = Join-Path (Get-Location).Path 'target/x86_64-pc-windows-msvc/release/bundle/nsis'
+if (Test-Path -LiteralPath $nsisDir) {
+    Get-ChildItem -LiteralPath $nsisDir -Filter *.exe -File |
+        ForEach-Object { Remove-Item -LiteralPath $_.FullName }
+}
 npm --prefix apps/desktop run build:windows
-$installer = Get-ChildItem "target/x86_64-pc-windows-msvc/release/bundle/nsis" -Filter *.exe | Select-Object -First 1
-Start-Process $installer.FullName -ArgumentList '/S' -Wait
+if ($LASTEXITCODE -ne 0) { throw 'Windows build failed' }
+
+$version = (Get-Content apps/desktop/src-tauri/tauri.conf.json -Raw | ConvertFrom-Json).version
+$installer = Get-Item -LiteralPath (Join-Path $nsisDir "Koushi_${version}_x64-setup.exe")
+$process = Start-Process $installer.FullName -ArgumentList '/S' -Wait -PassThru
+if ($process.ExitCode -ne 0) { throw "Installation failed: exit code $($process.ExitCode)" }
 ```
 
 ## Deterministic README screenshot

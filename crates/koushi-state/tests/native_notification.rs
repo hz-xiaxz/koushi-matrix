@@ -6,10 +6,10 @@
 //! must never be built for a suppressed candidate.
 
 use koushi_state::{
-    NativeAttentionCandidate, NativeAttentionCapabilities, NativeAttentionCapability,
-    NativeAttentionObservationKind, NativeAttentionProjectionInput, RoomAttentionKind,
-    RoomLatestEventSummary, RoomNotificationMode, RoomSummary, RoomTags,
-    native_attention_projection_from_rooms,
+    AppAction, AppState, NativeAttentionCandidate, NativeAttentionCapabilities,
+    NativeAttentionCapability, NativeAttentionObservationKind, NativeAttentionProjectionInput,
+    RoomAttentionKind, RoomLatestEventSummary, RoomNotificationMode, RoomSummary, RoomTags,
+    SessionInfo, SessionState, native_attention_projection_from_rooms, reduce,
 };
 use std::collections::{BTreeSet, HashMap};
 
@@ -39,6 +39,8 @@ fn room(room_id: &str, is_dm: bool, unread: u64, highlight: u64) -> RoomSummary 
         unread_count: unread,
         notification_count: unread,
         highlight_count: highlight,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: Some(42),
         conversation_activity: None,
@@ -60,9 +62,89 @@ fn latest_event(event_id: &str, sender: &str, preview: &str) -> RoomLatestEventS
         sender_label: Some(sender.to_owned()),
         sender_avatar: None,
         preview: Some(preview.to_owned()),
+        message_text: None,
         timestamp_ms: 42,
         is_redacted: false,
     }
+}
+
+#[test]
+fn server_only_notification_count_does_not_raise_a_desktop_notification() {
+    let mut phantom = room("!room:example.invalid", false, 0, 0);
+    phantom.notification_count = 3;
+    phantom.latest_event = Some(latest_event(
+        "$old:example.invalid",
+        "Sender",
+        "Old message",
+    ));
+
+    let state = project(
+        &[phantom],
+        false,
+        NativeAttentionObservationKind::Live,
+        None,
+    );
+    assert_eq!(state.summary.badge_count, 0);
+    assert!(state.notification.is_none());
+}
+
+#[test]
+fn unread_count_without_a_verified_latest_event_does_not_raise_a_desktop_notification() {
+    let unread = room("!room:example.invalid", false, 2, 0);
+    let state = project(&[unread], false, NativeAttentionObservationKind::Live, None);
+    assert_eq!(state.summary.badge_count, 2);
+    assert!(state.notification.is_none());
+}
+
+#[test]
+fn server_highlights_and_unmatched_latest_event_do_not_enter_a_desktop_alert() {
+    let mut unread = room("!room:example.invalid", false, 1, 9);
+    unread.notification_count = 9;
+    unread.latest_event = Some(latest_event(
+        "$unrelated:example.invalid",
+        "Sender",
+        "Unrelated content",
+    ));
+    let state = project(&[unread], true, NativeAttentionObservationKind::Live, None);
+    let payload = state.notification.expect("room-level unread alert");
+    assert_eq!(payload.title, "Message in Room");
+    assert_eq!(payload.body, "1 unread");
+    assert_eq!(payload.target.event_id, None);
+    assert_eq!(payload.target.thread_root_event_id, None);
+}
+
+#[test]
+fn server_highlight_growth_does_not_replay_an_old_room_notification() {
+    let mut state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: "@viewer:example.invalid".to_owned(),
+            device_id: "VIEWER".to_owned(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        ..AppState::default()
+    };
+    let mut first = room("!room:example.invalid", false, 1, 0);
+    first.latest_event = Some(latest_event("$old:example.invalid", "Sender", "Old"));
+    reduce(
+        &mut state,
+        AppAction::RoomListUpdated {
+            spaces: vec![],
+            rooms: vec![first.clone()],
+        },
+    );
+
+    first.notification_count = 9;
+    first.highlight_count = 9;
+    reduce(
+        &mut state,
+        AppAction::RoomListUpdated {
+            spaces: vec![],
+            rooms: vec![first],
+        },
+    );
+    assert_eq!(state.native_attention.summary.badge_count, 1);
+    assert!(state.native_attention.notification.is_none());
 }
 
 fn project(
@@ -87,9 +169,7 @@ fn project(
 }
 
 #[test]
-fn previews_off_keeps_message_content_out_of_the_notification() {
-    // The same triggering event serves both runs, so the only difference is the
-    // device-local setting.
+fn previews_setting_never_claims_an_unverified_event_or_content() {
     let mut dm = room("!dm:example.invalid", true, 2, 0);
     dm.latest_event = Some(latest_event(
         "$secret:example.invalid",
@@ -97,156 +177,33 @@ fn previews_off_keeps_message_content_out_of_the_notification() {
         "private body",
     ));
 
-    let without_previews = project(
-        &[dm.clone()],
-        false,
-        NativeAttentionObservationKind::Live,
-        None,
-    );
-    let payload = without_previews
-        .notification
-        .clone()
-        .expect("notification payload for the selected candidate");
-
-    assert_eq!(payload.title, "Direct message in Room");
-    assert_eq!(payload.body, "2 unread");
-    assert!(!payload.body.contains("private body"));
-    assert!(!payload.title.contains("private body"));
-    assert_eq!(payload.target.room_id, "!dm:example.invalid");
-    assert_eq!(
-        payload.target.event_id.as_deref(),
-        Some("$secret:example.invalid")
-    );
-    assert_eq!(label(&without_previews), "Room");
-}
-
-#[test]
-fn previews_on_shows_the_triggering_events_content_and_target() {
-    let mut room = room("!room:example.invalid", false, 3, 1);
-    room.latest_event = Some(latest_event(
-        "$mention:example.invalid",
-        "Alice",
-        "are you around?",
-    ));
-
-    let state = project(&[room], true, NativeAttentionObservationKind::Live, None);
-    let payload = state.notification.expect("notification payload");
-
-    assert_eq!(payload.title, "Mention in Room");
-    assert_eq!(payload.body, "Alice: are you around?");
-    assert_eq!(payload.target.room_id, "!room:example.invalid");
-    assert_eq!(
-        payload.target.event_id.as_deref(),
-        Some("$mention:example.invalid")
-    );
-    assert_eq!(payload.target.thread_root_event_id, None);
-}
-
-#[test]
-fn previews_on_keeps_the_thread_root_of_the_triggering_reply() {
-    let mut room = room("!room:example.invalid", false, 1, 0);
-    let mut event = latest_event("$reply:example.invalid", "Bob", "thread reply");
-    event.thread_root_event_id = Some("$root:example.invalid".to_owned());
-    room.latest_event = Some(event);
-
-    let state = project(&[room], true, NativeAttentionObservationKind::Live, None);
-    let payload = state.notification.expect("notification payload");
-
-    assert_eq!(
-        payload.target.event_id.as_deref(),
-        Some("$reply:example.invalid")
-    );
-    assert_eq!(
-        payload.target.thread_root_event_id.as_deref(),
-        Some("$root:example.invalid")
-    );
-}
-
-#[test]
-fn previews_on_uses_the_projected_fallback_text_for_unavailable_content() {
-    for (preview, expected) in [
-        (
-            "Unable to decrypt message",
-            "Alice: Unable to decrypt message",
-        ),
-        ("Message deleted", "Alice: Message deleted"),
-        ("m.sticker", "Alice: m.sticker"),
-    ] {
-        let mut room = room("!room:example.invalid", false, 1, 0);
-        room.is_encrypted = true;
-        room.latest_event = Some(latest_event("$event:example.invalid", "Alice", preview));
-
-        let state = project(&[room], true, NativeAttentionObservationKind::Live, None);
-        let payload = state.notification.expect("notification payload");
-
-        assert_eq!(payload.body, expected);
+    for previews in [false, true] {
+        let state = project(
+            &[dm.clone()],
+            previews,
+            NativeAttentionObservationKind::Live,
+            None,
+        );
+        let payload = state
+            .notification
+            .as_ref()
+            .expect("room-level notification");
+        assert_eq!(payload.title, "Direct message in Room");
+        assert_eq!(payload.body, "2 unread");
+        assert_eq!(payload.target.room_id, "!dm:example.invalid");
+        assert_eq!(payload.target.event_id, None);
+        assert_eq!(payload.target.thread_root_event_id, None);
+        assert_eq!(label(&state), "Room");
     }
 }
 
 #[test]
-fn previews_on_falls_back_to_counts_when_no_preview_exists() {
-    let mut room = room("!room:example.invalid", false, 4, 0);
-    room.latest_event = Some(RoomLatestEventSummary {
-        preview: None,
-        ..latest_event("$event:example.invalid", "Alice", "unused")
-    });
-
-    let state = project(&[room], true, NativeAttentionObservationKind::Live, None);
-    let payload = state.notification.expect("notification payload");
-
-    assert_eq!(payload.body, "4 unread");
-    assert_eq!(
-        payload.target.event_id.as_deref(),
-        Some("$event:example.invalid")
-    );
-}
-
-#[test]
-fn previews_on_collapses_whitespace_and_bounds_the_body() {
-    let mut room = room("!room:example.invalid", false, 1, 0);
-    let long = "x".repeat(400);
-    room.latest_event = Some(latest_event(
-        "$event:example.invalid",
-        "Alice",
-        &format!("first\n\n  second {long}"),
-    ));
-
-    let state = project(&[room], true, NativeAttentionObservationKind::Live, None);
-    let payload = state.notification.expect("notification payload");
-
-    assert!(payload.body.starts_with("Alice: first second "));
-    assert_eq!(payload.body.chars().count(), 201);
-    assert!(payload.body.ends_with('…'));
-}
-
-#[test]
-fn previews_on_bounds_multibyte_previews_on_character_boundaries() {
-    let mut room = room("!room:example.invalid", false, 1, 0);
-    room.latest_event = Some(latest_event(
-        "$event:example.invalid",
-        "アリス",
-        &"あ".repeat(300),
-    ));
-
-    let state = project(&[room], true, NativeAttentionObservationKind::Live, None);
-    let payload = state.notification.expect("notification payload");
-
-    assert_eq!(payload.body.chars().count(), 201);
-    assert!(payload.body.ends_with('…'));
-}
-
-#[test]
-fn missing_room_history_still_opens_the_room() {
+fn missing_room_history_does_not_claim_a_new_message() {
     let mut room = room("!room:example.invalid", false, 1, 0);
     room.latest_event = None;
 
     let state = project(&[room], true, NativeAttentionObservationKind::Live, None);
-    let payload = state.notification.expect("notification payload");
-
-    assert_eq!(payload.target.room_id, "!room:example.invalid");
-    assert_eq!(payload.target.event_id, None);
-    assert_eq!(payload.target.thread_root_event_id, None);
-    assert_eq!(payload.body, "1 unread");
+    assert!(state.notification.is_none());
 }
 
 #[test]
@@ -351,17 +308,19 @@ fn label(state: &koushi_state::NativeAttentionState) -> String {
 #[test]
 fn kind_specific_titles_match_the_notification_kind() {
     for (kind, expected) in [
-        (RoomAttentionKind::Mention, "Mention in Room"),
         (RoomAttentionKind::Dm, "Direct message in Room"),
         (RoomAttentionKind::Message, "Message in Room"),
     ] {
-        let room = if kind == RoomAttentionKind::Dm {
+        let mut room = if kind == RoomAttentionKind::Dm {
             room("!dm:example.invalid", true, 1, 0)
-        } else if kind == RoomAttentionKind::Mention {
-            room("!room:example.invalid", false, 1, 1)
         } else {
             room("!room:example.invalid", false, 1, 0)
         };
+        room.latest_event = Some(latest_event(
+            "$observed:example.invalid",
+            "Sender",
+            "Message",
+        ));
         let state = project(&[room], false, NativeAttentionObservationKind::Live, None);
         let payload = state.notification.expect("notification payload");
         assert_eq!(payload.title, expected);

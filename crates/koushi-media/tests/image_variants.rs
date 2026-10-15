@@ -2,8 +2,10 @@ use std::io::Cursor;
 
 use image::{DynamicImage, GenericImageView, ImageFormat, Rgba, RgbaImage};
 use koushi_media::{
-    ImageOutputFormat, ImageOutputRequest, ImagePreparationError, ImagePreparationPolicy,
-    ImageResizeScale, PreparedImageFormat, prepare_image_output, prepare_image_variants,
+    DecodeLimits, DecodedRgbaImage, ImageOutputFormat, ImageOutputRequest, ImagePreparationError,
+    ImagePreparationPolicy, ImageResizeScale, PreparedImageFormat, prepare_decoded_image_output,
+    prepare_image_output, prepare_image_output_fitted, prepare_image_variants,
+    probe_image_dimensions,
 };
 
 fn synthetic_png(width: u32, height: u32) -> Vec<u8> {
@@ -462,4 +464,171 @@ fn undecodable_sources_report_a_decode_failure() {
         ),
         Err(ImagePreparationError::Decode)
     );
+}
+
+fn decoded_rgba(width: u32, height: u32, alpha: u8) -> DecodedRgbaImage {
+    let pixels = (0..width * height)
+        .flat_map(|index| [(index % 251) as u8, (index % 239) as u8, 127, alpha])
+        .collect();
+    DecodedRgbaImage::from_straight_rgba(
+        width,
+        height,
+        width as usize * 4,
+        pixels,
+        DecodeLimits::default(),
+    )
+    .expect("synthetic layout")
+}
+
+#[test]
+fn decoded_pixels_encode_every_concrete_format_and_scale() {
+    let policy = ImagePreparationPolicy::default();
+    for (resize, expected) in [
+        (ImageResizeScale::Original, (64, 40)),
+        (ImageResizeScale::Half, (32, 20)),
+        (ImageResizeScale::Quarter, (16, 10)),
+        (ImageResizeScale::Eighth, (8, 5)),
+    ] {
+        for (format, prepared, mime, extension) in [
+            (
+                ImageOutputFormat::Jpeg,
+                PreparedImageFormat::Jpeg,
+                "image/jpeg",
+                "jpg",
+            ),
+            (
+                ImageOutputFormat::Png,
+                PreparedImageFormat::Png,
+                "image/png",
+                "png",
+            ),
+            (
+                ImageOutputFormat::WebP,
+                PreparedImageFormat::WebP,
+                "image/webp",
+                "webp",
+            ),
+        ] {
+            let request = ImageOutputRequest { resize, format };
+            let variant = prepare_decoded_image_output(
+                decoded_rgba(64, 40, 255),
+                "IMG_0001.HEIC",
+                request,
+                &policy,
+            )
+            .expect("decoded pixels encode");
+            assert_eq!(variant.id, request.identity());
+            assert_eq!(variant.format, prepared);
+            assert_eq!(variant.mime_type, mime);
+            assert_eq!(variant.filename, format!("IMG_0001.{extension}"));
+            assert_eq!(variant.dimensions, expected);
+            assert!(variant.metadata_stripped && variant.thumbnail_refreshed);
+            let reread = image::load_from_memory(&variant.bytes).expect("real encoded bytes");
+            assert_eq!(reread.dimensions(), expected);
+        }
+    }
+}
+
+#[test]
+fn decoded_pixels_keep_straight_alpha_and_reject_keep() {
+    let policy = ImagePreparationPolicy::default();
+    let png = prepare_decoded_image_output(
+        decoded_rgba(4, 4, 128),
+        "alpha.heic",
+        ImageOutputRequest {
+            resize: ImageResizeScale::Original,
+            format: ImageOutputFormat::Png,
+        },
+        &policy,
+    )
+    .expect("png");
+    let reread = image::load_from_memory(&png.bytes).expect("png").to_rgba8();
+    assert_eq!(reread.get_pixel(1, 0).0, [1, 1, 127, 128]);
+
+    assert_eq!(
+        prepare_decoded_image_output(
+            decoded_rgba(4, 4, 255),
+            "keep.heic",
+            ImageOutputRequest {
+                resize: ImageResizeScale::Original,
+                format: ImageOutputFormat::Keep,
+            },
+            &policy,
+        ),
+        Err(ImagePreparationError::Encode)
+    );
+}
+
+#[test]
+fn fitted_output_resizes_to_the_long_edge_budget_without_upscaling() {
+    let policy = ImagePreparationPolicy::default();
+
+    let landscape = prepare_image_output_fitted(
+        &synthetic_png(400, 200),
+        "avatar.png",
+        120,
+        ImageOutputFormat::WebP,
+        &policy,
+    )
+    .expect("landscape avatar fits the budget");
+    assert_eq!(landscape.dimensions, (120, 60));
+    assert_eq!(landscape.format, PreparedImageFormat::WebP);
+    assert_eq!(landscape.mime_type, "image/webp");
+    assert_eq!(landscape.id, "fit-120-webp");
+
+    let portrait = prepare_image_output_fitted(
+        &synthetic_jpeg(60, 300),
+        "avatar.jpg",
+        120,
+        ImageOutputFormat::Jpeg,
+        &policy,
+    )
+    .expect("portrait avatar fits the budget");
+    assert_eq!(portrait.dimensions, (24, 120));
+
+    // Already within the target: dimensions are preserved, never upscaled.
+    let small = prepare_image_output_fitted(
+        &synthetic_png(64, 32),
+        "avatar.png",
+        120,
+        ImageOutputFormat::WebP,
+        &policy,
+    )
+    .expect("small avatar stays at its own size");
+    assert_eq!(small.dimensions, (64, 32));
+}
+
+#[test]
+fn fitted_output_reports_non_decodable_content_instead_of_retaining_it() {
+    let policy = ImagePreparationPolicy::default();
+    assert_eq!(
+        prepare_image_output_fitted(
+            &synthetic_apng(),
+            "animated.png",
+            120,
+            ImageOutputFormat::WebP,
+            &policy,
+        ),
+        Err(ImagePreparationError::UnsupportedFormat)
+    );
+    assert_eq!(
+        prepare_image_output_fitted(
+            b"binaryjpegfullimagedata",
+            "avatar.jpg",
+            120,
+            ImageOutputFormat::WebP,
+            &policy,
+        ),
+        Err(ImagePreparationError::UnsupportedFormat)
+    );
+}
+
+#[test]
+fn dimension_probe_reads_headers_for_content_kept_verbatim() {
+    assert_eq!(
+        probe_image_dimensions(&synthetic_png(80, 40)),
+        Some((80, 40))
+    );
+    assert_eq!(probe_image_dimensions(b"binaryjpegfullimagedata"), None);
+    assert_eq!(probe_image_dimensions(&[]), None);
 }

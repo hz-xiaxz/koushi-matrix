@@ -1,9 +1,10 @@
-use std::{collections::BTreeMap, fmt};
+use std::{collections::BTreeMap, fmt, sync::Arc};
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_media::{
-    ImageOutputFormat, ImageOutputRequest, ImagePreparationPolicy, ImageResizeScale,
-    PreparedImageFormat, PreparedImageVariant, heif_mime_type, prepare_image_output,
+    ImageOutputFormat, ImageOutputRequest, ImagePreparationError, ImagePreparationPolicy,
+    ImageResizeScale, PreparedImageFormat, PreparedImageVariant, heif_mime_type,
+    prepare_decoded_image_output, prepare_image_output,
 };
 use koushi_state::{
     ComposerTarget, ImageUploadCompressionPolicy, MediaPreparationFailureKind,
@@ -13,15 +14,34 @@ use koushi_state::{
 };
 use tokio::sync::{Mutex, MutexGuard};
 
+use crate::native_image_decoder::{DecodeLimits, NativeImageDecodeError, NativeStillImageDecoder};
+
 pub const MAX_PREPARATION_BATCH_SIZE: usize = 16;
 
 #[derive(Default)]
 pub struct MediaPreparationService {
     registry: Mutex<MediaPreparationRegistry>,
     transitions: Mutex<()>,
+    native_image_decoder: Option<Arc<dyn NativeStillImageDecoder>>,
 }
 
 impl MediaPreparationService {
+    /// A service whose HEIF preparation uses `native_image_decoder` when one is
+    /// injected, and the pure decoder otherwise.
+    pub fn with_native_image_decoder(
+        native_image_decoder: Option<Arc<dyn NativeStillImageDecoder>>,
+    ) -> Self {
+        Self {
+            native_image_decoder,
+            ..Self::default()
+        }
+    }
+
+    /// The injected platform decoder, handed to each preparation worker.
+    pub fn native_image_decoder(&self) -> Option<Arc<dyn NativeStillImageDecoder>> {
+        self.native_image_decoder.clone()
+    }
+
     pub async fn transition(&self) -> MediaPreparationTransition<'_> {
         let transition = self.transitions.lock().await;
         let registry = self.registry.lock().await;
@@ -100,6 +120,16 @@ impl MediaPreparationTransition<'_> {
         self.registry.variant_bytes(target, staged_id, variant_id)
     }
 
+    pub fn variant_preview_bytes(
+        &self,
+        target: &ComposerTarget,
+        staged_id: &str,
+        variant_id: &str,
+    ) -> Option<Vec<u8>> {
+        self.registry
+            .variant_preview_bytes(target, staged_id, variant_id)
+    }
+
     pub fn use_original(
         &mut self,
         target: &ComposerTarget,
@@ -147,6 +177,10 @@ impl fmt::Debug for StageUploadBytesInput {
 struct CachedVariant {
     descriptor: PreparedUploadVariant,
     storage: CachedVariantStorage,
+    /// Variant whose bytes the preview surface may render when the upload bytes
+    /// themselves are not WebView-renderable (Original+Keep of a HEIF source).
+    /// `None` means "serve this variant's own bytes".
+    preview_variant_id: Option<String>,
 }
 
 #[derive(Clone)]
@@ -185,6 +219,9 @@ pub struct MediaPreparationStats {
 pub fn media_preparation_summary_event(stats: MediaPreparationStats) -> DiagnosticEvent {
     DiagnosticEvent::new(DiagnosticLevel::Info, "core.media_preparation", "summary")
         .field(DiagnosticField::token("retention", "source_backed"))
+        // Named cache only: these counters cover the composer's prepared media,
+        // not the native heap.
+        .field(DiagnosticField::token("cache_scope", "named_caches_only"))
         .field(DiagnosticField::count(
             "source_count",
             stats.source_count as u64,
@@ -253,6 +290,8 @@ pub struct MediaPreparationRegistry {
     selected: BTreeMap<(ComposerTarget, String), String>,
     sources: BTreeMap<(ComposerTarget, String), StageUploadBytesInput>,
     account_user_id: Option<String>,
+    /// Decoder capability for HEIF sources; never merged or retained as state.
+    native_image_decoder: Option<Arc<dyn NativeStillImageDecoder>>,
     high_water_source_count: usize,
     high_water_source_bytes: usize,
     high_water_variant_count: usize,
@@ -260,6 +299,21 @@ pub struct MediaPreparationRegistry {
 }
 
 impl MediaPreparationRegistry {
+    /// A preparation registry that decodes HEIF sources through
+    /// `native_image_decoder` when one is injected.
+    pub fn with_native_image_decoder(
+        native_image_decoder: Option<Arc<dyn NativeStillImageDecoder>>,
+    ) -> Self {
+        Self {
+            native_image_decoder,
+            ..Self::default()
+        }
+    }
+
+    pub fn native_image_decoder(&self) -> Option<&dyn NativeStillImageDecoder> {
+        self.native_image_decoder.as_deref()
+    }
+
     pub fn stats(&self) -> MediaPreparationStats {
         let source_bytes = self.sources.values().fold(0usize, |total, input| {
             total.saturating_add(input.bytes.len())
@@ -383,27 +437,38 @@ impl MediaPreparationRegistry {
 
     /// Encode one pair from a retained source, or `None` when it cannot be
     /// decoded or encoded.
+    ///
+    /// A HEIF source uses `native_image_decoder` when one is injected, so a
+    /// lazily selected output decodes exactly like the initial preparation.
     pub fn encode_output(
         source: &StageUploadBytesInput,
         selection: StagedUploadOutputSelection,
         policy: ImageUploadCompressionPolicy,
-    ) -> Option<(PreparedUploadVariant, Vec<u8>)> {
+        native_image_decoder: Option<&dyn NativeStillImageDecoder>,
+    ) -> Result<(PreparedUploadVariant, Vec<u8>), MediaPreparationFailureKind> {
         let request = ImageOutputRequest {
             resize: image_resize_scale(selection.resize),
             format: image_output_format_for_source(&source.bytes, selection),
         };
-        let variant = prepare_image_output(
-            &source.bytes,
-            &source.filename,
-            request,
-            &ImagePreparationPolicy {
-                target_long_edge: u32::try_from(policy.target_long_edge).unwrap_or(u32::MAX),
-                quality_percent: policy.quality_percent,
-            },
-        )
-        .ok()?;
+        let encode_policy = ImagePreparationPolicy {
+            target_long_edge: u32::try_from(policy.target_long_edge).unwrap_or(u32::MAX),
+            quality_percent: policy.quality_percent,
+        };
+        // The typed failure is preserved so a lazily selected pair that cannot be
+        // encoded settles the item instead of leaving it pending forever.
+        let variant = match heif_mime_type(&source.bytes) {
+            Some(detected) => prepare_heif_output(
+                source,
+                detected,
+                request,
+                &encode_policy,
+                native_image_decoder,
+            )?,
+            None => prepare_image_output(&source.bytes, &source.filename, request, &encode_policy)
+                .map_err(image_preparation_failure_kind)?,
+        };
         let descriptor = descriptor_from_image_variant(&variant, source.bytes.len(), selection);
-        Some((descriptor, variant.bytes))
+        Ok((descriptor, variant.bytes))
     }
 
     /// Cache a lazily encoded pair and select it, so the upload uses its exact
@@ -432,6 +497,7 @@ impl MediaPreparationRegistry {
             CachedVariant {
                 descriptor,
                 storage,
+                preview_variant_id: None,
             },
         );
         self.selected
@@ -471,6 +537,7 @@ impl MediaPreparationRegistry {
         })
     }
 
+    /// Bytes the upload sends for `variant_id`.
     pub fn variant_bytes(
         &self,
         target: &ComposerTarget,
@@ -481,6 +548,32 @@ impl MediaPreparationRegistry {
             self.variants
                 .get(&(target.clone(), staged_id.to_owned(), variant_id.to_owned()))?;
         self.cached_variant_bytes(target, staged_id, cached)
+    }
+
+    /// Bytes the preview surface may render for `variant_id`.
+    ///
+    /// Kept separate from [`Self::variant_bytes`]: Original+Keep must upload the
+    /// exact source bytes, while the WebView cannot render raw HEIF, so that
+    /// variant previews the converted output the item already caches. Every
+    /// other variant previews its own upload bytes.
+    pub fn variant_preview_bytes(
+        &self,
+        target: &ComposerTarget,
+        staged_id: &str,
+        variant_id: &str,
+    ) -> Option<Vec<u8>> {
+        let cached =
+            self.variants
+                .get(&(target.clone(), staged_id.to_owned(), variant_id.to_owned()))?;
+        let Some(preview_variant_id) = cached.preview_variant_id.as_deref() else {
+            return self.cached_variant_bytes(target, staged_id, cached);
+        };
+        let preview = self.variants.get(&(
+            target.clone(),
+            staged_id.to_owned(),
+            preview_variant_id.to_owned(),
+        ))?;
+        self.cached_variant_bytes(target, staged_id, preview)
     }
 
     fn cached_variant_bytes(
@@ -718,6 +811,7 @@ impl MediaPreparationRegistry {
             CachedVariant {
                 descriptor: descriptor.clone(),
                 storage: CachedVariantStorage::Source,
+                preview_variant_id: None,
             },
         );
         self.selected.insert(
@@ -778,6 +872,7 @@ impl MediaPreparationRegistry {
             CachedVariant {
                 descriptor: descriptor.clone(),
                 storage: CachedVariantStorage::Source,
+                preview_variant_id: None,
             },
         );
         self.selected.insert(
@@ -822,21 +917,18 @@ impl MediaPreparationRegistry {
             resize: StagedUploadResizeChoice::Original,
             format: StagedUploadFormatChoice::Jpeg,
         };
-        let Ok(converted) = prepare_image_output(
-            &input.bytes,
-            &input.filename,
+        let converted = match prepare_heif_output(
+            &input,
+            mime_type,
             ImageOutputRequest {
                 resize: ImageResizeScale::Original,
                 format: ImageOutputFormat::Jpeg,
             },
             &encode_policy,
-        ) else {
-            return staged_failure(
-                target,
-                input,
-                byte_count,
-                MediaPreparationFailureKind::Decode,
-            );
+            self.native_image_decoder.as_deref(),
+        ) {
+            Ok(converted) => converted,
+            Err(failure_kind) => return staged_failure(target, input, byte_count, failure_kind),
         };
         let original_selection = StagedUploadOutputSelection::default();
         let original = PreparedUploadVariant {
@@ -864,6 +956,10 @@ impl MediaPreparationRegistry {
             CachedVariant {
                 descriptor: original.clone(),
                 storage: CachedVariantStorage::Source,
+                // The exact HEIC bytes stay the upload payload, but a WebView
+                // cannot render them, so the preview renders the converted
+                // variant this same item already caches.
+                preview_variant_id: Some(converted_descriptor.variant_id.clone()),
             },
         );
         self.variants.insert(
@@ -875,6 +971,7 @@ impl MediaPreparationRegistry {
             CachedVariant {
                 descriptor: converted_descriptor.clone(),
                 storage: CachedVariantStorage::Owned(converted.bytes),
+                preview_variant_id: None,
             },
         );
         self.selected.insert(
@@ -903,6 +1000,86 @@ impl MediaPreparationRegistry {
             },
         }
     }
+}
+
+/// Map a pure-encoder failure onto the state's failure kind.
+fn image_preparation_failure_kind(error: ImagePreparationError) -> MediaPreparationFailureKind {
+    match error {
+        ImagePreparationError::Empty => MediaPreparationFailureKind::Empty,
+        ImagePreparationError::Decode => MediaPreparationFailureKind::Decode,
+        ImagePreparationError::Encode => MediaPreparationFailureKind::Encode,
+        // `prepare_image_output` never returns this; only the fitted avatar path
+        // does, and it maps its own outcome (#1396).
+        ImagePreparationError::UnsupportedFormat => MediaPreparationFailureKind::Decode,
+    }
+}
+
+/// Encode one HEIF output, decoding through the injected platform decoder when
+/// there is one. Without it the pure decoder, including its HDR and gain-map
+/// guard, stays authoritative; a failed platform decode is never retried there.
+fn prepare_heif_output(
+    source: &StageUploadBytesInput,
+    detected_mime: &'static str,
+    request: ImageOutputRequest,
+    policy: &ImagePreparationPolicy,
+    native_image_decoder: Option<&dyn NativeStillImageDecoder>,
+) -> Result<PreparedImageVariant, MediaPreparationFailureKind> {
+    let Some(decoder) = native_image_decoder else {
+        return prepare_image_output(&source.bytes, &source.filename, request, policy)
+            .map_err(|_| MediaPreparationFailureKind::Decode);
+    };
+    let started = crate::executor::Instant::now();
+    let decoded = decoder.decode(&source.bytes, DecodeLimits::default());
+    record_native_decode(
+        decoder.backend(),
+        detected_mime,
+        decoded.as_ref().err().copied(),
+        started.elapsed(),
+    );
+    let decoded = decoded.map_err(|error| match error {
+        NativeImageDecodeError::Unsupported => MediaPreparationFailureKind::Unsupported,
+        NativeImageDecodeError::Unavailable
+        | NativeImageDecodeError::Malformed
+        | NativeImageDecodeError::TooLarge => MediaPreparationFailureKind::Decode,
+    })?;
+    prepare_decoded_image_output(decoded, &source.filename, request, policy)
+        .map_err(|_| MediaPreparationFailureKind::Encode)
+}
+
+fn record_native_decode(
+    backend: &'static str,
+    detected_mime: &'static str,
+    failure: Option<NativeImageDecodeError>,
+    elapsed: std::time::Duration,
+) {
+    record(
+        DiagnosticEvent::new(
+            if failure.is_some() {
+                DiagnosticLevel::Warn
+            } else {
+                DiagnosticLevel::Debug
+            },
+            "core.media_preparation",
+            "native_decode",
+        )
+        .field(DiagnosticField::token("backend", backend))
+        .field(DiagnosticField::token(
+            "detected",
+            if detected_mime == "image/heic" {
+                "heic"
+            } else {
+                "heif"
+            },
+        ))
+        .field(DiagnosticField::token(
+            "outcome",
+            failure.map_or("decoded", NativeImageDecodeError::token),
+        ))
+        .field(DiagnosticField::milliseconds(
+            "elapsed_ms",
+            elapsed.as_millis(),
+        )),
+    );
 }
 
 enum SessionAccountObservation<'a> {
@@ -1080,5 +1257,7 @@ fn normalized_heif_filename(filename: &str, mime_type: &str) -> String {
     }
 }
 
+#[cfg(test)]
+mod native_decoder_tests;
 #[cfg(test)]
 mod tests;

@@ -578,6 +578,8 @@ describe("appStore projection cache", () => {
     const oldRoom = {
       receipts_by_event: {},
       fully_read_event_id: null,
+      focused_receipts_by_event: {},
+      thread_receipts_by_event: {},
       typing_user_ids: [],
       typing_users: []
     };
@@ -616,6 +618,8 @@ describe("appStore projection cache", () => {
     const oldRoom = {
       receipts_by_event: {},
       fully_read_event_id: null,
+      focused_receipts_by_event: {},
+      thread_receipts_by_event: {},
       typing_user_ids: [],
       typing_users: []
     };
@@ -623,6 +627,8 @@ describe("appStore projection cache", () => {
     const nextRoom = {
       receipts_by_event: {},
       fully_read_event_id: "$event:example.invalid",
+      focused_receipts_by_event: {},
+      thread_receipts_by_event: {},
       typing_user_ids: [],
       typing_users: []
     };
@@ -656,6 +662,8 @@ describe("appStore projection cache", () => {
         "$event:example.invalid": { readers: [], total_count: 1, overflow_count: 0 }
       },
       fully_read_event_id: null,
+      focused_receipts_by_event: {},
+      thread_receipts_by_event: {},
       typing_user_ids: [],
       typing_users: []
     };
@@ -697,12 +705,16 @@ describe("appStore projection cache", () => {
         "$removed:example.invalid": { readers: [], total_count: 2, overflow_count: 0 }
       },
       fully_read_event_id: null,
+      focused_receipts_by_event: {},
+      thread_receipts_by_event: {},
       typing_user_ids: [],
       typing_users: []
     };
     const unrelatedRoom = {
       receipts_by_event: {},
       fully_read_event_id: null,
+      focused_receipts_by_event: {},
+      thread_receipts_by_event: {},
       typing_user_ids: [],
       typing_users: []
     };
@@ -750,6 +762,66 @@ describe("appStore projection cache", () => {
     expect(projected?.state.domain.live_signals.rooms).not.toBe(
       previous.state.domain.live_signals.rooms
     );
+  });
+
+  test("merges scoped receipt deltas without crossing receipt scopes", () => {
+    const previous = makeSnapshot();
+    const room = {
+      receipts_by_event: {},
+      fully_read_event_id: null,
+      focused_receipts_by_event: {
+        "$target:example.invalid": {
+          "$changed:example.invalid": { readers: [], total_count: 1, overflow_count: 0 },
+          "$removed:example.invalid": { readers: [], total_count: 2, overflow_count: 0 }
+        }
+      },
+      thread_receipts_by_event: {
+        "$root:example.invalid": {
+          "$changed:example.invalid": { readers: [], total_count: 9, overflow_count: 0 }
+        }
+      },
+      typing_user_ids: [],
+      typing_users: []
+    };
+    previous.state.domain.live_signals.rooms["!room:example.invalid"] = room;
+    const focused = { readers: [], total_count: 3, overflow_count: 0 };
+    const delta = {
+      generation: 1,
+      changed: {
+        state: {
+          domain: {
+            live_signals_focused_receipts_by_room_event: {
+              "!room:example.invalid": {
+                "$target:example.invalid": {
+                  "$changed:example.invalid": focused,
+                  "$removed:example.invalid": null
+                }
+              }
+            },
+            live_signals_thread_receipts_by_room_event: {
+              "!room:example.invalid": {
+                "$root:example.invalid": {
+                  "$changed:example.invalid": { readers: [], total_count: 10, overflow_count: 0 }
+                }
+              }
+            }
+          }
+        }
+      }
+    };
+
+    const projected = applyDeltaToState(previous, delta);
+    const projectedRoom = projected?.state.domain.live_signals.rooms["!room:example.invalid"];
+
+    expect(projectedRoom?.focused_receipts_by_event).toEqual({
+      "$target:example.invalid": { "$changed:example.invalid": focused }
+    });
+    expect(projectedRoom?.thread_receipts_by_event).toEqual({
+      "$root:example.invalid": {
+        "$changed:example.invalid": { readers: [], total_count: 10, overflow_count: 0 }
+      }
+    });
+    expect(projectedRoom?.receipts_by_event).toBe(room.receipts_by_event);
   });
 
   test("merges one room profile-user delta without replacing other rooms", () => {
@@ -1340,7 +1412,7 @@ describe("session-scoped optional delta merge", () => {
 function makeSnapshot(): DesktopSnapshot {
   return {
     state: {
-      schema_version: 7,
+      schema_version: 8,
       domain: {
         session: { kind: "ready", homeserver: "https://example.invalid", user_id: "@user:example.invalid", device_id: "DEVICE" },
         session_lock_reason: null,
@@ -1362,6 +1434,19 @@ function makeSnapshot(): DesktopSnapshot {
               message_previews: true,
               send_read_receipts: true,
               send_typing_notifications: true
+            },
+            delivery: {
+              enabled: false,
+              direct_messages: true,
+              mentions: true,
+              keywords: true,
+              only_when_unfocused: true,
+              dwell_secs: 300,
+              min_interval_secs: 900,
+              prefix_chars: 80,
+              prefix_consent: null,
+              watched: [],
+              sinks: []
             },
             display: {
               code_block_wrap: true,
@@ -1502,6 +1587,7 @@ function makeSnapshot(): DesktopSnapshot {
           pending_email: null,
           operation: { kind: "idle" }
         },
+        notification_delivery: { sinks: [], presets: [] },
         contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
         account_management_capabilities: { change_password: { kind: "unknown" } },
         soft_logout_reauth: { kind: "idle" },
@@ -1607,6 +1693,7 @@ function makeSnapshot(): DesktopSnapshot {
         focused_context: { kind: "closed" },
         files_view: { kind: "closed" }, history_export: { kind: "idle" },
         threads_list: { kind: "closed" },
+        scheduled_sends_list: { kind: "closed" },
         errors: [],
         basic_operation: { kind: "idle" },
         room_address_availability: { kind: "idle" }

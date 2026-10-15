@@ -848,6 +848,35 @@ impl RoomActor {
                 self.handle_set_space_child(request_id, space_id, child_room_id)
                     .await;
             }
+            RoomCommand::SetSpaceChildSuggested {
+                request_id,
+                space_id,
+                child_room_id,
+                suggested,
+            } => {
+                self.handle_set_space_child_suggested(
+                    request_id,
+                    space_id,
+                    child_room_id,
+                    suggested,
+                )
+                .await;
+            }
+            RoomCommand::JoinSuggestedSpaceRooms {
+                request_id,
+                space_id,
+                room_ids,
+            } => {
+                self.handle_join_suggested_space_rooms(request_id, space_id, room_ids)
+                    .await;
+            }
+            RoomCommand::DismissSuggestedSpaceRooms {
+                request_id: _,
+                space_id,
+            } => {
+                self.reduce_reliable(vec![AppAction::SuggestedRoomsOfferDismissed { space_id }])
+                    .await;
+            }
             RoomCommand::InviteUser {
                 request_id,
                 room_id,
@@ -971,12 +1000,6 @@ impl RoomActor {
             } => {
                 self.handle_unpin_event(request_id, room_id, event_id).await;
             }
-            RoomCommand::RefreshPinnedEvents {
-                request_id,
-                room_id,
-            } => {
-                self.handle_refresh_pinned_events(request_id, room_id);
-            }
             RoomCommand::QueryDirectory { request_id, query } => {
                 self.handle_query_directory(request_id, query).await;
             }
@@ -1005,6 +1028,12 @@ impl RoomActor {
                 room_id,
             } => {
                 self.handle_load_room_settings(request_id, room_id).await;
+            }
+            RoomCommand::SetRoomAccessDraft {
+                request_id: _,
+                command,
+            } => {
+                self.handle_set_room_access_draft(command).await;
             }
             RoomCommand::QueryMentionCandidates {
                 request_id,

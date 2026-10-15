@@ -44,6 +44,10 @@ pub enum AppCommand {
         expected_account: crate::SessionKeyId,
         target: koushi_state::ComposerTarget,
         submitted_revision: ComposerDraftRevision,
+        /// #1130: whether the send that settles this draft actually dispatched
+        /// its text. A staged-attachment send dispatches only the staged items,
+        /// so it settles the revision and leaves the typed text in place.
+        consumes_draft: bool,
     },
     SetUploadStaging {
         request_id: RequestId,
@@ -179,6 +183,29 @@ pub enum AppCommand {
         request_id: RequestId,
         patch: SettingsPatch,
     },
+    /// #1427: store one delivery sink's secret in the credential store under the sink
+    /// id. The secret is written, never echoed back, never logged, and never part of any
+    /// state snapshot; `NotificationSinkSecret`'s own `Debug` redacts it even if this
+    /// command is formatted.
+    SetNotificationDeliverySecret {
+        request_id: RequestId,
+        sink_id: String,
+        secret: String,
+    },
+    /// #1427: forget the secret stored for one sink. The sink itself stays configured;
+    /// it simply stops being a sink this device can send through.
+    ClearNotificationDeliverySecret {
+        request_id: RequestId,
+        sink_id: String,
+    },
+    /// #1427: send one canned message through one sink, so the user can prove the
+    /// credential and the network path work before trusting the channel. It carries no
+    /// room, event, or message data, and it does not touch the coalescing window of real
+    /// deliveries.
+    TestNotificationDelivery {
+        request_id: RequestId,
+        sink_id: String,
+    },
     ImportLegacySettings {
         request_id: RequestId,
         patch: SettingsPatch,
@@ -231,6 +258,13 @@ pub enum AppCommand {
         scope: koushi_state::ThreadsListScope,
     },
     CloseThreadsList {
+        request_id: RequestId,
+    },
+    OpenScheduledSendsList {
+        request_id: RequestId,
+        scope: koushi_state::ScheduledSendsScope,
+    },
+    CloseScheduledSendsList {
         request_id: RequestId,
     },
     PaginateThreadsList {
@@ -311,10 +345,15 @@ impl fmt::Debug for AppCommand {
                 .field("root_event_id", &"EventId(..)")
                 .field("draft", &"MessageBody(..)")
                 .finish(),
-            Self::AcceptComposerDraft { request_id, .. } => formatter
+            Self::AcceptComposerDraft {
+                request_id,
+                consumes_draft,
+                ..
+            } => formatter
                 .debug_struct("AcceptComposerDraft")
                 .field("request_id", request_id)
                 .field("target", &"ComposerTarget(..)")
+                .field("consumes_draft", consumes_draft)
                 .finish(),
             Self::SetUploadStaging {
                 request_id, items, ..
@@ -518,6 +557,35 @@ impl fmt::Debug for AppCommand {
                 .field("request_id", request_id)
                 .field("patch_fields", &settings_patch_field_names(patch))
                 .finish(),
+            // The sink id is settings data and may be shown; the secret never is. A
+            // `String`'s derived `Debug` would print it, so this arm is the reason the
+            // enum has a hand-written `Debug` at all.
+            Self::SetNotificationDeliverySecret {
+                request_id,
+                sink_id,
+                secret: _,
+            } => formatter
+                .debug_struct("SetNotificationDeliverySecret")
+                .field("request_id", request_id)
+                .field("sink_id", sink_id)
+                .field("secret", &"NotificationSinkSecret(<redacted>)")
+                .finish(),
+            Self::ClearNotificationDeliverySecret {
+                request_id,
+                sink_id,
+            } => formatter
+                .debug_struct("ClearNotificationDeliverySecret")
+                .field("request_id", request_id)
+                .field("sink_id", sink_id)
+                .finish(),
+            Self::TestNotificationDelivery {
+                request_id,
+                sink_id,
+            } => formatter
+                .debug_struct("TestNotificationDelivery")
+                .field("request_id", request_id)
+                .field("sink_id", sink_id)
+                .finish(),
             Self::UpdateNavigationPreference { request_id, update } => formatter
                 .debug_struct("UpdateNavigationPreference")
                 .field("request_id", request_id)
@@ -592,6 +660,15 @@ impl fmt::Debug for AppCommand {
                 .finish(),
             Self::CloseThreadsList { request_id } => formatter
                 .debug_struct("CloseThreadsList")
+                .field("request_id", request_id)
+                .finish(),
+            Self::OpenScheduledSendsList { request_id, .. } => formatter
+                .debug_struct("OpenScheduledSendsList")
+                .field("request_id", request_id)
+                .field("scope", &"ScheduledSendsScope(..)")
+                .finish(),
+            Self::CloseScheduledSendsList { request_id } => formatter
+                .debug_struct("CloseScheduledSendsList")
                 .field("request_id", request_id)
                 .finish(),
             Self::PaginateThreadsList { request_id, .. } => formatter

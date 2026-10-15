@@ -10,7 +10,8 @@ use koushi_sdk::{
     MatrixTimelineGapInspection, MatrixTimelineGapRepairResult,
 };
 use koushi_state::{
-    AppAction, ComposerDocument, TimelineMediaGalleryItem, TimelineThreadRootOrder,
+    AppAction, ComposerDocument, ComposerFormattingOptions, TimelineMediaGalleryItem,
+    TimelineThreadRootOrder,
 };
 
 use matrix_sdk::send_queue::{RoomSendQueueUpdate, SendHandle};
@@ -28,8 +29,6 @@ use crate::search::SearchIndexMessage;
 use crate::startup_trace::{self, StartupPhase};
 use crate::threads_list::ThreadRootProjectionService;
 use koushi_protocol::command::MediaDownloadSelection;
-#[cfg(test)]
-use koushi_protocol::event::TimelineAnchorRestoreStatus;
 use koushi_protocol::event::{
     CoreEvent, LinkPreview, PaginationDirection, TimelineDiff, TimelineItem, TimelineItemId,
     TimelineNavigationSnapshot, TimelineReadStateSync, TimelineResyncReason, TimelineSendState,
@@ -51,15 +50,16 @@ use super::display_projection::{DisplayProjectionContext, DisplayProjectionState
 use super::gap_repair::{
     GapRepairEvaluationDiagnosticSignature, GapRepairViewportWakeDecision, GlobalCommitDecision,
     GlobalCommitFence, GlobalResponseCommit, PendingLiveTailRefreshCompletion,
-    PendingTimelineGapProjection, RestoreCausalProjectionBuffer, TimelineGapProjectionCorrelation,
-    TimelineGapRepairTracker, TimelineGapRepairTrigger, historical_causal_projection_operation,
-    projected_gaps_contain_id, rendered_live_edge_target, retain_room_subscription_checkpoint,
+    PendingTimelineGapProjection, TimelineGapProjectionCorrelation, TimelineGapRepairTracker,
+    TimelineGapRepairTrigger, historical_causal_projection_operation, projected_gaps_contain_id,
+    rendered_live_edge_target, retain_room_subscription_checkpoint,
     room_checkpoint_advances_global_fence, should_record_gap_repair_evaluation,
 };
 use super::item_projection::{
     ReceiptObservationTarget, apply_link_previews_to_item, apply_timeline_item_visibility,
     cache_sdk_item_media_source, emit_receipt_observation_actions,
-    live_event_receipts_from_sdk_items, remember_local_echo, sdk_item_to_timeline_item,
+    live_event_receipts_from_sdk_items, live_event_window_ids_from_sdk_items,
+    receipt_scope_for_timeline_kind, remember_local_echo, sdk_item_to_timeline_item,
     thread_auto_requestable_event_id, timeline_room_id, withheld_update_should_publish,
 };
 use super::manager::TimelineMessage;
@@ -68,10 +68,10 @@ use super::media::{
     media_gallery_updated_action,
 };
 use super::navigation::{
-    ActivePaginationTask, INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT, InitialItemsRequestIdentity,
-    PaginationCompletion, RestoreTimelineAnchorState, TimelineActorGenerationGate,
-    activity_rows_from_timeline_items, emit_initial_items_for_generation,
-    emit_timeline_events_for_generation, send_generation_fenced,
+    ActivePaginationTask, INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT,
+    INITIAL_EMPTY_ROOM_HYDRATION_MAX_ROUNDS, InitialItemsRequestIdentity, PaginationCompletion,
+    TimelineActorGenerationGate, activity_rows_from_timeline_items,
+    emit_initial_items_for_generation, emit_timeline_events_for_generation, send_generation_fenced,
     should_hydrate_empty_initial_room_timeline,
 };
 use super::outbound_send::{
@@ -214,6 +214,13 @@ pub(super) enum TimelineActorMessage {
     /// changed because another room was added/removed (issue #518). The actor
     /// must accept new-generation checkpoints after this message is processed.
     UpdateSubscriptionGeneration(u64),
+    /// #1259: re-overlay the room root items whose thread unread changed because a
+    /// read marker advanced outside this actor.
+    RefreshThreadUnread,
+    /// #1259: the same, retried while a threaded read's sync echo is still in flight.
+    RefreshThreadUnreadRetry {
+        attempt: u32,
+    },
     GlobalResponseCommitted(GlobalResponseCommit),
     StartLiveTailRefresh {
         epoch: u64,
@@ -271,15 +278,6 @@ pub(super) enum TimelineActorMessage {
         completion: PaginationCompletion,
     },
     OwnReadReceiptChanged,
-    RestoreTimelineAnchor {
-        request_id: RequestId,
-        event_id: String,
-        max_batches: u16,
-        event_count: u16,
-    },
-    RestoreTimelineAnchorContinue {
-        serial: u64,
-    },
     ObserveViewport {
         observation: TimelineViewportObservation,
     },
@@ -303,13 +301,6 @@ pub(super) enum TimelineActorMessage {
     ReplyQuoteRetryDue {
         event_id: String,
         token: super::reply_quote_hydration::HydrationToken,
-    },
-    /// Test-only: settle a ledger entry from an authoritative observation, as
-    /// a completed batch or an edit would, without an SDK lookup.
-    #[cfg(test)]
-    TestSettleReplyQuoteOriginal {
-        quote: koushi_state::ReplyQuote,
-        acknowledged: tokio::sync::oneshot::Sender<()>,
     },
     RequestRoomKey {
         request_id: Option<RequestId>,
@@ -356,15 +347,11 @@ pub(super) enum TimelineActorMessage {
         request_id: RequestId,
         event_id: String,
         document: ComposerDocument,
+        formatting_options: ComposerFormattingOptions,
     },
     Redact {
         request_id: RequestId,
         event_id: String,
-    },
-    ToggleReaction {
-        request_id: RequestId,
-        event_id: String,
-        reaction_key: String,
     },
     SendReaction {
         request_id: RequestId,
@@ -440,24 +427,14 @@ pub(super) enum TimelineActorMessage {
     ReplayInitialItems {
         cause_request_id: Option<RequestId>,
     },
+    /// Inject one SDK-shaped batch through the normal diff path and wait for
+    /// the actor to settle it. Used by tests that need an acknowledged diff
+    /// seam (ignored-user reset), not by the removed anchor restore (#1395).
     #[cfg(test)]
-    TestBeginRestore {
-        request_id: RequestId,
-        event_id: String,
-        acknowledged: oneshot::Sender<()>,
-    },
-    #[cfg(test)]
-    TestInjectRestoreDiff {
+    TestInjectDiff {
         diffs: Vec<eyeball_im::VectorDiff<Arc<SdkTimelineItem>>>,
         projections: BTreeSet<CausalProjectionId>,
         acknowledged: oneshot::Sender<()>,
-    },
-    #[cfg(test)]
-    TestRestoreCausalState(oneshot::Sender<(bool, bool, usize, BTreeSet<CausalProjectionId>)>),
-    #[cfg(test)]
-    TestFinishRestore {
-        request_id: RequestId,
-        response: oneshot::Sender<bool>,
     },
     #[cfg(test)]
     TestArmGapRepairCompletionPause {
@@ -472,6 +449,7 @@ pub(super) enum TimelineActorControl {
     ReplayInitialItems {
         cause_request_id: RequestId,
     },
+    RefreshThreadUnread,
     StartLiveTailRefresh {
         epoch: u64,
         operation_generation: u64,
@@ -557,6 +535,7 @@ impl From<TimelineActorControl> for TimelineActorMessage {
                     cause_request_id: Some(cause_request_id),
                 }
             }
+            TimelineActorControl::RefreshThreadUnread => Self::RefreshThreadUnread,
             TimelineActorControl::StartLiveTailRefresh {
                 epoch,
                 operation_generation,
@@ -892,14 +871,15 @@ pub(super) struct TimelineActor {
     pub(super) media_downloads_in_progress: HashSet<String>,
     /// In-flight media download workers keyed by event id; aborted on actor drop.
     pub(super) media_download_tasks: HashMap<String, executor::JoinHandle<()>>,
-    /// Search index mutation sender (Phase 6). `None` when no search index is
-    /// configured (pre-session or pre-Phase-6 builds). Fire-and-forget: if the
-    /// channel is full, we drop the mutation rather than block the diff relay.
+    /// Reliable Files metadata mutation sender; absent before a search session.
     pub(super) search_index_tx: Option<mpsc::Sender<crate::search::SearchIndexMessage>>,
     /// Rust-owned pane-level thread attention read-state tracker. Only thread
     /// timelines update it, and React reads its projection through
     /// `AppState.thread_attention`.
     pub(super) thread_attention: ThreadAttentionTracker,
+    /// #1238 diagnostic (temporary): the unopened-thread delivery boundary is
+    /// measured once per room actor.
+    pub(super) thread_delivery_diagnosed: bool,
     /// Rust-owned navigation projection source. The webview reports viewport
     /// facts; item ordering, unread marker semantics, and counts stay here.
     pub(super) navigation_items: Vec<TimelineItem>,
@@ -965,31 +945,12 @@ pub(super) struct TimelineActor {
     /// A republish was requested while an anchor restore was buffering its
     /// coalesced emission; it runs at the end of the loop once the restore has
     /// flushed.
-    pub(super) reply_quote_republish_pending: bool,
     pub(super) pagination_task: Option<ActivePaginationTask>,
     pub(super) cache_reset_refill_pending: bool,
     pub(super) next_pagination_serial: u64,
     /// Application data directory for cached preview images.
     pub(super) data_dir: Option<std::path::PathBuf>,
     pub(super) account_work: AccountWorkScheduler,
-    pub(super) restore_anchor: Option<RestoreTimelineAnchorState>,
-    pub(super) next_restore_anchor_serial: u64,
-    /// Buffered `TimelineDiff`s accumulated during a restore walk. While
-    /// `restore_anchor.is_some()`, each `handle_diff_batch` call appends its
-    /// projected display-space diffs here instead of emitting `ItemsUpdated`
-    /// per chunk. Canonical state advances immediately; the
-    /// buffer is flushed as ONE `ItemsUpdated` when the restore terminates
-    /// (Found/EndReached/BudgetExhausted/Failed/Superseded), so React receives
-    /// a single settled update rather than O(chunks) intermediate renders.
-    pub(super) restore_emit_buffer: Vec<TimelineDiff>,
-    /// Causal SDK projection tags for the diffs above. They must be observed
-    /// only after the coalesced restore batch is published to the UI.
-    pub(super) restore_causal_projections: RestoreCausalProjectionBuffer,
-    /// `maybe_hydrate_missing_thread_roots` is deliberately deferred until a
-    /// buffered restore window has emitted its final canonical `ItemsUpdated`.
-    /// Otherwise a newly observed Pending projection is pruned by the store
-    /// before the reply that owns it is visible.
-    pub(super) hydrate_after_restore_flush: bool,
     /// Monotonically increasing counter, incremented at the start of every
     /// `handle_diff_batch` call (restore or not).
     pub(super) diff_batch_seq: u64,
@@ -999,7 +960,6 @@ pub(super) struct TimelineActor {
     /// Historical projection released by a coalesced restore publication.
     /// The synchronous flush records the exact published batch; the actor loop
     /// performs the existing async scheduler handoff immediately afterwards.
-    pub(super) ready_restore_gap_projection_batch: Option<TimelineBatchId>,
     pub(super) live_tail_projection_correlation: TimelineGapProjectionCorrelation,
     pub(super) pending_live_tail_projection: Option<PendingLiveTailRefreshCompletion>,
     pub(super) live_tail_refresh: Option<(
@@ -1088,18 +1048,14 @@ fn canonical_pending_event_ids(
 
 impl TimelineActor {
     pub(super) fn display_projection_context(&self) -> DisplayProjectionContext {
-        DisplayProjectionContext::for_timeline(
-            &self.key.kind,
-            &self.viewport_observation,
-            self.restore_anchor.is_some(),
-        )
-        .with_thread_roots(
-            self.thread_root_order,
-            self.thread_root_projection_service
-                .lock()
-                .expect("thread-root projection service lock must not be poisoned")
-                .display_data_for_room(self.key.room_id()),
-        )
+        DisplayProjectionContext::for_timeline(&self.key.kind, &self.viewport_observation)
+            .with_thread_roots(
+                self.thread_root_order,
+                self.thread_root_projection_service
+                    .lock()
+                    .expect("thread-root projection service lock must not be poisoned")
+                    .display_data_for_room(self.key.room_id()),
+            )
     }
 
     pub(super) fn reproject_display_items(&mut self) -> Vec<TimelineDiff> {
@@ -1164,7 +1120,10 @@ impl TimelineActor {
             .send_completion
             .lock()
             .expect("send completion coordinator lock must not be poisoned")
-            .settled_transaction_ids(self.key.room_id());
+            .settled_transaction_ids(
+                self.key.room_id(),
+                &super::outbound_send::canonical_event_ids(&self.navigation_items),
+            );
         self.pending_send_projections = projections;
         let mut pending_items = self
             .pending_send_projections
@@ -1211,6 +1170,132 @@ impl TimelineActor {
             }
         }
         true
+    }
+
+    /// #1259: read the SDK thread cache for this room's roots. A forced read
+    /// also revisits tracked unread roots outside the current room window.
+    pub(super) async fn refresh_thread_unread_counts(&mut self, force: bool) {
+        if !matches!(self.key.kind, TimelineKind::Room { .. }) {
+            return;
+        }
+        let room_id = self.key.room_id().to_owned();
+        let candidates = if force {
+            self.thread_root_projection_service
+                .lock()
+                .expect("thread-root projection service lock must not be poisoned")
+                .roots_forced_unread_refresh(&room_id, &self.navigation_items)
+        } else {
+            self.thread_root_projection_service
+                .lock()
+                .expect("thread-root projection service lock must not be poisoned")
+                .roots_needing_unread_refresh(&room_id, &self.navigation_items)
+        };
+        let mut refreshed = Vec::new();
+        for (root_event_id, signature) in candidates {
+            if let Some(attention) = super::thread_projection::sdk_thread_unread_counts(
+                &self.session,
+                &room_id,
+                &root_event_id,
+            )
+            .await
+            {
+                refreshed.push((root_event_id, signature, attention));
+            }
+        }
+        if refreshed.is_empty() {
+            return;
+        }
+        {
+            let mut service = self
+                .thread_root_projection_service
+                .lock()
+                .expect("thread-root projection service lock must not be poisoned");
+            for (root_event_id, signature, attention) in refreshed.iter() {
+                service.apply_thread_unread(&room_id, root_event_id, signature.clone(), *attention);
+            }
+        }
+        for (root_event_id, _, attention) in refreshed {
+            // #1259/#1238: the Threads list is state-rendered, so mirror the value
+            // there; the reducer also sums it into the room's thread badge fields.
+            if !self
+                .emit_action_reliable(koushi_state::AppAction::ThreadUnreadObserved {
+                    room_id: room_id.clone(),
+                    root_event_id,
+                    unread: attention.unread,
+                    highlight: attention.highlight,
+                })
+                .await
+            {
+                return;
+            }
+        }
+        self.repaint_thread_unread();
+    }
+
+    /// #1259: the SDK learns a threaded read only from the sync echo of its receipt,
+    /// which lands after the send success that asked for this refresh. Re-read a bounded
+    /// number of times so the dot clears on its own instead of waiting for unrelated room
+    /// activity. The task ends when the actor is gone (its send fails) or the value cleared.
+    fn schedule_thread_unread_recheck(&mut self, attempt: u32) {
+        const MAX_ATTEMPTS: u32 = 10;
+        const INTERVAL: std::time::Duration = std::time::Duration::from_millis(1_000);
+        if attempt > MAX_ATTEMPTS || !self.has_unread_thread_root() {
+            return;
+        }
+        let tx = self.msg_tx.clone();
+        executor::spawn(async move {
+            executor::sleep(INTERVAL).await;
+            let _ = tx
+                .send(TimelineActorMessage::RefreshThreadUnreadRetry { attempt })
+                .await;
+        });
+    }
+
+    /// #1259: whether any tracked thread root still reports unread replies.
+    fn has_unread_thread_root(&self) -> bool {
+        let room_id = self.key.room_id();
+        let service = self
+            .thread_root_projection_service
+            .lock()
+            .expect("thread-root projection service lock must not be poisoned");
+        service.has_tracked_unread_root(room_id)
+    }
+
+    /// #1259: re-overlay the root items whose dot changed and emit a `Set` for each, so
+    /// a read clears the chip without waiting for the next diff batch.
+    fn repaint_thread_unread(&mut self) {
+        if !matches!(self.key.kind, TimelineKind::Room { .. }) {
+            return;
+        }
+        let mut core_diffs = Vec::new();
+        for (index, item) in self.navigation_items.iter_mut().enumerate() {
+            if item.thread_root.is_some() || item.thread_summary.is_none() {
+                continue;
+            }
+            let before = item
+                .thread_summary
+                .as_ref()
+                .map(|summary| summary.unread_count);
+            let overlaid = super::thread_projection::overlay_thread_summary_item(
+                &self.thread_root_projection_service,
+                &self.key,
+                item,
+            );
+            let after = overlaid
+                .thread_summary
+                .as_ref()
+                .map(|summary| summary.unread_count);
+            if before != after {
+                *item = overlaid.clone();
+                core_diffs.push(koushi_protocol::event::TimelineDiff::Set {
+                    index,
+                    item: overlaid,
+                });
+            }
+        }
+        if !core_diffs.is_empty() {
+            let _ = self.emit_non_sdk_item_sets(core_diffs);
+        }
     }
 
     fn drain_thread_summary_projection_wakes(&mut self) {
@@ -1443,50 +1528,64 @@ impl TimelineActor {
             &ignored_user_ids,
         );
         if should_hydrate_empty_initial_room_timeline(&key.kind, &projected_initial_items) {
-            let gate_started = Some(std::time::Instant::now());
-            let hydrate_result = {
-                let _permit = account_work
-                    .acquire(AccountWorkKind::ExplicitPagination)
-                    .await;
-                let gate_wait = gate_started.map(|started| started.elapsed());
-                trace_timeline_paginate(
-                    "initial_hydrate_gate_acquired",
-                    subscribe_request_id,
-                    &key,
-                    PaginationDirection::Backward,
-                    INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT,
-                    None,
-                    gate_wait.map(|duration| duration.as_millis()),
-                    None,
-                );
-                let paginate_started = Some(startup_trace::now());
-                let trace_started = Some(std::time::Instant::now());
-                let outcome = timeline
-                    .paginate_backwards(INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT)
-                    .await;
-                let outcome_token = match &outcome {
-                    Ok(true) => "end_reached",
-                    Ok(false) => "idle",
-                    Err(_) => "failed",
+            // #1125: the window can be entirely hidden technical state events, so
+            // one guarded pass does not always reach a displayed row. Keep taking
+            // passes while the projection is still empty; the round cap is the
+            // bound, because a page can also reach the timeline after its
+            // pagination call returns, so a "the edges did not move" check could
+            // stop one pass too early.
+            let mut hydrate_rounds = 0_u8;
+            while should_hydrate_empty_initial_room_timeline(&key.kind, &projected_initial_items)
+                && hydrate_rounds < INITIAL_EMPTY_ROOM_HYDRATION_MAX_ROUNDS
+            {
+                hydrate_rounds += 1;
+                let gate_started = Some(std::time::Instant::now());
+                let hydrate_result = {
+                    let _permit = account_work
+                        .acquire(AccountWorkKind::ExplicitPagination)
+                        .await;
+                    let gate_wait = gate_started.map(|started| started.elapsed());
+                    trace_timeline_paginate(
+                        "initial_hydrate_gate_acquired",
+                        subscribe_request_id,
+                        &key,
+                        PaginationDirection::Backward,
+                        INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT,
+                        None,
+                        gate_wait.map(|duration| duration.as_millis()),
+                        None,
+                    );
+                    let paginate_started = Some(startup_trace::now());
+                    let trace_started = Some(std::time::Instant::now());
+                    let outcome = timeline
+                        .paginate_backwards(INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT)
+                        .await;
+                    let outcome_token = match &outcome {
+                        Ok(true) => "end_reached",
+                        Ok(false) => "idle",
+                        Err(_) => "failed",
+                    };
+                    trace_timeline_paginate(
+                        "initial_hydrate_sdk_finish",
+                        subscribe_request_id,
+                        &key,
+                        PaginationDirection::Backward,
+                        INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT,
+                        trace_started.map(|started| started.elapsed().as_millis()),
+                        gate_wait.map(|duration| duration.as_millis()),
+                        Some(outcome_token),
+                    );
+                    startup_trace::trace_paginate(
+                        paginate_started,
+                        gate_wait,
+                        matches!(outcome, Ok(true)),
+                    );
+                    outcome
                 };
-                trace_timeline_paginate(
-                    "initial_hydrate_sdk_finish",
-                    subscribe_request_id,
-                    &key,
-                    PaginationDirection::Backward,
-                    INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT,
-                    trace_started.map(|started| started.elapsed().as_millis()),
-                    gate_wait.map(|duration| duration.as_millis()),
-                    Some(outcome_token),
-                );
-                startup_trace::trace_paginate(
-                    paginate_started,
-                    gate_wait,
-                    matches!(outcome, Ok(true)),
-                );
-                outcome
-            };
-            if hydrate_result.is_ok() {
+                let reached_start = matches!(&hydrate_result, Ok(true));
+                if hydrate_result.is_err() {
+                    break;
+                }
                 let resubscribe_started = Some(startup_trace::now());
                 let (hydrated_items, hydrated_stream) = timeline.subscribe().await;
                 startup_trace::trace_phase_items(
@@ -1503,6 +1602,9 @@ impl TimelineActor {
                     hide_redacted,
                     &ignored_user_ids,
                 );
+                if reached_start {
+                    break;
+                }
             }
         }
         let mut initial_read_receipt_changes = if own_user_id.is_some() {
@@ -1544,7 +1646,6 @@ impl TimelineActor {
         let initial_display_context = DisplayProjectionContext::for_timeline(
             &key.kind,
             &TimelineViewportObservation::default(),
-            false,
         )
         .with_thread_roots(
             thread_root_order,
@@ -1559,7 +1660,10 @@ impl TimelineActor {
                 .expect("send completion coordinator lock must not be poisoned");
             (
                 coordinator.projections_for_key(&key),
-                coordinator.settled_transaction_ids(key.room_id()),
+                coordinator.settled_transaction_ids(
+                    key.room_id(),
+                    &super::outbound_send::canonical_event_ids(&initial_items),
+                ),
             )
         };
         let pending_items = pending_send_projections
@@ -1582,6 +1686,9 @@ impl TimelineActor {
         let initial_media_gallery_items =
             media_gallery_items_from_timeline_items(&key, &initial_items);
         let initial_receipts = live_event_receipts_from_sdk_items(initial_sdk_items.iter());
+        let initial_receipt_scope = receipt_scope_for_timeline_kind(&key.kind);
+        let initial_window_event_ids =
+            live_event_window_ids_from_sdk_items(initial_sdk_items.iter());
         let receipt_endpoints =
             super::receipt_endpoints::ReceiptEndpointMirror::new(initial_sdk_items.iter());
 
@@ -1788,7 +1895,11 @@ impl TimelineActor {
             )));
 
             let room_id = room_id_str.clone();
-            if initial_emitted && !initial_receipts.is_empty() {
+            // The actor's initial receipt observation reconciles its own scope
+            // over its own initial window. It must run even when the initial
+            // snapshot has no receipt entries, so a retired actor's summaries
+            // inside that window are removed instead of merged over.
+            if initial_emitted && !initial_window_event_ids.is_empty() {
                 let _ = emit_receipt_observation_actions(
                     session.as_ref(),
                     &action_tx,
@@ -1797,7 +1908,10 @@ impl TimelineActor {
                     actor_generation,
                     &room_id,
                     initial_receipts,
-                    ReceiptObservationTarget::Live,
+                    ReceiptObservationTarget::Live {
+                        scope: initial_receipt_scope,
+                        scoped_event_ids: initial_window_event_ids,
+                    },
                 )
                 .await;
             }
@@ -1892,6 +2006,7 @@ impl TimelineActor {
             media_download_tasks: HashMap::new(),
             search_index_tx,
             thread_attention,
+            thread_delivery_diagnosed: false,
             navigation_items,
             receipt_endpoints,
             display_projection,
@@ -1923,22 +2038,15 @@ impl TimelineActor {
             terminal_ingress,
             reply_quote_hydration,
             reply_quote_refresh: HashSet::new(),
-            reply_quote_republish_pending: false,
             pagination_task: None,
             cache_reset_refill_pending: false,
             next_pagination_serial: 0,
             data_dir,
             account_work,
-            restore_anchor: None,
-            next_restore_anchor_serial: 0,
-            restore_emit_buffer: Vec::new(),
-            restore_causal_projections: RestoreCausalProjectionBuffer::default(),
-            hydrate_after_restore_flush: false,
             diff_batch_seq: 0,
             gap_repair,
             gap_projection_correlation: TimelineGapProjectionCorrelation::default(),
             pending_gap_projection: None,
-            ready_restore_gap_projection_batch: None,
             live_tail_projection_correlation: TimelineGapProjectionCorrelation::default(),
             pending_live_tail_projection: None,
             live_tail_refresh: None,
@@ -2069,22 +2177,9 @@ impl TimelineActor {
             }
             self.finish_ready_causal_projection_handoffs().await;
             self.maybe_refill_reset_room_cache().await;
-            self.flush_deferred_reply_quote_republish();
-        }
-    }
-    /// Run a republish that was requested while an anchor restore was buffering
-    /// its coalesced emission, once that restore has flushed. This runs at the
-    /// loop tail so a relay batch that flushes the restore in the same turn
-    /// cannot leave the republish pending indefinitely.
-    fn flush_deferred_reply_quote_republish(&mut self) {
-        if self.reply_quote_republish_pending && self.restore_anchor.is_none() {
-            self.republish_reply_quote_dependents();
         }
     }
     async fn finish_ready_causal_projection_handoffs(&mut self) {
-        if let Some(batch_id) = self.ready_restore_gap_projection_batch.take() {
-            self.finish_pending_gap_projection(batch_id).await;
-        }
         if self.pending_live_tail_projection.is_some()
             && !self.live_tail_projection_correlation.is_pending()
             && self.finish_pending_live_tail_projection().await
@@ -2375,18 +2470,6 @@ impl TimelineActor {
             TimelineActorMessage::OwnReadReceiptChanged => {
                 self.handle_own_read_receipt_changed().await;
             }
-            TimelineActorMessage::RestoreTimelineAnchor {
-                request_id,
-                event_id,
-                max_batches,
-                event_count,
-            } => {
-                self.handle_restore_timeline_anchor(request_id, event_id, max_batches, event_count)
-                    .await;
-            }
-            TimelineActorMessage::RestoreTimelineAnchorContinue { serial } => {
-                self.handle_restore_timeline_anchor_continue(serial).await;
-            }
             TimelineActorMessage::ObserveViewport { observation } => {
                 self.viewport_observation = observation;
                 if let Some(target) = self.observe_local_viewed_boundary() {
@@ -2510,22 +2593,6 @@ impl TimelineActor {
             TimelineActorMessage::ReplyQuoteRetryDue { event_id, token } => {
                 self.handle_reply_quote_retry_due(event_id, token);
             }
-            #[cfg(test)]
-            TimelineActorMessage::TestSettleReplyQuoteOriginal {
-                quote,
-                acknowledged,
-            } => {
-                let mut refreshes = super::reply_quote_hydration::ReplyQuoteRefreshes::default();
-                let outcome = self.reply_quote_hydration.learn(quote.clone());
-                super::reply_quote_hydration::record_learn(
-                    &mut refreshes,
-                    quote.event_id.clone(),
-                    outcome,
-                );
-                self.apply_reply_quote_refreshes(refreshes);
-                self.republish_reply_quote_dependents();
-                let _ = acknowledged.send(());
-            }
             TimelineActorMessage::RequestRoomKey {
                 request_id,
                 event_id,
@@ -2643,22 +2710,16 @@ impl TimelineActor {
                 request_id,
                 event_id,
                 document,
+                formatting_options,
             } => {
-                self.handle_edit_text(request_id, event_id, document).await;
+                self.handle_edit_text(request_id, event_id, document, formatting_options)
+                    .await;
             }
             TimelineActorMessage::Redact {
                 request_id,
                 event_id,
             } => {
                 self.handle_redact(request_id, event_id).await;
-            }
-            TimelineActorMessage::ToggleReaction {
-                request_id,
-                event_id,
-                reaction_key,
-            } => {
-                self.handle_toggle_reaction(request_id, event_id, reaction_key)
-                    .await;
             }
             TimelineActorMessage::SendReaction {
                 request_id,
@@ -2808,31 +2869,20 @@ impl TimelineActor {
                 self.handle_send_queue_lagged().await;
                 self.publish_current_canonical_activity().await;
             }
+            TimelineActorMessage::RefreshThreadUnread => {
+                self.refresh_thread_unread_counts(true).await;
+                self.schedule_thread_unread_recheck(1);
+            }
+            TimelineActorMessage::RefreshThreadUnreadRetry { attempt } => {
+                self.refresh_thread_unread_counts(true).await;
+                self.schedule_thread_unread_recheck(attempt + 1);
+            }
             TimelineActorMessage::ReplayInitialItems { cause_request_id } => {
                 self.handle_replay_initial_items(cause_request_id);
                 self.publish_current_canonical_activity().await;
             }
             #[cfg(test)]
-            TimelineActorMessage::TestBeginRestore {
-                request_id,
-                event_id,
-                acknowledged,
-            } => {
-                self.restore_anchor = Some(RestoreTimelineAnchorState {
-                    request_id,
-                    event_id,
-                    max_batches_remaining: 1,
-                    event_count: 1,
-                    in_flight: false,
-                    awaiting_diff_batch: false,
-                    continuation_scheduled: false,
-                    continuation_serial: None,
-                    anchor_relay_wait: None,
-                });
-                let _ = acknowledged.send(());
-            }
-            #[cfg(test)]
-            TimelineActorMessage::TestInjectRestoreDiff {
+            TimelineActorMessage::TestInjectDiff {
                 diffs,
                 projections,
                 acknowledged,
@@ -2840,24 +2890,6 @@ impl TimelineActor {
                 let provenance = ThreadAttentionBatchProvenance::from_sdk_diffs(&diffs);
                 self.handle_diff_batch(diffs, provenance, projections).await;
                 let _ = acknowledged.send(());
-            }
-            #[cfg(test)]
-            TimelineActorMessage::TestRestoreCausalState(response) => {
-                let _ = response.send((
-                    self.live_tail_projection_correlation.is_pending(),
-                    self.pending_live_tail_projection.is_some(),
-                    self.restore_emit_buffer.len(),
-                    self.restore_causal_projections.projections.clone(),
-                ));
-            }
-            #[cfg(test)]
-            TimelineActorMessage::TestFinishRestore {
-                request_id,
-                response,
-            } => {
-                let had_buffered_diffs = !self.restore_emit_buffer.is_empty();
-                self.finish_anchor_restore(request_id, TimelineAnchorRestoreStatus::EndReached);
-                let _ = response.send(had_buffered_diffs);
             }
             #[cfg(test)]
             TimelineActorMessage::TestArmGapRepairCompletionPause {
@@ -2871,10 +2903,6 @@ impl TimelineActor {
             TimelineActorMessage::Barrier(response) => {
                 let _ = response.send(());
             }
-        }
-        if self.hydrate_after_restore_flush && self.restore_anchor.is_none() {
-            self.hydrate_after_restore_flush = false;
-            self.maybe_hydrate_missing_thread_roots(None).await;
         }
     }
     pub(super) fn emit(&self, event: CoreEvent) {

@@ -32,6 +32,8 @@ fn room(id: &str, label: &str, is_dm: bool, unread: u64, highlight: u64) -> Room
         unread_count: unread,
         notification_count: unread,
         highlight_count: highlight,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: Some(10),
         conversation_activity: None,
@@ -41,6 +43,13 @@ fn room(id: &str, label: &str, is_dm: bool, unread: u64, highlight: u64) -> Room
         is_encrypted: false,
         joined_members: 2,
     }
+}
+
+/// Pin the server recency stamp so the section order is decided by recency
+/// instead of the display-label tiebreak (#542: unread no longer moves a row).
+fn with_recency(mut room: RoomSummary, recency_stamp: u64) -> RoomSummary {
+    room.recency_stamp = Some(recency_stamp);
+    room
 }
 
 /// Give a room a conversation timestamp so activity/recency ordering is
@@ -86,7 +95,7 @@ fn mixed_state() -> AppState {
             ],
         }],
         rooms: vec![
-            room("!plain:example.invalid", "Plain", false, 5, 1),
+            with_recency(room("!plain:example.invalid", "Plain", false, 5, 1), 20),
             tag_favourite(room("!fav:example.invalid", "Favourite", false, 0, 0)),
             tag_low_priority(with_activity(
                 room("!low-room:example.invalid", "Zed Low", false, 8, 2),
@@ -230,6 +239,7 @@ fn low_priority_collapse_falls_back_to_the_legacy_flag_until_the_scope_is_edited
             section: SidebarSectionKind::LowPriority,
             collapsed: Some(false),
             sort: None,
+            expanded: None,
         },
         RoomListSort::Activity,
     );
@@ -250,6 +260,7 @@ fn the_low_priority_section_follows_the_scope_rooms_sort() {
             section: SidebarSectionKind::Rooms,
             collapsed: None,
             sort: Some(RoomListSort::NormalLocale),
+            expanded: None,
         },
         RoomListSort::Activity,
     );
@@ -259,6 +270,7 @@ fn the_low_priority_section_follows_the_scope_rooms_sort() {
         Some(SidebarSectionSettings {
             collapsed: false,
             sort: RoomListSort::NormalLocale,
+            expanded: false,
         })
     );
 }
@@ -322,7 +334,7 @@ fn a_normal_room_keeps_its_native_contribution_beside_a_low_priority_room() {
             .candidate
             .as_ref()
             .map(|candidate| candidate.room_display_name.as_str()),
-        Some("Plain")
+        None
     );
 }
 

@@ -18,6 +18,7 @@ import {
   InviteTargetsDialog,
   LeaveSpaceDialog,
   ResetLocalDataConfirmationDialog,
+  SuggestedRoomsDialog,
   UploadStagingDialog
 } from "./dialogs";
 import type {
@@ -152,6 +153,50 @@ describe("UploadStagingDialog", () => {
     expect(container.contains(modal)).toBe(false);
     expect(document.body.contains(modal)).toBe(true);
     expect(screen.queryByRole("group", { name: t("upload.previewMode") })).toBeNull();
+  });
+
+  it("opens on the first caption editor, never the clear action", () => {
+    render(
+      dialog([
+        stagedImage("", { kind: "preparing" }, "staged-1", "first.png"),
+        stagedImage("", { kind: "preparing" }, "staged-2", "second.png")
+      ])
+    );
+    const caption = screen.getByRole("textbox", { name: "Caption for first.png" });
+
+    // The clear action is destructive and explains itself with a bubble, so an
+    // attachment never opens the staging dialog on it.
+    expect(document.activeElement).toBe(caption);
+    expect(document.activeElement).not.toBe(screen.getByRole("button", { name: t("upload.clear") }));
+    expect(screen.queryByRole("tooltip")).toBeNull();
+  });
+
+  it("cancels the staging dialog from an Escape resolved in the caption", async () => {
+    const onClear = vi.fn();
+    const resolveComposerKeyAction = vi.fn(async () => "cancel" as const);
+    render(
+      <UploadStagingDialog
+        items={[stagedImage("", { kind: "preparing" })]}
+        onClear={onClear}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={vi.fn()}
+        onSendAttachments={vi.fn()}
+        onRetryPreparation={vi.fn()}
+        onUseOriginal={vi.fn()}
+        loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={resolveComposerKeyAction}
+        surface="main"
+      />
+    );
+
+    // The caption consumes Escape before the modal sees it, so the dialog's
+    // cancel path has to be reachable from the editor it opens on.
+    fireEvent.keyDown(screen.getByRole("textbox", { name: "Caption for synthetic.png" }), {
+      key: "Escape",
+      code: "Escape"
+    });
+
+    await waitFor(() => expect(onClear).toHaveBeenCalledTimes(1));
   });
 
   it("renders the shared caption editor and emits a structured document from formatting", () => {
@@ -560,47 +605,256 @@ describe("dialog IME submit handling", () => {
 });
 
 describe("CreateEntityDialog room access", () => {
-  it("explains standard Space access and exposes invite-only access", () => {
+  it("offers Space members, invite and Anyone in a Space and maps the choice", () => {
     const onRoomOptionsChange = vi.fn();
-    const roomOptions = {
-      aliasLocalpart: "",
-      encrypted: true,
-      invitedOnly: false,
-      topic: "",
-      visibility: "private" as const
-    };
-    const { rerender } = render(
+    const onSetRoomAccessDraft = vi.fn();
+    const view = (visibility: "private" | "public") => (
       <CreateEntityDialog
-        activeSpaceName="春学"
+        targetSpaceName="春学"
         kind="room"
         isBusy={false}
-        roomOptions={roomOptions}
+        roomOptions={{
+          aliasLocalpart: "",
+          encrypted: true,
+          invitedOnly: false,
+          topic: "",
+          visibility
+        }}
         value="秘密ルーム"
         onCancel={vi.fn()}
         onRoomOptionsChange={onRoomOptionsChange}
         onSubmit={vi.fn()}
         onValueChange={vi.fn()}
+        onSetRoomAccessDraft={onSetRoomAccessDraft}
       />
     );
+    const { rerender } = render(view("private"));
 
-    expect(screen.getByText(t("dialog.standardRoomInSpace", { spaceName: "春学" }))).toBeTruthy();
-    fireEvent.click(screen.getByRole("checkbox", { name: t("dialog.invitedOnlyRoom") }));
-    expect(onRoomOptionsChange).toHaveBeenLastCalledWith(expect.objectContaining({ invitedOnly: true }));
+    expect(screen.getByRole("group", { name: t("dialog.createWhoCanJoin") })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: t("dialog.createJoinPublic") }));
+    expect(onSetRoomAccessDraft).toHaveBeenCalledWith({
+      kind: "rule",
+      scope: { kind: "create", sessionId: 0 },
+      rule: "public"
+    });
+    expect(onRoomOptionsChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ visibility: "public" })
+    );
 
-    rerender(
+    fireEvent.click(
+      screen.getByRole("radio", { name: t("dialog.createJoinSpaceMembers", { spaceName: "春学" }) })
+    );
+    expect(onSetRoomAccessDraft).toHaveBeenCalledWith({
+      kind: "rule",
+      scope: { kind: "create", sessionId: 0 },
+      rule: "restricted"
+    });
+    expect(onRoomOptionsChange).toHaveBeenLastCalledWith(
+      expect.objectContaining({ visibility: "private", invitedOnly: false })
+    );
+
+    rerender(view("public"));
+    fireEvent.click(screen.getByRole("radio", { name: t("dialog.createJoinInvite") }));
+    expect(onSetRoomAccessDraft).toHaveBeenCalledWith({
+      kind: "rule",
+      scope: { kind: "create", sessionId: 0 },
+      rule: "invite"
+    });
+  });
+
+  it("offers only invite and Anyone at Home (#1416)", () => {
+    render(
       <CreateEntityDialog
-        activeSpaceName="春学"
         kind="room"
         isBusy={false}
-        roomOptions={{ ...roomOptions, invitedOnly: true }}
-        value="秘密ルーム"
+        value=""
         onCancel={vi.fn()}
-        onRoomOptionsChange={onRoomOptionsChange}
         onSubmit={vi.fn()}
         onValueChange={vi.fn()}
       />
     );
-    expect(screen.getByText(t("dialog.invitedOnlyRoomInSpace", { spaceName: "春学" }))).toBeTruthy();
+    const radios = within(screen.getByRole("group", { name: t("dialog.createWhoCanJoin") }))
+      .getAllByRole("radio")
+      .map((radio) => radio.getAttribute("value"));
+    expect(radios).toEqual(["invite", "public"]);
+  });
+
+  it("chooses earlier-message access with two plain choices and summarizes above the buttons", () => {
+    const onSetRoomAccessDraft = vi.fn();
+    render(
+      <CreateEntityDialog
+        kind="room"
+        isBusy={false}
+        value=""
+        roomOptions={{
+          aliasLocalpart: "",
+          encrypted: true,
+          invitedOnly: false,
+          topic: "",
+          visibility: "private"
+        }}
+        roomAccessDraft={{
+          scope: { kind: "create", sessionId: 1 },
+          revision: 1,
+          rule: "invite",
+          history: "shared"
+        }}
+        createAccessPreview={{
+          scope: { kind: "create", sessionId: 1 },
+          confirmed: false,
+          effectiveRule: "invite",
+          effectiveHistory: "shared",
+          roomVersionPinned: false,
+          outcome: {
+            join: { messageId: "room.accessOutcomeJoinInvite" },
+            history: { messageId: "room.accessOutcomeHistoryShared" },
+            encryption: { messageId: "room.accessOutcomeEncrypted" },
+            directory: { messageId: "room.accessOutcomeDirectoryLoading" },
+            nonRetroactive: { messageId: "room.historyNonRetroactive" }
+          }
+        }}
+        createAccessSessionId={1}
+        onCancel={vi.fn()}
+        onRoomOptionsChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onValueChange={vi.fn()}
+        onSetRoomAccessDraft={onSetRoomAccessDraft}
+      />
+    );
+    const history = screen.getByRole("group", { name: t("dialog.createEarlierMessages") });
+    expect(within(history).getAllByRole("radio")).toHaveLength(2);
+    // Reading without joining is offered only for a public room.
+    expect(screen.queryByRole("checkbox", { name: t("dialog.createHistoryWorldReadable") })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: t("dialog.createHistoryInvited") }));
+    expect(onSetRoomAccessDraft).toHaveBeenCalledWith({
+      kind: "history",
+      scope: { kind: "create", sessionId: 1 },
+      history: "invited"
+    });
+    const summary = document.querySelector(".create-dialog-footer .create-room-summary");
+    expect(summary?.textContent).toBe(
+      [
+        t("room.accessOutcomeJoinInvite"),
+        t("room.accessOutcomeHistoryShared"),
+        t("room.accessOutcomeEncrypted")
+      ].join(" · ")
+    );
+    expect(summary?.textContent).not.toContain(t("room.historyNonRetroactive"));
+  });
+
+  it.each([
+    ["publicWithRestrictedAccess", "room.accessRejectionPublicWithRestrictedAccess"],
+    ["explicitPolicyWithInvitedOnly", "room.accessRejectionExplicitPolicyWithInvitedOnly"],
+    ["emptyAccessTargets", "room.accessRejectionEmptyAccessTargets"],
+    ["publicWithInvitedOnly", "room.accessRejectionPublicWithInvitedOnly"]
+  ] as const)("surfaces the Rust rejection %s and disables Create", (rejection, messageId) => {
+    render(
+      <CreateEntityDialog
+        kind="room"
+        isBusy={false}
+        value="papers"
+        roomOptions={{
+          aliasLocalpart: "papers",
+          encrypted: true,
+          invitedOnly: false,
+          topic: "",
+          visibility: "private"
+        }}
+        addressPreview={{
+          localpart: "papers",
+          full_alias: "#papers:example.invalid",
+          error: null,
+          server_name: "example.invalid"
+        }}
+        createAccessPreview={{
+          scope: { kind: "create", sessionId: 0 },
+          confirmed: false,
+          rejection,
+          effectiveRule: "restricted",
+          effectiveHistory: "shared",
+          roomVersionPinned: true,
+          outcome: {
+            join: { messageId: "room.accessOutcomeJoinSpaceMembers", substitutions: ["Design"] },
+            history: { messageId: "room.accessOutcomeHistoryShared" },
+            encryption: { messageId: "room.accessOutcomeEncrypted" },
+            directory: { messageId: "room.accessOutcomeDirectoryLoading" },
+            nonRetroactive: { messageId: "room.historyNonRetroactive" }
+          }
+        }}
+        onCancel={vi.fn()}
+        onRoomOptionsChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onValueChange={vi.fn()}
+      />
+    );
+    expect(screen.getByText(t(messageId))).toBeTruthy();
+    expect(screen.getByText(t("room.accessRoomVersionPinned"))).toBeTruthy();
+    expect((screen.getByRole("button", { name: t("dialog.submitCreateRoom") }) as HTMLButtonElement).disabled).toBe(true);
+  });
+
+  it("disables the access controls while Create is pending", () => {
+    render(
+      <CreateEntityDialog
+        kind="room"
+        isBusy
+        value="papers"
+        roomOptions={{
+          aliasLocalpart: "papers",
+          encrypted: true,
+          invitedOnly: false,
+          topic: "",
+          visibility: "private"
+        }}
+        addressPreview={{
+          localpart: "papers",
+          full_alias: "#papers:example.invalid",
+          error: null,
+          server_name: "example.invalid"
+        }}
+        roomAccessDraft={{
+          scope: { kind: "create", sessionId: 1 },
+          revision: 1,
+          rule: "restricted",
+          allowTargets: ["!space:example.invalid"]
+        }}
+        createAccessPreview={{
+          scope: { kind: "create", sessionId: 1 },
+          confirmed: false,
+          effectiveRule: "restricted",
+          effectiveHistory: "shared",
+          roomVersionPinned: true,
+          outcome: {
+            join: { messageId: "room.accessOutcomeJoinMembershipRoute" },
+            history: { messageId: "room.accessOutcomeHistoryShared" },
+            encryption: { messageId: "room.accessOutcomeEncrypted" },
+            directory: { messageId: "room.accessOutcomeDirectoryLoading" },
+            nonRetroactive: { messageId: "room.historyNonRetroactive" }
+          }
+        }}
+        createAccessSessionId={1}
+        targetSpaceName="Design"
+        joinedSpaces={[
+          { id: "!space:example.invalid", name: "Design" },
+          { id: "!other:example.invalid", name: "Physics" }
+        ]}
+        onCancel={vi.fn()}
+        onRoomOptionsChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onValueChange={vi.fn()}
+        onSetRoomAccessDraft={vi.fn()}
+      />
+    );
+
+    expect(
+      (screen.getByRole("radio", { name: t("dialog.createJoinPublic") }) as HTMLInputElement).matches(":disabled")
+    ).toBe(true);
+    expect(
+      (screen.getByRole("checkbox", { name: "Design" }) as HTMLInputElement).matches(":disabled")
+    ).toBe(true);
+    expect(
+      (screen.getByRole("checkbox", { name: t("dialog.encryptedRoom") }) as HTMLInputElement)
+        .matches(":disabled")
+    ).toBe(true);
   });
 });
 
@@ -1086,7 +1340,7 @@ describe("UploadStagingDialog send action", () => {
     render(sendableDialog([readyItem(), stagedImage("", { kind: "preparing" }, "staged-2")]));
 
     expect(
-      screen.getByRole<HTMLButtonElement>("button", { name: "Send attachments" }).disabled
+      screen.getByRole<HTMLButtonElement>("button", { name: "Send attachments" }).matches(":disabled")
     ).toBe(true);
   });
 });
@@ -1158,5 +1412,145 @@ describe("LeaveSpaceDialog", () => {
     renderDialog(vi.fn(), candidates, true);
     expect(screen.getByRole("button", { name: t("space.leaveConfirmAction") })).toHaveProperty("disabled", true);
     expect(screen.getByRole("radio", { name: t("space.leaveSpaceOnly") })).toHaveProperty("disabled", true);
+  });
+});
+
+describe("upload staging failure affordances (#1147)", () => {
+  function renderFailedItem(overrides: { canUseOriginal?: boolean } = {}) {
+    const onRetryPreparation = vi.fn();
+    const onUseOriginal = vi.fn();
+    const onSendAttachments = vi.fn();
+    render(
+      <UploadStagingDialog
+        items={[
+          stagedImage(
+            "holiday",
+            {
+              kind: "failed",
+              failure_kind: "decode",
+              can_use_original: overrides.canUseOriginal ?? true
+            },
+            "staged-failed",
+            "camera.HEIC"
+          )
+        ]}
+        onClear={vi.fn()}
+        onUpdateCaption={vi.fn()}
+        onSelectOutput={vi.fn()}
+        onRetryPreparation={onRetryPreparation}
+        onUseOriginal={onUseOriginal}
+        onSendAttachments={onSendAttachments}
+        loadPreview={vi.fn(async () => [])}
+        resolveComposerKeyAction={vi.fn(async () => "noop" as const)}
+        surface="main"
+      />
+    );
+    return { onRetryPreparation, onUseOriginal, onSendAttachments };
+  }
+
+  it("offers retry and original instead of the output toolbar", () => {
+    const { onRetryPreparation, onUseOriginal } = renderFailedItem();
+
+    expect(screen.getByText("Attachment preparation failed")).toBeTruthy();
+    // No resize/format controls and no preview for a failed preparation.
+    expect(screen.queryByRole("radiogroup", { name: "Resize" })).toBeNull();
+    expect(screen.queryByRole("radiogroup", { name: "Format" })).toBeNull();
+    expect(document.querySelector("img.upload-staging-preview")).toBeNull();
+
+    fireEvent.click(screen.getByRole("button", { name: "Retry preparation" }));
+    fireEvent.click(screen.getByRole("button", { name: "Use original" }));
+    expect(onRetryPreparation).toHaveBeenCalledWith("staged-failed");
+    expect(onUseOriginal).toHaveBeenCalledWith("staged-failed");
+  });
+
+  it("hides the original fallback when there are no retained source bytes", () => {
+    renderFailedItem({ canUseOriginal: false });
+    expect(screen.getByRole("button", { name: "Retry preparation" })).toBeTruthy();
+    expect(screen.queryByRole("button", { name: "Use original" })).toBeNull();
+  });
+});
+
+// Issue #1410: the one-time suggested-rooms offer. The rooms come from Rust;
+// the dialog only asks, and nothing is joined without Join all.
+describe("SuggestedRoomsDialog", () => {
+  const rooms = [
+    { room_id: "!alpha:example.invalid", display_name: "Alpha" },
+    { room_id: "!beta:example.invalid", display_name: "Beta" }
+  ];
+
+  it("names the Space, lists the rooms, and joins only on Join all", () => {
+    const onJoinAll = vi.fn();
+    const onDismiss = vi.fn();
+    render(
+      <SuggestedRoomsDialog
+        offer={{ kind: "offered", space_id: "!space:example.invalid", rooms }}
+        spaceName="Synthetic Workspace"
+        onJoinAll={onJoinAll}
+        onDismiss={onDismiss}
+      />
+    );
+    expect(
+      screen.getByRole("dialog", {
+        name: t("suggestedRooms.offerTitle", { space: "Synthetic Workspace" })
+      })
+    ).toBeTruthy();
+    const list = screen.getByRole("list", { name: t("suggestedRooms.listLabel") });
+    expect(within(list).getAllByRole("listitem").map((item) => item.textContent)).toEqual([
+      "Alpha",
+      "Beta"
+    ]);
+    expect(onJoinAll).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: t("suggestedRooms.skip") }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
+    expect(onJoinAll).not.toHaveBeenCalled();
+
+    fireEvent.click(screen.getByRole("button", { name: t("suggestedRooms.joinAll") }));
+    expect(onJoinAll).toHaveBeenCalledTimes(1);
+  });
+
+  it("disables both choices while joining", () => {
+    render(
+      <SuggestedRoomsDialog
+        offer={{ kind: "joining", request_id: 3, space_id: "!space:example.invalid", rooms }}
+        spaceName="Synthetic Workspace"
+        onJoinAll={vi.fn()}
+        onDismiss={vi.fn()}
+      />
+    );
+    expect(
+      (screen.getByRole("button", { name: t("suggestedRooms.joining") }) as HTMLButtonElement)
+        .matches(":disabled")
+    ).toBe(true);
+    expect(
+      (screen.getByRole("button", { name: t("suggestedRooms.skip") }) as HTMLButtonElement).matches(":disabled")
+    ).toBe(true);
+  });
+
+  it("reports each room's outcome after a partial failure", () => {
+    const onDismiss = vi.fn();
+    render(
+      <SuggestedRoomsDialog
+        offer={{
+          kind: "completed",
+          space_id: "!space:example.invalid",
+          results: [
+            { room_id: "!alpha:example.invalid", display_name: "Alpha", failure: null },
+            { room_id: "!beta:example.invalid", display_name: "Beta", failure: "forbidden" }
+          ]
+        }}
+        spaceName="Synthetic Workspace"
+        onJoinAll={vi.fn()}
+        onDismiss={onDismiss}
+      />
+    );
+    const items = within(
+      screen.getByRole("list", { name: t("suggestedRooms.listLabel") })
+    ).getAllByRole("listitem");
+    expect(items[0].textContent).toContain(t("suggestedRooms.joined"));
+    expect(items[1].textContent).toContain("Beta");
+    expect(items[1].textContent).not.toContain(t("suggestedRooms.joined"));
+    fireEvent.click(screen.getByRole("button", { name: t("suggestedRooms.done") }));
+    expect(onDismiss).toHaveBeenCalledTimes(1);
   });
 });

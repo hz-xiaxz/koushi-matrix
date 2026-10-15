@@ -51,6 +51,7 @@ mod actor;
 pub(crate) mod composer;
 mod diagnostics;
 mod display_projection;
+mod focused_build;
 mod gap_repair;
 pub(crate) mod html_sanitize;
 mod item_projection;
@@ -79,7 +80,10 @@ pub use item_projection::sdk_item_to_timeline_item;
 /// timeline actor's projection and the consumer export.
 pub(crate) use item_projection::timeline_item_is_hidden;
 pub(crate) use manager::TimelineMessage;
-pub use manager::{TIMELINE_DIFF_QUEUE_CAPACITY, TimelineManagerActor, TimelineManagerHandle};
+pub use manager::{
+    TIMELINE_DIFF_QUEUE_CAPACITY, TimelineManagerActor, TimelineManagerHandle,
+    TimelineResidencyDiagnostics,
+};
 #[cfg(any(test, feature = "test-hooks"))]
 pub use navigation::display_projection_reset_fallback_count;
 pub(crate) use navigation::{

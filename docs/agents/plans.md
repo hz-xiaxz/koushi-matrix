@@ -19,6 +19,89 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
+[#1427 device-local notification delivery](../plans/2026-10-14-issue1427-local-notification-email.md)
+makes the app deliver its own notifications and the default email path, because the
+server-owned `kind: email` pusher cannot work on a homeserver such as matrix.org: an
+app-scoped sink list (a mail provider such as Resend or a QQ Mail SMTP preset, later a
+WeChat relay) with every sink secret in the credential store, triggers taken from the
+persistent unread state after a configurable dwell, an interval-coalesced in-memory
+queue with no durable outbox, and a default-off plaintext prefix behind a
+provider-agnostic consent. The server pusher surface keeps its own meaning.
+
+[#1396 avatar thumbnails](../plans/2026-10-13-issue1396-avatar-thumbnails.md)
+requests a homeserver thumbnail sized from the 40 px avatar slot, resizes the
+fallback locally to the same long edge, keys the cache by thumbnail identity, and
+splits the avatar and link-preview budgets (8 MiB vs 32 MiB). It retired a
+released source's bytes; [#1432](../plans/2026-10-14-issue1432-avatar-source-retirement.md)
+removed the scoped-demand half of that retirement and records that a source
+the renderer can still show is never left announced as Ready. Records the open
+decisions and the measured output
+size.
+
+[#1394 resident timeline-set diagnostics](../plans/2026-10-13-issue1394-resident-timeline-diagnostics.md)lands the export-time counters the memory measurement record asked for before any
+retention bound: resident Room/actor counts and a canonical-depth proxy, as
+`core.timeline_residency` rows next to `core.search_retention`. Observation only;
+the unbounded timeline-actor map and the depth axis stay as recorded.
+
+[#1392 topology-first gap inspection](../superpowers/plans/2026-10-13-issue1392-gap-inspection-topology.md)
+describes the SDK-fork store path (`EventCacheStore::load_chunk_topology`) that
+removes full-history decryption from healthy room gap inspection, the koushi
+counter records, and the benchmark evidence obligations; two PRs split at the
+fork/application repository boundary.
+
+[#1363 / #1366 sidebar section row bound](../plans/2026-10-12-issue1363-1366-sidebar-section-bound.md)
+bounds each visible section to five rows with a Rust-projected expand control,
+stores the per-scope `expanded` preference next to `collapsed`/`sort`, reveals a
+collapsed section on conversation entry for the session, and records the
+deliberate divergence from Element Web's non-truncating room list.
+
+[#1364 persisted room activity](../plans/2026-10-12-issue1364-persisted-room-activity.md)
+records why the Recent sidebar order collapsed into name order, the
+`recency_stamp` fallback for the activity-less group, and the persisted per-room
+conversation-activity store that the #542 Recent-first default depends on.
+
+[#542 Recent-first default](../plans/2026-10-12-issue542-recent-first-default.md)
+makes recent conversation order the default for every scope and section, keeps
+`Activity` deserializable for settings an older build persisted, removes the
+attention-first selector option, and corrects the canon's attention ranks to the
+three the reducer implements.
+
+[#1150 index-first search and bounded memory](../plans/2026-10-06-issue1150-search-index-first.md)
+tracks M2: making the persistent ngram index the only candidate source and
+removing full-history RAM body/edit retention, with the remaining store shrink
+and bounded refill. M3 (durable crawl commitments) and M4 (startup warm set)
+were dropped from the PR.
+
+[#1150 resident retention](../plans/2026-10-09-issue1150-resident-retention.md)
+records the M2 follow-up: it lands the fork PR #19 revision on the SDK fork's
+`main` and the matching gitlink move, and it records why the retention changes
+(bounded Room timeline-actor set, event-ring sizing) are **not** implemented
+-- two independent reviews rejected the direct design with verified
+read-intent-loss, quiescence, teardown-settlement and scheduler hazards. It also
+records the open decisions (policy owner, read intent, measurement first) and
+what was dropped (the SDK search-reader LRU, a second React retention limit, the
+invented 64 MiB and p95/p99 gates, and the conditional SDK gap step).
+
+[#1230 cold Room timeline retirement](../plans/2026-10-09-issue1230-cold-room-retirement.md)
+and its successor [read-intent ownership](../plans/2026-10-09-issue1230-read-intent-ownership.md)
+are an **archive, not implementation briefs**. Four designs were reviewed and
+none reached an implementable state before the maintainer closed the work as not
+planned: the retirement-policy designs failed because read work exists
+independently of `local_read_correlations`, and the ownership-move revision left
+eight specification items open, including an engineering-rules cancel-and-await
+conflict. The residual retention is instead tracked as a "Known deviation" note in
+engineering rules "Async and Runtime" 2. The first record also corrects a factual
+error: Room retirement already has a quiescence fence inside
+`clear_thread_root_projections_for_room`.
+
+[#1344 bounded search/history residency](../plans/2026-10-12-issue1344-bounded-search-retention.md)
+is the design record for the maintainer's 2026-10-12 direction: durable crawl
+progress, bounded history traversal, and operation-scoped search readers. Its
+revision 1 was rejected by an independent pre-implementation review; revision 2
+dispositions every verified finding, puts the non-hydrating persisted-store
+cursor first, and leaves one scope decision open (per-account vs cross-account
+byte allowances).
+
 - Rooms / DMs collapsible sidebar sections (design and implementation record):
   [2026-09-19-sidebar-sections-design.md](../superpowers/specs/2026-09-19-sidebar-sections-design.md)
   — its Low priority removal is superseded by #955 below.

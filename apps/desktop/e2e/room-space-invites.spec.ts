@@ -1115,6 +1115,7 @@ test("room management panel updates settings, roles, and members from Rust state
               history_visibility: "shared",
               permissions: {
                 can_edit_settings: true,
+                can_change_join_rule: true,
                 can_edit_roles: true,
                 can_invite: true,
                 can_kick: true,
@@ -1249,10 +1250,105 @@ test("room management panel updates settings, roles, and members from Rust state
   await expect(currentAvatarRow.getByText("mxc://example.invalid/managed-avatar")).toBeVisible();
   await expect(currentAvatarRow.getByText("No avatar")).toHaveCount(0);
 
-  await page.getByRole("button", { name: "Change history visibility" }).click();
-  const historyVisibilitySelect = page.getByRole("combobox", { name: "History visibility" });
-  await historyVisibilitySelect.selectOption("joined");
-  await page.getByRole("button", { name: "Save history visibility" }).click();
+  // #1177: the access/history editor is the shared choice-and-detail control
+  // over the Rust-owned draft. The browser harness is fixture-only: seed the
+  // Rust-shaped draft/preview fixtures and assert the dispatched commands.
+  await page.evaluate((roomId) => {
+    window.__harness.setCommandResponse(
+      "preview_room_access",
+      ({ scope, context }: { scope: unknown; context: unknown }) => ({
+        scope,
+        context,
+        confirmed: false,
+        outcome: {
+          join: { messageId: "room.accessOutcomeJoinInvite" },
+          history: { messageId: "room.accessOutcomeHistoryShared" },
+          encryption: { messageId: "room.accessOutcomeNotEncrypted" },
+          directory: { messageId: "room.accessOutcomeDirectoryPrivate" },
+          nonRetroactive: { messageId: "room.historyNonRetroactive" }
+        }
+      })
+    );
+    const snapshot = window.__harness.currentSnapshot();
+    const withAccess = <T extends { room_id: string }>(rows: T[]): T[] =>
+      rows.map((row) =>
+        row.room_id === roomId ? { ...row, access_join_rule: "invite" as const } : row
+      );
+    window.__harness.setSnapshot({
+      ...snapshot,
+      sidebar: {
+        ...snapshot.sidebar,
+        space_rooms: withAccess(snapshot.sidebar.space_rooms),
+        sections: {
+          ...snapshot.sidebar.sections,
+          rooms: withAccess(snapshot.sidebar.sections.rooms)
+        }
+      },
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          room_management: {
+            ...snapshot.state.domain.room_management,
+            selected_room_id: roomId,
+            draft: {
+              scope: { kind: "room", roomId },
+              revision: 1,
+              rule: "invite",
+              allowTargets: []
+            },
+            operation: { kind: "idle" }
+          }
+        }
+      }
+    });
+    window.__harness.pushStateUpdate();
+  }, HARNESS_ROOM_ID);
+
+  const historyCard = page.locator('[data-setting-property="history-visibility"]');
+  await historyCard.getByRole("radio", { name: /Since join/ }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() =>
+        window.__harness.invocationsOf("set_room_access_draft").at(-1)?.args
+      )
+    )
+    .toEqual({
+      command: {
+        kind: "history",
+        scope: { kind: "room", roomId: HARNESS_ROOM_ID },
+        history: "joined"
+      }
+    });
+
+  await page.evaluate(
+    ({ roomId }) => {
+      const snapshot = window.__harness.currentSnapshot();
+      const roomManagement = snapshot.state.domain.room_management;
+      window.__harness.setSnapshot({
+        ...snapshot,
+        state: {
+          ...snapshot.state,
+          domain: {
+            ...snapshot.state.domain,
+            room_management: {
+              ...roomManagement,
+              draft: {
+                scope: { kind: "room", roomId },
+                revision: 2,
+                rule: "invite",
+                allowTargets: [],
+                history: "joined"
+              }
+            }
+          }
+        }
+      });
+      window.__harness.pushStateUpdate();
+    },
+    { roomId: HARNESS_ROOM_ID }
+  );
+  await historyCard.getByRole("button", { name: "Save history visibility" }).click();
   await expect
     .poll(async () =>
       page.evaluate(() => window.__harness.invocationsOf("update_room_setting").at(-1)?.args)
@@ -1262,17 +1358,43 @@ test("room management panel updates settings, roles, and members from Rust state
       change: { historyVisibility: "joined" }
     });
 
-  await page.getByRole("button", { name: "Change join rule" }).click();
-  const joinRuleSelect = page.getByRole("combobox", { name: "Join rule" });
-  await joinRuleSelect.selectOption("public");
-  await page.getByRole("button", { name: "Save join rule" }).click();
+  const joinRuleCard = page.locator('[data-setting-property="join-rule"]');
+  await joinRuleCard.getByRole("radio", { name: /Public/ }).click();
+  await page.evaluate(
+    ({ roomId }) => {
+      const snapshot = window.__harness.currentSnapshot();
+      const roomManagement = snapshot.state.domain.room_management;
+      window.__harness.setSnapshot({
+        ...snapshot,
+        state: {
+          ...snapshot.state,
+          domain: {
+            ...snapshot.state.domain,
+            room_management: {
+              ...roomManagement,
+              draft: {
+                scope: { kind: "room", roomId },
+                revision: 3,
+                rule: "public",
+                allowTargets: [],
+                history: "joined"
+              }
+            }
+          }
+        }
+      });
+      window.__harness.pushStateUpdate();
+    },
+    { roomId: HARNESS_ROOM_ID }
+  );
+  await joinRuleCard.getByRole("button", { name: "Save join rule" }).click();
   await expect
     .poll(async () =>
       page.evaluate(() => window.__harness.invocationsOf("update_room_setting").at(-1)?.args)
     )
     .toEqual({
       roomId: HARNESS_ROOM_ID,
-      change: { joinRule: "public" }
+      change: { accessPolicy: { rule: "public", allowTargets: [] } }
     });
 
   await page
@@ -1976,8 +2098,8 @@ test("room sections follow Element-aligned order and render Rust-owned counts", 
   await expect(roomsSection.getByRole("button", { name: "Low Priority Room" })).toHaveCount(0);
 
   const favouriteRoom = roomsSection.getByRole("button", { name: "Favourite Room" });
-  await expect(favouriteRoom).toHaveAttribute("data-mention-count", "1");
-  await expect(favouriteRoom.locator(".room-mention-dot")).toBeVisible();
+  await expect(favouriteRoom).not.toHaveAttribute("data-mention-count", "1");
+  await expect(favouriteRoom.locator(".room-mention-dot")).toHaveCount(0);
   await expect(favouriteRoom.locator(".room-count")).toHaveText("1");
   await expect(page.locator(".workspace-rail .workspace-button").first()).toHaveAttribute(
     "data-count",
@@ -2293,7 +2415,7 @@ test("notification attention snapshot drives room, space, thread, and click rout
   const attentionRoom = page.getByRole("button", { name: "Attention Room" });
   const lowPriorityRoom = page.getByRole("button", { name: "Quiet Low Priority" });
   await expect(attentionRoom.locator(".room-count")).toHaveText("4");
-  await expect(attentionRoom.locator(".room-mention-dot")).toBeVisible();
+  await expect(attentionRoom.locator(".room-mention-dot")).toHaveCount(0);
   await expect(lowPriorityRoom.locator(".room-count")).toHaveText("8");
   const attentionSpace = page.getByRole("button", { name: "Attention Space" });
   await expect(attentionSpace).toHaveAttribute("data-count", "4");
@@ -2322,7 +2444,7 @@ test("notification attention snapshot drives room, space, thread, and click rout
   await expect(attentionRoom).toHaveClass(/is-active/);
 });
 
-test("Home rail tooltip is absent while Space rail tooltip remains on hover and focus", async ({
+test("Home rail tooltip is absent while Space rail tooltip remains hover-only", async ({
   page
 }) => {
   await gotoReadyShell(page);
@@ -2351,11 +2473,15 @@ test("Home rail tooltip is absent while Space rail tooltip remains on hover and 
   await expect(accountButton).not.toHaveAttribute("title", /.+/);
   await expect(accountButton).not.toHaveAttribute("aria-describedby", /.+/);
 
+  // #1388: the shared bubble is hover-owned, so a keyboard visit no longer
+  // explains the control.
   await spaceButton.focus();
-  await expect(spaceTooltip).toBeVisible();
-  await page.keyboard.press("Escape");
-  await expect(spaceTooltip).toBeHidden();
+  await expect(spaceTooltip).toHaveCount(0);
   await expect(spaceButton).not.toHaveAttribute("aria-describedby", /.+/);
+
+  // A fresh hover explains it again.
+  await spaceButton.hover();
+  await expect(spaceTooltip).toBeVisible();
 });
 
 test("room selection keeps a delta that arrives before its command receipt", async ({
@@ -3200,4 +3326,327 @@ test("room info People entry opens the standalone People panel", async ({ page }
   await peopleButton.click();
 
   await expect(page.getByRole("heading", { name: t("panel.people") })).toBeVisible();
+});
+
+test("the Room Info access editor dispatches typed draft commands over Rust-shaped fixtures", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  await page.evaluate((roomId) => {
+    const outcome = {
+      // Two targets: no single-Space route, so the generic membership line. Used
+      // by the create preview and by the two-target access transitions below.
+      join: { messageId: "room.accessOutcomeJoinMembershipRoute" },
+      history: { messageId: "room.accessOutcomeHistoryShared" },
+      encryption: { messageId: "room.accessOutcomeNotEncrypted" },
+      directory: { messageId: "room.accessOutcomeDirectoryPrivate" },
+      nonRetroactive: { messageId: "room.historyNonRetroactive" }
+    };
+    // The harness is fixture-only: the spec sets the Rust-shaped result fixture
+    // for each transition and asserts the dispatched command. The initial
+    // preview describes the initial draft: restricted to Alpha alone, with its
+    // opaque Rust canonical-policy token.
+    window.__harness.setCommandResponse("preview_room_access", () => ({
+      scope: { kind: "room", roomId },
+      context: "access",
+      confirmed: false,
+      canonicalPolicyKey: "policy:6f1e2d3c4b5a6978",
+      outcome: {
+        join: {
+          messageId: "room.accessOutcomeJoinSpaceMembers",
+          substitutions: ["Alpha"]
+        },
+        history: { messageId: "room.accessOutcomeHistoryShared" },
+        encryption: { messageId: "room.accessOutcomeNotEncrypted" },
+        directory: { messageId: "room.accessOutcomeDirectoryPrivate" },
+        nonRetroactive: { messageId: "room.historyNonRetroactive" }
+      }
+    }));
+    window.__harness.setCommandResponse("preview_create_room_access", () => ({
+      scope: { kind: "create", sessionId: 1 },
+      confirmed: false,
+      outcome,
+      effectiveRule: "invite",
+      effectiveHistory: "shared",
+      rejection: null,
+      roomVersionPinned: false
+    }));
+    const snapshot = window.__harness.currentSnapshot();
+    const withAccess = <T extends { room_id: string }>(rows: T[]): T[] =>
+      rows.map((row) =>
+        row.room_id === roomId
+          ? {
+              ...row,
+              access_join_rule: "restricted" as const,
+              access_restricted_conditions: "membershipOnly" as const
+            }
+          : row
+      );
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state_generation: (snapshot.state_generation ?? 0) + 1,
+      sidebar: {
+        ...snapshot.sidebar,
+        space_rooms: withAccess(snapshot.sidebar.space_rooms),
+        sections: {
+          ...snapshot.sidebar.sections,
+          rooms: withAccess(snapshot.sidebar.sections.rooms)
+        }
+      },
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          spaces: [
+            {
+              space_id: "!space-a:example.invalid",
+              raw_name: "Alpha",
+              display_name: "Alpha",
+              avatar: null,
+              join_rule: "invite",
+              child_room_ids: [],
+              parent_side_child_room_ids: []
+            },
+            {
+              space_id: "!space-b:example.invalid",
+              raw_name: "Beta",
+              display_name: "Beta",
+              avatar: null,
+              join_rule: "invite",
+              child_room_ids: [],
+              parent_side_child_room_ids: []
+            }
+          ],
+          room_management: {
+            selected_room_id: roomId,
+            settings: {
+              room_id: roomId,
+              name: "Harness Room",
+              topic: null,
+              avatar_url: null,
+              join_rule: "restricted",
+              history_visibility: "shared",
+              permissions: {
+                can_edit_settings: true,
+                can_change_join_rule: true,
+                can_edit_roles: true,
+                can_invite: true,
+                can_kick: true,
+                can_ban: false,
+                can_unban: false
+              },
+              members: []
+            },
+            // Rust seeded the confirmed restricted(A) selection into the draft.
+            draft: {
+              scope: { kind: "room", roomId },
+              revision: 0,
+              rule: "restricted",
+              allowTargets: ["!space-a:example.invalid"]
+            },
+            operation: { kind: "idle" }
+          }
+        }
+      }
+    });
+    window.__harness.setCommandResponse("load_room_settings", () =>
+      window.__harness.currentSnapshot()
+    );
+    window.__harness.pushStateUpdate();
+    window.__harness.clearInvocations();
+  }, HARNESS_ROOM_ID);
+
+  await page.getByRole("button", { name: t("room.roomInfo") }).click();
+  const card = page.locator('[data-setting-property="join-rule"]');
+  await expect(card).toBeVisible();
+  // The initial preview describes the fixture's own initial draft: restricted
+  // to Alpha alone.
+  await expect(
+    card.getByText(t("room.accessOutcomeJoinSpaceMembers", { space: "Alpha" }))
+  ).toBeVisible();
+
+  // The confirmed restricted(A) selection is restored from the fixture, not
+  // guessed from the lagging scalar rule.
+  await expect(card.getByRole("checkbox", { name: "Alpha" })).toBeChecked();
+  await expect(card.getByRole("checkbox", { name: "Beta" })).not.toBeChecked();
+
+  // Each target edit is one typed mutation against the draft's current set.
+  await card.getByRole("checkbox", { name: "Beta" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("set_room_access_draft").at(-1)?.args)
+    )
+    .toEqual({
+      command: {
+        kind: "toggleAllowTarget",
+        scope: { kind: "room", roomId: HARNESS_ROOM_ID },
+        target: "!space-b:example.invalid",
+        selected: true
+      }
+    });
+
+  // The fixture-only harness does not mutate its snapshot from the command.
+  expect(
+    await page.evaluate(
+      () => window.__harness.currentSnapshot().state.domain.room_management.draft?.allowTargets
+    )
+  ).toEqual(["!space-a:example.invalid"]);
+
+  // A same-rule allow-list change is unconfirmed: no Saved until the Rust-shaped
+  // fixture reports the full canonical policy confirmed.
+  await page.evaluate((roomId) => {
+    const snapshot = window.__harness.currentSnapshot();
+    const management = snapshot.state.domain.room_management;
+    // The draft now selected Alpha and Beta, so the re-fetched preview describes
+    // that two-target tuple with its own opaque token.
+    window.__harness.setCommandResponse("preview_room_access", () => ({
+      scope: { kind: "room", roomId },
+      context: "access",
+      confirmed: false,
+      canonicalPolicyKey: "policy:8a7b6c5d4e3f2019",
+      outcome: {
+        join: { messageId: "room.accessOutcomeJoinMembershipRoute" },
+        history: { messageId: "room.accessOutcomeHistoryShared" },
+        encryption: { messageId: "room.accessOutcomeNotEncrypted" },
+        directory: { messageId: "room.accessOutcomeDirectoryPrivate" },
+        nonRetroactive: { messageId: "room.historyNonRetroactive" }
+      }
+    }));
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state_generation: (snapshot.state_generation ?? 0) + 1,
+      state: {
+        ...snapshot.state,
+        domain: {
+          ...snapshot.state.domain,
+          room_management: {
+            ...management,
+            draft: {
+              scope: { kind: "room", roomId },
+              revision: 1,
+              rule: "restricted",
+              allowTargets: ["!space-a:example.invalid", "!space-b:example.invalid"]
+            }
+          }
+        }
+      }
+    });
+    window.__harness.pushStateUpdate();
+  }, HARNESS_ROOM_ID);
+  // The re-fetched preview now describes the two-target draft, so the opaque
+  // token captured at Save is the two-target one.
+  await expect(card.getByText(t("room.accessOutcomeJoinMembershipRoute"))).toBeVisible();
+  await expect(card.getByRole("button", { name: "Save join rule" })).toBeEnabled();
+  await card.getByRole("button", { name: "Save join rule" }).click();
+  await expect
+    .poll(async () =>
+      page.evaluate(() => window.__harness.invocationsOf("update_room_setting").at(-1)?.args)
+    )
+    .toEqual({
+      roomId: HARNESS_ROOM_ID,
+      change: {
+        accessPolicy: {
+          rule: "restricted",
+          allowTargets: ["!space-a:example.invalid", "!space-b:example.invalid"]
+        }
+      }
+    });
+  await expect(card.getByRole("status")).toHaveCount(0);
+
+  // Only a Rust-shaped confirmed fixture turns the same-rule edit to Saved.
+  await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setCommandResponse(
+      "preview_room_access",
+      ({ scope, context }: { scope: unknown; context: unknown }) => ({
+        scope,
+        context,
+        confirmed: true,
+        canonicalPolicyKey: "policy:8a7b6c5d4e3f2019",
+        outcome: {
+          join: { messageId: "room.accessOutcomeJoinMembershipRoute" },
+          history: { messageId: "room.accessOutcomeHistoryShared" },
+          encryption: { messageId: "room.accessOutcomeNotEncrypted" },
+          directory: { messageId: "room.accessOutcomeDirectoryPrivate" },
+          nonRetroactive: { messageId: "room.historyNonRetroactive" }
+        }
+      })
+    );
+    window.__harness.setSnapshot({
+      ...snapshot,
+      state_generation: (snapshot.state_generation ?? 0) + 1
+    });
+    window.__harness.pushStateUpdate();
+  });
+  await expect(card.getByRole("status")).toHaveText("Saved");
+});
+
+// Issue #1410: the one-time suggested-rooms offer is Rust state. The dialog
+// names the Space, joins nothing without consent, sends no room list of its
+// own, and reports each room's outcome.
+test("suggested-rooms offer joins only on consent and reports per-room failures", async ({
+  page
+}) => {
+  await gotoReadyShell(page);
+  const spaceId = "!harness-space:example.invalid";
+  const setOffer = (offer: unknown) =>
+    page.evaluate((nextOffer) => {
+      const next = structuredClone(window.__harness.currentSnapshot());
+      next.state.domain.space_children = {
+        ...next.state.domain.space_children,
+        suggested_offer: nextOffer as typeof next.state.domain.space_children.suggested_offer
+      };
+      window.__harness.setSnapshot(next);
+      window.__harness.pushStateUpdate();
+      window.__harness.clearInvocations();
+    }, offer);
+  const rooms = [
+    { room_id: "!alpha-suggested:example.invalid", display_name: "Alpha Suggested" },
+    { room_id: "!beta-suggested:example.invalid", display_name: "Beta Suggested" }
+  ];
+
+  await setOffer({ kind: "offered", space_id: spaceId, rooms });
+  const dialog = page.getByRole("dialog", {
+    name: t("suggestedRooms.offerTitle", { space: "Harness Space" })
+  });
+  await expect(dialog).toBeVisible();
+  await expect(dialog.getByRole("listitem")).toHaveText(["Alpha Suggested", "Beta Suggested"]);
+  expect(await invocationCount(page, "join_suggested_space_rooms")).toBe(0);
+
+  await dialog.getByRole("button", { name: t("suggestedRooms.joinAll") }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__harness.invocationsOf("join_suggested_space_rooms").at(-1)?.args)
+    )
+    .toMatchObject({ spaceId });
+  const joinArgs = await page.evaluate(
+    () => window.__harness.invocationsOf("join_suggested_space_rooms").at(-1)?.args ?? {}
+  );
+  expect(Object.keys(joinArgs)).not.toContain("roomIds");
+
+  await setOffer({ kind: "joining", request_id: 1, space_id: spaceId, rooms });
+  await expect(dialog.getByRole("button", { name: t("suggestedRooms.joining") })).toBeDisabled();
+  await expect(dialog.getByRole("button", { name: t("suggestedRooms.skip") })).toBeDisabled();
+
+  await setOffer({
+    kind: "completed",
+    space_id: spaceId,
+    results: [
+      { ...rooms[0], failure: null },
+      { ...rooms[1], failure: "forbidden" }
+    ]
+  });
+  const result = page.getByRole("dialog", { name: t("suggestedRooms.resultTitle") });
+  await expect(result).toBeVisible();
+  await expect(result.getByRole("listitem").nth(0)).toContainText(t("suggestedRooms.joined"));
+  await expect(result.getByRole("listitem").nth(1)).not.toContainText(t("suggestedRooms.joined"));
+  await result.getByRole("button", { name: t("suggestedRooms.done") }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__harness.invocationsOf("dismiss_suggested_space_rooms").at(-1)?.args)
+    )
+    .toMatchObject({ spaceId });
+
+  await setOffer({ kind: "none" });
+  await expect(result).toHaveCount(0);
 });

@@ -4,6 +4,7 @@ use std::time::Duration;
 
 use koushi_core::CoreRuntime;
 use koushi_core::media_preparation::StageUploadBytesInput;
+use koushi_core::runtime::IsolatedStores;
 use koushi_state::{
     AppAction, ComposerTarget, RoomSummary, StagedUploadFormatChoice, StagedUploadOutputSelection,
     StagedUploadResizeChoice,
@@ -32,8 +33,8 @@ fn image(id: &str) -> StageUploadBytesInput {
     }
 }
 
-async fn ready_runtime() -> (CoreRuntime, koushi_core::CoreConnection) {
-    let runtime = CoreRuntime::start_with_event_capacity(64);
+async fn ready_runtime() -> (CoreRuntime, koushi_core::CoreConnection, IsolatedStores) {
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(64);
     let mut connection = runtime.attach();
     let mut actions = support::restore_ready_actions();
     actions.extend([
@@ -53,14 +54,14 @@ async fn ready_runtime() -> (CoreRuntime, koushi_core::CoreConnection) {
         state.timeline.room_id.as_deref() == Some(ROOM_ID)
     })
     .await;
-    (runtime, connection)
+    (runtime, connection, _stores)
 }
 
 #[tokio::test]
 async fn prepared_preview_is_core_owned_and_target_fenced() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     let staged = connection
-        .stage_upload_bytes(target(), vec![image("preview")])
+        .stage_upload_bytes(target(), vec![image("preview")], None)
         .await
         .expect("image should stage");
     let staged_generation = staged;
@@ -93,9 +94,9 @@ async fn prepared_preview_is_core_owned_and_target_fenced() {
 
 #[tokio::test]
 async fn same_target_preparation_admission_is_serialized() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     connection
-        .stage_upload_bytes(target(), vec![image("race")])
+        .stage_upload_bytes(target(), vec![image("race")], None)
         .await
         .expect("image should stage");
     let mut barrier = runtime
@@ -149,7 +150,7 @@ async fn same_target_preparation_admission_is_serialized() {
 
 #[tokio::test]
 async fn prepared_send_rejects_before_upload_when_account_or_target_fence_fails() {
-    let (runtime, mut connection) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     let generation = connection
         .begin_composer_draft_renderer_generation()
         .expect("renderer generation");
@@ -174,8 +175,87 @@ async fn prepared_send_rejects_before_upload_when_account_or_target_fence_fails(
             lease,
             target(),
             koushi_state::ComposerDraftRevision::default(),
+            None,
         )
         .await;
     assert!(result.is_err());
+    drop(runtime);
+}
+
+/// The repository's licensed opaque HEIC fixture.
+const HEIF_FIXTURE: &[u8] = include_bytes!(concat!(
+    env!("CARGO_MANIFEST_DIR"),
+    "/../koushi-media/tests/fixtures/heif/opaque.heic"
+));
+
+/// #1147: the preview surface must render an Original+Keep HEIF selection
+/// without WebView HEIC support, while the selection itself keeps the exact
+/// source bytes for the upload.
+#[tokio::test]
+async fn heif_original_preview_is_not_the_raw_heic_payload() {
+    let (runtime, mut connection, _stores) = ready_runtime().await;
+    connection
+        .stage_upload_bytes(
+            target(),
+            vec![StageUploadBytesInput {
+                staged_id: "heif-preview".to_owned(),
+                position: 1,
+                filename: "camera.HEIC".to_owned(),
+                mime_type: String::new(),
+                bytes: HEIF_FIXTURE.to_vec(),
+            }],
+            None,
+        )
+        .await
+        .expect("HEIC staging should settle");
+    connection
+        .select_staged_upload_output(
+            target(),
+            "heif-preview".to_owned(),
+            StagedUploadOutputSelection {
+                resize: StagedUploadResizeChoice::Original,
+                format: StagedUploadFormatChoice::Keep,
+            },
+        )
+        .await
+        .expect("Original+Keep should be selectable");
+
+    let snapshot = connection.versioned_snapshot();
+    let item = snapshot
+        .state
+        .timeline
+        .staged_uploads
+        .iter()
+        .find(|item| item.staged_id == "heif-preview")
+        .expect("staged HEIC");
+    // The selection still describes the exact original payload.
+    assert_eq!(item.mime_type, "image/heic");
+    assert_eq!(item.byte_count, HEIF_FIXTURE.len() as u64);
+    let koushi_state::StagedUploadPreparation::Ready { variants, .. } = &item.preparation else {
+        panic!("HEIC should be ready");
+    };
+    let original_keep = variants
+        .iter()
+        .find(|variant| {
+            variant.resize == StagedUploadResizeChoice::Original
+                && variant.format_choice == StagedUploadFormatChoice::Keep
+        })
+        .expect("Original+Keep variant")
+        .variant_id
+        .clone();
+
+    let preview = connection
+        .prepared_upload_preview(target(), "heif-preview".to_owned(), original_keep)
+        .await
+        .expect("preview bytes should be available");
+    assert_ne!(
+        preview, HEIF_FIXTURE,
+        "the preview must not hand the raw HEIC payload to the WebView"
+    );
+    assert_eq!(
+        preview[..3],
+        [0xFF, 0xD8, 0xFF],
+        "the preview must be a renderable image"
+    );
     drop(runtime);
 }

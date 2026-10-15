@@ -22,6 +22,11 @@ dependencies. If it rejects submodule status, update the checkout to the
 recorded gitlink; do not work around the failure by adding a remote SDK
 revision.
 
+`.github/workflows/sdk-upstream-release-check.yml` compares the pinned fork base
+with upstream's latest `matrix-sdk` release once a day. When the base is behind,
+it opens one issue carrying the `sdk-update` label; close that issue only after
+the gitlink moves to a base that includes the newer release.
+
 ## Local homeserver binaries
 
 Local homeserver QA runners resolve `tuwunel` from the child process `PATH`;
@@ -106,6 +111,23 @@ lockfile is the reproducible security boundary: changing only an existing
 `node_modules` tree is not a fix. Commit dependency-security changes on an
 isolated branch so other developers and `origin/main` are unaffected until the
 change is reviewed and merged.
+
+### Dependency warning maintenance
+
+The desktop package pins KaTeX to `0.18.10`: `0.18.11` was deprecated by its
+publisher for accidental breaking changes. Update the matching vendored history
+export assets and `THIRD_PARTY_NOTICES.md` together with the npm dependency;
+`src/i18n/katexVendor.test.ts` checks the version and offline font references.
+
+WebdriverIO stays on the 9.x line. Its Cheerio dependency uses an explicit
+`encoding-sniffer` override to replace deprecated `whatwg-encoding`, and
+`@wdio/config` uses a scoped `glob` override to a maintained release. Recheck
+buffer/stream decoding and config file matching when changing these overrides,
+and remove them when the parent dependencies support the maintained versions.
+
+`package.json` explicitly denies Edge and Firefox driver install scripts through
+npm's `allowScripts` setting. The Linux GUI lane uses the separately provisioned
+Tauri/WebKit drivers; it does not need those automatic browser downloads.
 
 ## CI maintenance
 

@@ -16,6 +16,138 @@ use koushi_protocol::ids::{AccountKey, RequestId, RuntimeConnectionId, TimelineK
 
 use tempfile::tempdir;
 
+#[tokio::test]
+async fn authoritative_query_rebases_policy_buffered_by_mailbox_pressure() {
+    use crate::search::{SearchActorHandle, SearchActorMessage};
+    use koushi_protocol::command::SearchCommand;
+    use koushi_state::{AttachmentFilter, AttachmentScope, AttachmentSort, SearchCrawlerSettings};
+    let credentials = tempdir().unwrap();
+    let data = tempdir().unwrap();
+    let (account, _actions, _events) = spawn_actor_with_dirs(credentials.path(), data.path());
+    let (search, mut inbox) = SearchActorHandle::controlled_inbox_for_testing();
+    let id = RequestId {
+        connection_id: RuntimeConnectionId(11),
+        sequence: 1,
+    };
+    assert!(
+        search
+            .send_command(SearchCommand::StopHistoryCrawl {
+                request_id: id,
+                room_id: "!policy:example.invalid".into()
+            })
+            .await
+    );
+    let (ack, ready) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::ConfigureSearchActorForTesting {
+                handle: Some(search),
+                acknowledged: ack
+            })
+            .await
+    );
+    ready.await.unwrap();
+    let permissive = SearchCrawlerSettings {
+        include_filenames: true,
+        ..Default::default()
+    };
+    assert!(
+        account
+            .send(AccountMessage::NotifySearchCrawlerRoomsAvailable {
+                room_ids: vec!["!policy:example.invalid".into()],
+                latest_event_ids: Default::default(),
+                settings: permissive,
+            })
+            .await
+    );
+    let (ack, ready) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::ConfigureSearchActorForTesting {
+                handle: None,
+                acknowledged: ack
+            })
+            .await
+    );
+    ready.await.unwrap(); // the permissive notification really saw the full inbox
+    let restrictive = SearchCrawlerSettings {
+        include_filenames: false,
+        ..Default::default()
+    };
+    assert!(
+        account
+            .send(AccountMessage::SearchWithPolicy {
+                command: SearchCommand::Attachments {
+                    request_id: id,
+                    scope: AttachmentScope::Account,
+                    filter: AttachmentFilter::default(),
+                    sort: AttachmentSort::NewestFirst
+                },
+                content_policy: restrictive,
+            })
+            .await
+    );
+    assert!(matches!(
+        inbox.recv().await.unwrap(),
+        SearchActorMessage::StopHistoryCrawl { .. }
+    ));
+    let SearchActorMessage::Attachments {
+        content_policy: Some(policy),
+        ..
+    } = executor::timeout(Duration::from_secs(2), inbox.recv())
+        .await
+        .unwrap()
+        .unwrap()
+    else {
+        panic!("expected query")
+    };
+    assert!(!policy.include_filenames);
+    // Observe the buffered roster flush after the authoritative query, using a
+    // fresh controlled inbox so this does not depend on a scheduling race.
+    let (replacement, mut flushed) = SearchActorHandle::controlled_inbox_for_testing();
+    let (ack, ready) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::ConfigureSearchActorForTesting {
+                handle: Some(replacement),
+                acknowledged: ack
+            })
+            .await
+    );
+    ready.await.unwrap();
+    let notification = if let Ok(Some(SearchActorMessage::RoomsAvailable(n))) =
+        executor::timeout(Duration::from_millis(100), inbox.recv()).await
+    {
+        n
+    } else {
+        let SearchActorMessage::RoomsAvailable(n) =
+            executor::timeout(Duration::from_secs(2), flushed.recv())
+                .await
+                .unwrap()
+                .unwrap()
+        else {
+            panic!("expected buffered roster")
+        };
+        n
+    };
+    assert!(
+        !notification.settings.include_filenames,
+        "buffer must not undo opt-out"
+    );
+    assert_eq!(notification.room_ids, ["!policy:example.invalid"]);
+    let (ack, done) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::ShutdownWithAck { acknowledged: ack })
+            .await
+    );
+    let _ = flushed.recv().await;
+    executor::timeout(Duration::from_secs(2), done)
+        .await
+        .unwrap()
+        .unwrap();
+}
+
 #[test]
 fn composer_timeline_command_rechecks_full_session_owner_before_account_routing() {
     let active = SessionKeyId {
@@ -208,5 +340,161 @@ fn classify_room_event_lookup_error_only_treats_not_found_as_missing() {
     assert_eq!(
         classify_room_event_lookup_error(None),
         RoomEventLookupResult::Failed
+    );
+}
+
+#[tokio::test]
+async fn export_time_retention_sample_is_answered_or_settles_unavailable() {
+    use crate::search::{
+        AccountRetentionDiagnostics, EventCacheRetentionCounters, SearchActorHandle,
+        SearchActorMessage, SearchRetentionCounters,
+    };
+
+    let credentials = tempdir().unwrap();
+    let data = tempdir().unwrap();
+    let (account, _actions, _events) = spawn_actor_with_dirs(credentials.path(), data.path());
+
+    // No search actor configured: the sample settles as unavailable instead of
+    // holding the export.
+    let (response_tx, response_rx) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::SearchRetentionDiagnostics {
+                response: response_tx
+            })
+            .await
+    );
+    assert_eq!(
+        executor::timeout(Duration::from_secs(2), response_rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        None
+    );
+
+    // With a configured search actor, the reply channel is forwarded to it.
+    let (search_actor, mut inbox) = SearchActorHandle::controlled_inbox_for_testing();
+    let (acknowledged, ready) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::ConfigureSearchActorForTesting {
+                handle: Some(search_actor),
+                acknowledged,
+            })
+            .await
+    );
+    ready.await.unwrap();
+
+    let fixture = AccountRetentionDiagnostics {
+        search: SearchRetentionCounters {
+            rooms_total: 3,
+            live_decrypted_len_bytes: 8192,
+            ..SearchRetentionCounters::default()
+        },
+        event_cache: EventCacheRetentionCounters::default(),
+    };
+    let (response_tx, response_rx) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::SearchRetentionDiagnostics {
+                response: response_tx
+            })
+            .await
+    );
+    let SearchActorMessage::RetentionDiagnostics { response } =
+        executor::timeout(Duration::from_secs(2), inbox.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    else {
+        panic!("expected an export-time retention request")
+    };
+    response.send(Some(fixture)).unwrap();
+    assert_eq!(
+        executor::timeout(Duration::from_secs(2), response_rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        Some(fixture)
+    );
+
+    // A held response does not stall the account actor: a later account
+    // message is processed while the retention reply is still outstanding.
+    let (response_tx, response_rx) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::SearchRetentionDiagnostics {
+                response: response_tx
+            })
+            .await
+    );
+    let (acknowledged, ready) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::ConfigureSearchActorForTesting {
+                handle: None,
+                acknowledged,
+            })
+            .await
+    );
+    ready.await.unwrap();
+    let SearchActorMessage::RetentionDiagnostics { response } =
+        executor::timeout(Duration::from_secs(2), inbox.recv())
+            .await
+            .unwrap()
+            .unwrap()
+    else {
+        panic!("expected the second retention request")
+    };
+    response.send(None).unwrap();
+    assert_eq!(
+        executor::timeout(Duration::from_secs(2), response_rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        None
+    );
+}
+
+#[tokio::test]
+async fn export_time_timeline_residency_sample_answers_the_resident_set() {
+    let credentials = tempdir().unwrap();
+    let data = tempdir().unwrap();
+    let (account, _actions, _events) = spawn_actor_with_dirs(credentials.path(), data.path());
+
+    // A fresh account has no resident Room set: the sample is answered with the
+    // empty snapshot rather than settling as unavailable (#1394).
+    let (response_tx, response_rx) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::TimelineResidencyDiagnostics {
+                response: response_tx
+            })
+            .await
+    );
+    assert_eq!(
+        executor::timeout(Duration::from_secs(2), response_rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        Some(crate::timeline::TimelineResidencyDiagnostics::default())
+    );
+
+    // A second sample is answered too, so one outstanding sample does not
+    // consume the account actor.
+    let (second_tx, second_rx) = oneshot::channel();
+    assert!(
+        account
+            .send(AccountMessage::TimelineResidencyDiagnostics {
+                response: second_tx
+            })
+            .await
+    );
+    assert_eq!(
+        executor::timeout(Duration::from_secs(2), second_rx)
+            .await
+            .unwrap()
+            .unwrap(),
+        Some(crate::timeline::TimelineResidencyDiagnostics::default())
     );
 }

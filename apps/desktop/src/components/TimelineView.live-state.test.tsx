@@ -223,6 +223,9 @@ describe("TimelineView", () => {
       server_confirmed_read_event_id: "$server:example.invalid"
     };
     act(() => {
+      emit({ kind: "Timeline", event: { InitialItems: {
+        key: KEY, generation: 1, request_id: null, items: []
+      } } });
       emit({
         kind: "Timeline",
         event: {
@@ -276,6 +279,8 @@ describe("TimelineView", () => {
           rooms: {
             "!room:example.invalid": {
               fully_read_event_id: null,
+              focused_receipts_by_event: {},
+              thread_receipts_by_event: {},
               typing_user_ids: [],
               typing_users: [],
               receipts_by_event: {
@@ -364,6 +369,8 @@ describe("TimelineView", () => {
           rooms: {
             "!room:example.invalid": {
               fully_read_event_id: null,
+              focused_receipts_by_event: {},
+              thread_receipts_by_event: {},
               typing_user_ids: [],
               typing_users: [],
               receipts_by_event: {
@@ -451,6 +458,8 @@ describe("TimelineView", () => {
           rooms: {
             "!room:example.invalid": {
               fully_read_event_id: null,
+              focused_receipts_by_event: {},
+              thread_receipts_by_event: {},
               typing_user_ids: [],
               typing_users: [],
               receipts_by_event: {
@@ -814,6 +823,17 @@ describe("TimelineView", () => {
     emit({
       kind: "Timeline",
       event: {
+        InitialItems: {
+          request_id: null,
+          key: KEY,
+          generation: 1,
+          items: [other, own1, own2]
+        }
+      }
+    });
+    emit({
+      kind: "Timeline",
+      event: {
         NavigationUpdated: {
           key: KEY,
           snapshot: {
@@ -828,17 +848,6 @@ describe("TimelineView", () => {
             newer_event_count: 0,
             can_jump_to_bottom: false
           }
-        }
-      }
-    });
-    emit({
-      kind: "Timeline",
-      event: {
-        InitialItems: {
-          request_id: null,
-          key: KEY,
-          generation: 1,
-          items: [other, own1, own2]
         }
       }
     });
@@ -877,6 +886,17 @@ describe("TimelineView", () => {
     emit({
       kind: "Timeline",
       event: {
+        InitialItems: {
+          request_id: null,
+          key: KEY,
+          generation: 1,
+          items: [own1, own2]
+        }
+      }
+    });
+    emit({
+      kind: "Timeline",
+      event: {
         NavigationUpdated: {
           key: KEY,
           snapshot: {
@@ -891,17 +911,6 @@ describe("TimelineView", () => {
             newer_event_count: 0,
             can_jump_to_bottom: false
           }
-        }
-      }
-    });
-    emit({
-      kind: "Timeline",
-      event: {
-        InitialItems: {
-          request_id: null,
-          key: KEY,
-          generation: 1,
-          items: [own1, own2]
         }
       }
     });
@@ -937,6 +946,17 @@ describe("TimelineView", () => {
     emit({
       kind: "Timeline",
       event: {
+        InitialItems: {
+          request_id: null,
+          key: KEY,
+          generation: 1,
+          items: [other, unread, own1]
+        }
+      }
+    });
+    emit({
+      kind: "Timeline",
+      event: {
         NavigationUpdated: {
           key: KEY,
           snapshot: {
@@ -951,17 +971,6 @@ describe("TimelineView", () => {
             newer_event_count: 0,
             can_jump_to_bottom: false
           }
-        }
-      }
-    });
-    emit({
-      kind: "Timeline",
-      event: {
-        InitialItems: {
-          request_id: null,
-          key: KEY,
-          generation: 1,
-          items: [other, unread, own1]
         }
       }
     });
@@ -1013,6 +1022,8 @@ describe("TimelineView", () => {
             }
           },
           fully_read_event_id: null,
+          focused_receipts_by_event: {},
+          thread_receipts_by_event: {},
           typing_user_ids: [],
           typing_users: []
         }
@@ -1061,6 +1072,8 @@ describe("TimelineView", () => {
         "!room:example.invalid": {
           receipts_by_event: {},
           fully_read_event_id: null,
+          focused_receipts_by_event: {},
+          thread_receipts_by_event: {},
           typing_user_ids: ["@hironeishida:matrix.org"],
           typing_users: [
             {
@@ -1105,6 +1118,8 @@ describe("TimelineView", () => {
         "!room:example.invalid": {
           receipts_by_event: {},
           fully_read_event_id: null,
+          focused_receipts_by_event: {},
+          thread_receipts_by_event: {},
           typing_user_ids: ["@unknown:example.invalid"],
           typing_users: [
             {

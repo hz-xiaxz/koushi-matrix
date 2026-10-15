@@ -432,6 +432,30 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   `SettingsValues.notifications.sound`. React may pass that DTO value into native
   adapter routing so sound is skipped, but it must not create an independent
   notification preference or mutate native attention state locally.
+- Device-local notification delivery (#1427) is Rust-owned the same way: the
+  enabled sinks, their non-secret fields, the dwell, the interval, the focus
+  gating, the optional plaintext prefix and its consent, and the per-sink outcome
+  are Rust state, and the dwell timer runs on the core executor's clock. React
+  renders that DTO and dispatches typed commands; it must not decide whether a
+  delivery happens, start or reset a timer, assemble a body, or read a sink secret.
+  Whether a stored credential still belongs to a sink is Rust's answer as well: the
+  binding it was saved under, and the `secret_retired` flag that says this device
+  deleted it, are core facts, so React must not compare endpoints or hosts to guess
+  them or keep its own list of which credentials it has seen. The keyword list is not
+  local settings at all: it is the account's own `content` push rules, read and
+  written through the account notification surface, so a rule another client wrote is
+  visible here and a failed write is never shown as saved. React adds a keyword by
+  sending the pattern and nothing else: Rust trims it, rejects the empty, oversized,
+  and duplicate cases, enforces the cap, and mints the rule id, and a refusal reaches
+  the screen as one of that surface's typed failures. A rule's `enabled` flag is also
+  the server's, so a rule another client turned off is rendered as off - it is still on
+  the account and still refuses a same-pattern add - and React must not hide it,
+  re-enable it, or keep an enabled list of its own. The plaintext prefix's
+  source is the message body the room list already holds, marked never to be
+  serialized, and it reaches the send request without passing through any DTO.
+  The same attention projection that drives the badge and the unread marks is the
+  only source of what is delivered, so a delivered message cannot describe a state
+  the badge does not show.
 - Candidate projection uses private-data-minimized room labels and counts only.
   Native attention uses `RoomSummary.display_label` for its safe room label, but
   serialized candidates still must not carry room IDs, sender IDs, event IDs, or
@@ -448,10 +472,21 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   stale non-null summary. Replay/restart rehydrates the same Core projection
   from the SDK event cache; no frontend or first-party plaintext summary store
   exists.
+- Thread unread per root is Rust-owned: the room timeline actor reads the SDK thread
+  cache for every root whose room-side summary changed and mirrors the value to
+  state (`ThreadUnreadObserved`), so the Threads-list rows show the same count as
+  the room-timeline chip. The same per-root values feed the reducer-derived
+  `RoomSummary.thread_unread_count` / `thread_highlight_count` room totals under
+  the proven SDK event-cache decomposition (canon "Threads and attention"); a
+  thread count never enters the main-only `RoomSummary.unread_count`.
 - Thread-root lifecycle and placement are also Rust-owned. The session-scoped
   `ThreadRootProjectionService` retains canonical/hydrated root snapshots until
   authoritative aggregate/redaction clear, Room unsubscribe, or session teardown;
-  a bounded display omission is dormant, never deletion. Rust State mirrors only
+  a bounded display omission is dormant, never deletion. Thread summaries describe
+  aggregate presentation state, not complete per-thread unread state: capability
+  advertisement and a room-badge change do not prove thread-event delivery, so the
+  thread contribution to a room badge rests on the named SDK event-cache filters,
+  not on a badge. Rust State mirrors only
   explicit Core lifecycle actions. The Room actor's `DisplayProjectionState`
   applies root-event/latest-reply order, standalone-reply suppression, stable row
   identity and display-relative diffs. `TimelineItem` display metadata is a
@@ -601,6 +636,14 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   vector but must not classify tags/DMs, join room/Space membership, compute
   attention or sort. Account-global invites remain the Home navigation/count and
   are not a room section.
+- Section row bounds are Rust state
+  ([canon](../architecture/state-machine.md#sidebar-section-row-bound-1363-1366)):
+  the persisted `expanded` preference lives in `SidebarScopeSettings`, the
+  projection emits `SidebarModel.section_bounds`, and React only slices with
+  `visible_count` and renders the control Rust asked for. Frontend fakes must
+  look the numbers up in the Rust-generated
+  `apps/desktop/src/test/sidebarSectionBounds.generated.json` instead of
+  computing a bound, and a shape that fixture does not cover renders every row.
 - The Not joined section is fed by `AppState.space_children`, the selected
   Space's `/hierarchy` projection (#961). Rust owns it end to end: the reducer
   clears it and bumps its generation wherever the active Space changes
@@ -617,6 +660,20 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   reported from `AppState.invites`, not from the server summary. A child the
   server did not describe is `unknown` with no join action — the permission model
   is never worked around.
+- Suggested Space rooms (#1410,
+  [canon](../architecture/state-machine.md#suggested-space-rooms-1410)) live in `AppState.space_children`
+  too. `SpaceChildSummary.suggested` comes from the Space's synced
+  `m.space.child` with the `/hierarchy` as fallback, and the Not joined lane
+  sorts suggested rows first and marks them with `RoomListItem.suggested`.
+  `can_edit_suggested` and `suggested_edit` (one save at a time) back the
+  admin's `set_space_child_suggested` toggle, which keeps every other field of
+  the child event. `suggested_offer` is the one-time bulk-join offer that the
+  reducer opens when a Space is joined. It outlives the Space selection and
+  leaves when the Space or the session goes. `join_suggested_space_rooms`
+  carries no room list, because admission rewrites it from the held offer.
+  React renders the offer, its `joining` state and its per-room `completed`
+  results, and it must not choose rooms, retry joins, or reopen a dismissed
+  offer.
 - Add existing room (#1007) renders `SidebarModel.space_add_rooms`, projected
   by `space_add_rooms_for_state` from the active Space's parent-side
   `child_room_ids`, the in-flight `LinkingSpaceChild` pair, and
@@ -627,17 +684,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   Core derives `via` from the SDK. `create_room` returns
   `spaceLinkFailure` because a failed link does not fail creation. Browser tests
   push Rust-shaped `space_add_rooms` snapshots after the command receipt.
-- The create-room address preview (`preview_room_address`, #838/#1006) is Rust
-  owned: normalization, the `<space>-<room>` suggestion from the selected
-  Space's Matrix name (dropped when it would exceed 255 bytes), validation, the
-  full alias, and the `server_name` whose alias namespace all Spaces share.
-  React keeps only whether the address was edited, and re-requests the preview
-  for the current draft; an `aliasInUse` create failure is rendered with the
-  attempted full address and server captured from that preview. A submitted
-  alias is never renamed or retried automatically. The preview's
-  `without_address` (#1023) is Rust's verdict that an unnamed public room
-  may be created without an address (a named room never is);
-  React renders it and does not decide when an address is optional.
+- The create-room address preview (`preview_room_address`, #838/#1006/#1416)
+  is Rust owned: the create session's random default address (Core draws the
+  suffix into the create draft; the prefix is the attachment Space's Matrix
+  name, or `room`), normalization, validation, the full alias, and the
+  `server_name` whose alias namespace all Spaces share. The default never
+  follows the room name. React sends the create session id and the edited
+  address (or none), and re-requests the preview when either changes; an
+  `aliasInUse` create failure is rendered with the attempted full address and
+  server captured from that preview. A submitted alias is never renamed or
+  retried automatically, and a public room is never created without one.
 - The create-room dialog's initial choices (#1023) are
   `SidebarModel.create_room_defaults` (`create_room_defaults_for_state`): public
   in a Space whose synced join rule is public, otherwise private. React seeds the
@@ -805,7 +861,10 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   visibility from React settings state, or repair switch state after dispatch.
 - Timeline mention pills are display-only rendering over Rust-owned timeline body
   text plus `ProfileState.users`; they must not become a React-owned source of
-  mention semantics.
+  mention semantics. Their spelling is presentational too: a formatted-body anchor
+  that lacks the composer's `@` gets one at render time, and the event's HTML, the
+  plain body, the copy path, and the `matrix.to` target keep the sender's own text
+  (#1328).
 
 ## Profiles and local aliases
 
@@ -1078,8 +1137,17 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   Rust-owned Upload attachments staging dialog. Send invokes
   `send_prepared_uploads`; there is no direct renderer upload command. Each staged caption is a nullable
   `ComposerDocument`, edited through the staging dialog
-  (`TimelinePaneState.staged_uploads[*].caption`), not inferred from the
-  ordinary Composer draft. At the media-send boundary Rust derives the
+  (`TimelinePaneState.staged_uploads[*].caption`). A single attachment staged into
+  a target that had none is seeded once from the renderer's captured Composer
+  document (#1194) and is edited like any other caption afterwards; no other
+  staging infers a caption. That caption is the one prepared send that consumes the
+  draft rather than settling it (#1204): a single attachment whose caption is still
+  the submitted text moves it into the message, so the composer is cleared. Any
+  other prepared send settles the composer draft
+  revision without consuming its content (#1130): it dispatches only the staged
+  items and their captions, so text typed before pasting an image survives the
+  send while the revision, tombstones and accepted-send navigation stay exactly
+  as a text send leaves them. At the media-send boundary Rust derives the
   `FormattedMessageDraft` from that document's plain body, formatted body, and
   mention intent. Rust exclusively owns staged items, caption DTOs, residency,
   and send content. The bounded main/thread `caption:*` mutation lanes own only
@@ -1169,10 +1237,21 @@ normal QA-title mode and cannot change product title semantics.
   behavior per component.
 - Font assets: Inter and Twemoji COLR are bundled-preferred choices with system
   fallbacks, and any included font package must update `THIRD_PARTY_NOTICES.md`
-  with version, local path, license, and provenance. The current Twemoji COLR
-  package (`twemoji-colr-font@15.0.3`) is pinned but npm marks it deprecated; do
-  not upgrade or replace it without checking the rendered family name, license
-  stack (package/font/artwork), and browser COLR/CPAL behavior.
+  with version, local path, license, and provenance. The bundled Twemoji COLR is
+  `@sableclient/twemoji-font@1.0.4` (#1341, v0.22.0), which replaced the
+  deprecated `twemoji-colr-font@15.0.3`; do not change or upgrade it without
+  checking the rendered family name, the license stack (package/font/artwork),
+  and browser COLR/CPAL and cmap format-14 behavior — a variation-sequence gap
+  changes which code points the font can paint at all (#1380).
+- The bundled Twemoji build declares a cmap format-14 subtable for exactly four
+  variation sequences (U+00A9, U+00AE, U+2122, U+24C2 with U+FE0F) and carries no
+  bare U+00A9/U+00AE/U+2122/U+24C2 glyph. Reaction keys therefore paint a display
+  form (`reactionKeyDisplayText`) that drops U+FE0F and U+FE0E except on those
+  four bases, and emoji picker cells paint from `--font-emoji` like the pills do.
+  The transform is display-only: the key stays verbatim for `m.relates_to.key`
+  matching, `send_reaction`, `redact_reaction`, the reaction tooltip and the
+  accessible name, because Matrix treats `👍` (U+1F44D) and `👍️` (U+1F44D U+FE0F)
+  as two different reactions.
 - Keep the root font stack as a single resolved custom property, e.g.
   `font-family: var(--font-ui)`. A 2026-06-15 attempt used `font-family:
   var(--font-ui), var(--font-emoji)` with list-valued variables; headless Chromium
@@ -1209,8 +1288,15 @@ normal QA-title mode and cannot change product title semantics.
 - Scheduled/send-later state follows the same boundary. The full queue and local
   fallback timer are Rust/core-owned; React may render only
   `snapshot.state.timeline.scheduled_sends` for the selected room and
-  `scheduled_send_capability`, then dispatch typed schedule/cancel/reschedule
-  commands. MSC4140 delayed-event capability detection and
+  `scheduled_send_capability` — plus, while the explicitly opened scheduled-sends
+  panel is `Open` (#1160), the Rust-projected
+  `snapshot.state.ui.scheduled_sends_list` — then dispatch typed
+  schedule/cancel/reschedule commands. That panel slice is the one deliberate
+  exception that carries future message bodies for non-visible rooms: it is
+  admitted only in a `Ready` session, closed by Rust when the session leaves
+  `Ready` or the captured Space is gone/inactive, and React must keep no copy of
+  its contents beyond rendering the slice. MSC4140 delayed-event capability
+  detection and
   create/cancel/reschedule requests live in `AccountActor` through SDK/Ruma APIs.
   The local fallback timer must consider only `ScheduledSendHandle::Local` items;
   server handles are owned by the homeserver and must not be fired by the local
@@ -1278,7 +1364,8 @@ normal QA-title mode and cannot change product title semantics.
   password), `EnableKeyBackup` (optional recovery passphrase), and
   `RestoreKeyBackup` (recovery secret). Their reducer actions, effects, events,
   snapshots, logs, and `Debug` output must remain secret-free.
-- Secure-backup setup/recovery-key reset/passphrase-change reveal the SDK-produced
+- Secure-backup setup/recovery-key reset/passphrase-change and the
+  verification-gate identity bootstrap (#1049) reveal the SDK-produced
   recovery key on screen (#927). The reducer owns it only as
   `RecoveryKeyMaterial` inside `SecureBackupSetupState::RecoveryKeyReady` /
   `SecureBackupPassphraseChangeState::Changed`; AccountActor holds the one
@@ -1288,7 +1375,11 @@ normal QA-title mode and cannot change product title semantics.
   `ConfirmSecureBackupRecoveryKeySaved` does. If AccountActor cannot then
   clear the persisted delivery marker it keeps its copy and
   `SecureBackupRecoveryKeyConfirmFailed` restores the setup reveal with
-  `confirmation_failed: true` (TS mirror `confirmation_failed: boolean`). The privacy contract is
+  `confirmation_failed: true` (TS mirror `confirmation_failed: boolean`).
+  The identity bootstrap keys the same slot by its flow id; its exit is
+  `ConfirmSessionBootstrapSaved`, settled by AccountActor (marker clear
+  first), and `SessionState::AwaitingBootstrapConfirmation` and its TS mirror
+  carry only `flow_id` and coarse gate state. The privacy contract is
   [engineering rule 11](../policies/engineering-rules.md); the gate
   transitions are in the [state machines](../architecture/state-machine.md).
 - Secure-backup setup/re-enable confirmation policy is Rust-owned. The closed
@@ -1337,6 +1428,14 @@ normal QA-title mode and cannot change product title semantics.
   WebView Core-event projection contains only `request_id`, and React receives
   only coarse launch outcome plus settlement. Never return the provider URL or
   OAuth state to React or add an SSO `window.open` fallback.
+- Browser callback correlation is Rust-owned as well. `AccountRuntimeManager`
+  keeps at most one pending sign-in attempt per account tab and decides which tab
+  a callback may complete. Tauri only classifies the callback URL shape: an
+  OAuth/MAS CSRF `state`, or the stateless legacy `m.login.sso` `loginToken`
+  callback, which completes a tab only while exactly one legacy attempt is
+  pending (#1266). A legacy callback never completes an OAuth attempt. The login
+  token stays inside the callback URL string handed to the core command and is
+  never projected, logged, or persisted.
 - Trust GUI controls are transport clients only. Add Tauri commands as thin
   `CoreCommand::Account` submitters and keep SDK calls, UIAA/OAuth continuation
   handles, and verification handles inside Rust actors. React must render
@@ -1510,8 +1609,13 @@ has caused a real visible bug.
 - GUI-only tooltips are presentation state only when their displayed text already
   comes from Rust-owned snapshots, such as `space.display_name`. Prefer the
   reusable `Tooltip` component over native `title=` for styled, testable
-  tooltips: it must expose `role="tooltip"`, add `aria-describedby` only while
-  open, open on hover/focus, and dismiss on mouse-leave/blur/Escape.
+  tooltips: it exposes `role="tooltip"`, adds `aria-describedby` only while
+  open, and is pointer-owned — it opens on hover only, a press dismisses it and
+  keeps it dismissed while the pointer rests on the control, Escape closes it,
+  and keyboard or programmatic focus never opens it, because a control that
+  returns focus to itself after a selection must not leave an explanation on
+  screen (#1388). A fact stated only in a hover bubble also needs a
+  keyboard-reachable statement on the wrapped control.
 - Do not add ad hoc `px` literals in TSX for fixed GUI geometry. Repeated or
   semantic dimensions for rails, icon buttons, badges, avatars, counters, and
   tooltip placement belong in named CSS custom properties. Keeping `px` behind a

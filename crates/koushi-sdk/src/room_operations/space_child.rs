@@ -11,7 +11,7 @@ use super::{MatrixRoomOperationError, MatrixRoomOperationFailureKind};
 use crate::MatrixClientSession;
 use crate::room_projection::matrix_room;
 use matrix_sdk::{
-    deserialized_responses::SyncOrStrippedState,
+    deserialized_responses::{RawSyncOrStrippedState, SyncOrStrippedState},
     ruma::{
         OwnedServerName,
         events::{
@@ -83,6 +83,95 @@ pub async fn set_space_child(
         child_written,
         parent,
     })
+}
+
+/// Issue #1410: mark or unmark a linked child of `space_id` as suggested.
+///
+/// Mirrors Element Web's Space hierarchy "Mark as suggested": the existing
+/// `m.space.child` content is rewritten with only `suggested` changed, so
+/// `via`, `order` and any field this client does not model survive. A pair
+/// that is not linked (no routed child event) is `WrongRoomState`: toggling
+/// must never create a relationship. Returns `false` when the event already
+/// says what was asked and nothing was sent.
+pub async fn set_space_child_suggested(
+    session: &MatrixClientSession,
+    space_id: &str,
+    child_room_id: &str,
+    suggested: bool,
+) -> Result<bool, MatrixRoomOperationError> {
+    let space = matrix_room(session, space_id)?;
+    let child_room_id = matrix_sdk::ruma::RoomId::parse(child_room_id)
+        .map_err(|_| MatrixRoomOperationError::InvalidRoomId)?;
+    let user_id = session
+        .client()
+        .user_id()
+        .ok_or(MatrixRoomOperationError::Sdk(
+            MatrixRoomOperationFailureKind::AuthenticationRequired,
+        ))?
+        .to_owned();
+    if !space_child_events_permitted(&space, &user_id).await {
+        return Err(MatrixRoomOperationError::Sdk(
+            MatrixRoomOperationFailureKind::Forbidden,
+        ));
+    }
+
+    let Some(mut content) = routed_space_child_content(&space, &child_room_id).await else {
+        return Err(MatrixRoomOperationError::Sdk(
+            MatrixRoomOperationFailureKind::WrongRoomState,
+        ));
+    };
+    let current = content
+        .get("suggested")
+        .and_then(serde_json::Value::as_bool)
+        .unwrap_or(false);
+    if current == suggested {
+        return Ok(false);
+    }
+    content.insert("suggested".to_owned(), serde_json::Value::Bool(suggested));
+    space
+        .send_state_event_raw(
+            StateEventType::SpaceChild.to_string().as_str(),
+            child_room_id.as_str(),
+            serde_json::Value::Object(content),
+        )
+        .await
+        .map_err(MatrixRoomOperationError::from_sdk_error)?;
+    Ok(true)
+}
+
+/// Whether the account may send `m.space.child` in `space` (#1410). An
+/// unreadable power-levels event is not a denial: the homeserver decides.
+pub(crate) async fn space_child_events_permitted(
+    space: &matrix_sdk::Room,
+    user_id: &matrix_sdk::ruma::UserId,
+) -> bool {
+    match space.power_levels().await {
+        Ok(power_levels) => power_levels.user_can_send_state(user_id, StateEventType::SpaceChild),
+        Err(_) => true,
+    }
+}
+
+/// The raw content of a routed (non-empty `via`) `m.space.child` event, every
+/// field kept.
+async fn routed_space_child_content(
+    space: &matrix_sdk::Room,
+    child_room_id: &matrix_sdk::ruma::RoomId,
+) -> Option<serde_json::Map<String, serde_json::Value>> {
+    let raw = space
+        .get_state_event_static_for_key::<SpaceChildEventContent, _>(child_room_id)
+        .await
+        .ok()??;
+    let RawSyncOrStrippedState::Sync(raw) = raw else {
+        return None;
+    };
+    let content = raw
+        .get_field::<serde_json::Map<String, serde_json::Value>>("content")
+        .ok()??;
+    let routed = content
+        .get("via")
+        .and_then(serde_json::Value::as_array)
+        .is_some_and(|via| !via.is_empty());
+    routed.then_some(content)
 }
 
 async fn link_space_parent(

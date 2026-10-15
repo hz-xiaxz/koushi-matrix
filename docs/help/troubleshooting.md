@@ -34,6 +34,11 @@ as the desktop session. Keep Koushi running until the provider redirects to
 the registered callback scheme. If Koushi shows a browser-launch error, fix
 the default-browser configuration and select **Single sign-on** again.
 
+Finish one browser sign-in at a time. When two account tabs are both waiting on
+**Single sign-on**, Koushi cannot tell which tab an incoming callback belongs to
+and ignores it. Complete or cancel the other unfinished sign-in, then select
+**Single sign-on** again in the tab you want.
+
 An expired or revoked session requires signing in again. A verification screen
 requires the [session verification flow](security-and-recovery.md#verify-a-session-after-sign-in),
 not repeated password attempts.
@@ -82,21 +87,132 @@ Check **Room info** for **Mute** or **Mentions only**, then check **Account
 Settings → Notifications** for desktop notifications and **App Settings →
 Notifications** for sounds and badges. Also check the operating system's
 notification permission for Koushi. An unread badge and a desktop notification
-are different signals.
+are different signals. A red badge counts locally observed unread messages;
+server-only notification counts do not create a red number or a desktop alert.
+Desktop alerts state the verified room count and open the room; they do not show
+an unverified message preview or jump to an unverified event.
+The message-preview setting is hidden while exact unread event verification is
+unavailable.
+
+If the notification you are missing is mail or a relay message sent from this
+device, see [Notifications from this device do not
+arrive](#notifications-from-this-device-do-not-arrive).
+
+## Notifications from this device do not arrive
+
+Koushi sends these itself, so check the device channel before the homeserver:
+
+- **Send notifications from this device** is on.
+- At least one service is added, turned on with **Send through this service**,
+  and shows its password as **Saved**.
+- At least one switch under **Send for** is on, or the room, or a space that
+  contains it, is in **Also send for these rooms and spaces**. A plain group
+  message is sent only through the watch list.
+- **Wait before sending** has elapsed while the room stayed unread. Reading the
+  room, muting it, or leaving Koushi focused cancels the wait.
+- **Shortest gap between sends** has passed since the last send.
+- With **Only while Koushi is not focused** on, the Koushi window must not be in
+  the foreground.
+- Koushi is running. The waiting list is kept only in Koushi's memory: nothing
+  is sent while Koushi is closed, and a waiting notification is discarded when
+  Koushi exits.
+- **Last send** on the service's row tells you what happened. If the row also
+  says **This service is not sending**, see [What the last send result
+  means](settings.md#what-the-last-send-result-means).
+
+Notifications from the **Homeserver** tab are separate: mail from your server
+arriving does not mean the device channel is working. See [the homeserver
+setting](#the-homeserver-still-sends-its-own-notifications).
+
+### The message arrives with no text
+
+By design, the summary carries room names, kinds, and counts, not message text.
+Text is added only when **Include the start of the message** is on for the
+service that sent it and you have accepted its consent. If you turned it on but
+then changed the service, its server or endpoint, or the **Send to** address, the
+consent no longer applies and the text is dropped until you accept again.
+
+### The password field is empty again after changing the server or account
+
+A saved password is used only for the exact server and account it was entered
+for. Changing the **Mailbox preset**, **Server**, **Port**, or **Username**
+removes the saved value on purpose, so a password entered for one mailbox is
+never offered to another; the service says **The saved password was removed
+because the server or account changed. Enter it again.** Nothing was lost: save
+the password for the new server. Changing only the **Send to** address keeps the
+password but asks for the plaintext-prefix consent again.
+
+### The provider says the credential is invalid, or the account is not permitted
+
+**The service rejected the key** means the saved credential was refused. Create a
+new one with the provider and save it. The usual causes:
+
+- Gmail issues app passwords only while 2-Step Verification is on, and not for
+  every account.
+- iCloud Mail needs an app-specific password created for this app.
+- QQ Mail invalidates every authorization code when the QQ password changes.
+- A Resend API key cannot be read again after it is created.
+
+**The service refused this sender or this account** means the provider took the
+credential but will not send for this **From address**, or the account is not
+allowed to send yet. Check the address against the provider's rules; some
+services send only from a verified domain. For Resend's testing sender
+`onboarding@resend.dev`, the recipient must be the address on your Resend
+account.
+
+### Mail lands in the spam folder
+
+Mark the message as not spam and add the sender to your contacts, so later
+notices from the same sender reach the inbox. A sender address on a shared or
+unverified domain is more likely to be filtered. If the provider asks you to
+verify a domain, doing so lets you send from your own domain and improves how
+receivers treat the mail; a mailbox you own and send from yourself is the least
+surprising sender.
+
+### The homeserver still sends its own notifications
+
+The **This device** and **Homeserver** tabs are separate. The **Homeserver**
+tab's **Email notifications** switch controls your server's pusher, which applies
+to every device on the account, and nothing on the **This device** tab changes
+it. Turning this device's channel off leaves the server setting as it was; turn
+the server setting off on the **Homeserver** tab if you do not want both. See
+[Email notifications](settings.md#email-notifications).
+
+### A message looks stale, or repeats a room you already read
+
+The summary is built when it is sent, from the rooms that are unread at that
+moment, so a room you read before the send is not included. While a room stays
+unread, one send covers it and it is not sent again until it leaves and re-enters
+the unread state. Keep in mind that:
+
+- Mail can be delayed on the way, so a room may have been read since the message
+  was sent.
+- Koushi's timers start again when it restarts, so a room that was already sent
+  and is still unread can be sent once more after a restart.
+- A send that failed part-way can be retried, and a provider that does not
+  recognize the retry as the same message can deliver a second copy.
 
 ## Ask for help or report a bug
 
 You can [ask an AI assistant](README.md#ask-an-ai-assistant) using the public
 repository and your version. If the issue persists, open a
-[GitHub issue](https://github.com/shinaoka/koushi-matrix/issues/new) with:
+[GitHub issue](https://github.com/shinaoka/koushi-matrix/issues/new/choose) with:
 
-- Koushi version, operating system, and whether the problem began after updating.
+- Koushi version (**About Koushi** in the application menu, or **Check for
+  updates** in **App Settings → Software update**), operating system, and
+  whether the problem began after updating.
 - The steps you took, what you expected, and what happened instead.
 - Whether the affected room is encrypted and whether the issue affects one room
   or several, without disclosing private room IDs or messages.
-- A sanitized error description. Review any screenshot or diagnostic attachment
-  before sharing it.
+- A sanitized error description. Review any screenshot before sharing it.
+
+When the problem involves sign-in, startup, sync, encryption, or a crash,
+attach the diagnostics report as a file. Select **Open diagnostics** at the top
+right of the window, select **Save to file…**, and attach the saved
+`koushi-diagnostics.txt`. The report is too long to paste, and the dialog notes
+that it omits private data: no message text, room or member names, Matrix IDs,
+email addresses, or file paths.
 
 Never include passwords, recovery keys, access tokens, private messages, or
-key export files. If you are unsure what a diagnostic file contains, describe
-the visible symptom first.
+key export files. If you are unsure what a diagnostics file contains, open it
+before attaching it or describe the visible symptom first.

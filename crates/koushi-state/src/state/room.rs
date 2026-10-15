@@ -59,6 +59,19 @@ pub struct RoomSummary {
     pub unread_count: u64,
     pub notification_count: u64,
     pub highlight_count: u64,
+    /// #1238: the room's summed per-root SDK thread-cache unread replies.
+    ///
+    /// This is the thread half of the proven client-side decomposition
+    /// (`RoomReadReceiptEventFilter` excludes thread replies from
+    /// `unread_count`, each `ThreadReadReceiptEventFilter` counts one thread);
+    /// it is deliberately a separate field from the main-only `unread_count`,
+    /// which stays the navigation value for read markers and first-unread.
+    #[serde(default)]
+    pub thread_unread_count: u64,
+    /// #1238: the room's summed per-root SDK thread-cache unread mentions, so a
+    /// mention inside a thread renders mention styling instead of a plain count.
+    #[serde(default)]
+    pub thread_highlight_count: u64,
     #[serde(default)]
     pub marked_unread: bool,
     #[serde(default)]
@@ -93,6 +106,8 @@ impl fmt::Debug for RoomSummary {
             .field("unread_count", &self.unread_count)
             .field("notification_count", &self.notification_count)
             .field("highlight_count", &self.highlight_count)
+            .field("thread_unread_count", &self.thread_unread_count)
+            .field("thread_highlight_count", &self.thread_highlight_count)
             .field("marked_unread", &self.marked_unread)
             .field("has_recency_stamp", &self.recency_stamp.is_some())
             .field("conversation_activity", &self.conversation_activity)
@@ -183,6 +198,23 @@ pub(crate) fn compare_conversation_activity(
                 .map(|activity| activity.timestamp_ms)
                 .cmp(&left_activity.map(|activity| activity.timestamp_ms))
         })
+        // #1364: a room whose newest event is not a conversation event (sticker,
+        // poll, call, reaction, state change) has no conversation timestamp to
+        // compare, and the room-list Event Cache window can be a single event
+        // deep. Keep the server's own room order inside that group instead of
+        // collapsing every activity-less room into case-folded label order. The
+        // recency stamp is consumed only here, below every room that has real
+        // conversation activity, so a newly joined room cannot outrank an
+        // existing conversation (state-machine.md, Sidebar Sections And Low
+        // Priority).
+        .then_with(|| {
+            let left_stamp = left.and_then(|room| room.recency_stamp);
+            let right_stamp = right.and_then(|room| room.recency_stamp);
+            right_stamp
+                .is_some()
+                .cmp(&left_stamp.is_some())
+                .then_with(|| right_stamp.cmp(&left_stamp))
+        })
         .then_with(|| {
             let left_label = left
                 .map(|room| room.display_label.to_lowercase())
@@ -219,6 +251,18 @@ pub struct RoomLatestEventSummary {
     pub sender_avatar: Option<AvatarImage>,
     #[serde(default)]
     pub preview: Option<String>,
+    /// #1427: the decrypted body of the latest conversation event when it is a plain
+    /// text message this device can already read, for the device-local delivery
+    /// prefix. It is the latest event's body, which may be newer than the unread
+    /// event that made the room qualify.
+    ///
+    /// Never serialized. The room-list `preview` above is part of the sidebar row and
+    /// is already in the app-state snapshot; this field is the prefix source the
+    /// delivery channel adds, and it must not enter a snapshot, a state delta, an
+    /// event, or a diagnostic. It is `None` for a redacted, undecryptable, or
+    /// non-text event, so a room with nothing readable delivers without a prefix.
+    #[serde(skip)]
+    pub message_text: Option<String>,
     pub timestamp_ms: u64,
     #[serde(default)]
     pub is_redacted: bool,
@@ -254,6 +298,10 @@ impl fmt::Debug for RoomLatestEventSummary {
                 &self.sender_avatar.as_ref().map(|_| "AvatarImage(..)"),
             )
             .field("preview", &self.preview.as_ref().map(|_| "Preview(..)"))
+            .field(
+                "message_text",
+                &self.message_text.as_ref().map(|_| "MessageText(..)"),
+            )
             .field("timestamp_ms", &self.timestamp_ms)
             .field("is_redacted", &self.is_redacted)
             .finish()
@@ -355,23 +403,24 @@ pub fn room_attention_kind(
     }
 }
 
+/// Persistent numeric unread shared by room/sidebar, account and native badges.
+///
+/// #1238: the badge is the only place the main-timeline and thread counts meet.
+/// Thread replies are excluded from `unread_count` by the SDK's room read-receipt
+/// filter and counted per thread by the thread filters, so
+/// `unread_count + thread_unread_count` is the non-overlapping client
+/// decomposition. A homeserver's `notification_count` has no event IDs and
+/// cannot make a message locatable, so it cannot add to a numeric unread badge.
+/// `unread_count` itself stays main-only for navigation.
 pub fn room_activity_unread_count(room: &RoomSummary) -> u64 {
-    let count = room
-        .unread_count
-        .max(room.notification_count)
-        .max(room.highlight_count);
-    if count > 0 {
-        count
-    } else if room.marked_unread {
-        1
-    } else {
-        0
-    }
+    room.unread_count.saturating_add(room.thread_unread_count)
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct RoomAttentionProjection {
     pub unread_count: u64,
+    pub main_unread_count: u64,
+    pub thread_unread_count: u64,
     pub notification_count: u64,
     pub highlight_count: u64,
     pub has_unread_content: bool,
@@ -386,30 +435,26 @@ pub fn room_attention_projection(
     mode: Option<RoomNotificationMode>,
 ) -> RoomAttentionProjection {
     let is_muted = mode == Some(RoomNotificationMode::Mute);
-    let has_unread_content = room.unread_count > 0
-        || room.notification_count > 0
-        || room.highlight_count > 0
-        || room.marked_unread;
+    let thread_highlight_count = room.thread_highlight_count;
+    let highlight_total = room.highlight_count.saturating_add(thread_highlight_count);
+    let has_unread_content = room_activity_unread_count(room) > 0 || room.marked_unread;
     let unread_count = room_activity_unread_count(room);
-    let highlight_count = if is_muted { 0 } else { room.highlight_count };
-    let has_unread_mention = !is_muted && room.highlight_count > 0;
-    let is_attention_highlighted = !is_muted
-        && (room.notification_count > 0 || room.highlight_count > 0 || room.marked_unread);
-    let notification_count = if is_muted
-        || (mode == Some(RoomNotificationMode::Mentions) && room.highlight_count == 0)
-    {
-        0
-    } else {
-        room.notification_count
-    };
-    let display_count = if is_muted {
-        room.unread_count
-    } else {
-        notification_count
-    };
+    let highlight_count = if is_muted { 0 } else { highlight_total };
+    let has_unread_mention = !is_muted && highlight_total > 0;
+    let is_attention_highlighted =
+        !is_muted && (room.notification_count > 0 || highlight_total > 0 || room.marked_unread);
+    let notification_count =
+        if is_muted || (mode == Some(RoomNotificationMode::Mentions) && highlight_total == 0) {
+            0
+        } else {
+            room.notification_count
+        };
+    let display_count = unread_count;
 
     RoomAttentionProjection {
         unread_count,
+        main_unread_count: room.unread_count,
+        thread_unread_count: room.thread_unread_count,
         notification_count,
         highlight_count,
         has_unread_content,
@@ -426,12 +471,12 @@ fn room_attention_sort_rank(room: Option<&RoomSummary>, mode: Option<RoomNotific
     };
     let projection = room_attention_projection(room, mode);
 
-    if projection.has_unread_mention {
+    // Server notification/highlight counters cannot prove a visible unread
+    // message. They must not promote a room that has no SDK-local unread.
+    if !projection.is_muted && projection.unread_count > 0 {
         0
-    } else if projection.notification_count > 0 {
+    } else if !projection.is_muted && room.marked_unread {
         1
-    } else if projection.has_unread_content {
-        2
     } else {
         3
     }
@@ -486,6 +531,7 @@ mod tests {
             sender_label: Some("Private Sender".to_owned()),
             sender_avatar: None,
             preview: Some("private body".to_owned()),
+            message_text: Some("private message text".to_owned()),
             timestamp_ms: 42,
             is_redacted: true,
         };
@@ -498,8 +544,63 @@ mod tests {
             "@private-sender:example.invalid",
             "Private Sender",
             "private body",
+            "private message text",
         ] {
             assert!(!debug.contains(private_value));
+        }
+    }
+
+    /// #1427: the delivery prefix source is a fact this device holds about a room and
+    /// never a field of the app state. The room-list `preview` is serialized for the
+    /// sidebar row and stays that way; the text this feature adds must not join it.
+    #[test]
+    fn the_delivery_prefix_source_never_serializes_into_the_app_state() {
+        let mut state = koushi_state_app_state_with_room_latest_text("private delivery text");
+        let serialized = serde_json::to_string(&state).expect("the app state serializes");
+        assert!(
+            !serialized.contains("private delivery text"),
+            "the prefix source reached the app-state snapshot"
+        );
+
+        // The same state does carry the room-list preview, which is pre-existing
+        // sidebar behavior and is not what this test protects.
+        assert!(serialized.contains("private preview"));
+        // Dropping the room also drops the text, so the negative assertion above is
+        // about the field and not about an empty room list.
+        state.rooms.clear();
+        assert!(
+            !serde_json::to_string(&state)
+                .expect("the app state serializes")
+                .contains("private delivery text")
+        );
+    }
+
+    fn koushi_state_app_state_with_room_latest_text(text: &str) -> crate::AppState {
+        let mut room: super::RoomSummary = serde_json::from_value(json!({
+            "room_id": "!room:example.invalid",
+            "display_name": "Room",
+            "display_label": "Room",
+            "is_dm": false,
+            "unread_count": 1,
+            "notification_count": 1,
+            "highlight_count": 0,
+            "parent_space_ids": [],
+            "latest_event": {
+                "event_id": "$event:example.invalid",
+                "preview": "private preview",
+                "timestamp_ms": 42,
+            },
+        }))
+        .expect("a room summary with a latest event");
+        let latest_event = room.latest_event.as_mut().expect("the latest event");
+        // `message_text` is skipped on deserialize, like every other field the app
+        // state must not carry, so it is set here where the test can hold it.
+        assert!(latest_event.message_text.is_none());
+        latest_event.message_text = Some(text.to_owned());
+
+        crate::AppState {
+            rooms: vec![room],
+            ..crate::AppState::default()
         }
     }
 }

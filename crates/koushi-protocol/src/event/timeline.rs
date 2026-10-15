@@ -46,8 +46,8 @@ pub enum ThreadsListEvent {
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum TimelineEvent {
     InitialItems {
-        /// Stable projection identity retained until the WebView acknowledges
-        /// this actor generation's initial projection.
+        /// Stable actor-owned projection identity retained across replay for
+        /// this actor generation.
         request_id: Option<RequestId>,
         /// Exact command that caused this delivery. Recovery projections have
         /// no command cause and therefore use `None`.
@@ -76,14 +76,11 @@ pub enum TimelineEvent {
         /// `None` is used for admission rejection, start, cancellation, and failure.
         prepend_expected: Option<bool>,
     },
-    AnchorRestoreFinished {
-        request_id: RequestId,
-        key: TimelineKey,
-        status: TimelineAnchorRestoreStatus,
-    },
     NavigationUpdated {
         key: TimelineKey,
-        snapshot: TimelineNavigationSnapshot,
+        /// Boxed so the ~144 B snapshot stays out of the inline `TimelineEvent`
+        /// (and therefore `CoreEvent`) representation (#1150).
+        snapshot: Box<TimelineNavigationSnapshot>,
     },
     GapPositionsUpdated {
         key: TimelineKey,
@@ -133,7 +130,9 @@ pub enum TimelineEvent {
     MessageSourceLoaded {
         request_id: RequestId,
         key: TimelineKey,
-        source: TimelineMessageSource,
+        /// Boxed so the ~208 B source stays out of the inline `TimelineEvent`
+        /// (and therefore `CoreEvent`) representation (#1150).
+        source: Box<TimelineMessageSource>,
     },
     MediaUploadProgress {
         request_id: Option<RequestId>,
@@ -216,14 +215,6 @@ impl fmt::Debug for TimelineEvent {
                 .field("key", &"TimelineKey(..)")
                 .field("direction", direction)
                 .field("state", state)
-                .finish(),
-            Self::AnchorRestoreFinished {
-                request_id, status, ..
-            } => formatter
-                .debug_struct("AnchorRestoreFinished")
-                .field("request_id", request_id)
-                .field("key", &"TimelineKey(..)")
-                .field("status", status)
                 .finish(),
             Self::NavigationUpdated { snapshot, .. } => formatter
                 .debug_struct("NavigationUpdated")
@@ -376,14 +367,6 @@ impl fmt::Debug for TimelineEvent {
                 .finish(),
         }
     }
-}
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub enum TimelineAnchorRestoreStatus {
-    Found,
-    EndReached,
-    BudgetExhausted,
-    Superseded,
-    Failed { kind: TimelineFailureKind },
 }
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TimelineDisplayLabelUpdate {
@@ -886,6 +869,11 @@ pub struct TimelineItem {
     /// items that are not messages.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentioned_user_ids: Vec<String>,
+    /// The message's `m.mentions.room` flag (#1123). The renderer draws the
+    /// spec-standard room mention as a pill from the message itself, wherever
+    /// it was sent from, exactly as it does for `mentioned_user_ids`.
+    #[serde(default)]
+    pub mentions_room: bool,
     #[serde(default)]
     pub reactions: Vec<ReactionGroup>,
     #[serde(default)]
@@ -1134,6 +1122,12 @@ pub struct ThreadSummaryDto {
     pub latest_sender_label: Option<String>,
     pub latest_body_preview: Option<String>,
     pub latest_timestamp_ms: Option<u64>,
+    /// #1259: replies posted since this client last read the thread, derived from the
+    /// bundled summary's `reply_count` and a session-scoped read marker. `0` when the
+    /// thread is read or has no new remote replies. It is not the homeserver's own
+    /// unread count and carries no mention information.
+    #[serde(default)]
+    pub unread_count: u32,
 }
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]

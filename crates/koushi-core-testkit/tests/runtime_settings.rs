@@ -4,10 +4,12 @@ use koushi_core::settings::{SETTINGS_SCHEMA_VERSION, SettingsStore, SettingsStor
 use koushi_core::{CoreCommand, CoreRuntime, store::StoreActor};
 use koushi_protocol::command::AppCommand;
 use koushi_state::{
-    AppearanceSettings, DisplayDensity, DisplaySettings, MediaSettings, NativeAttentionCandidate,
-    NativeAttentionCapabilities, NativeAttentionCapability, NativeAttentionDispatchState,
-    NativeAttentionState, NativeAttentionSummary, NotificationSettings, RoomAttentionKind,
-    SettingsPatch, SettingsPersistenceState, ThemePreference,
+    AppearanceSettings, CatalogLocale, DisplayDensity, DisplayPlatform, DisplaySettings,
+    MediaSettings, NativeAttentionCandidate, NativeAttentionCapabilities,
+    NativeAttentionCapability, NativeAttentionDispatchState, NativeAttentionState,
+    NativeAttentionSummary, NotificationSettings, RoomAttentionKind, SettingsPatch,
+    SettingsPersistenceState, TextDirectionPreference, ThemePreference,
+    resolve_locale_display_profile,
 };
 
 mod support;
@@ -135,7 +137,10 @@ async fn legacy_settings_import_rejects_a_failed_initial_load() {
 #[tokio::test]
 async fn failed_account_settings_load_does_not_commit_legacy_import_marker() {
     let data_dir = tempfile::tempdir().expect("tempdir");
-    let store = StoreActor::new(data_dir.path());
+    let store = StoreActor::with_backend(
+        koushi_core::store::TestCredentialStoreBackend::in_memory(),
+        data_dir.path(),
+    );
     let account_settings_file = store
         .account_local_data_dir(&support::session_key())
         .join("settings/account-settings.v1.enc");
@@ -476,6 +481,25 @@ fn settings_store_round_trips_versioned_values() {
     store.save(&values).expect("save");
 
     assert_eq!(store.load().expect("reload"), values);
+}
+
+#[test]
+fn persisted_language_applies_to_the_resolved_catalog_on_reload() {
+    // The UI round trip only proves the in-memory snapshot; a saved explicit
+    // language must be applied by a fresh load without any renderer state.
+    let data_dir = tempfile::tempdir().expect("tempdir");
+    let store = SettingsStore::new(data_dir.path());
+    let mut values = store.load().expect("default settings");
+    values.locale.language_tag = Some("ja-JP".to_owned());
+    values.locale.text_direction = TextDirectionPreference::Auto;
+    store.save(&values).expect("save");
+
+    let reloaded = SettingsStore::new(data_dir.path()).load().expect("reload");
+    assert_eq!(reloaded.locale.language_tag.as_deref(), Some("ja-JP"));
+    assert_eq!(
+        resolve_locale_display_profile(&reloaded.locale, DisplayPlatform::Linux).catalog_locale,
+        CatalogLocale::Ja
+    );
 }
 
 #[test]

@@ -342,6 +342,37 @@ pub async fn disable_email_notifications(
     .await
 }
 
+/// Add one keyword as an account `content` push rule that notifies and
+/// highlights (#1427). Rust trims and validates the pattern before any request.
+#[tauri::command]
+pub async fn add_notification_keyword(
+    account_tab_id: Option<String>,
+    pattern: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    submit_account_notifications(
+        state.inner(),
+        account_tab_id.as_deref(),
+        koushi_protocol::command::AccountNotificationsRequest::AddKeyword { pattern },
+    )
+    .await
+}
+
+/// Remove one keyword by the `content` rule id the list showed (#1427).
+#[tauri::command]
+pub async fn remove_notification_keyword(
+    account_tab_id: Option<String>,
+    rule_id: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    submit_account_notifications(
+        state.inner(),
+        account_tab_id.as_deref(),
+        koushi_protocol::command::AccountNotificationsRequest::RemoveKeyword { rule_id },
+    )
+    .await
+}
+
 /// Digest language hint for the email pusher: a short BCP 47-ish tag only.
 fn admit_notification_lang(lang: String) -> String {
     let valid = !lang.is_empty()

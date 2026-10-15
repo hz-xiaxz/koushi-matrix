@@ -99,7 +99,7 @@ pub(crate) fn handle_email_token_sent(
     ) || !working_matches(
         &state.account_notifications.operation,
         request_id,
-        operation,
+        &operation,
     ) {
         return Vec::new();
     }
@@ -121,11 +121,11 @@ pub(crate) fn handle_uia_required(
     operation: AccountNotificationsOperation,
 ) -> Vec<AppEffect> {
     if !matches!(
-        state.account_notifications.operation,
+        &state.account_notifications.operation,
         AccountNotificationsOperationState::Working {
             request_id: active,
             operation: active_operation,
-        } if active == request_id && active_operation == operation
+        } if *active == request_id && active_operation == &operation
     ) {
         return Vec::new();
     }
@@ -147,7 +147,7 @@ pub(crate) fn handle_uia_submitted(
             request_id: active_request_id,
             flow_id: active_flow_id,
             operation,
-        } if *active_request_id == request_id && *active_flow_id == flow_id => *operation,
+        } if *active_request_id == request_id && *active_flow_id == flow_id => operation.clone(),
         _ => return Vec::new(),
     };
     state.account_notifications.operation = AccountNotificationsOperationState::Working {
@@ -166,7 +166,7 @@ pub(crate) fn handle_operation_succeeded(
     if !working_matches(
         &state.account_notifications.operation,
         request_id,
-        operation,
+        &operation,
     ) {
         return Vec::new();
     }
@@ -191,7 +191,7 @@ pub(crate) fn handle_operation_failed(
     if !working_matches(
         &state.account_notifications.operation,
         request_id,
-        operation,
+        &operation,
     ) {
         return Vec::new();
     }
@@ -270,7 +270,7 @@ fn clear_pending_if_verified(state: &mut AppState, snapshot: &AccountNotificatio
 fn working_matches(
     operation_state: &AccountNotificationsOperationState,
     request_id: u64,
-    operation: AccountNotificationsOperation,
+    operation: &AccountNotificationsOperation,
 ) -> bool {
     matches!(
         operation_state,
@@ -282,6 +282,6 @@ fn working_matches(
             request_id: active,
             operation: active_operation,
             ..
-        } if *active == request_id && *active_operation == operation
+        } if *active == request_id && active_operation == operation
     )
 }

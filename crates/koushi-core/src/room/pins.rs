@@ -228,14 +228,6 @@ impl RoomActor {
         }
     }
 
-    pub(super) fn handle_refresh_pinned_events(&mut self, request_id: RequestId, room_id: String) {
-        if self.session.is_none() {
-            self.emit_failure(request_id, CoreFailure::SessionRequired);
-            return;
-        }
-        self.start_pinned_refresh(room_id, Some(request_id));
-    }
-
     pub(super) fn handle_pinned_events_changed(&mut self, room_ids: BTreeSet<String>) {
         for room_id in room_ids {
             self.start_pinned_refresh(room_id, None);

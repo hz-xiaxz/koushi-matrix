@@ -24,6 +24,8 @@ import type {
   ComposerDocument,
   ComposerDraftRevision,
   ComposerDraftAcceptanceResponse,
+  PreparedUploadSendResponse,
+  DelegatedAuthMethod,
   DirectoryQuery,
   MentionSurface,
   NavigationPreferenceUpdate,
@@ -35,6 +37,12 @@ import type {
   NotificationCategory,
   RoomNotificationMode,
   RoomSettingChange,
+  RoomAccessDraftCommand,
+  RoomAccessDraftScope,
+  RoomAccessPreview,
+  RoomAccessPreviewContext,
+  CreateRoomAccessPreviewInput,
+  CreateRoomAccessPreview,
   RoomTagKind,
   SavedSessionInfo,
   SearchScopeKind,
@@ -53,6 +61,7 @@ import type {
   HistoryExportScopeInput,
   HistoryExportStart,
   FilesViewScope,
+  ScheduledSendsScope,
   SubmissionResponse,
   ThreadOpenIntent,
   ThreadsListScope
@@ -153,6 +162,10 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<void>("restart_to_install_desktop_update");
   }
 
+  async ignoreDesktopUpdate(version: string): Promise<void> {
+    return this.invokeCommand<void>("ignore_desktop_update", { version });
+  }
+
   async settlementSnapshot(accountTabId?: string): Promise<DesktopSnapshot> {
     return accountTabId === undefined
       ? this.invokeCommand<DesktopSnapshot>("settlement_snapshot")
@@ -173,6 +186,14 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<DiagnosticLogSnapshot>("get_diagnostic_snapshot");
   }
 
+  /** Native save dialog owned by the adapter; `null` when it was dismissed. */
+  async saveDiagnosticsReport(report: string, dialogTitle: string): Promise<string | null> {
+    return this.invokeCommand<string | null>("save_diagnostics_report", {
+      report,
+      dialogTitle
+    });
+  }
+
   async observeViewportSync(
     observation: ViewportSyncObservation
   ): Promise<ViewportSyncReceipt> {
@@ -183,11 +204,21 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandSettlement>("discover_login_methods", { homeserver });
   }
 
-  async startOidcLogin(homeserver: string): Promise<OidcBrowserLaunchResponse> {
+  async startOidcLogin(
+    homeserver: string,
+    method: DelegatedAuthMethod
+  ): Promise<OidcBrowserLaunchResponse> {
     const args = this.accountTabId === undefined
-      ? { homeserver }
-      : { homeserver, accountTabId: this.accountTabId };
+      ? { homeserver, method }
+      : { homeserver, method, accountTabId: this.accountTabId };
     return this.invokeCommand<OidcBrowserLaunchResponse>("start_oidc_login", args);
+  }
+
+  async cancelOidcLogin(): Promise<CommandAdmission> {
+    const args = this.accountTabId === undefined
+      ? {}
+      : { accountTabId: this.accountTabId };
+    return this.invokeCommand<CommandAdmission>("cancel_oidc_login", args);
   }
 
   async completeOidcLogin(
@@ -383,6 +414,44 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandAdmission>("disable_email_notifications");
   }
 
+  /**
+   * #1427 keyword push rules. `pattern` is the raw field text: Rust trims and
+   * validates it and mints the rule id, so the renderer never invents one. As
+   * with the neighbouring account-notification commands, the wrapper adds the
+   * optional `accountTabId` when this client is bound to a tab, and the request
+   * id stays Rust's business.
+   */
+  async addNotificationKeyword(pattern: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("add_notification_keyword", { pattern });
+  }
+
+  async removeNotificationKeyword(ruleId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("remove_notification_keyword", { ruleId });
+  }
+
+  /**
+   * Device-local notification delivery (#1427). `secret` is a write-only value: the command
+   * stores it in the OS credential store and the answer carries only an admission. It is
+   * never put in a URL, a log, or a snapshot, and it is never read back to the renderer.
+   */
+  async setNotificationDeliverySecret(
+    sinkId: string,
+    secret: string
+  ): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("set_notification_delivery_secret", {
+      sinkId,
+      secret
+    });
+  }
+
+  async clearNotificationDeliverySecret(sinkId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("clear_notification_delivery_secret", { sinkId });
+  }
+
+  async testNotificationDelivery(sinkId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("test_notification_delivery", { sinkId });
+  }
+
   async loadAccountManagementCapabilities(): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("load_account_management_capabilities");
   }
@@ -417,6 +486,16 @@ export class TauriDesktopApi implements DesktopApi {
 
   async importRoomKeys(sourcePath: string, passphrase: string): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("import_room_keys", { sourcePath, passphrase });
+  }
+
+  /** Native save dialog owned by the adapter; `null` when dismissed. */
+  async chooseRoomKeyExportDestination(dialogTitle: string): Promise<string | null> {
+    return this.invokeCommand<string | null>("choose_room_key_export_destination", { dialogTitle });
+  }
+
+  /** Native open dialog owned by the adapter; `null` when dismissed. */
+  async chooseRoomKeyImportSource(dialogTitle: string): Promise<string | null> {
+    return this.invokeCommand<string | null>("choose_room_key_import_source", { dialogTitle });
   }
 
   async historyExportTimeZone(): Promise<string> {
@@ -494,7 +573,7 @@ export class TauriDesktopApi implements DesktopApi {
   async startOwnUserSas(): Promise<CommandAdmission> { return this.invokeCommand("start_own_user_sas"); }
   async retryCurrentDeviceTrustDiscovery(): Promise<CommandAdmission> { return this.invokeCommand("retry_current_device_trust_discovery"); }
   async mismatchSasVerification(flowId: number): Promise<CommandAdmission> { return this.invokeCommand("mismatch_sas_verification", { flowId }); }
-  async startSessionBootstrap(passphrase: string | null, recoveryKeyDestinationPath: string): Promise<CommandAdmission> { return this.invokeCommand("start_session_bootstrap", { passphrase, recoveryKeyDestinationPath }); }
+  async startSessionBootstrap(passphrase: string | null): Promise<CommandAdmission> { return this.invokeCommand("start_session_bootstrap", { passphrase }); }
   async confirmSessionBootstrapSaved(flowId: number): Promise<CommandAdmission> { return this.invokeCommand("confirm_session_bootstrap_saved", { flowId }); }
 
   async confirmSasVerification(flowId: number): Promise<CommandAdmission> {
@@ -622,9 +701,14 @@ export class TauriDesktopApi implements DesktopApi {
 
   async stageUploadBytes(
     target: ComposerTarget,
-    items: StageUploadBytesRequestItem[]
+    items: StageUploadBytesRequestItem[],
+    composerDocument?: ComposerDocument
   ): Promise<CommandSettlement> {
-    return this.invokeCommand<CommandSettlement>("stage_upload_bytes", { target, items });
+    return this.invokeCommand<CommandSettlement>("stage_upload_bytes", {
+      target,
+      items,
+      composerDocument
+    });
   }
 
   async selectStagedUploadOutput(
@@ -666,16 +750,18 @@ export class TauriDesktopApi implements DesktopApi {
     leaseId: string,
     rendererGeneration: string,
     target: ComposerTarget,
-    draftRevision: ComposerDraftRevision
-  ): Promise<ComposerDraftAcceptanceResponse> {
-    return this.invokeCommand<ComposerDraftAcceptanceResponse>("send_prepared_uploads", {
+    draftRevision: ComposerDraftRevision,
+    draftDocument?: ComposerDocument
+  ): Promise<PreparedUploadSendResponse> {
+    return this.invokeCommand<PreparedUploadSendResponse>("send_prepared_uploads", {
       accountHomeserver: account.homeserver,
       accountUserId: account.userId,
       accountDeviceId: account.deviceId,
       leaseId,
       rendererGeneration,
       target,
-      draftRevision
+      draftRevision,
+      draftDocument
     });
   }
 
@@ -1029,6 +1115,14 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandAdmission>("close_threads_list");
   }
 
+  async openScheduledSendsList(scope: ScheduledSendsScope): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("open_scheduled_sends_list", { scope });
+  }
+
+  async closeScheduledSendsList(): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("close_scheduled_sends_list");
+  }
+
   async openFilesView(
     scope: FilesViewScope,
     filter: AttachmentFilter,
@@ -1212,8 +1306,26 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandSettlement>("join_room", { roomId });
   }
 
-  async previewRoomAddress(name: string, aliasLocalpart: string | null): Promise<RoomAddressPreview> {
-    return this.invokeCommand<RoomAddressPreview>("preview_room_address", { name, aliasLocalpart });
+  async previewRoomAddress(createSessionId: number, aliasLocalpart: string | null): Promise<RoomAddressPreview> {
+    return this.invokeCommand<RoomAddressPreview>("preview_room_address", { createSessionId, aliasLocalpart });
+  }
+
+  async setRoomAccessDraft(command: RoomAccessDraftCommand): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("set_room_access_draft", { command });
+  }
+
+  async previewRoomAccess(
+    scope: RoomAccessDraftScope,
+    context: RoomAccessPreviewContext
+  ): Promise<RoomAccessPreview> {
+    return this.invokeCommand<RoomAccessPreview>("preview_room_access", { scope, context });
+  }
+
+  async previewCreateRoomAccess(
+    scope: RoomAccessDraftScope,
+    input: CreateRoomAccessPreviewInput
+  ): Promise<CreateRoomAccessPreview> {
+    return this.invokeCommand<CreateRoomAccessPreview>("preview_create_room_access", { scope, input });
   }
 
   async createRoom(request: CreateRoomRequest): Promise<CreateRoomSettlement> {
@@ -1234,6 +1346,26 @@ export class TauriDesktopApi implements DesktopApi {
 
   async setSpaceChild(spaceId: string, childRoomId: string): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("set_space_child", { spaceId, childRoomId });
+  }
+
+  async setSpaceChildSuggested(
+    spaceId: string,
+    childRoomId: string,
+    suggested: boolean
+  ): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("set_space_child_suggested", {
+      spaceId,
+      childRoomId,
+      suggested
+    });
+  }
+
+  async joinSuggestedSpaceRooms(spaceId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("join_suggested_space_rooms", { spaceId });
+  }
+
+  async dismissSuggestedSpaceRooms(spaceId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("dismiss_suggested_space_rooms", { spaceId });
   }
 
   async acceptInvite(roomId: string): Promise<CommandSettlement> {

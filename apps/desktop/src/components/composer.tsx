@@ -4,6 +4,7 @@ import {
   type FormEvent,
   type KeyboardEvent,
   type MouseEvent,
+  type RefObject,
   memo,
   useCallback,
   useEffect,
@@ -25,7 +26,7 @@ import {
   Smile,
   X
 } from "lucide-react";
-import { t } from "../i18n/messages";
+import { t, type MessageId } from "../i18n/messages";
 import type {
   ComposerDocument,
   ComposerSurface,
@@ -55,6 +56,7 @@ import {
   avatarInitial,
   defaultScheduleDateTimeValue,
   scheduledSendTimestampFromInput,
+  shiftScheduledSendValue,
   type MentionCandidate,
   type ComposerModeProp
 } from "../app/uiShared";
@@ -65,6 +67,8 @@ import {
   type NativeFileDropEvent
 } from "../backend/nativeFileDropRuntime";
 import { EntityAvatar } from "./Shell";
+import { useOutsidePressDismissal } from "./popupDismissal";
+import { Tooltip } from "./Tooltip";
 import { useStableEvent } from "./useStableEvent";
 import {
   attachmentPasteNeedsNativeImageRead,
@@ -120,8 +124,11 @@ export const Composer = memo(function Composer({
   onSendStagedUploads,
   onTabToSend,
   preferSendOnForwardTab = false,
+  editorHandleRef,
   onDiagnosticLogEntry,
-  notice = null
+  notice = null,
+  scheduledSendCount = 0,
+  scheduledSendPersistenceFailed = false
 }: {
   surface?: ComposerSurface;
   editorOnly?: boolean;
@@ -154,12 +161,30 @@ export const Composer = memo(function Composer({
   onTabToSend?: () => void;
   /** Makes Send the first main-surface focus target after the editor. */
   preferSendOnForwardTab?: boolean;
+  /**
+   * Optional external handle on the editor, for a hosting surface that owns
+   * when the editor takes focus (the upload staging dialog focuses its first
+   * caption when the dialog opens).
+   */
+  editorHandleRef?: RefObject<ImeInlineMentionEditorHandle | null>;
   /** #send-key-unification: routed when the send shortcut is pressed while
    *  staged uploads are ready, instead of sending the composer body. */
   onSendStagedUploads?: () => void;
   onDiagnosticLogEntry?: (entry: DiagnosticLogEntry) => void;
   /** Localized transient notice rendered above the composer (issue #450). */
   notice?: string | null;
+  /**
+   * This room's pending scheduled-send count, projected from Rust
+   * (`state.ui.timeline.scheduled_sends`). The send-later clock badges it so the
+   * reservation queue is visible from the composer that creates it.
+   */
+  scheduledSendCount?: number;
+  /**
+   * Core reported that local scheduled-send changes could not be saved
+   * (#1159). Rendered as its own notice, so transient slash-command feedback
+   * can never hide a failure that is still true.
+   */
+  scheduledSendPersistenceFailed?: boolean;
 }) {
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
@@ -195,7 +220,11 @@ export const Composer = memo(function Composer({
   const [activeMentionIndex, setActiveMentionIndex] = useState(0);
   const [dismissedMentionKey, setDismissedMentionKey] = useState<string | null>(null);
   const [fileDragActive, setFileDragActive] = useState(false);
-  const editorRef = useRef<ImeInlineMentionEditorHandle>(null);
+  // A surface that hosts the editor (the upload staging dialog) owns the
+  // decision of when its editor takes focus, so it can hand in its own handle
+  // instead of the composer keeping the only reference.
+  const localEditorRef = useRef<ImeInlineMentionEditorHandle>(null);
+  const editorRef = editorHandleRef ?? localEditorRef;
   const documentEpochRef = useRef(0);
   const keyResolutionPendingRef = useRef(false);
   const mountedRef = useRef(true);
@@ -421,11 +450,18 @@ export const Composer = memo(function Composer({
     if (!activeMention) {
       return;
     }
-    const displayLabel = peopleFacingLabel(candidate.label);
-    const target =
-      candidate.target.kind === "user"
-        ? { ...candidate.target, display_label: displayLabel }
-        : candidate.target;
+    // #1122: Rust renders an inline as `@` + its display label, so the label has
+    // to be the bare token. The room-notification candidate's own label already
+    // carries the `@` its autocomplete row shows (`@room`), while its target's
+    // label is the `room` half of the token.
+    const isRoomMention = candidate.target.kind === "roomMention";
+    const isUserTarget = candidate.target.kind === "user";
+    const displayLabel = isRoomMention
+      ? candidate.target.display_label
+      : peopleFacingLabel(candidate.label);
+    const target = isUserTarget
+      ? { ...candidate.target, display_label: displayLabel }
+      : candidate.target;
     const withMention = insertMention(
       localDocument,
       activeMention.start,
@@ -716,17 +752,22 @@ export const Composer = memo(function Composer({
 
   const emojiControl = (
     <span className="composer-emoji-anchor">
-      <button
-        ref={emojiButtonRef}
-        className="icon-button"
-        type="button"
-        aria-label={t("composer.emoji")}
-        aria-expanded={emojiPickerOpen}
-        aria-haspopup="dialog"
-        onClick={toggleEmojiPicker}
-      >
-        <Smile size={ICON_SIZE.control} />
-      </button>
+      <Tooltip label={t("composer.emoji")} placement="above">
+        {(tooltipProps) => (
+          <button
+            ref={emojiButtonRef}
+            className="icon-button"
+            type="button"
+            aria-label={t("composer.emoji")}
+            aria-expanded={emojiPickerOpen}
+            aria-haspopup="dialog"
+            onClick={toggleEmojiPicker}
+            {...tooltipProps}
+          >
+            <Smile size={ICON_SIZE.control} />
+          </button>
+        )}
+      </Tooltip>
       {emojiPickerOpen ? (
         <LazyEmojiPicker
           anchorRef={emojiButtonRef}
@@ -738,6 +779,14 @@ export const Composer = memo(function Composer({
       ) : null}
     </span>
   );
+
+  // The count is part of the clock's accessible name as well as its badge: the
+  // badge itself is presentation-only, so assistive technology still learns how
+  // many messages this room already has waiting.
+  const scheduleLaterLabel =
+    scheduledSendCount > 0
+      ? t("scheduled.sendLaterWithCount", { count: scheduledSendCount })
+      : t("scheduled.sendLater");
 
   const footerControls = (
     <div className="composer-footer-controls">
@@ -752,49 +801,79 @@ export const Composer = memo(function Composer({
           void onAttachFileChange(event);
         }}
       />
-      <button
-        className="icon-button"
-        type="button"
-        aria-label={t("composer.attachFile")}
-        disabled={!canEdit}
-        onClick={() => fileInputRef.current?.click()}
-      >
-        <Paperclip size={ICON_SIZE.control} />
-      </button>
-      <button
-        className="icon-button"
-        type="button"
-        aria-label={t("composer.mention")}
-        onMouseDown={keepComposerFocus}
-        onClick={insertMentionTrigger}
-      >
-        <AtSign size={ICON_SIZE.control} />
-      </button>
+      <Tooltip label={t("composer.attachFile")} placement="above">
+        {(tooltipProps) => (
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={t("composer.attachFile")}
+            disabled={!canEdit}
+            onClick={() => fileInputRef.current?.click()}
+            {...tooltipProps}
+          >
+            <Paperclip size={ICON_SIZE.control} />
+          </button>
+        )}
+      </Tooltip>
+      <Tooltip label={t("composer.mention")} placement="above">
+        {(tooltipProps) => (
+          <button
+            className="icon-button"
+            type="button"
+            aria-label={t("composer.mention")}
+            onMouseDown={keepComposerFocus}
+            onClick={insertMentionTrigger}
+            {...tooltipProps}
+          >
+            <AtSign size={ICON_SIZE.control} />
+          </button>
+        )}
+      </Tooltip>
       {emojiControl}
       {onScheduleSend ? (
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("scheduled.sendLater")}
-          disabled={!canEdit || isSending || !localValue.trim() || hasStagedUploads}
-          onClick={openScheduleForm}
-        >
-          <Clock3 size={ICON_SIZE.control} />
-        </button>
+        <Tooltip label={scheduleLaterLabel} placement="above">
+          {(tooltipProps) => (
+            <button
+              className="icon-button composer-schedule-button"
+              type="button"
+              data-count={scheduledSendCount > 0 ? scheduledSendCount : undefined}
+              aria-label={scheduleLaterLabel}
+              disabled={!canEdit || isSending || !localValue.trim() || hasStagedUploads}
+              onClick={openScheduleForm}
+              {...tooltipProps}
+            >
+              <Clock3 size={ICON_SIZE.control} />
+              {scheduledSendCount > 0 ? (
+                <span className="composer-schedule-badge" aria-hidden="true">
+                  {scheduledSendCount}
+                </span>
+              ) : null}
+            </button>
+          )}
+        </Tooltip>
       ) : null}
     </div>
   );
   const sendControl = (
-    <button
-      ref={sendButtonRef}
-      className={`send-button ${localValue.trim() && !isSending ? "ready" : ""} ${isSending ? "is-sending" : ""}`}
-      type="button"
-      aria-label={isSending ? t("action.sending") : t("action.send")}
-      disabled={!sendEnabled}
-      onClick={() => submitDocument("button", localDocument, localValue)}
+    <Tooltip
+      label={isSending ? t("action.sending") : t("action.send")}
+      placement="above"
+      align="end"
     >
-      <Send size={ICON_SIZE.input} />
-    </button>
+      {(tooltipProps) => (
+        <button
+          ref={sendButtonRef}
+          className={`send-button ${localValue.trim() && !isSending ? "ready" : ""} ${isSending ? "is-sending" : ""}`}
+          type="button"
+          aria-label={isSending ? t("action.sending") : t("action.send")}
+          disabled={!sendEnabled}
+          onClick={() => submitDocument("button", localDocument, localValue)}
+          {...tooltipProps}
+        >
+          <Send size={ICON_SIZE.input} />
+        </button>
+      )}
+    </Tooltip>
   );
 
   const sendingAccountLabel = sendingAccount
@@ -824,65 +903,100 @@ export const Composer = memo(function Composer({
           {notice}
         </p>
       ) : null}
+      {scheduledSendPersistenceFailed ? (
+        <p className="composer-notice" role="status">
+          {t("scheduled.persistenceFailed")}
+        </p>
+      ) : null}
       {!editorOnly && composerMode.kind === "reply" ? (
         <div className="composer-reply-banner">
           <span className="composer-reply-label">{t("composer.replying")}</span>
-          <button
-            className="icon-button"
-            type="button"
-            aria-label={t("composer.cancelReply")}
-            onClick={onCancelReply}
-          >
-            <X size={ICON_SIZE.small} />
-          </button>
+          <Tooltip label={t("composer.cancelReply")} placement="below">
+            {(tooltipProps) => (
+              <button
+                className="icon-button"
+                type="button"
+                aria-label={t("composer.cancelReply")}
+                onClick={onCancelReply}
+                {...tooltipProps}
+              >
+                <X size={ICON_SIZE.small} />
+              </button>
+            )}
+          </Tooltip>
         </div>
       ) : null}
       <div className="composer-tools">
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("composer.bold")}
-          onMouseDown={keepComposerFocus}
-          onClick={() => applyInlineMarkdown("**", "**", "bold")}
-        >
-          <Bold size={ICON_SIZE.input} />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("composer.italic")}
-          onMouseDown={keepComposerFocus}
-          onClick={() => applyInlineMarkdown("_", "_", "italic")}
-        >
-          <Italic size={ICON_SIZE.input} />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("composer.link")}
-          onMouseDown={keepComposerFocus}
-          onClick={applyLinkMarkdown}
-        >
-          <Link2 size={ICON_SIZE.input} />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("composer.list")}
-          onMouseDown={keepComposerFocus}
-          onClick={applyListMarkdown}
-        >
-          <List size={ICON_SIZE.input} />
-        </button>
-        <button
-          className="icon-button"
-          type="button"
-          aria-label={t("composer.code")}
-          onMouseDown={keepComposerFocus}
-          onClick={() => applyInlineMarkdown("`", "`", "code")}
-        >
-          <Code2 size={ICON_SIZE.input} />
-        </button>
+        <Tooltip label={t("composer.bold")} placement="below">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("composer.bold")}
+              onMouseDown={keepComposerFocus}
+              onClick={() => applyInlineMarkdown("**", "**", "bold")}
+              {...tooltipProps}
+            >
+              <Bold size={ICON_SIZE.input} />
+            </button>
+          )}
+        </Tooltip>
+        <Tooltip label={t("composer.italic")} placement="below">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("composer.italic")}
+              onMouseDown={keepComposerFocus}
+              onClick={() => applyInlineMarkdown("_", "_", "italic")}
+              {...tooltipProps}
+            >
+              <Italic size={ICON_SIZE.input} />
+            </button>
+          )}
+        </Tooltip>
+        <Tooltip label={t("composer.link")} placement="below">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("composer.link")}
+              onMouseDown={keepComposerFocus}
+              onClick={applyLinkMarkdown}
+              {...tooltipProps}
+            >
+              <Link2 size={ICON_SIZE.input} />
+            </button>
+          )}
+        </Tooltip>
+        <Tooltip label={t("composer.list")} placement="below">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("composer.list")}
+              onMouseDown={keepComposerFocus}
+              onClick={applyListMarkdown}
+              {...tooltipProps}
+            >
+              <List size={ICON_SIZE.input} />
+            </button>
+          )}
+        </Tooltip>
+        <Tooltip label={t("composer.code")} placement="below">
+          {(tooltipProps) => (
+            <button
+              className="icon-button"
+              type="button"
+              aria-label={t("composer.code")}
+              onMouseDown={keepComposerFocus}
+              onClick={() => applyInlineMarkdown("`", "`", "code")}
+              {...tooltipProps}
+            >
+              <Code2 size={ICON_SIZE.input} />
+            </button>
+          )}
+        </Tooltip>
         {/* Multi-account only: the toolbar row names the sender by Matrix ID,
             since display names alone do not tell accounts apart. */}
         {!editorOnly && sendingAccount ? (
@@ -904,24 +1018,32 @@ export const Composer = memo(function Composer({
             not an insert-markup action like the buttons beside it. It speaks the
             same switch vocabulary as the settings panels so the state is
             readable at rest. */}
-        <button
-          className="composer-math-toggle"
-          type="button"
-          role="switch"
-          aria-checked={mathModeEnabled}
-          aria-label={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
-          title={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
-          onMouseDown={keepComposerFocus}
-          onClick={() => {
-            void onMathModeChange(!mathModeEnabled);
-          }}
+        <Tooltip
+          label={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
+          placement="below"
+          align="end"
         >
-          <Sigma size={ICON_SIZE.input} aria-hidden="true" />
-          <span>{t("composer.mathMode")}</span>
-          <span className="composer-math-switch-track" aria-hidden="true">
-            <span className="composer-math-switch-thumb" />
-          </span>
-        </button>
+          {(tooltipProps) => (
+            <button
+              className="composer-math-toggle"
+              type="button"
+              role="switch"
+              aria-checked={mathModeEnabled}
+              aria-label={mathModeEnabled ? t("composer.mathModeOn") : t("composer.mathModeOff")}
+              onMouseDown={keepComposerFocus}
+              onClick={() => {
+                void onMathModeChange(!mathModeEnabled);
+              }}
+              {...tooltipProps}
+            >
+              <Sigma size={ICON_SIZE.input} aria-hidden="true" />
+              <span>{t("composer.mathMode")}</span>
+              <span className="composer-math-switch-track" aria-hidden="true">
+                <span className="composer-math-switch-thumb" />
+              </span>
+            </button>
+          )}
+        </Tooltip>
       </div>
       <MentionAutocomplete
         open={autocompleteOpen}
@@ -930,6 +1052,8 @@ export const Composer = memo(function Composer({
         candidates={activeMentionSuggestions}
         loading={mentionCandidatesLoading}
         activeOptionId={activeMentionOptionId}
+        anchorRef={sectionRef}
+        onDismiss={closeAutocompleteForCurrentQuery}
         onAccept={acceptMention}
         onMouseDown={keepComposerFocus}
       />
@@ -943,6 +1067,11 @@ export const Composer = memo(function Composer({
         syncKey={draftKey}
         onDocumentChange={(nextDocument) => updateLocalDocument(nextDocument)}
         onSelectionChange={setDocumentSelection}
+        // #1368: an outside press dismisses the suggestions for the current
+        // mention query. Returning to the editor starts a new editing session,
+        // so the same query offers its candidates again instead of staying
+        // suppressed for the rest of the draft's life.
+        onFocus={() => setDismissedMentionKey(null)}
         onKeyDown={onComposerKeyDown}
         onPaste={(event) => {
           const files = filesFromAttachmentTransfer(event.clipboardData);
@@ -983,6 +1112,7 @@ export const Composer = memo(function Composer({
               onChange={(event) => setScheduleValue(event.currentTarget.value)}
             />
           </label>
+          <ScheduledSendTimeAdjustments value={scheduleValue} onChange={setScheduleValue} />
           <div className="scheduled-send-form-actions">
             <button className="dialog-button" type="button" onClick={() => setScheduleOpen(false)}>
               {t("action.cancel")}
@@ -1000,6 +1130,37 @@ export const Composer = memo(function Composer({
     </section>
   );
 });
+
+/** Mouse-driven adjusted to a native `datetime-local` scheduled-send value (#1124). */
+export function ScheduledSendTimeAdjustments({
+  value,
+  onChange
+}: {
+  value: string;
+  onChange: (value: string) => void;
+}) {
+  const adjustments: Array<{ id: MessageId; deltaMinutes: number }> = [
+    { id: "scheduled.timeEarlierHour", deltaMinutes: -60 },
+    { id: "scheduled.timeEarlierTenMinutes", deltaMinutes: -10 },
+    { id: "scheduled.timeLaterTenMinutes", deltaMinutes: 10 },
+    { id: "scheduled.timeLaterHour", deltaMinutes: 60 }
+  ];
+  return (
+    <div className="scheduled-send-adjustments">
+      {adjustments.map(({ id, deltaMinutes }) => (
+        <button
+          key={id}
+          className="dialog-button scheduled-send-adjustment"
+          type="button"
+          aria-label={t(id)}
+          onClick={() => onChange(shiftScheduledSendValue(value, deltaMinutes))}
+        >
+          {t(id)}
+        </button>
+      ))}
+    </div>
+  );
+}
 
 type MentionSection = {
   key: "users" | "room";
@@ -1109,6 +1270,7 @@ const ThreadComposer = memo(function ThreadComposer({
   mentionCandidates = [],
   mentionCandidatesLoading = false,
   notice = null,
+  scheduledSendPersistenceFailed = false,
   roomName = t("panel.thread"),
   resolveComposerKeyAction,
   onAttachFiles,
@@ -1133,6 +1295,8 @@ const ThreadComposer = memo(function ThreadComposer({
   mentionCandidates?: MentionCandidate[];
   mentionCandidatesLoading?: boolean;
   notice?: string | null;
+  /** Core-owned local scheduled-send save failure (#1159); see the main composer. */
+  scheduledSendPersistenceFailed?: boolean;
   roomName?: string;
   resolveComposerKeyAction: ResolveComposerKeyAction;
   onAttachFiles?: (files: File[]) => void | Promise<void>;
@@ -1162,6 +1326,7 @@ const ThreadComposer = memo(function ThreadComposer({
       mentionCandidates={mentionCandidates}
       mentionCandidatesLoading={mentionCandidatesLoading}
       notice={notice}
+      scheduledSendPersistenceFailed={scheduledSendPersistenceFailed}
       resolveComposerKeyAction={resolveComposerKeyAction}
       draftKey={draftKey}
       ariaLabel={t("timeline.threadComposer")}
@@ -1204,6 +1369,8 @@ export function MentionAutocomplete({
   candidates,
   loading,
   activeOptionId,
+  anchorRef,
+  onDismiss,
   onAccept,
   onMouseDown
 }: {
@@ -1213,10 +1380,23 @@ export function MentionAutocomplete({
   candidates: MentionCandidate[];
   loading: boolean;
   activeOptionId?: string;
+  anchorRef: RefObject<HTMLElement | null>;
+  onDismiss: () => void;
   onAccept: (candidate: MentionCandidate) => void;
   onMouseDown: (event: MouseEvent<HTMLButtonElement>) => void;
 }) {
   const popupRef = useRef<HTMLDivElement>(null);
+  // #1368: the listbox renders in flow without a backdrop, so a press outside
+  // the composer dismisses it instead of leaving it over the timeline. Presses
+  // inside the composer (the editor, the tools, Send) keep it, because those
+  // deliberately keep editing focus.
+  useOutsidePressDismissal({
+    open,
+    kind: "composer-autocomplete",
+    contentRef: popupRef,
+    triggerRef: anchorRef,
+    onDismiss
+  });
 
   // #480: keep the keyboard-selected option visible inside the popup without
   // scrolling any ancestor. Only the popup's own scrollTop is adjusted, so the

@@ -1,4 +1,4 @@
-import type { SecurityDiagnostics } from "../domain/diagnostics";
+import type { RendererContextDiagnostics, SecurityDiagnostics } from "../domain/diagnostics";
 import type { QaDomDiagnostics, QaTimelineDiagnostics } from "../domain/qaTitle";
 
 export const INITIAL_TIMELINE_DIAGNOSTICS: QaTimelineDiagnostics = {
@@ -62,6 +62,53 @@ function imageSrcScheme(src: string): string {
   } catch {
     return "invalid";
   }
+}
+
+/**
+ * Sample renderer context once, at the moment a diagnostic export is requested
+ * (#1344). It reads primitives only: no DOM node is retained, no URL or text is
+ * captured, and the mounted-row count is a single one-shot query rather than a
+ * per-frame traversal.
+ */
+export function qaRendererContextDiagnostics(): RendererContextDiagnostics {
+  const jsHeap = performanceJsHeapBytes();
+  return {
+    viewportWidth: normalizedDimension(window.innerWidth),
+    viewportHeight: normalizedDimension(window.innerHeight),
+    devicePixelRatio: Number.isFinite(window.devicePixelRatio) && window.devicePixelRatio > 0
+      ? window.devicePixelRatio
+      : 0,
+    visibility: document.visibilityState,
+    mountedImages: document.images.length,
+    mountedTimelineRows: document.querySelectorAll(".timeline-item-frame").length,
+    jsHeapUsedBytes: jsHeap?.usedBytes ?? null,
+    jsHeapTotalBytes: jsHeap?.totalBytes ?? null
+  };
+}
+
+function normalizedDimension(value: number): number {
+  return Number.isFinite(value) ? Math.max(0, Math.trunc(value)) : 0;
+}
+
+/**
+ * Chromium-based WebViews expose the nonstandard `performance.memory`. WebKit
+ * does not, and the figures cover the JavaScript heap only — never WebKit/GPU
+ * or native allocations. Non-finite or negative values count as unavailable.
+ */
+function performanceJsHeapBytes(): { usedBytes: number; totalBytes: number } | null {
+  const memory = (performance as Performance & {
+    memory?: { usedJSHeapSize?: unknown; totalJSHeapSize?: unknown };
+  }).memory;
+  const usedBytes = memory?.usedJSHeapSize;
+  const totalBytes = memory?.totalJSHeapSize;
+  if (!isMeasuredByteCount(usedBytes) || !isMeasuredByteCount(totalBytes)) {
+    return null;
+  }
+  return { usedBytes, totalBytes };
+}
+
+function isMeasuredByteCount(value: unknown): value is number {
+  return typeof value === "number" && Number.isFinite(value) && value >= 0;
 }
 
 export function timelineDiagnosticsEqual(

@@ -32,7 +32,7 @@ impl ActivityResolutionOutcome {
 pub struct ActivityResolutionRequest {
     pub(crate) room_id: String,
     pub(crate) fully_read_event_id: Option<String>,
-    pub(crate) minimum_unread_count: u64,
+    pub(crate) own_user_id: String,
 }
 
 impl fmt::Debug for ActivityResolutionRequest {
@@ -44,7 +44,6 @@ impl fmt::Debug for ActivityResolutionRequest {
                 "fully_read_event_id",
                 &self.fully_read_event_id.as_ref().map(|_| "EventId(..)"),
             )
-            .field("minimum_unread_count", &self.minimum_unread_count)
             .finish()
     }
 }
@@ -66,6 +65,10 @@ async fn resolve_activity_request(
     request: &ActivityResolutionRequest,
     backpressure: &AccountWorkScheduler,
 ) -> Result<Vec<ActivityRow>, OperationFailureKind> {
+    if request.fully_read_event_id.is_none() {
+        // A server counter alone cannot identify which event should be shown.
+        return Ok(Vec::new());
+    }
     let mut subscription = None;
     for _ in 0..MAX_ATTEMPTS {
         match koushi_sdk::subscribe_room_timeline(session, &request.room_id).await {
@@ -122,29 +125,28 @@ fn select_unread_items<'a>(
     request: &ActivityResolutionRequest,
     reached_start: bool,
 ) -> Option<Vec<&'a MatrixTimelineItem>> {
-    let mut ordered = items.iter().collect::<Vec<_>>();
-    ordered.sort_by(|left, right| {
-        left.timestamp_ms
-            .cmp(&right.timestamp_ms)
-            .then_with(|| left.event_id.cmp(&right.event_id))
-    });
+    // The SDK timeline's item order is the event order. Event timestamps can
+    // be skewed and must not determine which side of a read marker an event is.
+    let ordered = items.iter().collect::<Vec<_>>();
+    if request.own_user_id.is_empty() {
+        return Some(Vec::new());
+    }
     if let Some(marker) = request.fully_read_event_id.as_deref() {
         if let Some(index) = ordered.iter().position(|item| item.event_id == marker) {
-            return Some(ordered.into_iter().skip(index + 1).collect());
+            return Some(
+                ordered
+                    .into_iter()
+                    .skip(index + 1)
+                    .filter(|item| item.thread_root.is_none())
+                    .filter(|item| item.sender != request.own_user_id)
+                    .collect(),
+            );
         }
-        return reached_start.then(|| newest_items(ordered, request.minimum_unread_count));
+        return reached_start.then(Vec::new);
     }
-    let enough = ordered.len() as u64 >= request.minimum_unread_count.max(1);
-    (enough || reached_start).then(|| newest_items(ordered, request.minimum_unread_count))
-}
-
-fn newest_items(
-    ordered: Vec<&MatrixTimelineItem>,
-    minimum_unread_count: u64,
-) -> Vec<&MatrixTimelineItem> {
-    let count = usize::try_from(minimum_unread_count.max(1)).unwrap_or(usize::MAX);
-    let skip = ordered.len().saturating_sub(count);
-    ordered.into_iter().skip(skip).collect()
+    // Without an observed marker, count-based selection would guess which
+    // message IDs are unread. Callers skip resolution before reaching here.
+    Some(Vec::new())
 }
 
 fn activity_row(item: &MatrixTimelineItem) -> ActivityRow {
@@ -187,11 +189,11 @@ mod tests {
 
     #[test]
     fn marker_selects_only_later_rows_and_debug_is_redacted() {
-        let items = vec![item("$later", 30), item("$marker", 20), item("$older", 10)];
+        let items = vec![item("$older", 10), item("$marker", 20), item("$later", 30)];
         let request = ActivityResolutionRequest {
             room_id: "!private:example.invalid".to_owned(),
             fully_read_event_id: Some("$marker".to_owned()),
-            minimum_unread_count: 1,
+            own_user_id: "@self:example.invalid".to_owned(),
         };
         let selected = select_unread_items(&items, &request, false).expect("marker resolved");
         assert_eq!(
@@ -205,16 +207,52 @@ mod tests {
     }
 
     #[test]
-    fn missing_marker_waits_for_start_then_uses_notification_bound() {
+    fn own_message_after_marker_is_not_identified_as_unread() {
+        let mut own = item("$own", 30);
+        own.sender = "@self:example.invalid".to_owned();
+        let items = vec![item("$marker", 10), item("$other", 20), own];
+        let request = ActivityResolutionRequest {
+            room_id: "!private:example.invalid".to_owned(),
+            fully_read_event_id: Some("$marker".to_owned()),
+            own_user_id: "@self:example.invalid".to_owned(),
+        };
+        let selected = select_unread_items(&items, &request, false).expect("marker resolved");
+        assert_eq!(
+            selected
+                .iter()
+                .map(|item| item.event_id.as_str())
+                .collect::<Vec<_>>(),
+            ["$other"]
+        );
+    }
+
+    #[test]
+    fn missing_marker_never_guesses_unread_event_ids_from_notification_count() {
         let items = vec![item("$new", 30), item("$old", 10)];
         let request = ActivityResolutionRequest {
             room_id: "!private:example.invalid".to_owned(),
             fully_read_event_id: Some("$missing".to_owned()),
-            minimum_unread_count: 1,
+            own_user_id: "@self:example.invalid".to_owned(),
         };
         assert!(select_unread_items(&items, &request, false).is_none());
-        let selected = select_unread_items(&items, &request, true).expect("start is authoritative");
-        assert_eq!(selected[0].event_id, "$new");
+        assert_eq!(
+            select_unread_items(&items, &request, true),
+            Some(Vec::new())
+        );
+    }
+
+    #[test]
+    fn absent_marker_never_guesses_unread_event_ids_from_notification_count() {
+        let items = vec![item("$new", 30), item("$old", 10)];
+        let request = ActivityResolutionRequest {
+            room_id: "!private:example.invalid".to_owned(),
+            fully_read_event_id: None,
+            own_user_id: "@self:example.invalid".to_owned(),
+        };
+        assert_eq!(
+            select_unread_items(&items, &request, true),
+            Some(Vec::new())
+        );
     }
 
     #[test]

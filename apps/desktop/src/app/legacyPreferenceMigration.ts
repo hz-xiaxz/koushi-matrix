@@ -95,8 +95,11 @@ export function readLegacyPreferenceMigration(
 
   const sort = storage.getItem(LEGACY_PREFERENCE_KEYS.sidebarSort);
   if (sort === "active" || sort === "name") {
+    // The legacy `active` choice asked for a recency order, which #542 makes
+    // the product default (`recentFirst`); `activity` is the newer
+    // attention-first value and was never persisted under this key.
     settingsPatch.room_list_sort = {
-      kind: sort === "active" ? "activity" : "normalLocale"
+      kind: sort === "active" ? "recentFirst" : "normalLocale"
     };
     sourceKeys.push(LEGACY_PREFERENCE_KEYS.sidebarSort);
   }

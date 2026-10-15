@@ -32,6 +32,59 @@ test("Home owns Explore and Invites; a selected space shows neither", async ({ p
   await expect(page.getByRole("button", { name: t("workspace.invites"), exact: true })).toHaveCount(0);
 });
 
+test("Home drains the current room composer after same-view room navigation", async ({ page }) => {
+  await page.goto("/appHarness.html");
+  await expect(page.getByRole("main", { name: t("timeline.conversation") })).toBeVisible();
+
+  const composer = page.getByRole("textbox", { name: t("composer.messageComposer") });
+  await composer.fill("temporary draft");
+  await composer.fill("");
+
+  await page.evaluate(() => {
+    const next = structuredClone(window.__harness.currentSnapshot());
+    const currentRoom = next.state.domain.rooms[0];
+    const currentSpace = next.state.domain.spaces[0];
+    if (!currentRoom || !currentSpace) throw new Error("ready harness room/space missing");
+    const roomId = "!home-navigation-room:example.invalid";
+    next.state.domain.rooms.push({
+      ...currentRoom,
+      room_id: roomId,
+      display_name: "Home Navigation Room",
+      display_label: "Home Navigation Room",
+      original_display_label: "Home Navigation Room"
+    });
+    currentSpace.child_room_ids.push(roomId);
+    const currentSidebarRoom = next.sidebar.space_rooms[0];
+    if (!currentSidebarRoom) throw new Error("ready harness sidebar room missing");
+    const sidebarRoom = {
+      ...currentSidebarRoom,
+      room_id: roomId,
+      display_name: "Home Navigation Room"
+    };
+    next.sidebar.space_rooms.push(sidebarRoom);
+    next.sidebar.sections.rooms.push(sidebarRoom);
+    window.__harness.setSnapshot(next);
+    window.__harness.pushStateUpdate();
+  });
+
+  await page.getByRole("button", { name: "Home Navigation Room", exact: true }).click();
+  await expect
+    .poll(() =>
+      page.evaluate(() => window.__harness.currentSnapshot().state.ui.timeline.room_id)
+    )
+    .toBe("!home-navigation-room:example.invalid");
+
+  await page.evaluate(() => window.__harness.clearInvocations());
+  await selectHome(page);
+
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.invocationsOf("select_space").length))
+    .toBe(1);
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.invocationsOf("select_space")[0]?.args))
+    .toEqual({ spaceId: null });
+});
+
 test("a selected space exposes the aggregate Threads nav entry", async ({ page }) => {
   await page.goto("/appHarness.html");
   await expect(page.getByRole("complementary", { name: t("workspace.rooms") })).toBeVisible();
@@ -60,6 +113,7 @@ test("the Home rail badge totals unread messages and invites separately in its l
   const homeButton = rail(page).getByRole("button", { name: "Home" });
   const label = await homeButton.getAttribute("aria-label");
   const badge = await homeButton.getAttribute("data-count");
+  const inviteBadge = await homeButton.getAttribute("data-invite-count");
 
   expect(label).not.toBeNull();
   const counts = label!.match(/(\d+)\D+(\d+)/);
@@ -73,8 +127,9 @@ test("the Home rail badge totals unread messages and invites separately in its l
   expect(invites).toBeGreaterThan(0);
   expect(
     Number(badge),
-    "the badge shows the Rust-owned total of unread messages plus invites"
-  ).toBe(unread + invites);
+    "the red badge shows only confirmed unread messages"
+  ).toBe(unread);
+  expect(Number(inviteBadge)).toBe(invites);
 });
 
 test("Explore separates joining by address from searching a public directory", async ({

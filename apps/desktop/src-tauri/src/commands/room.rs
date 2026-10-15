@@ -487,39 +487,6 @@ pub async fn unpin_event(
 }
 
 #[tauri::command]
-pub async fn refresh_pinned_events(
-    account_tab_id: Option<String>,
-    room_id: String,
-    app: AppHandle,
-    state: State<'_, CoreRuntimeState>,
-) -> Result<FrontendCommandSettlement, String> {
-    let mut event_conn = account_connection(state.inner(), account_tab_id.as_deref()).await?;
-    let baseline = event_conn.versioned_snapshot();
-    let account_key = account_key_from_app_state(&baseline.state);
-    let request_id = event_conn.next_request_id();
-    event_conn
-        .command(build_refresh_pinned_events_command(
-            request_id,
-            room_id.clone(),
-        ))
-        .await
-        .map_err(|e| format!("command submit failed: {e}"))?;
-    let generation = wait_for_room_operation(
-        &mut event_conn,
-        request_id,
-        baseline.generation,
-        account_key,
-        room_id.clone(),
-        RoomOperationKind::PinnedEventsRefreshed,
-        ROOM_OPERATION_EVENT_TIMEOUT,
-        "pinned messages refresh",
-    )
-    .await?;
-    update_qa_window_title_from_state(&app, state.inner()).await;
-    Ok(command_settlement(generation))
-}
-
-#[tauri::command]
 pub async fn load_room_settings(
     account_tab_id: Option<String>,
     room_id: String,
@@ -780,13 +747,59 @@ pub async fn update_room_member_role(
 #[tauri::command]
 pub async fn preview_room_address(
     account_tab_id: Option<String>,
-    name: String,
+    create_session_id: u64,
     alias_localpart: Option<String>,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<koushi_state::RoomAddressPreview, String> {
     Ok(account_connection(state.inner(), account_tab_id.as_deref())
         .await?
-        .preview_room_address(&name, alias_localpart.as_deref()))
+        .preview_room_address(alias_localpart.as_deref(), create_session_id))
+}
+
+/// Mutate the Rust-owned access/history draft (#1177). Admission only: the
+/// updated draft arrives in the next `StateDelta`.
+#[tauri::command]
+pub async fn set_room_access_draft(
+    account_tab_id: Option<String>,
+    command: koushi_protocol::command::RoomAccessDraftCommand,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    submit_core_command_with_admission(
+        state.inner(),
+        CoreCommand::Room(RoomCommand::SetRoomAccessDraft {
+            request_id,
+            command,
+        }),
+    )
+    .await
+}
+
+/// A stateless Rust preview of one Room Info access/history panel (#1177).
+#[tauri::command]
+pub async fn preview_room_access(
+    account_tab_id: Option<String>,
+    scope: koushi_state::RoomAccessDraftScope,
+    context: koushi_state::RoomAccessPreviewContext,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<koushi_state::RoomAccessPreview, String> {
+    Ok(account_connection(state.inner(), account_tab_id.as_deref())
+        .await?
+        .preview_room_access(&scope, context))
+}
+
+/// A stateless Rust preview of the create dialog's effective proposed tuple
+/// (#1177), normalized with the same rules Create applies.
+#[tauri::command]
+pub async fn preview_create_room_access(
+    account_tab_id: Option<String>,
+    scope: koushi_state::RoomAccessDraftScope,
+    input: koushi_state::CreateRoomAccessPreviewInput,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<koushi_state::CreateRoomAccessPreview, String> {
+    Ok(account_connection(state.inner(), account_tab_id.as_deref())
+        .await?
+        .preview_create_room_access(&scope, input))
 }
 
 #[tauri::command]
@@ -939,6 +952,60 @@ pub async fn set_space_child(
     .await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(admission)
+}
+
+/// Issue #1410: an admin marks a Space child as suggested to members, or not.
+#[tauri::command]
+pub async fn set_space_child_suggested(
+    account_tab_id: Option<String>,
+    space_id: String,
+    child_room_id: String,
+    suggested: bool,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_set_space_child_suggested_command(request_id, space_id, child_room_id, suggested),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(admission)
+}
+
+/// Issue #1410: accept the one-time suggested-rooms offer. Core joins the
+/// rooms of the offer it holds; the GUI names none.
+#[tauri::command]
+pub async fn join_suggested_space_rooms(
+    account_tab_id: Option<String>,
+    space_id: String,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_join_suggested_space_rooms_command(request_id, space_id),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(admission)
+}
+
+/// Issue #1410: skip the suggested-rooms offer, or close its results.
+#[tauri::command]
+pub async fn dismiss_suggested_space_rooms(
+    account_tab_id: Option<String>,
+    space_id: String,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    submit_core_command_with_admission(
+        state.inner(),
+        build_dismiss_suggested_space_rooms_command(request_id, space_id),
+    )
+    .await
 }
 
 #[tauri::command]
@@ -1366,6 +1433,41 @@ pub(super) fn build_leave_space_command(
     })
 }
 
+pub(super) fn build_set_space_child_suggested_command(
+    request_id: koushi_protocol::RequestId,
+    space_id: String,
+    child_room_id: String,
+    suggested: bool,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::SetSpaceChildSuggested {
+        request_id,
+        space_id,
+        child_room_id,
+        suggested,
+    })
+}
+
+pub(super) fn build_join_suggested_space_rooms_command(
+    request_id: koushi_protocol::RequestId,
+    space_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::JoinSuggestedSpaceRooms {
+        request_id,
+        space_id,
+        room_ids: Vec::new(),
+    })
+}
+
+pub(super) fn build_dismiss_suggested_space_rooms_command(
+    request_id: koushi_protocol::RequestId,
+    space_id: String,
+) -> CoreCommand {
+    CoreCommand::Room(RoomCommand::DismissSuggestedSpaceRooms {
+        request_id,
+        space_id,
+    })
+}
+
 pub(super) fn build_forget_room_command(
     request_id: koushi_protocol::RequestId,
     room_id: String,
@@ -1423,16 +1525,6 @@ pub(super) fn build_unpin_event_command(
         request_id,
         room_id,
         event_id,
-    })
-}
-
-pub(super) fn build_refresh_pinned_events_command(
-    request_id: koushi_protocol::RequestId,
-    room_id: String,
-) -> CoreCommand {
-    CoreCommand::Room(RoomCommand::RefreshPinnedEvents {
-        request_id,
-        room_id,
     })
 }
 

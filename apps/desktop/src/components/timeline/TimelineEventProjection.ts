@@ -1,5 +1,4 @@
 import type {
-  TimelineAnchorRestoreStatus,
   TimelineDiff,
   TimelineEvent,
   TimelineItem,
@@ -110,13 +109,6 @@ export function emitTimelineEventDiagnosticLog(
     );
     return;
   }
-  if ("AnchorRestoreFinished" in event) {
-    emit(
-      "timeline.event",
-      `kind=${kind} anchor restore status=${anchorRestoreStatusLogLabel(event.AnchorRestoreFinished.status)}`
-    );
-    return;
-  }
   if ("NavigationUpdated" in event) {
     emit(
       "timeline.event",
@@ -199,13 +191,6 @@ function paginationStateLogLabel(state: PaginationState): string {
     return state;
   }
   return `Failed(${state.Failed.kind})`;
-}
-
-function anchorRestoreStatusLogLabel(status: TimelineAnchorRestoreStatus): string {
-  if (typeof status === "string") {
-    return status;
-  }
-  return `Failed(${status.Failed.kind})`;
 }
 
 export function paginationStateDiagnosticLabel(

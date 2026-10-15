@@ -1703,6 +1703,17 @@ describe("TimelineView", () => {
       emit({
         kind: "Timeline",
         event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [message("$before:example.invalid", "Before"), rootAtActivity]
+          }
+        }
+      });
+      emit({
+        kind: "Timeline",
+        event: {
           NavigationUpdated: {
             key: KEY,
             snapshot: navigationSnapshot({
@@ -1710,17 +1721,6 @@ describe("TimelineView", () => {
               unread_event_count: 1,
               unread_position: "insideViewport"
             })
-          }
-        }
-      });
-      emit({
-        kind: "Timeline",
-        event: {
-          InitialItems: {
-            request_id: null,
-            key: KEY,
-            generation: 1,
-            items: [message("$before:example.invalid", "Before"), rootAtActivity]
           }
         }
       });
@@ -1774,6 +1774,17 @@ describe("TimelineView", () => {
       emit({
         kind: "Timeline",
         event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [message("$before:example.invalid", "Before"), rootAtActivity]
+          }
+        }
+      });
+      emit({
+        kind: "Timeline",
+        event: {
           NavigationUpdated: {
             key: KEY,
             snapshot: navigationSnapshot({
@@ -1781,17 +1792,6 @@ describe("TimelineView", () => {
               unread_event_count: 1,
               unread_position: "belowViewport"
             })
-          }
-        }
-      });
-      emit({
-        kind: "Timeline",
-        event: {
-          InitialItems: {
-            request_id: null,
-            key: KEY,
-            generation: 1,
-            items: [message("$before:example.invalid", "Before"), rootAtActivity]
           }
         }
       });
@@ -2324,10 +2324,16 @@ describe("TimelineView", () => {
     const chip = within(row!).getByRole("button", { name: /スレッドを開く/ });
     expect(chip.textContent).toContain("返信 1 件 · Bob: Latest reply");
     expect(chip.textContent).not.toContain("件件");
-    expect(chip.getAttribute("aria-label")).toContain("返信 1 件 · Bob: Latest reply");
+    // #1378: the visible text keeps the name and the preview in their own
+    // `dir="auto"` elements, and the accessible name isolates the same two values
+    // with FSI…PDI instead, so `aria-label` carries the invisible U+2068/U+2069.
+    expect(chip.querySelector('span[dir="auto"]')?.textContent).toBe("Bob");
+    expect(chip.getAttribute("aria-label")).toContain(
+      "返信 1 件 · \u2068Bob\u2069: \u2068Latest reply\u2069"
+    );
   });
 
-  it("shows notification count on the matching root row without moving timeline rows", async () => {
+  it("shows the SDK-confirmed per-root unread count even while the pane tracks a server notification", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const onOpenThread = vi.fn();
     const transport = baseTransport({
@@ -2340,6 +2346,7 @@ describe("TimelineView", () => {
       ...message("$thread-root:example.invalid", "Thread root"),
       thread_summary: {
         reply_count: 4,
+        unread_count: 2,
         latest_event_id: "$latest-thread-reply:example.invalid",
         latest_sender: "@bob:example.invalid",
         latest_sender_label: "Bob",
@@ -2383,7 +2390,7 @@ describe("TimelineView", () => {
     });
 
     const notifications = await screen.findByRole("button", {
-      name: /Thread notifications · 3/
+      name: /Thread unread · 2/
     });
     expect(notifications.closest("[data-event-id]")?.getAttribute("data-event-id")).toBe(
       "$thread-root:example.invalid"
@@ -2460,13 +2467,13 @@ describe("TimelineView", () => {
     );
     expect(row).not.toBeNull();
     expect(
-      within(row!).queryByRole("button", { name: /Thread notifications|View new replies/ })
+      within(row!).queryByRole("button", { name: /Thread unread|View new replies/ })
     ).toBeNull();
     expect(within(row!).getByRole("button", { name: /Open thread/ })).toBeTruthy();
   });
 
 
-  it("keeps notification badges with their root when roots reorder", async () => {
+  it("keeps SDK unread badges with their root when roots reorder", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const rootAAtOrigin = threadRootDisplayItem(
       {
@@ -2474,6 +2481,7 @@ describe("TimelineView", () => {
         timestamp_ms: 1_800_000_000_100,
         thread_summary: {
           reply_count: 1,
+          unread_count: 3,
           latest_event_id: "$thread-reply-a:example.invalid",
           latest_sender: "@bob:example.invalid",
           latest_sender_label: "Bob",
@@ -2548,7 +2556,7 @@ describe("TimelineView", () => {
       });
     });
 
-    const badge = await screen.findByRole("button", { name: /Thread notifications · 3/ });
+    const badge = await screen.findByRole("button", { name: /Thread unread · 3/ });
     const rootRow = badge.closest<HTMLElement>("article");
     expect(rootRow?.getAttribute("data-event-id")).toBe("$thread-root-a:example.invalid");
     const rootOrder = Array.from(document.querySelectorAll("article[data-event-id]")).map((row) =>
@@ -2572,7 +2580,7 @@ describe("TimelineView", () => {
       });
     });
     await waitFor(() => {
-      const movedBadge = screen.getByRole("button", { name: /Thread notifications · 3/ });
+      const movedBadge = screen.getByRole("button", { name: /Thread unread · 3/ });
       expect(movedBadge.closest<HTMLElement>("article")).toBe(rootRow);
       expect(
         movedBadge.closest<HTMLElement>("article")?.getAttribute("data-content-event-id")

@@ -56,6 +56,9 @@ impl CoreCommand {
                 | AppCommand::RemoveInviteTarget { request_id, .. }
                 | AppCommand::UpdateSettings { request_id, .. }
                 | AppCommand::ImportLegacySettings { request_id, .. }
+                | AppCommand::SetNotificationDeliverySecret { request_id, .. }
+                | AppCommand::ClearNotificationDeliverySecret { request_id, .. }
+                | AppCommand::TestNotificationDelivery { request_id, .. }
                 | AppCommand::UpdateNavigationPreference { request_id, .. }
                 | AppCommand::RebuildSearchIndex { request_id }
                 | AppCommand::SetRoomUrlPreviewOverride { request_id, .. }
@@ -69,6 +72,8 @@ impl CoreCommand {
                 | AppCommand::CloseFilesView { request_id }
                 | AppCommand::OpenThreadsList { request_id, .. }
                 | AppCommand::CloseThreadsList { request_id }
+                | AppCommand::OpenScheduledSendsList { request_id, .. }
+                | AppCommand::CloseScheduledSendsList { request_id }
                 | AppCommand::PaginateThreadsList { request_id, .. }
                 | AppCommand::RecordLocalEncryptionHealth { request_id, .. }
                 | AppCommand::UpdateNativeAttentionState { request_id, .. }
@@ -82,6 +87,7 @@ impl CoreCommand {
                 AccountCommand::LoginPassword { request_id, .. }
                 | AccountCommand::DiscoverLogin { request_id, .. }
                 | AccountCommand::StartOidcLogin { request_id, .. }
+                | AccountCommand::CancelOidcLogin { request_id }
                 | AccountCommand::CompleteOidcLogin { request_id, .. }
                 | AccountCommand::RestoreSession { request_id, .. }
                 | AccountCommand::RestoreLastSession { request_id }
@@ -149,6 +155,9 @@ impl CoreCommand {
                 | RoomCommand::CreatePublicDirectoryRoom { request_id, .. }
                 | RoomCommand::CreateSpace { request_id, .. }
                 | RoomCommand::SetSpaceChild { request_id, .. }
+                | RoomCommand::SetSpaceChildSuggested { request_id, .. }
+                | RoomCommand::JoinSuggestedSpaceRooms { request_id, .. }
+                | RoomCommand::DismissSuggestedSpaceRooms { request_id, .. }
                 | RoomCommand::CheckRoomAddressAvailability { request_id, .. }
                 | RoomCommand::ClearRoomAddressAvailability { request_id }
                 | RoomCommand::InviteUser { request_id, .. }
@@ -168,12 +177,12 @@ impl CoreCommand {
                 | RoomCommand::RemoveTag { request_id, .. }
                 | RoomCommand::PinEvent { request_id, .. }
                 | RoomCommand::UnpinEvent { request_id, .. }
-                | RoomCommand::RefreshPinnedEvents { request_id, .. }
                 | RoomCommand::QueryDirectory { request_id, .. }
                 | RoomCommand::PreviewJoinTarget { request_id, .. }
                 | RoomCommand::DismissDirectoryPreview { request_id }
                 | RoomCommand::JoinDirectoryRoom { request_id, .. }
                 | RoomCommand::LoadRoomSettings { request_id, .. }
+                | RoomCommand::SetRoomAccessDraft { request_id, .. }
                 | RoomCommand::QueryMentionCandidates { request_id, .. }
                 | RoomCommand::UpdateRoomSetting { request_id, .. }
                 | RoomCommand::ModerateRoomMember { request_id, .. }
@@ -197,7 +206,6 @@ impl CoreCommand {
                 | TimelineCommand::Paginate { request_id, .. }
                 | TimelineCommand::CancelPagination { request_id, .. }
                 | TimelineCommand::CancelLinkPreviews { request_id, .. }
-                | TimelineCommand::RestoreTimelineAnchor { request_id, .. }
                 | TimelineCommand::ObserveViewport { request_id, .. }
                 | TimelineCommand::RepairGaps { request_id, .. }
                 | TimelineCommand::SendText { request_id, .. }
@@ -219,7 +227,6 @@ impl CoreCommand {
                 | TimelineCommand::SendReadReceipt { request_id, .. }
                 | TimelineCommand::SetFullyRead { request_id, .. }
                 | TimelineCommand::SetTyping { request_id, .. }
-                | TimelineCommand::ToggleReaction { request_id, .. }
                 | TimelineCommand::LoadLinkPreviews { request_id, .. }
                 | TimelineCommand::HideLinkPreview { request_id, .. } => *request_id,
                 TimelineCommand::BroadcastLinkPreviewPolicy { .. } => RequestId {
@@ -258,7 +265,10 @@ pub use account::{
     SecureBackupPassphraseChangeRequest, SecureBackupSetupRequest, SetAvatarRequest,
 };
 pub use app::{AppCommand, EventNavigationMissingTargetPolicy};
-pub use room::{CreateRoomOptions, CreateRoomParentSpace, CreateRoomVisibility, RoomCommand};
+pub use room::{
+    CreateRoomOptions, CreateRoomParentSpace, CreateRoomVisibility, RoomAccessDraftCommand,
+    RoomCommand,
+};
 pub use search::{SearchCommand, SearchScope, ThreadsListCommand};
 pub use timeline::{
     ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,

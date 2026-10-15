@@ -80,6 +80,17 @@ describe("legacy frontend preference migration", () => {
     expect(storage.length).toBe(7);
   });
 
+  test("maps the legacy Active choice to the Recent-first order (#542)", () => {
+    const storage = memoryStorage({ "koushi.sidebarRoomSort.v1": "active" });
+
+    const migration = readLegacyPreferenceMigration(storage, new Set(), currentSettings);
+
+    expect(migration.settingsPatch).toMatchObject({
+      room_list_sort: { kind: "recentFirst" }
+    });
+    expect(migration.sourceKeys).toEqual(["koushi.sidebarRoomSort.v1"]);
+  });
+
   test("ignores corrupt, unknown and oversized values without inventing defaults", () => {
     const storage = memoryStorage({
       "koushi.spaceLocalOverrides.v1": "{broken",

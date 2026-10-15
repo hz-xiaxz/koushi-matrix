@@ -9,6 +9,7 @@ pub mod search_crawler;
 // ── New per-feature submodules (#87 Phase 2) ────────────────────────────────
 mod account_notifications;
 mod activity;
+mod auth_failure;
 mod basic_operation;
 mod cjk;
 mod composer_draft;
@@ -24,8 +25,10 @@ mod local_encryption;
 mod mention;
 mod native_attention;
 mod navigation;
+mod notification_delivery;
 mod profile;
 mod room;
+mod room_activity;
 mod room_interactions;
 mod room_management;
 mod search;
@@ -65,13 +68,21 @@ pub use contact_security::{
 pub use account_notifications::{
     AccountNotificationsFailureKind, AccountNotificationsLoadState, AccountNotificationsOperation,
     AccountNotificationsOperationState, AccountNotificationsSnapshot, AccountNotificationsState,
-    MAX_NOTIFICATION_EMAIL_LEN, NotificationCategory, NotificationCategoryState,
-    NotificationCategoryStates, NotificationEmailAddress, NotificationEmailManagement,
-    PendingNotificationEmail, normalize_notification_email,
+    MAX_NOTIFICATION_EMAIL_LEN, MAX_NOTIFICATION_KEYWORD_CHARS, MAX_NOTIFICATION_KEYWORDS,
+    NotificationCategory, NotificationCategoryState, NotificationCategoryStates,
+    NotificationEmailAddress, NotificationEmailManagement, NotificationKeywordRuleState,
+    PendingNotificationEmail, normalize_notification_email, normalize_notification_keyword,
+    normalize_notification_keyword_removal,
 };
 
 // ── Re-exports: sync ────────────────────────────────────────────────────────
 pub use sync::{SyncLifecycleStatus, SyncState};
+
+// ── Re-exports: auth failure vocabulary (#1268) ─────────────────────────────
+pub use auth_failure::{
+    AuthFailureDetail, AuthFailureStage, AuthFailureTransport, AuthMatrixErrorKind, AuthMethod,
+    DelegatedAuthMethod,
+};
 
 // ── Re-exports: session ─────────────────────────────────────────────────────
 pub use session::{
@@ -80,12 +91,13 @@ pub use session::{
     CurrentDeviceTrustState, DelegatedAuthLinks, DeviceCleanupAuthMode, DeviceCleanupFailureKind,
     DeviceCleanupLocalMode, DeviceCleanupOfferReason, DeviceCleanupRemoteOutcome,
     DeviceCleanupState, LoginAttemptId, LoginFlow, LoginFlowKind, PendingKeyCountBucket,
-    ProvisionalPhase, QrLoginState, RecoveryMethod, SecureBackupGateFailureKind,
-    SecureBackupGateState, SecureBackupSetupAdmission, SecureBackupSetupIntent,
-    SessionAuthenticationMethod, SessionInfo, SessionLockReason, SessionState,
-    SoftLogoutReauthState, VerificationAccountKind, VerificationGateFailureKind,
-    VerificationGateRejectReason, VerificationGateState, VerificationMethod,
-    VerificationMethodCapability,
+    ProvisionalPhase, QrLoginState, RecoveryMethod, SecureBackupFailureDetail,
+    SecureBackupFailureStage, SecureBackupFailureTransport, SecureBackupGateFailureKind,
+    SecureBackupGateState, SecureBackupInspectionFailure, SecureBackupMatrixErrorKind,
+    SecureBackupSetupAdmission, SecureBackupSetupIntent, SessionAuthenticationMethod, SessionInfo,
+    SessionLockReason, SessionState, SoftLogoutReauthState, VerificationAccountKind,
+    VerificationGateFailureKind, VerificationGateRejectReason, VerificationGateState,
+    VerificationMethod, VerificationMethodCapability,
 };
 pub use session_status::{
     ArmedSessionStatusCheck, CurrentSessionBackupState, CurrentSessionStatusDetails,
@@ -109,12 +121,23 @@ pub use settings::{
     EmojiPreference, FontPreference, ImageUploadCompressionMode, ImageUploadCompressionPolicy,
     KeyboardSettings, LinkPreviewSettingsState, LocaleSettings, MediaSettings,
     NotificationSettings, RoomNotificationMode, RoomNotificationModeOperation,
-    RoomNotificationSettings, RoomPreference, RoomPreferencesState, RoomUrlPreviews, SettingsPatch,
-    SettingsPatchScope, SettingsPersistenceState, SettingsState, SettingsValues, SidebarCategory,
-    SidebarCollapsedSections, SidebarScopeSettings, SidebarSectionKind, SidebarSectionPatch,
-    SidebarSectionSettings, SidebarSettings, TextDirectionPreference, ThemePreference,
-    ThreadListOrder, TimelineSettings, TimelineThreadRootOrder, TypographySettings,
-    UpdatesSettings, WindowSettings,
+    RoomNotificationSettings, RoomPreference, RoomPreferencesState, RoomUrlPreviews,
+    SIDEBAR_HOME_SCOPE_KEY, SettingsPatch, SettingsPatchScope, SettingsPersistenceState,
+    SettingsState, SettingsValues, SidebarCategory, SidebarCollapsedSections, SidebarScopeSettings,
+    SidebarSectionKind, SidebarSectionPatch, SidebarSectionReveal, SidebarSectionSettings,
+    SidebarSettings, TextDirectionPreference, ThemePreference, ThreadListOrder, TimelineSettings,
+    TimelineThreadRootOrder, TypographySettings, UpdatesSettings, WindowSettings,
+    sidebar_scope_key,
+};
+
+// ── Re-exports: notification delivery ───────────────────────────────────────
+pub use notification_delivery::{
+    MAX_NOTIFICATION_DELIVERY_DWELL_SECS, MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
+    MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS, MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS,
+    NotificationDeliveryOutcomeState, NotificationDeliveryPrefixConsent,
+    NotificationDeliveryPresetState, NotificationDeliverySettings, NotificationDeliverySinkState,
+    NotificationDeliveryState, NotificationDeliveryTarget, NotificationSinkConfig,
+    NotificationSinkSettings, SmtpTls, bounded_notification_delivery_prefix_source,
 };
 
 // ── Re-exports: profile ─────────────────────────────────────────────────────
@@ -129,7 +152,9 @@ pub use profile::{
 
 // ── Re-exports: space children ────────────────────────────────────────────
 pub use space_children::{
-    SpaceChildMembership, SpaceChildSummary, SpaceChildrenLoadState, SpaceChildrenState,
+    RECENTLY_JOINED_ROOM_LIMIT, RecentlyJoinedRoomIds, SpaceChildMembership,
+    SpaceChildSuggestedEditState, SpaceChildSummary, SpaceChildrenLoadState, SpaceChildrenState,
+    SuggestedRoomCandidate, SuggestedRoomJoinOutcome, SuggestedRoomJoinResult, SuggestedRoomsOffer,
 };
 
 // ── Re-exports: space members ─────────────────────────────────────────────
@@ -150,6 +175,9 @@ pub use room::{
     RoomSummary, RoomTagInfo, RoomTagKind, RoomTags, SpaceSummary, room_activity_unread_count,
     room_attention_kind, room_attention_projection, room_attention_summary,
 };
+
+// ── Re-exports: room_activity ───────────────────────────────────────────────
+pub use room_activity::{RoomActivityRecord, RoomActivityState};
 
 // ── Re-exports: invite_workflow ─────────────────────────────────────────────
 pub use invite_workflow::{
@@ -194,10 +222,16 @@ pub use directory::{
 
 // ── Re-exports: room_management ─────────────────────────────────────────────
 pub use room_management::{
-    RoomHistoryVisibility, RoomJoinRule, RoomManagementOperationKind, RoomManagementOperationState,
-    RoomManagementState, RoomMemberMembership, RoomMemberRole, RoomMemberRoleOption,
-    RoomMemberSummary, RoomModerationAction, RoomPermissionFacts, RoomSettingChange,
-    RoomSettingsSnapshot, UserTrustState,
+    CreateRoomAccessPreview, CreateRoomAccessPreviewInput, CreateRoomAccessRejection,
+    CreateRoomAccessSeed, RestrictedConditions, RoomAccessCondition, RoomAccessDraft,
+    RoomAccessDraftScope, RoomAccessObservation, RoomAccessPolicy, RoomAccessPreview,
+    RoomAccessPreviewContext, RoomAllowTarget, RoomAllowTargetKind, RoomHistoryVisibility,
+    RoomJoinRule, RoomManagementOperationKind, RoomManagementOperationState, RoomManagementState,
+    RoomMemberMembership, RoomMemberRole, RoomMemberRoleOption, RoomMemberSummary,
+    RoomModerationAction, RoomPermissionFacts, RoomSettingChange, RoomSettingsSnapshot,
+    UserTrustState, access_policy_target_rejection, canonical_access_policy,
+    confirmed_access_policy, confirmed_room_access_outcome, preview_create_room_access,
+    preview_room_access_draft,
 };
 
 // ── Re-exports: e2ee ────────────────────────────────────────────────────────
@@ -213,14 +247,16 @@ pub use e2ee::{
 pub use local_encryption::{LocalEncryptionHealth, LocalEncryptionState};
 
 // ── Re-exports: native_attention ─────────────────────────────────────────────
+pub(crate) use native_attention::native_attention_projection_from_rooms_with_live_room;
 pub use native_attention::{
     NativeAttentionCandidate, NativeAttentionCapabilities, NativeAttentionCapability,
     NativeAttentionContext, NativeAttentionDispatchId, NativeAttentionDispatchState,
     NativeAttentionObservationKind, NativeAttentionProjection, NativeAttentionProjectionInput,
     NativeAttentionSoundOutcome, NativeAttentionState, NativeAttentionSummary,
     NativeAttentionSuppressionReason, NativeNotificationPayload, NativeNotificationTarget,
-    native_attention_capabilities_for_platform, native_attention_projection_from_rooms,
-    native_attention_state_from_rooms,
+    RoomAttentionCandidate, attention_room_candidates, attention_room_candidates_for_state,
+    attention_room_notification_modes, native_attention_capabilities_for_platform,
+    native_attention_projection_from_rooms, native_attention_state_from_rooms,
 };
 
 // ── Re-exports: cjk ─────────────────────────────────────────────────────────
@@ -236,20 +272,21 @@ pub use timeline::{
     MAX_PERSISTED_COMPOSER_DRAFT_ROOM_COUNT, MAX_PERSISTED_COMPOSER_DRAFT_THREAD_COUNT,
     MediaGalleryStore, MediaPreparationFailureKind, PendingComposerSendKind, PreparedUploadFormat,
     PreparedUploadVariant, ScheduledSendCapability, ScheduledSendHandle, ScheduledSendItem,
-    ScheduledSendStore, StagedUploadCompressionChoice, StagedUploadFormatChoice, StagedUploadItem,
-    StagedUploadKind, StagedUploadOutputSelection, StagedUploadPreparation,
-    StagedUploadResizeChoice, TimelineContinuityInspection, TimelineContinuityState,
-    TimelineGapRepairFailureKind, TimelineMediaGalleryItem, TimelineMediaGalleryMedia,
-    TimelineMediaGallerySource, TimelineMediaGalleryThumbnail, TimelineMediaKind,
-    TimelinePaneState, UploadStagingStore, staged_upload_item_with_completed_output,
+    ScheduledSendStore, ScheduledSendsListState, ScheduledSendsScope,
+    StagedUploadCompressionChoice, StagedUploadFormatChoice, StagedUploadItem, StagedUploadKind,
+    StagedUploadOutputSelection, StagedUploadPreparation, StagedUploadResizeChoice,
+    TimelineContinuityInspection, TimelineContinuityState, TimelineGapRepairFailureKind,
+    TimelineMediaGalleryItem, TimelineMediaGalleryMedia, TimelineMediaGallerySource,
+    TimelineMediaGalleryThumbnail, TimelineMediaKind, TimelinePaneState, UploadStagingStore,
+    staged_upload_item_with_completed_output, staged_upload_send_consumes_composer_draft,
     staged_uploads_are_sendable,
 };
 
 // ── Re-exports: thread ──────────────────────────────────────────────────────
 pub use thread::{
-    ThreadAttentionState, ThreadOpenIntent, ThreadPaneState, ThreadRootProjectionState,
-    ThreadRootProjectionStatus, ThreadsListItem, ThreadsListScope, ThreadsListState,
-    sort_threads_list_items,
+    ThreadAttentionState, ThreadOpenIntent, ThreadPaneState, ThreadRootAttention,
+    ThreadRootProjectionState, ThreadRootProjectionStatus, ThreadsListItem, ThreadsListScope,
+    ThreadsListState, sort_threads_list_items,
 };
 
 // ── Re-exports: search ──────────────────────────────────────────────────────
@@ -280,8 +317,8 @@ pub use basic_operation::{
 // ── Re-exports: live_signals ────────────────────────────────────────────────
 pub use live_signals::{
     LiveEventReceiptSummary, LiveEventReceiptSummaryUpdate, LiveEventReceipts, LiveReadReceipt,
-    LiveRoomSignalUpdate, LiveSignalsState, LiveTypingUser, PresenceKind, RoomLiveSignals,
-    enrich_live_receipt, refresh_live_receipt_display_projection,
+    LiveRoomSignalUpdate, LiveSignalsState, LiveTypingUser, PresenceKind, ReceiptScope,
+    RoomLiveSignals, enrich_live_receipt, refresh_live_receipt_display_projection,
     refresh_live_typing_user_display_projection, resolve_live_receipt_profile,
 };
 
@@ -298,6 +335,25 @@ pub(crate) fn default_true() -> bool {
 }
 
 // ── AppState ─────────────────────────────────────────────────────────────────
+/// #1238 diagnostic (temporary): where an unopened thread's replies stop being
+/// delivered to this client. Recorded once per room from the authenticated client
+/// so the QA can name the boundary instead of inferring it from a badge.
+/// Session-scoped and never serialized to the webview.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct ThreadDeliveryDiagnostic {
+    /// The server advertises `org.matrix.msc4306` and the client opted in.
+    pub capability_advertised: Option<bool>,
+    /// A thread subscription request was sent for a root the room window exposed.
+    pub subscribe_attempted: bool,
+    /// That request was accepted.
+    pub subscribe_succeeded: Option<bool>,
+    /// The SDK thread cache was read for that root.
+    pub thread_cache_read: bool,
+    pub thread_cache_unread: u64,
+    pub thread_cache_notifications: u64,
+    pub thread_cache_mentions: u64,
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AppState {
     pub session: SessionState,
@@ -309,6 +365,14 @@ pub struct AppState {
     pub sliding_sync_account_epoch: u64,
     #[serde(skip)]
     pub sliding_sync_capability: SlidingSyncCapabilityState,
+    /// #1238 diagnostic (temporary): see [`ThreadDeliveryDiagnostic`].
+    #[serde(skip)]
+    pub thread_delivery: ThreadDeliveryDiagnostic,
+    /// #1259/#1238: per-root SDK thread-cache attention, keyed by
+    /// `(room_id, root_event_id)`. The Threads list rows read the unread half and
+    /// the reducer sums both halves into the room's thread badge fields.
+    #[serde(skip)]
+    pub thread_unread: BTreeMap<(String, String), ThreadRootAttention>,
     #[serde(default)]
     pub device_cleanup: DeviceCleanupState,
     #[serde(default)]
@@ -334,10 +398,21 @@ pub struct AppState {
     #[serde(default)]
     pub qr_login: QrLoginState,
     pub settings: SettingsState,
+    /// #1427: the device-local notification delivery channel's runtime facts - which
+    /// sinks hold a credential and how their last send ended. App scope, never
+    /// persisted, and never a secret value. The channel's settings live in
+    /// `settings.values.delivery`.
+    #[serde(default)]
+    pub notification_delivery: NotificationDeliveryState,
     #[serde(default)]
     pub link_preview_settings: LinkPreviewSettingsState,
     #[serde(default)]
     pub room_preferences: RoomPreferencesState,
+    /// #1364: newest conversation activity observed per room. Merged into
+    /// `rooms` before the room-list projection runs, so Recent-first ordering
+    /// survives a restart. A local cache; never published to the frontend.
+    #[serde(skip)]
+    pub room_activity: RoomActivityState,
     pub profile: ProfileState,
     #[serde(default)]
     pub space_children: SpaceChildrenState,
@@ -360,6 +435,31 @@ pub struct AppState {
     #[serde(skip)]
     pub room_notification_awaiting_echo: HashMap<String, (u64, RoomNotificationMode)>,
     pub room_interactions: BTreeMap<String, RoomInteractionState>,
+    /// Each joined room's authoritative access condition, from its own
+    /// `m.room.join_rules` (#1166). Empty until a room-list update has projected
+    /// it; an absent room is "not yet known", never a guessed rule. Never derived
+    /// from encryption, DM status, the viewer's membership or `can_join`.
+    #[serde(default)]
+    pub room_access: BTreeMap<String, RoomAccessCondition>,
+    /// The last authoritative/provisional observation behind `room_access`,
+    /// per room (#1177). Kept apart from the displayed value so a locally
+    /// accepted access/history value that has not been observed is never
+    /// mistaken for an unchanged old observation.
+    #[serde(skip)]
+    pub room_access_observed: BTreeMap<String, RoomAccessObservation>,
+    /// The raw pre-send access condition of each room's last settings read
+    /// (#1177), kept apart from the presentation-preserved `settings.access` so
+    /// the reducer's admission check sees the facts the read actually found and
+    /// agrees with Core's own pre-send verdict instead of the local accepted
+    /// value. Cleared with the room's other access state.
+    #[serde(skip)]
+    pub room_access_pre_send: BTreeMap<String, RoomAccessCondition>,
+    /// The highest create-editor session identity Rust has admitted (#1177). A
+    /// stale `Open` at or below it is a retired lifetime and is rejected, so it
+    /// can never recreate a draft or replace a newer one. Monotonic for the
+    /// process; never serialized.
+    #[serde(skip)]
+    pub create_access_session_watermark: u64,
     #[serde(skip)]
     pub composer_drafts: ComposerDraftStore,
     #[serde(skip)]
@@ -377,10 +477,19 @@ pub struct AppState {
     pub thread: ThreadPaneState,
     pub thread_attention: ThreadAttentionState,
     pub threads_list: ThreadsListState,
+    /// #1160: the explicitly opened Home/Space scheduled-sends projection. Kept
+    /// out of [`scheduled_sends`](Self::scheduled_sends) because only this slice
+    /// is deliberately body-bearing for non-visible rooms while open.
+    #[serde(default)]
+    pub scheduled_sends_list: ScheduledSendsListState,
     #[serde(default)]
     pub thread_root_projections: ThreadRootProjectionState,
     pub focused_context: FocusedContextState,
     pub search: SearchState,
+    /// Connection that submitted the current search request, so a result from
+    /// another connection with the same connection-local sequence is refused.
+    #[serde(default)]
+    pub search_request_connection_id: Option<u64>,
     #[serde(default)]
     pub search_crawler: SearchCrawlerState,
     pub files_view: FilesViewState,
@@ -411,6 +520,8 @@ impl Default for AppState {
             secure_backup_gate: SecureBackupGateState::Inactive,
             sliding_sync_account_epoch: 0,
             sliding_sync_capability: SlidingSyncCapabilityState::Unknown,
+            thread_delivery: ThreadDeliveryDiagnostic::default(),
+            thread_unread: BTreeMap::new(),
             device_cleanup: DeviceCleanupState::Idle,
             current_session_status: CurrentSessionStatusState::Idle,
             current_session_status_schedule: SessionStatusSchedule::default(),
@@ -423,8 +534,10 @@ impl Default for AppState {
             soft_logout_reauth: SoftLogoutReauthState::Idle,
             qr_login: QrLoginState::Idle,
             settings: SettingsState::default(),
+            notification_delivery: NotificationDeliveryState::default(),
             link_preview_settings: LinkPreviewSettingsState::default(),
             room_preferences: RoomPreferencesState::default(),
+            room_activity: RoomActivityState::default(),
             profile: ProfileState::default(),
             space_children: SpaceChildrenState::default(),
             space_members: SpaceMembersState::default(),
@@ -439,6 +552,10 @@ impl Default for AppState {
             room_notification_settings: HashMap::new(),
             room_notification_awaiting_echo: HashMap::new(),
             room_interactions: BTreeMap::new(),
+            room_access: BTreeMap::new(),
+            room_access_observed: BTreeMap::new(),
+            room_access_pre_send: BTreeMap::new(),
+            create_access_session_watermark: 0,
             composer_drafts: ComposerDraftStore::default(),
             scheduled_sends: ScheduledSendStore::default(),
             upload_staging: UploadStagingStore::default(),
@@ -451,9 +568,11 @@ impl Default for AppState {
             thread: ThreadPaneState::Closed,
             thread_attention: ThreadAttentionState::Closed,
             threads_list: ThreadsListState::Closed,
+            scheduled_sends_list: ScheduledSendsListState::Closed,
             thread_root_projections: ThreadRootProjectionState::default(),
             focused_context: FocusedContextState::Closed,
             search: SearchState::Closed,
+            search_request_connection_id: None,
             search_crawler: SearchCrawlerState::default(),
             files_view: FilesViewState::Closed,
             history_export: HistoryExportState::Idle,

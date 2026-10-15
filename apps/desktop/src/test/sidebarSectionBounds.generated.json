@@ -1,0 +1,645 @@
+{
+  "cases": [
+    {
+      "activeRoomIndex": null,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 0,
+      "visibleCount": 0
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 0,
+      "visibleCount": 0
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 1,
+      "visibleCount": 1
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 1,
+      "visibleCount": 1
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 1,
+      "visibleCount": 1
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 1,
+      "visibleCount": 1
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 2,
+      "visibleCount": 2
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 2,
+      "visibleCount": 2
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 2,
+      "visibleCount": 2
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 2,
+      "visibleCount": 2
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 3,
+      "visibleCount": 3
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 3,
+      "visibleCount": 3
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 3,
+      "visibleCount": 3
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 3,
+      "visibleCount": 3
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 3,
+      "visibleCount": 3
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 3,
+      "visibleCount": 3
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 4,
+      "visibleCount": 4
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 4,
+      "visibleCount": 4
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 4,
+      "visibleCount": 4
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 4,
+      "visibleCount": 4
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 4,
+      "visibleCount": 4
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 4,
+      "visibleCount": 4
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 5,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 5,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 5,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 4,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 5,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 5,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 5,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 5,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 4,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": false,
+      "totalCount": 5,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 1,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 6,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 1,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 6,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 1,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 6,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 4,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 1,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 6,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 5,
+      "expanded": true,
+      "expandedByActiveRoom": true,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 6,
+      "visibleCount": 6
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 6,
+      "visibleCount": 6
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 6,
+      "visibleCount": 6
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 6,
+      "visibleCount": 6
+    },
+    {
+      "activeRoomIndex": 4,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 6,
+      "visibleCount": 6
+    },
+    {
+      "activeRoomIndex": 5,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 6,
+      "visibleCount": 6
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 2,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 7,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 2,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 7,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 2,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 7,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 4,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 2,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 7,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 5,
+      "expanded": true,
+      "expandedByActiveRoom": true,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 7,
+      "visibleCount": 7
+    },
+    {
+      "activeRoomIndex": 6,
+      "expanded": true,
+      "expandedByActiveRoom": true,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 7,
+      "visibleCount": 7
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 7,
+      "visibleCount": 7
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 7,
+      "visibleCount": 7
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 7,
+      "visibleCount": 7
+    },
+    {
+      "activeRoomIndex": 4,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 7,
+      "visibleCount": 7
+    },
+    {
+      "activeRoomIndex": 5,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 7,
+      "visibleCount": 7
+    },
+    {
+      "activeRoomIndex": 6,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 7,
+      "visibleCount": 7
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 3,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 8,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 3,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 8,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 3,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 8,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 4,
+      "expanded": false,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 3,
+      "persistedExpanded": false,
+      "showsExpandControl": true,
+      "totalCount": 8,
+      "visibleCount": 5
+    },
+    {
+      "activeRoomIndex": 5,
+      "expanded": true,
+      "expandedByActiveRoom": true,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 8,
+      "visibleCount": 8
+    },
+    {
+      "activeRoomIndex": 6,
+      "expanded": true,
+      "expandedByActiveRoom": true,
+      "hiddenCount": 0,
+      "persistedExpanded": false,
+      "showsExpandControl": false,
+      "totalCount": 8,
+      "visibleCount": 8
+    },
+    {
+      "activeRoomIndex": null,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 8,
+      "visibleCount": 8
+    },
+    {
+      "activeRoomIndex": 0,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 8,
+      "visibleCount": 8
+    },
+    {
+      "activeRoomIndex": 2,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 8,
+      "visibleCount": 8
+    },
+    {
+      "activeRoomIndex": 4,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 8,
+      "visibleCount": 8
+    },
+    {
+      "activeRoomIndex": 5,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 8,
+      "visibleCount": 8
+    },
+    {
+      "activeRoomIndex": 6,
+      "expanded": true,
+      "expandedByActiveRoom": false,
+      "hiddenCount": 0,
+      "persistedExpanded": true,
+      "showsExpandControl": true,
+      "totalCount": 8,
+      "visibleCount": 8
+    }
+  ],
+  "visibleLimit": 5
+}

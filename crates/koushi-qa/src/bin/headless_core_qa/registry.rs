@@ -87,42 +87,6 @@ const ENV_STRESS_REPLAY_EXISTING: &str = "KOUSHI_QA_STRESS_REPLAY_EXISTING";
 pub(super) const QA_WRONG_RECOVERY_SECRET: &str =
     "koushi-desktop-headless-qa-wrong-recovery-secret";
 
-pub(super) const ENV_CACHE_RESTORE_ROOMS: &str = "KOUSHI_QA_CACHE_RESTORE_ROOMS";
-
-pub(super) const ENV_CACHE_RESTORE_DEPTH: &str = "KOUSHI_QA_CACHE_RESTORE_DEPTH";
-
-pub(super) const DEFAULT_CACHE_RESTORE_ROOMS: usize = 3;
-
-pub(super) const DEFAULT_CACHE_RESTORE_DEPTH: usize = 200;
-
-/// Batch size used for backward pagination during the populate (EndReached) pass.
-pub(super) const CACHE_RESTORE_PAGINATE_BATCH: u16 = 20;
-
-/// Production-faithful restore parameters, matching the app's live-room constants.
-/// Source: apps/desktop/src/components/TimelineView.tsx:406-407
-/// (LIVE_ROOM_ANCHOR_RESTORE_MAX_BATCHES=6, EVENT_COUNT=100).
-/// These are intentionally small. Room entry should fail fast for stale or
-/// very deep persisted anchors and let the UI fall back to live edge; deep
-/// event-centered restore belongs to an explicit focused-event timeline.
-pub(super) const CACHE_RESTORE_PROD_MAX_BATCHES: u16 = 6;
-
-pub(super) const CACHE_RESTORE_PROD_EVENT_COUNT: u16 = 100;
-
-/// Speed gate: maximum backward-paginate cycles allowed per room during an
-/// offline anchor restore. Deep anchors may end as BudgetExhausted, but they
-/// must not walk history long enough to block room entry.
-pub(super) const CACHE_RESTORE_MAX_CYCLES: u16 = 3;
-
-/// Number of messages in the shallow-anchor room.  Enough to exceed the SDK's
-/// initial visible window (~20 items) so that m0 (oldest) is hidden behind a
-/// lazy-reveal skip when the session restarts.  All events fit in a single
-/// stored chunk (well under 128), so chunks_loaded == 0 during the restore.
-/// The anchor (m0) lives in the live in-memory prefix that
-/// live_lazy_paginate_backwards reveals (lazy_reveal_batches == 1).
-/// The P1 lazy-reveal-fence fix gates on this: without it the settle fence
-/// misses the lazy-reveal DiffBatch and may conclude before items settle.
-pub(super) const CACHE_RESTORE_SHALLOW_DEPTH: usize = 30;
-
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub(super) enum QaScenario {
     AvatarDemand,
@@ -163,10 +127,11 @@ pub(super) enum QaScenario {
     SendQueue,
     RestoreCleanup,
     LinkPreview,
-    CacheRestore,
     ReadStateConvergence,
     HiddenStateAcl,
     ThreadLateJoiner,
+    IdleSyncGapInspection,
+    NotificationDelivery,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -208,10 +173,11 @@ pub(super) enum QaStage {
     SendQueue,
     RestoreCleanup,
     LinkPreview,
-    CacheRestore,
     ReadStateConvergence,
     HiddenStateAcl,
     ThreadLateJoiner,
+    IdleSyncGapInspection,
+    NotificationDelivery,
 }
 
 /// Refuse to run against the OS keychain. Debug and qa-bin release builds both
@@ -289,15 +255,16 @@ impl QaScenario {
             "send_queue" => Ok(Self::SendQueue),
             "restore_cleanup" => Ok(Self::RestoreCleanup),
             "link_preview" => Ok(Self::LinkPreview),
-            "cache_restore" => Ok(Self::CacheRestore),
             "read_state_convergence" => Ok(Self::ReadStateConvergence),
             "hidden_state_acl" => Ok(Self::HiddenStateAcl),
             "thread_late_joiner" => Ok(Self::ThreadLateJoiner),
+            "idle_sync_gap_inspection" => Ok(Self::IdleSyncGapInspection),
+            "notification_delivery" => Ok(Self::NotificationDelivery),
             "avatar_demand" => Ok(Self::AvatarDemand),
             "account_notifications" => Ok(Self::AccountNotifications),
             "user_verification" => Ok(Self::UserVerification),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, search_crawler_catchup, room_history_export, scheduled_send, restore_cleanup, link_preview, cache_restore, read_state_convergence, hidden_state_acl, thread_late_joiner, avatar_demand, account_notifications, user_verification; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, search_crawler_catchup, room_history_export, scheduled_send, restore_cleanup, link_preview, read_state_convergence, hidden_state_acl, thread_late_joiner, avatar_demand, account_notifications, user_verification, notification_delivery; got {other}"
             )),
         }
     }
@@ -316,6 +283,8 @@ impl QaScenario {
                     | QaStage::AvatarDemand
                     | QaStage::AccountNotifications
                     | QaStage::UserVerification
+                    | QaStage::IdleSyncGapInspection
+                    | QaStage::NotificationDelivery
             ),
             Self::Safety => matches!(stage, QaStage::Safety),
             Self::UserVerification => matches!(
@@ -515,13 +484,18 @@ impl QaScenario {
                     | QaStage::Composer
                     | QaStage::LinkPreview
             ),
-            Self::CacheRestore => matches!(stage, QaStage::Safety | QaStage::CacheRestore),
             Self::AvatarDemand => matches!(stage, QaStage::Safety | QaStage::AvatarDemand),
             Self::ReadStateConvergence => {
                 matches!(stage, QaStage::Safety | QaStage::ReadStateConvergence)
             }
             Self::HiddenStateAcl => matches!(stage, QaStage::Safety | QaStage::HiddenStateAcl),
             Self::ThreadLateJoiner => matches!(stage, QaStage::Safety | QaStage::ThreadLateJoiner),
+            Self::NotificationDelivery => {
+                matches!(stage, QaStage::Safety | QaStage::NotificationDelivery)
+            }
+            Self::IdleSyncGapInspection => {
+                matches!(stage, QaStage::Safety | QaStage::IdleSyncGapInspection)
+            }
             Self::SearchCrawlerCatchup => {
                 matches!(stage, QaStage::Safety | QaStage::SearchCrawlerCatchup)
             }
@@ -602,16 +576,19 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "gate_recovery_retry_ready=ok",
             "gate_recovery_cancel_retryable=ok",
             "gate_recovery_cancel_retry_ready=ok",
-            "gate_trust_loss_locked=ok",
+            "gate_trust_loss_regated=ok",
             "gate_trust_loss_commands_blocked=ok",
         ],
         QaStage::GateNoProof => &[
-            "gate_no_proof_rejected=ok",
+            "gate_no_proof_cleanup_offered=ok",
+            "gate_no_proof_commands_blocked=ok",
             "gate_no_proof_restart_signed_out=ok",
         ],
         QaStage::UserVerification => &[
             "user_verification_offered=ok",
+            "user_verification_a_observed_join=ok",
             "user_verification_request_sent=ok",
+            "user_verification_incoming_request=ok",
             "user_verification_accepted=ok",
             "user_verification_sas_match=ok",
             "user_verification_done=ok",
@@ -632,6 +609,13 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "room_settings=ok",
             "moderation=ok",
             "permission_guard=ok",
+            "space_access_create_membership=ok",
+            "space_access_target_without_permission=ok",
+            "space_access_history=ok",
+            "space_access_history_values=ok",
+            "space_access_second_client=ok",
+            "space_access_restricted_restore=ok",
+            "space_access_two_parent=ok",
             "space_access=ok",
             "space_add_existing=ok",
             "space_leave_children=ok",
@@ -696,6 +680,12 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "thread_projection_lifecycle=stable",
             "thread_summary=ok",
             "thread_recv=ok",
+            "thread_delivery=recorded",
+            "thread_chip_dot=ok",
+            "thread_chip_dot_cleared=ok",
+            "thread_room_badge=ok",
+            "thread_room_badge_cleared=ok",
+            "thread_room_badge_main_read_kept=ok",
             "thread_paginate=end_reached",
         ],
         QaStage::EditRedactSearch => &["edit_redact_search=ok"],
@@ -731,6 +721,7 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "scheduled_reschedule=ok",
             "scheduled_cancel=ok",
             "scheduled_fire=ok",
+            "scheduled_thread_reply=ok",
         ],
         QaStage::SendQueue => &[
             "send_fail=ok",
@@ -747,7 +738,6 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "link_preview_e2ee_default=ok",
             "link_preview_hide=ok",
         ],
-        QaStage::CacheRestore => &["cache_restore=ok"],
         QaStage::ReadStateConvergence => &["read_state_convergence=ok"],
         QaStage::HiddenStateAcl => &["hidden_state_acl=ok"],
         QaStage::ThreadLateJoiner => &[
@@ -756,6 +746,30 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "thread_late_joiner=ok",
         ],
         QaStage::AvatarDemand => &["avatar_window_requests=ok"],
+        QaStage::IdleSyncGapInspection => &["idle_sync_gap_inspection=ok"],
+        QaStage::NotificationDelivery => &[
+            "notification_delivery_file_credential_store=ok",
+            "notification_delivery_unfocused=ok",
+            "notification_delivery_channel_off=ok",
+            "notification_delivery_dwell=ok",
+            "notification_delivery_request=ok",
+            "notification_delivery_body=ok",
+            "notification_delivery_read_cancels=ok",
+            "notification_delivery_rearm=ok",
+            "notification_delivery_min_interval=ok",
+            "notification_delivery_watched_room=ok",
+            "notification_delivery_watched_space=ok",
+            "notification_delivery_secret_hygiene=ok",
+            "notification_delivery_secret_binding=ok",
+            "notification_delivery_prefix=ok",
+            "notification_delivery_prefix_no_consent=ok",
+            "notification_delivery_prefix_option_off=ok",
+            "notification_delivery_prefix_no_text=ok",
+            "notification_delivery_prefix_consent_cleared=ok",
+            "notification_delivery_prefix_endpoint_cleared=ok",
+            "notification_delivery_prefix_hygiene=ok",
+            "notification_delivery=ok",
+        ],
         QaStage::AccountNotifications => &[
             "account_notifications_load=ok",
             "account_notifications_no_write_on_open=ok",
@@ -764,6 +778,11 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "account_notifications_category_restore=ok",
             "account_notifications_email_unsupported=ok",
             "account_notifications_email_requires_verified=ok",
+            "account_notifications_keyword_actions=ok",
+            "account_notifications_keyword_projection=ok",
+            "account_notifications_keyword_duplicate=ok",
+            "account_notifications_keyword_disabled=ok",
+            "account_notifications_keyword_remove=ok",
             "account_notifications=ok",
         ],
     }
@@ -795,6 +814,13 @@ fn implemented_final_tokens() -> Vec<&'static str> {
         "room_settings=ok",
         "moderation=ok",
         "permission_guard=ok",
+        "space_access_create_membership=ok",
+        "space_access_target_without_permission=ok",
+        "space_access_history=ok",
+        "space_access_history_values=ok",
+        "space_access_second_client=ok",
+        "space_access_restricted_restore=ok",
+        "space_access_two_parent=ok",
         "space_access=ok",
         "space_add_existing=ok",
         "space_leave_children=ok",
@@ -818,6 +844,12 @@ fn implemented_final_tokens() -> Vec<&'static str> {
         "thread_projection_lifecycle=stable",
         "thread_summary=ok",
         "thread_recv=ok",
+        "thread_delivery=recorded",
+        "thread_chip_dot=ok",
+        "thread_chip_dot_cleared=ok",
+        "thread_room_badge=ok",
+        "thread_room_badge_cleared=ok",
+        "thread_room_badge_main_read_kept=ok",
         "thread_paginate=end_reached",
         "send_media=ok",
         "media_caption=ok",
@@ -850,6 +882,7 @@ fn implemented_final_tokens() -> Vec<&'static str> {
         "scheduled_reschedule=ok",
         "scheduled_cancel=ok",
         "scheduled_fire=ok",
+        "scheduled_thread_reply=ok",
         "send_fail=ok",
         "resend=ok",
         "cancel_send=ok",
@@ -867,6 +900,27 @@ fn implemented_final_tokens() -> Vec<&'static str> {
         "link_preview_room=ok",
         "link_preview_e2ee_default=ok",
         "link_preview_hide=ok",
+        "notification_delivery_file_credential_store=ok",
+        "notification_delivery_unfocused=ok",
+        "notification_delivery_channel_off=ok",
+        "notification_delivery_dwell=ok",
+        "notification_delivery_request=ok",
+        "notification_delivery_body=ok",
+        "notification_delivery_read_cancels=ok",
+        "notification_delivery_rearm=ok",
+        "notification_delivery_min_interval=ok",
+        "notification_delivery_watched_room=ok",
+        "notification_delivery_watched_space=ok",
+        "notification_delivery_secret_hygiene=ok",
+        "notification_delivery_secret_binding=ok",
+        "notification_delivery_prefix=ok",
+        "notification_delivery_prefix_no_consent=ok",
+        "notification_delivery_prefix_option_off=ok",
+        "notification_delivery_prefix_no_text=ok",
+        "notification_delivery_prefix_consent_cleared=ok",
+        "notification_delivery_prefix_endpoint_cleared=ok",
+        "notification_delivery_prefix_hygiene=ok",
+        "notification_delivery=ok",
     ]
 }
 
@@ -1043,12 +1097,15 @@ pub(super) fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
             QaStage::Composer,
             QaStage::LinkPreview,
         ],
-        QaScenario::CacheRestore => vec![QaStage::Safety, QaStage::CacheRestore],
         QaScenario::AvatarDemand => vec![QaStage::Safety, QaStage::AvatarDemand],
         QaScenario::ReadStateConvergence => {
             vec![QaStage::Safety, QaStage::ReadStateConvergence]
         }
         QaScenario::HiddenStateAcl => vec![QaStage::Safety, QaStage::HiddenStateAcl],
+        QaScenario::IdleSyncGapInspection => vec![QaStage::Safety, QaStage::IdleSyncGapInspection],
+        QaScenario::NotificationDelivery => {
+            vec![QaStage::Safety, QaStage::NotificationDelivery]
+        }
         QaScenario::ThreadLateJoiner => vec![QaStage::Safety, QaStage::ThreadLateJoiner],
         QaScenario::SearchCrawlerCatchup => vec![QaStage::Safety, QaStage::SearchCrawlerCatchup],
         QaScenario::All => vec![
@@ -1134,7 +1191,6 @@ pub(super) fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static st
             tokens
         }
         QaScenario::TimelineReconnect
-        | QaScenario::CacheRestore
         | QaScenario::DeviceCleanup
         | QaScenario::GateRestore
         | QaScenario::GateNegative
@@ -1143,7 +1199,9 @@ pub(super) fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static st
         | QaScenario::ReadStateConvergence
         | QaScenario::HiddenStateAcl
         | QaScenario::SearchCrawlerCatchup
-        | QaScenario::ThreadLateJoiner => stages_for_scenario(scenario)
+        | QaScenario::ThreadLateJoiner
+        | QaScenario::IdleSyncGapInspection
+        | QaScenario::NotificationDelivery => stages_for_scenario(scenario)
             .into_iter()
             .flat_map(|stage| tokens_for_stage(stage).iter().copied())
             .collect(),

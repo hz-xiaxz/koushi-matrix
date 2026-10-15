@@ -17,6 +17,7 @@ import { t } from "../i18n/messages";
 import { avatarInitial, ICON_SIZE, operationFailureLabel, type OpenContextMenu } from "../app/uiShared";
 import { ImeTextField } from "./ImeTextControl";
 import { EntityAvatar } from "./Shell";
+import { Tooltip } from "./Tooltip";
 
 const noopSearchInviteTargets = async (): Promise<InviteTargetCandidate[]> => [];
 
@@ -406,34 +407,69 @@ export function SpaceMembersPanel({
           {state.space_joined.length}
         </span>}
         {headerInviteVisible && !inviteMode ? (
-          <button
-            className="icon-button space-members-invite-trigger"
-            type="button"
-            aria-label={t("room.invitePeople")}
-            title={headerInviteTitle(panelAvailabilityReason)}
-            aria-describedby={headerInviteDisabled ? headerInviteReasonId : undefined}
-            data-invite-availability={panelAvailabilityReason}
-            disabled={headerInviteDisabled}
-            onClick={() => {
-              if (!headerInviteDisabled) setInviteMode(true);
-            }}
+          <Tooltip
+            label={headerInviteTitle(panelAvailabilityReason)}
+            placement="below"
+            align="end"
           >
-            <UserPlus size={ICON_SIZE.control} />
-          </button>
+            {(triggerProps) => {
+              // #1033: a disabled control receives no pointer events, so the
+              // accessible description and the native title still carry the
+              // availability reason; the styled bubble only describes the
+              // enabled control. Both descriptions coexist while it is open.
+              const { "aria-describedby": tooltipDescribedBy, ...buttonProps } = triggerProps;
+              const describedBy = [
+                headerInviteDisabled ? headerInviteReasonId : null,
+                tooltipDescribedBy
+              ]
+                .filter(Boolean)
+                .join(" ");
+              return (
+                <button
+                  className="icon-button space-members-invite-trigger"
+                  type="button"
+                  aria-label={t("room.invitePeople")}
+                  title={
+                    headerInviteDisabled ? headerInviteTitle(panelAvailabilityReason) : undefined
+                  }
+                  aria-describedby={describedBy || undefined}
+                  data-invite-availability={panelAvailabilityReason}
+                  disabled={headerInviteDisabled}
+                  onClick={() => {
+                    if (!headerInviteDisabled) setInviteMode(true);
+                  }}
+                  {...buttonProps}
+                >
+                  <UserPlus size={ICON_SIZE.control} />
+                </button>
+              );
+            }}
+          </Tooltip>
         ) : null}
         {headerInviteVisible && !inviteMode && headerInviteDisabled ? (
           <span id={headerInviteReasonId} className="sr-only">
             {headerInviteTitle(panelAvailabilityReason)}
           </span>
         ) : null}
-        <button
-          className="icon-button space-members-close"
-          type="button"
-          aria-label={t("action.close", { title: inviteMode ? t("room.invitePeople") : t("spaceMembers.title") })}
-          onClick={onClose}
+        <Tooltip
+          label={t("action.close", {
+            title: inviteMode ? t("room.invitePeople") : t("spaceMembers.title")
+          })}
+          placement="below"
+          align="end"
         >
-          <X size={ICON_SIZE.control} />
-        </button>
+          {(tooltipProps) => (
+            <button
+              className="icon-button space-members-close"
+              type="button"
+              aria-label={t("action.close", { title: inviteMode ? t("room.invitePeople") : t("spaceMembers.title") })}
+              onClick={onClose}
+              {...tooltipProps}
+            >
+              <X size={ICON_SIZE.control} />
+            </button>
+          )}
+        </Tooltip>
       </header>
 
       {inviteMode ? (

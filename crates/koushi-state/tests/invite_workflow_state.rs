@@ -32,6 +32,8 @@ fn room(room_id: &str, display_name: &str, parent_space_ids: Vec<String>) -> Roo
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -80,6 +82,7 @@ fn room_settings(room_id: &str, members: Vec<RoomMemberSummary>) -> RoomSettings
         share_link: None,
         join_rule: RoomJoinRule::Invite,
         history_visibility: RoomHistoryVisibility::Shared,
+        access: koushi_state::RoomAccessCondition::default(),
         permissions: RoomPermissionFacts::default(),
         members,
     }
@@ -163,7 +166,6 @@ fn recovery_sessions() -> Vec<SessionState> {
             info: info.clone(),
             gate: recovery_gate(),
             flow_id: 1,
-            destination_written: false,
         },
         SessionState::Locked(info),
     ]

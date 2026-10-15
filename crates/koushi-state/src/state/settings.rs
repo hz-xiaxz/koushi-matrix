@@ -3,6 +3,9 @@ use std::collections::BTreeMap;
 
 use crate::composer_shortcuts::ComposerFormattingOptions;
 
+use super::notification_delivery::{
+    NotificationDeliverySettings, deserialize_notification_delivery,
+};
 use super::search_crawler::SearchCrawlerSettings;
 
 pub(crate) fn default_true() -> bool {
@@ -37,8 +40,12 @@ fn default_timeline_thread_root_order() -> TimelineThreadRootOrder {
     TimelineThreadRootOrder::LatestReply
 }
 
+/// #542: the sidebar's product default is true recent-conversation order.
+/// Attention stays visible through badges, highlighting, and the Activity
+/// surface, but no longer moves a room; `Activity` remains deserializable for
+/// settings an older build persisted.
 fn default_room_list_sort() -> RoomListSort {
-    RoomListSort::Activity
+    RoomListSort::RecentFirst
 }
 
 fn canonicalize_recent_emojis(emojis: Vec<String>) -> Vec<String> {
@@ -127,6 +134,11 @@ pub struct SettingsValues {
     pub composer: ComposerSettings,
     #[serde(default)]
     pub notifications: NotificationSettings,
+    /// Device-local notification delivery (#1427). App scope: the Matrix account is
+    /// never consulted for a destination. Boxed for the same reason the settings patch
+    /// is: the block would otherwise dominate the effect enum's largest variant.
+    #[serde(default, deserialize_with = "deserialize_notification_delivery")]
+    pub delivery: Box<NotificationDeliverySettings>,
     #[serde(default)]
     pub display: DisplaySettings,
     #[serde(default)]
@@ -158,6 +170,10 @@ pub struct AppSettingsValues {
     pub keyboard: KeyboardSettings,
     pub composer_math_mode: bool,
     pub notifications: AppNotificationSettings,
+    /// The settings file holds the app projection, so the same load-time
+    /// canonicalization the full value gets has to run here too.
+    #[serde(default, deserialize_with = "deserialize_notification_delivery")]
+    pub delivery: Box<NotificationDeliverySettings>,
     pub display: AppDisplaySettings,
     pub media: MediaSettings,
     pub timeline: TimelineSettings,
@@ -232,6 +248,7 @@ impl SettingsValues {
                 code_block_wrap: self.display.code_block_wrap,
                 hide_redacted: self.display.hide_redacted,
             },
+            delivery: self.delivery.clone(),
             media: self.media.clone(),
             timeline: self.timeline.clone(),
             thread_list_order: self.thread_list_order,
@@ -274,6 +291,9 @@ impl SettingsValues {
         self.notifications.badges = app.notifications.badges;
         self.display.code_block_wrap = app.display.code_block_wrap;
         self.display.hide_redacted = app.display.hide_redacted;
+        let mut delivery = app.delivery.clone();
+        delivery.canonicalize();
+        self.delivery = delivery;
         self.media = app.media.clone();
         self.timeline = app.timeline.clone();
         self.thread_list_order = app.thread_list_order;
@@ -366,6 +386,11 @@ impl SettingsValues {
                     display.encrypted_url_previews_enabled;
             }
         }
+        if apply_app && let Some(delivery) = patch.delivery {
+            let mut delivery = delivery;
+            delivery.canonicalize();
+            *self.delivery = delivery;
+        }
         if apply_account {
             if let Some(room_list_sort) = patch.room_list_sort {
                 self.room_list_sort = room_list_sort;
@@ -419,6 +444,11 @@ impl AppSettingsValues {
                 code_block_wrap: value.code_block_wrap,
                 hide_redacted: value.hide_redacted,
             };
+        }
+        if let Some(value) = &patch.delivery {
+            let mut delivery = value.clone();
+            delivery.canonicalize();
+            *self.delivery = delivery;
         }
         if let Some(value) = &patch.media {
             self.media = value.clone();
@@ -596,6 +626,13 @@ pub struct SidebarSectionSettings {
     pub collapsed: bool,
     #[serde(default)]
     pub sort: RoomListSort,
+    /// #1363/#1366: the persisted row bound of this section. `false`, the
+    /// default, keeps the section at
+    /// [`crate::SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT`] rows; `true` shows every
+    /// row. The bound is a second, independent dimension from `collapsed`:
+    /// collapsing hides every row, expanding shows the bounded list.
+    #[serde(default)]
+    pub expanded: bool,
 }
 
 #[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -620,6 +657,30 @@ pub enum SidebarSectionKind {
     LowPriority,
 }
 
+/// #1366: the section a conversation selection revealed in the current session.
+///
+/// A Space or the user can leave a section collapsed or bounded, and selecting a
+/// conversation through a notification or permalink must still show its row.
+/// The reducer records the reveal here when the selection settles; the sidebar
+/// projection renders that section open until the user's own collapse choice for
+/// the same scope and section clears it. Session-scoped on purpose: the persisted section
+/// preferences stay the user's, and a restart honors them.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SidebarSectionReveal {
+    /// The `SidebarSettings::scope` key: a Space id, or
+    /// [`SIDEBAR_HOME_SCOPE_KEY`] at Home.
+    pub scope: String,
+    pub section: SidebarSectionKind,
+}
+
+/// The Home scope's key in `SidebarSettings.scope_preferences`.
+pub const SIDEBAR_HOME_SCOPE_KEY: &str = "__home__";
+
+/// The `SidebarSettings::scope` key for a scope id (`None` is Home).
+pub fn sidebar_scope_key(scope: Option<&str>) -> &str {
+    scope.unwrap_or(SIDEBAR_HOME_SCOPE_KEY)
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct SidebarSectionPatch {
     pub scope: String,
@@ -628,11 +689,25 @@ pub struct SidebarSectionPatch {
     pub collapsed: Option<bool>,
     #[serde(default)]
     pub sort: Option<RoomListSort>,
+    #[serde(default)]
+    pub expanded: Option<bool>,
+}
+
+impl SidebarSectionKind {
+    /// The Settings scope field that owns this section, or `None` for a section
+    /// without a scope preference.
+    pub fn scope_field(self, settings: &SidebarScopeSettings) -> Option<&SidebarSectionSettings> {
+        match self {
+            SidebarSectionKind::Rooms => Some(&settings.rooms),
+            SidebarSectionKind::Dms => Some(&settings.dms),
+            SidebarSectionKind::LowPriority => settings.low_priority.as_ref(),
+        }
+    }
 }
 
 impl SidebarSettings {
     pub fn scope(&self, scope: Option<&str>, fallback_sort: RoomListSort) -> SidebarScopeSettings {
-        let scope = scope.unwrap_or("__home__");
+        let scope = sidebar_scope_key(scope);
         let mut resolved = self
             .scope_preferences
             .get(scope)
@@ -650,12 +725,16 @@ impl SidebarSettings {
             });
         // The Low priority section has no independent sort: it follows the
         // scope's Rooms order. Its unset collapse state falls back to the
-        // legacy device-global flag (state-machine.md, Settings).
+        // legacy device-global flag (state-machine.md, Settings). Its bound is
+        // scoped like the other sections and defaults to the bounded state.
         resolved.low_priority = Some(SidebarSectionSettings {
             collapsed: resolved
                 .low_priority
                 .map_or(self.collapsed.low_priority, |section| section.collapsed),
             sort: resolved.rooms.sort,
+            expanded: resolved
+                .low_priority
+                .is_some_and(|section| section.expanded),
         });
         resolved
     }
@@ -678,6 +757,9 @@ impl SidebarSettings {
         }
         if let Some(sort) = patch.sort {
             section.sort = sort;
+        }
+        if let Some(expanded) = patch.expanded {
+            section.expanded = expanded;
         }
     }
 }
@@ -1004,8 +1086,11 @@ pub enum ThreadListOrder {
 #[serde(tag = "kind", rename_all = "camelCase")]
 #[derive(Default)]
 pub enum RoomListSort {
-    #[default]
+    /// #438's attention-first order. No longer the default and no longer
+    /// offered by the sidebar selector (#542), but still deserialized so an
+    /// older persisted preference keeps its explicit choice.
     Activity,
+    #[default]
     RecentFirst,
     NormalLocale,
 }
@@ -1037,6 +1122,10 @@ pub struct SettingsPatch {
     pub keyboard: Option<KeyboardSettings>,
     pub composer: Option<ComposerSettings>,
     pub notifications: Option<NotificationSettings>,
+    /// Device-local notification delivery (#1427), app scope. The patch carries the
+    /// whole block, as the notification block does, and the app re-canonicalizes it.
+    #[serde(default)]
+    pub delivery: Option<NotificationDeliverySettings>,
     pub display: Option<DisplaySettings>,
     pub media: Option<MediaSettings>,
     pub timeline: Option<TimelineSettings>,

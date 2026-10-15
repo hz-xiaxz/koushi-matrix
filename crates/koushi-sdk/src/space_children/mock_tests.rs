@@ -283,3 +283,80 @@ async fn hierarchy_child_with_a_calculated_empty_name_is_marked_as_a_placeholder
         assert_eq!(child.display_name_placeholder, expected, "name {name:?}");
     }
 }
+
+/// #1410: `suggested` comes from the Space's own synced `m.space.child`, which
+/// is fresher than `/hierarchy` right after this account changes it; a child
+/// with no local event falls back to the hierarchy's `children_state`.
+#[tokio::test]
+async fn suggested_comes_from_the_local_child_event_then_the_hierarchy() {
+    const OTHER_ID: &str = "!other:example.org";
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let own = client.user_id().unwrap().to_owned();
+    let space_id = RoomId::parse(SPACE_ID).unwrap();
+    let factory = EventFactory::new().room(&space_id).sender(&own);
+    let mut suggested = SpaceChildEventContent::new(vec!["example.org".try_into().unwrap()]);
+    suggested.suggested = true;
+    server
+        .sync_room(
+            &client,
+            JoinedRoomBuilder::new(&space_id)
+                .add_state_event(factory.create(&own, RoomVersionId::V11).with_space_type())
+                .add_state_event(factory.member(&own))
+                .add_state_event(factory.event(suggested).state_key(CHILD_ID)),
+        )
+        .await;
+    let child_state = |room_id: &str, suggested: bool| {
+        serde_json::json!({
+            "type": "m.space.child",
+            "state_key": room_id,
+            "content": { "via": ["example.org"], "suggested": suggested },
+            "sender": own,
+            "origin_server_ts": 1,
+        })
+    };
+    server
+        .mock_get_hierarchy()
+        .respond_with(ResponseTemplate::new(200).set_body_json(serde_json::json!({
+            "rooms": [
+                {
+                    "room_id": SPACE_ID,
+                    "room_type": "m.space",
+                    "num_joined_members": 1,
+                    "world_readable": false,
+                    "guest_can_join": false,
+                    "join_rule": "invite",
+                    // The hierarchy lags the local event for CHILD_ID.
+                    "children_state": [
+                        child_state(CHILD_ID, false),
+                        child_state(OTHER_ID, true),
+                    ],
+                },
+                hierarchy_child("public", 2),
+                {
+                    "room_id": OTHER_ID,
+                    "name": "Other",
+                    "num_joined_members": 2,
+                    "world_readable": false,
+                    "guest_can_join": false,
+                    "join_rule": "public",
+                    "children_state": [],
+                },
+            ],
+        })))
+        .mount()
+        .await;
+
+    let entries = matrix_space_children_projection(&session(&server, client), SPACE_ID)
+        .await
+        .unwrap();
+
+    let suggested_of = |room_id: &str| {
+        entries
+            .iter()
+            .find(|entry| entry.room_id == room_id)
+            .map(|entry| entry.suggested)
+    };
+    assert_eq!(suggested_of(CHILD_ID), Some(true));
+    assert_eq!(suggested_of(OTHER_ID), Some(true));
+}

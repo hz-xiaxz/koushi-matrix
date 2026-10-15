@@ -37,6 +37,8 @@ fn ready_state_with_rooms(room_ids: &[&str]) -> AppState {
                 unread_count: 0,
                 notification_count: 0,
                 highlight_count: 0,
+                thread_unread_count: 0,
+                thread_highlight_count: 0,
                 marked_unread: false,
                 recency_stamp: None,
                 conversation_activity: None,
@@ -1086,6 +1088,7 @@ fn rooms_available_carries_latest_event_ids_for_catch_up() {
         sender_label: None,
         sender_avatar: None,
         preview: None,
+        message_text: None,
         timestamp_ms: 1,
         is_redacted: false,
     });

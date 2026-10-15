@@ -2,11 +2,12 @@ use super::support::{avatar, ready_state, rooms, session_info, spaces};
 use koushi_state::{
     AppAction, AppEffect, AppState, ConversationActivity, ConversationActivitySource,
     RoomLatestEventSummary, RoomListFilter, RoomListSort, RoomNotificationMode,
-    RoomNotificationSettings, RoomSummary, RoomTags, SessionState, SpaceSummary, UiEvent,
-    compose_sidebar, compose_sidebar_with_account_facts, compute_room_list_projection, reduce,
+    RoomNotificationSettings, RoomSummary, RoomTags, SessionState, SidebarScopeSettings,
+    SidebarSectionSettings, SpaceSummary, UiEvent, compose_sidebar, compose_sidebar_for_state,
+    compose_sidebar_with_account_facts, compute_room_list_projection, reduce,
 };
 use serde_json::json;
-use std::collections::HashMap;
+use std::collections::{BTreeMap, HashMap};
 
 fn active_sort_room(
     room_id: &str,
@@ -29,6 +30,8 @@ fn active_sort_room(
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: activity_timestamp_ms,
         conversation_activity: activity_timestamp_ms.map(|timestamp_ms| ConversationActivity {
@@ -47,6 +50,33 @@ fn active_sort_room(
         is_encrypted: false,
         joined_members: 0,
     }
+}
+
+#[test]
+fn unread_filter_excludes_server_only_notifications_without_sdk_unread() {
+    let mut server_only = active_sort_room("server-only", false, &[], &[], Some(100));
+    server_only.notification_count = 2;
+    server_only.highlight_count = 1;
+    let mut verified_thread = active_sort_room("verified-thread", false, &[], &[], Some(90));
+    verified_thread.thread_unread_count = 1;
+
+    let projection = compute_room_list_projection(
+        RoomListFilter::Unread,
+        RoomListSort::Activity,
+        None,
+        &[],
+        &[server_only, verified_thread],
+        &HashMap::new(),
+        &[],
+    );
+    assert_eq!(
+        projection
+            .items
+            .iter()
+            .map(|item| item.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["verified-thread"]
+    );
 }
 
 fn dm_room_for_activity(
@@ -68,6 +98,8 @@ fn dm_room_for_activity(
         unread_count: 0,
         notification_count: 0,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: Some(999),
         conversation_activity,
@@ -89,6 +121,7 @@ fn latest_message(event_id: &str, timestamp_ms: u64) -> RoomLatestEventSummary {
         sender_label: Some("Sender".to_owned()),
         sender_avatar: None,
         preview: Some("latest message".to_owned()),
+        message_text: None,
         timestamp_ms,
         is_redacted: false,
     }
@@ -233,6 +266,8 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
             unread_count: 1,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -256,6 +291,8 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
             unread_count: 4,
             notification_count: 2,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -279,6 +316,8 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: true,
             recency_stamp: None,
             conversation_activity: None,
@@ -292,17 +331,17 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
 
     let sidebar = compose_sidebar(None, &spaces, &rooms);
 
-    assert_eq!(sidebar.account_home.unread_count, 6);
+    assert_eq!(sidebar.account_home.unread_count, 5);
     assert_eq!(sidebar.space_rail[0].unread_count, 5);
     assert_eq!(sidebar.space_unread_count, 5);
-    assert_eq!(sidebar.dm_unread_count, 1);
+    assert_eq!(sidebar.dm_unread_count, 0);
     let plain = sidebar
         .space_rooms
         .iter()
         .find(|room| room.room_id == "plain")
         .expect("plain room should be projected");
     assert_eq!(plain.unread_count, 1);
-    assert_eq!(plain.display_count, 0);
+    assert_eq!(plain.display_count, 1);
     assert!(plain.has_unread_content);
     assert!(!plain.is_attention_highlighted);
     assert!(!plain.has_unread_mention);
@@ -312,7 +351,7 @@ fn sidebar_badges_include_plain_unread_counts_and_keep_display_semantics() {
         .iter()
         .find(|room| room.room_id == "notified")
         .expect("notified room should be projected");
-    assert_eq!(notified.display_count, 2);
+    assert_eq!(notified.display_count, 4);
     assert!(notified.is_attention_highlighted);
 
     let marked = sidebar
@@ -380,6 +419,8 @@ fn active_space_lists_only_dms_belonging_to_that_space() {
         unread_count: 9,
         notification_count: 9,
         highlight_count: 0,
+        thread_unread_count: 0,
+        thread_highlight_count: 0,
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
@@ -440,6 +481,8 @@ fn dm_in_multiple_spaces_appears_under_each() {
             unread_count: 5,
             notification_count: 5,
             highlight_count: 1,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -463,6 +506,8 @@ fn dm_in_multiple_spaces_appears_under_each() {
             unread_count: 2,
             notification_count: 2,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -504,8 +549,14 @@ fn sidebar_projection_carries_rust_owned_highlight_counts_for_mention_affordance
     assert_eq!(value["space_rail"][0]["unread_count"], json!(5));
     assert_eq!(value["account_home"]["highlight_count"], json!(1));
     assert_eq!(value["space_rail"][0]["highlight_count"], json!(1));
-    assert_eq!(value["space_rooms"][0]["unread_count"], json!(5));
-    assert_eq!(value["space_rooms"][0]["highlight_count"], json!(1));
+    let room_a = value["space_rooms"]
+        .as_array()
+        .unwrap()
+        .iter()
+        .find(|room| room["room_id"] == "room-a")
+        .unwrap();
+    assert_eq!(room_a["unread_count"], json!(5));
+    assert_eq!(room_a["highlight_count"], json!(1));
     assert_eq!(value["global_dms"][0]["unread_count"], json!(3));
     assert_eq!(value["global_dms"][0]["highlight_count"], json!(0));
     assert_eq!(value["space_unread_count"], json!(7));
@@ -540,6 +591,8 @@ fn sidebar_items_carry_rust_owned_room_and_space_avatars() {
             unread_count: 5,
             notification_count: 5,
             highlight_count: 1,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -563,6 +616,8 @@ fn sidebar_items_carry_rust_owned_room_and_space_avatars() {
             unread_count: 3,
             notification_count: 3,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: None,
             conversation_activity: None,
@@ -618,6 +673,8 @@ fn room_list_sort_supports_recent_and_locale_modes() {
                 unread_count: 0,
                 notification_count: 0,
                 highlight_count: 0,
+                thread_unread_count: 0,
+                thread_highlight_count: 0,
                 marked_unread: false,
                 recency_stamp: Some(2000),
                 conversation_activity: Some(ConversationActivity {
@@ -644,6 +701,8 @@ fn room_list_sort_supports_recent_and_locale_modes() {
                 unread_count: 0,
                 notification_count: 0,
                 highlight_count: 0,
+                thread_unread_count: 0,
+                thread_highlight_count: 0,
                 marked_unread: false,
                 recency_stamp: Some(1000),
                 conversation_activity: Some(ConversationActivity {
@@ -672,7 +731,8 @@ fn room_list_sort_supports_recent_and_locale_modes() {
             filter: RoomListFilter::Rooms,
         },
     );
-    assert_eq!(state.room_list.sort, RoomListSort::Activity);
+    // #542: recent conversation order is the product default.
+    assert_eq!(state.room_list.sort, RoomListSort::RecentFirst);
     assert_eq!(
         state
             .room_list
@@ -767,6 +827,8 @@ fn room_list_activity_sort_uses_latest_message_timestamp_before_status_activity(
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: Some(300),
             conversation_activity: Some(ConversationActivity {
@@ -793,6 +855,8 @@ fn room_list_activity_sort_uses_latest_message_timestamp_before_status_activity(
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: Some(200),
             conversation_activity: Some(ConversationActivity {
@@ -843,6 +907,8 @@ fn room_list_activity_sort_keeps_a_messaged_dm_ahead_of_a_newer_join_only_dm() {
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: Some(300),
             conversation_activity: None,
@@ -866,6 +932,8 @@ fn room_list_activity_sort_keeps_a_messaged_dm_ahead_of_a_newer_join_only_dm() {
             unread_count: 0,
             notification_count: 0,
             highlight_count: 0,
+            thread_unread_count: 0,
+            thread_highlight_count: 0,
             marked_unread: false,
             recency_stamp: Some(200),
             conversation_activity: Some(ConversationActivity {
@@ -1024,13 +1092,13 @@ fn active_sort_prioritizes_attention_before_newer_activity_and_keeps_stable_fall
             .map(|item| item.room_id.as_str())
             .collect::<Vec<_>>(),
         vec![
-            "mention",
-            "notification",
             "ordinary",
             "manual",
             "read-newest",
+            "notification",
             "same-a",
             "same-b",
+            "mention",
             "missing-a",
             "missing-b",
         ]
@@ -1087,10 +1155,10 @@ fn active_sort_orders_sidebar_rooms_and_dms_in_home_and_active_space() {
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
         vec![
-            "space-mention",
-            "space-notification",
             "home-ordinary",
             "space-read",
+            "space-notification",
+            "space-mention",
         ]
     );
     assert_eq!(
@@ -1098,7 +1166,7 @@ fn active_sort_orders_sidebar_rooms_and_dms_in_home_and_active_space() {
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["dm-mention", "dm-notification", "dm-read", "dm-outside"]
+        vec!["dm-read", "dm-outside", "dm-notification", "dm-mention"]
     );
 
     let active_space = compose_sidebar(Some("space-a"), &spaces, &rooms);
@@ -1108,7 +1176,7 @@ fn active_sort_orders_sidebar_rooms_and_dms_in_home_and_active_space() {
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["space-mention", "space-notification", "space-read"]
+        vec!["space-read", "space-notification", "space-mention"]
     );
     assert_eq!(
         active_space
@@ -1116,7 +1184,7 @@ fn active_sort_orders_sidebar_rooms_and_dms_in_home_and_active_space() {
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["dm-mention", "dm-notification", "dm-read"]
+        vec!["dm-read", "dm-notification", "dm-mention"]
     );
 }
 
@@ -1138,6 +1206,9 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
         mention,
     ];
 
+    // Attention-first ordering is no longer the default (#542), so this
+    // test selects it explicitly to keep proving the legacy recompute path.
+    state.settings.values.room_list_sort = RoomListSort::Activity;
     let settings = state.settings.values.clone();
     reduce(&mut state, AppAction::SettingsLoaded { values: settings });
     assert_eq!(
@@ -1147,7 +1218,7 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["mention", "notification", "ordinary", "selected"]
+        vec!["ordinary", "selected", "notification", "mention"]
     );
 
     let mute_effects = reduce(
@@ -1166,7 +1237,7 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["notification", "ordinary", "mention", "selected"]
+        vec!["ordinary", "selected", "notification", "mention"]
     );
 
     let mentions_effects = reduce(
@@ -1185,7 +1256,7 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["ordinary", "notification", "mention", "selected"]
+        vec!["ordinary", "selected", "notification", "mention"]
     );
 
     let read_effects = reduce(
@@ -1203,7 +1274,7 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["notification", "mention", "selected", "ordinary"]
+        vec!["selected", "ordinary", "notification", "mention"]
     );
 
     let sidebar = compose_sidebar_with_account_facts(
@@ -1219,7 +1290,7 @@ fn active_sort_recomputes_from_mute_and_mentions_actions_without_changing_select
             .iter()
             .map(|room| room.room_id.as_str())
             .collect::<Vec<_>>(),
-        vec!["notification", "mention", "selected", "ordinary"]
+        vec!["selected", "ordinary", "notification", "mention"]
     );
     assert_eq!(state.navigation.active_room_id.as_deref(), Some("selected"));
 }
@@ -1248,4 +1319,437 @@ fn sidebar_global_dms_uses_the_authoritative_conversation_activity_order() {
             .collect::<Vec<_>>(),
         vec!["messaged", "join-only"]
     );
+}
+
+/// #1166: the room rows the sidebar renders carry their room's own access
+/// condition, and a room with no projected condition stays unknown.
+#[test]
+fn sidebar_room_rows_carry_the_projected_access_condition() {
+    let mut state = ready_state();
+    state.rooms = {
+        let mut room_list = rooms();
+        room_list.push(active_sort_room("unprojected", false, &[], &[], None));
+        room_list.push(active_sort_room("mixed-unnamed", false, &[], &[], None));
+        room_list
+    };
+    state.spaces = spaces();
+    state.room_access = BTreeMap::from([
+        (
+            "room-a".to_owned(),
+            koushi_state::RoomAccessCondition {
+                join_rule: Some(koushi_state::RoomJoinRule::Public),
+                restricted: None,
+                allow_targets: Vec::new(),
+            },
+        ),
+        (
+            "dm-a".to_owned(),
+            koushi_state::RoomAccessCondition {
+                join_rule: Some(koushi_state::RoomJoinRule::KnockRestricted),
+                restricted: Some(koushi_state::RestrictedConditions::ConfirmedEmpty),
+                // One resolvable route and one this projection cannot name.
+                allow_targets: vec![
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Room,
+                        room_id: "room-a".to_owned(),
+                    },
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Unknown,
+                        room_id: "!invisible:example.invalid".to_owned(),
+                    },
+                ],
+            },
+        ),
+        (
+            "global-room".to_owned(),
+            koushi_state::RoomAccessCondition {
+                join_rule: Some(koushi_state::RoomJoinRule::Restricted),
+                restricted: Some(koushi_state::RestrictedConditions::MembershipOnly),
+                // Exactly one distinct target, verified a Space in the local
+                // room's create event, with a name this projection carries.
+                allow_targets: vec![koushi_state::RoomAllowTarget {
+                    kind: koushi_state::RoomAllowTargetKind::Space,
+                    room_id: "space-a".to_owned(),
+                }],
+            },
+        ),
+        (
+            "mixed-unnamed".to_owned(),
+            koushi_state::RoomAccessCondition {
+                join_rule: Some(koushi_state::RoomJoinRule::Restricted),
+                restricted: Some(koushi_state::RestrictedConditions::MembershipOnly),
+                // One named Space beside one target this projection cannot name:
+                // both count, so a regression that filtered unnamed targets
+                // before deciding cardinality would wrongly claim the route.
+                allow_targets: vec![
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Space,
+                        room_id: "space-a".to_owned(),
+                    },
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Unknown,
+                        room_id: "!invisible:example.invalid".to_owned(),
+                    },
+                ],
+            },
+        ),
+        (
+            "space-a".to_owned(),
+            koushi_state::RoomAccessCondition {
+                join_rule: Some(koushi_state::RoomJoinRule::Restricted),
+                restricted: Some(koushi_state::RestrictedConditions::MembershipPlusUnsupported),
+                // A membership route beside an unmodelled entry is never the
+                // verified single-Space route.
+                allow_targets: vec![
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Space,
+                        room_id: "space-a".to_owned(),
+                    },
+                    koushi_state::RoomAllowTarget {
+                        kind: koushi_state::RoomAllowTargetKind::Unknown,
+                        room_id: "!unsupported:example.invalid".to_owned(),
+                    },
+                ],
+            },
+        ),
+    ]);
+
+    let sidebar = koushi_state::compose_sidebar_for_state(&state);
+
+    let public_room = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "room-a")
+        .expect("room-a should be in the room list");
+    assert_eq!(
+        public_room.access_join_rule,
+        Some(koushi_state::RoomJoinRule::Public)
+    );
+    let direct_message = sidebar
+        .global_dms
+        .iter()
+        .find(|room| room.room_id == "dm-a")
+        .expect("dm-a should be in the DM list");
+    assert_eq!(
+        direct_message.access_join_rule,
+        Some(koushi_state::RoomJoinRule::KnockRestricted)
+    );
+    assert_eq!(
+        direct_message.access_restricted_conditions,
+        Some(koushi_state::RestrictedConditions::ConfirmedEmpty),
+        "the restricted-rule facts travel to the row"
+    );
+    assert_eq!(
+        public_room.access_restricted_conditions, None,
+        "a non-restricted rule carries no allow-condition claim"
+    );
+    assert_eq!(
+        direct_message.access_allowed_room_names,
+        vec!["Room A".to_owned()],
+        "a named route becomes a label this projection already carries, and an          entry it cannot name is omitted rather than exposed by id"
+    );
+    assert!(public_room.access_allowed_room_names.is_empty());
+    assert_eq!(
+        direct_message.access_space_members_route, None,
+        "a rule that is not membership-only is never the verified Space route"
+    );
+    let space_route_room = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "global-room")
+        .expect("global-room should be in the room list");
+    assert_eq!(
+        space_route_room.access_space_members_route.as_deref(),
+        Some("Space A"),
+        "the single verified Space route names the Space for the specific sentence"
+    );
+    let mixed_unnamed = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "mixed-unnamed")
+        .expect("mixed-unnamed should be in the room list");
+    assert_eq!(
+        mixed_unnamed.access_space_members_route, None,
+        "an unnamed target still counts, so a named-plus-unnamed pair is not the verified single-Space route"
+    );
+    let space_row = sidebar
+        .space_rail
+        .iter()
+        .find(|space| space.space_id == "space-a")
+        .expect("space-a should be on the rail");
+    assert_eq!(
+        space_row.access_space_members_route, None,
+        "a membership-plus-unsupported rule keeps the generic sentence"
+    );
+    // A room with no projected condition is unknown, never a guessed rule.
+    let unknown = sidebar
+        .space_rooms
+        .iter()
+        .find(|room| room.room_id == "unprojected")
+        .expect("unprojected should be in the room list");
+    assert_eq!(unknown.access_join_rule, None);
+}
+
+/// #1364: a room whose newest event is not a conversation event has no
+/// conversation timestamp, and the room-list Event Cache window can be one
+/// event deep. The server recency stamp must keep that group in true order
+/// instead of collapsing it into case-folded label order.
+#[test]
+fn recent_order_uses_the_server_recency_stamp_when_activity_is_absent() {
+    let mut state = ready_state();
+    let mut newer = dm_room_for_activity("dm-newer", "Member 2", None);
+    newer.recency_stamp = Some(200);
+    let mut older = dm_room_for_activity("dm-older", "Member 1", None);
+    older.recency_stamp = Some(100);
+    state.rooms = vec![newer, older];
+    use_recent_first_for_home_dms(&mut state);
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    assert_eq!(
+        sidebar
+            .sections
+            .people
+            .iter()
+            .map(|item| item.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["dm-newer", "dm-older"]
+    );
+}
+
+/// A recency stamp that only moved because of a join or a state event must not
+/// lift an activity-less room above a room with a real conversation.
+#[test]
+fn recent_order_keeps_a_real_conversation_above_a_recency_stamp_bump() {
+    let mut state = ready_state();
+    let mut joined = dm_room_for_activity("dm-joined", "Member 9", None);
+    joined.recency_stamp = Some(900);
+    let mut talked = dm_room_for_activity(
+        "dm-talked",
+        "Member 1",
+        Some(ConversationActivity {
+            timestamp_ms: 100,
+            source: ConversationActivitySource::Message,
+        }),
+    );
+    talked.recency_stamp = Some(100);
+    state.rooms = vec![joined, talked];
+    use_recent_first_for_home_dms(&mut state);
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    assert_eq!(
+        sidebar
+            .sections
+            .people
+            .iter()
+            .map(|item| item.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["dm-talked", "dm-joined"]
+    );
+}
+
+/// The activity-less fallback is shared by the attention sort, so an
+/// attention-first scope keeps a stable order for read rooms too.
+#[test]
+fn activity_sort_uses_the_server_recency_stamp_between_read_rooms() {
+    let mut state = ready_state();
+    let mut newer = dm_room_for_activity("dm-newer", "Member 2", None);
+    newer.recency_stamp = Some(200);
+    let mut older = dm_room_for_activity("dm-older", "Member 1", None);
+    older.recency_stamp = Some(100);
+    state.rooms = vec![newer, older];
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    assert_eq!(
+        sidebar
+            .sections
+            .people
+            .iter()
+            .map(|item| item.room_id.as_str())
+            .collect::<Vec<_>>(),
+        vec!["dm-newer", "dm-older"]
+    );
+}
+
+fn use_recent_first_for_home_dms(state: &mut AppState) {
+    state.settings.values.sidebar.scope_preferences.insert(
+        "__home__".to_owned(),
+        SidebarScopeSettings {
+            dms: SidebarSectionSettings {
+                collapsed: false,
+                sort: RoomListSort::RecentFirst,
+                ..Default::default()
+            },
+            ..Default::default()
+        },
+    );
+}
+
+// ── #542: recent conversation order is the product default ──────────────────
+
+fn update_room_list(state: &mut AppState, rooms: Vec<RoomSummary>) {
+    reduce(
+        state,
+        AppAction::RoomListUpdated {
+            spaces: Vec::new(),
+            rooms,
+        },
+    );
+}
+
+fn item_order(state: &AppState) -> Vec<&str> {
+    state
+        .room_list
+        .items
+        .iter()
+        .map(|item| item.room_id.as_str())
+        .collect()
+}
+
+fn section_order(items: &[koushi_state::RoomListItem]) -> Vec<&str> {
+    items.iter().map(|item| item.room_id.as_str()).collect()
+}
+
+/// With no scope preference written, every section already opens in recent
+/// conversation order: unread and mention state stays visible but does not move
+/// a row.
+#[test]
+fn default_sidebar_order_is_recent_conversation_order_in_home_and_every_space() {
+    let mut state = ready_state();
+    let child_room_ids = vec![
+        "room-newer".to_owned(),
+        "room-unread".to_owned(),
+        "room-mention".to_owned(),
+        "dm-newer".to_owned(),
+        "dm-unread".to_owned(),
+    ];
+    state.spaces = vec![SpaceSummary {
+        space_id: "space-a".to_owned(),
+        raw_name: None,
+        display_name: "Space A".to_owned(),
+        avatar: None,
+        join_rule: None,
+        child_room_ids: child_room_ids.clone(),
+        parent_side_child_room_ids: child_room_ids,
+    }];
+    let mut room_unread = active_sort_room("room-unread", false, &["space-a"], &[], Some(500));
+    room_unread.unread_count = 4;
+    room_unread.notification_count = 4;
+    let mut room_mention = active_sort_room("room-mention", false, &["space-a"], &[], Some(100));
+    room_mention.highlight_count = 1;
+    room_mention.notification_count = 1;
+    let mut dm_unread = active_sort_room("dm-unread", true, &[], &["space-a"], Some(400));
+    dm_unread.unread_count = 2;
+    state.rooms = vec![
+        active_sort_room("room-newer", false, &["space-a"], &[], Some(900)),
+        room_unread,
+        room_mention,
+        active_sort_room("dm-newer", true, &[], &["space-a"], Some(950)),
+        dm_unread,
+    ];
+
+    let home = compose_sidebar_for_state(&state);
+    assert_eq!(
+        section_order(&home.sections.rooms),
+        vec!["room-newer", "room-unread", "room-mention"]
+    );
+    assert_eq!(
+        section_order(&home.sections.people),
+        vec!["dm-newer", "dm-unread"]
+    );
+
+    state.navigation.active_space_id = Some("space-a".to_owned());
+    let space = compose_sidebar_for_state(&state);
+    assert_eq!(
+        section_order(&space.sections.rooms),
+        vec!["room-newer", "room-unread", "room-mention"]
+    );
+    assert_eq!(
+        section_order(&space.sections.people),
+        vec!["dm-newer", "dm-unread"]
+    );
+    assert_eq!(space.sections.rooms[1].unread_count, 4);
+    assert_eq!(space.sections.rooms[2].highlight_count, 1);
+}
+
+/// Sliding Sync can restore an unread counter long after the message. That must
+/// not move an old room upward.
+#[test]
+fn restoring_stale_unread_counters_does_not_move_an_old_room() {
+    let mut state = ready_state();
+    let newer = active_sort_room("room-new", false, &[], &[], Some(900));
+    let mut older = active_sort_room("room-old", false, &[], &[], Some(100));
+    update_room_list(&mut state, vec![newer.clone(), older.clone()]);
+    assert_eq!(item_order(&state), vec!["room-new", "room-old"]);
+
+    older.unread_count = 5;
+    older.notification_count = 5;
+    older.highlight_count = 2;
+    older.marked_unread = true;
+    update_room_list(&mut state, vec![newer, older]);
+
+    assert_eq!(item_order(&state), vec!["room-new", "room-old"]);
+}
+
+/// #438's attention-first order stays reachable for a settings document an
+/// older build persisted, even though the selector no longer offers it.
+#[test]
+fn a_persisted_activity_sort_keeps_attention_order() {
+    let sort: RoomListSort =
+        serde_json::from_value(json!({ "kind": "activity" })).expect("legacy activity sort");
+    assert_eq!(sort, RoomListSort::Activity);
+
+    let mut state = ready_state();
+    state.settings.values.room_list_sort = sort;
+    let newer = active_sort_room("room-new", false, &[], &[], Some(900));
+    let mut older = active_sort_room("room-old", false, &[], &[], Some(100));
+    older.unread_count = 5;
+    update_room_list(&mut state, vec![newer, older]);
+
+    assert_eq!(item_order(&state), vec!["room-old", "room-new"]);
+}
+
+/// A live reorder must not drop the selection, and the filter must keep the
+/// projected order instead of re-sorting.
+#[test]
+fn a_reordered_snapshot_keeps_the_selected_room_and_preserves_order_through_filters() {
+    let mut state = ready_state();
+    state.navigation.active_room_id = Some("room-old".to_owned());
+    let newer = active_sort_room("room-new", false, &[], &[], Some(900));
+    let mut older = active_sort_room("room-old", false, &[], &[], Some(100));
+    older.unread_count = 1;
+    update_room_list(&mut state, vec![newer.clone(), older.clone()]);
+    assert_eq!(item_order(&state), vec!["room-new", "room-old"]);
+
+    reduce(
+        &mut state,
+        AppAction::RoomListFilterSelected {
+            filter: RoomListFilter::Unread,
+        },
+    );
+    assert_eq!(item_order(&state), vec!["room-old"]);
+    reduce(
+        &mut state,
+        AppAction::RoomListFilterSelected {
+            filter: RoomListFilter::Rooms,
+        },
+    );
+
+    // A newer message in the other room reorders the list.
+    let mut newer = newer;
+    newer.conversation_activity = Some(ConversationActivity {
+        timestamp_ms: 2_000,
+        source: ConversationActivitySource::Message,
+    });
+    newer.recency_stamp = Some(2_000);
+    update_room_list(&mut state, vec![newer, older]);
+
+    assert_eq!(
+        state.navigation.active_room_id.as_deref(),
+        Some("room-old"),
+        "a live reorder must not move the selection"
+    );
+    assert_eq!(item_order(&state), vec!["room-new", "room-old"]);
 }

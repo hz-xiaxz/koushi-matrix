@@ -294,7 +294,7 @@ async fn exercise_ignored_reset(case: ResetCase) {
                     for _ in 0..3 {
                         let (acknowledged, received) = tokio::sync::oneshot::channel();
                         actor
-                            .send(TimelineActorMessage::TestInjectRestoreDiff {
+                            .send(TimelineActorMessage::TestInjectDiff {
                                 diffs: vec![eyeball_im::VectorDiff::Clear],
                                 projections: BTreeSet::new(),
                                 acknowledged,

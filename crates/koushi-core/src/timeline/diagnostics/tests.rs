@@ -85,6 +85,7 @@ fn event_cache_structured_fields_include_relation_presence_without_ids() {
             ("index_present", DiagnosticValue::Boolean(true)),
             ("event_id_present", DiagnosticValue::Boolean(true)),
             ("sender_present", DiagnosticValue::Boolean(true)),
+            ("redaction_event", DiagnosticValue::Boolean(false)),
             ("redacted", DiagnosticValue::Boolean(false)),
             (
                 "timestamp_minute",
@@ -361,9 +362,7 @@ fn event_cache_diff_batch_emits_one_count_only_summary() {
 fn timeline_items_record_batch_only_by_default() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
     let key = room_key();
-    let baseline = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let baseline = koushi_diagnostics::test_support::detail_cursor();
     trace_timeline_items(
         "replay_initial",
         &key,
@@ -373,8 +372,8 @@ fn timeline_items_record_batch_only_by_default() {
         ],
     );
 
-    let records = koushi_diagnostics::test_support::detail_snapshot().records;
-    let appended = records[baseline..]
+    let records = koushi_diagnostics::test_support::detail_records_since(baseline);
+    let appended = records
         .iter()
         .filter(|record| {
             record.event.source == "core.timeline_item" && record.event.stage == "replay_initial"
@@ -405,9 +404,7 @@ fn timeline_items_record_batch_only_by_default() {
 #[test]
 fn thread_projection_diagnostic_records_only_thread_batches() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let baseline = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let baseline = koushi_diagnostics::test_support::detail_cursor();
     let thread_key = TimelineKey {
         account_key: AccountKey("@a:test".to_owned()),
         kind: TimelineKind::Thread {
@@ -435,8 +432,8 @@ fn thread_projection_diagnostic_records_only_thread_batches() {
         11,
     );
 
-    let records = koushi_diagnostics::test_support::detail_snapshot().records;
-    let appended = records[baseline..]
+    let records = koushi_diagnostics::test_support::detail_records_since(baseline);
+    let appended = records
         .iter()
         .filter(|record| record.event.source == "core.thread_timeline")
         .collect::<Vec<_>>();
@@ -458,9 +455,7 @@ fn thread_projection_diagnostic_records_only_thread_batches() {
 #[test]
 fn thread_summary_diagnostic_is_closed_and_private_data_free() {
     let _diagnostic_lock = koushi_diagnostics::test_support::lock();
-    let baseline = koushi_diagnostics::test_support::detail_snapshot()
-        .records
-        .len();
+    let baseline = koushi_diagnostics::test_support::detail_cursor();
     for (source, relation, decision) in [
         ("rehydration", "missing", "advance"),
         ("live_reply", "different", "advance"),
@@ -480,8 +475,8 @@ fn thread_summary_diagnostic_is_closed_and_private_data_free() {
         );
     }
 
-    let records = koushi_diagnostics::test_support::detail_snapshot().records;
-    let events = records[baseline..]
+    let records = koushi_diagnostics::test_support::detail_records_since(baseline);
+    let events = records
         .iter()
         .filter(|record| {
             record.event.source == "core.thread_summary" && record.event.stage == "reconciled"
@@ -604,6 +599,7 @@ async fn subscribe_replay_path_records_subscribed_done_stage() {
         hide_redacted: false,
         timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
         live_tail_refreshes: LiveTailRefreshCoordinator::new(),
+        focused_builds: Default::default(),
         test_session_available: true,
     };
 
@@ -818,6 +814,7 @@ async fn diagnostics_producer_paths_run_without_trace_environment() {
         hide_redacted: false,
         timeline_actor_generations: Arc::new(TimelineActorGenerationGate::default()),
         live_tail_refreshes: LiveTailRefreshCoordinator::new(),
+        focused_builds: Default::default(),
         test_session_available: true,
     };
 
@@ -1054,4 +1051,40 @@ fn initial_thread_backfill_stage_tokens_remain_distinct_and_closed() {
         assert_eq!(super::timeline_stage_token(stage), stage);
     }
     assert_eq!(super::timeline_stage_token("untrusted detail"), "other");
+}
+
+#[test]
+fn residency_diagnostics_partitions_actors_and_sums_canonical_depth() {
+    use crate::timeline::manager::fold_residency_actors;
+    use koushi_protocol::ids::TimelineKind;
+
+    let room = TimelineKind::Room {
+        room_id: "!room:synthetic.invalid".to_owned(),
+    };
+    let thread = TimelineKind::Thread {
+        room_id: "!room:synthetic.invalid".to_owned(),
+        root_event_id: "$root:synthetic.invalid".to_owned(),
+    };
+    let focused = TimelineKind::Focused {
+        room_id: "!room:synthetic.invalid".to_owned(),
+        event_id: "$event:synthetic.invalid".to_owned(),
+    };
+    let diagnostics = fold_residency_actors(
+        9,
+        7,
+        [
+            (&room, Some(120)),
+            (&room, None),
+            (&thread, Some(30)),
+            (&focused, Some(4)),
+        ],
+    );
+    assert_eq!(diagnostics.session_resident_rooms, 9);
+    assert_eq!(diagnostics.actual_room_subscriptions, 7);
+    assert_eq!(diagnostics.resident_actors, 4);
+    assert_eq!(diagnostics.resident_room_actors, 2);
+    assert_eq!(diagnostics.resident_thread_actors, 1);
+    assert_eq!(diagnostics.resident_focused_actors, 1);
+    assert_eq!(diagnostics.resident_event_items, 154);
+    assert_eq!(diagnostics.deepest_actor_event_items, 120);
 }

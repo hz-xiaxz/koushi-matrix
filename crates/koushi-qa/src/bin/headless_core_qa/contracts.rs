@@ -75,6 +75,7 @@ pub(super) fn synthetic_timeline_item(
         link_previews: None,
         link_ranges: Vec::new(),
         mentioned_user_ids: Vec::new(),
+        mentions_room: false,
         reactions: Vec::new(),
         can_react: false,
         is_redacted: false,
@@ -419,7 +420,7 @@ pub(super) fn qa_operation_failed_event(request_id: RequestId) -> CoreEvent {
 pub(super) fn qa_state_delta_event() -> CoreEvent {
     CoreEvent::StateDelta(koushi_core::StateDelta {
         generation: 1,
-        changed: koushi_core::StateDeltaChangedSlices::default(),
+        changed: Box::default(),
     })
 }
 

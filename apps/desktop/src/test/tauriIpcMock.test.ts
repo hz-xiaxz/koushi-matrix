@@ -147,7 +147,9 @@ describe("TauriIpcMock command responses", () => {
           include_filenames: true
         },
         thread_list_order: { kind: "latestReply" },
-        room_list_sort: { kind: "activity" }
+        // #542: the fake default mirrors the Rust default, so a fake-only
+        // projection cannot hide a drift away from recent order.
+        room_list_sort: { kind: "recentFirst" }
       }
     });
   });

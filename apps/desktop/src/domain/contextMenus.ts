@@ -4,6 +4,8 @@ import type { RoomTags } from "./types";
 export type ContextMenuKind = "message" | "room" | "space" | "spaceMember" | "account";
 
 export type ContextMenuActionId =
+  | "copySelectedText"
+  | "searchWebForSelectedText"
   | "replyToMessage"
   | "openThread"
   | "editMessage"
@@ -24,7 +26,6 @@ export type ContextMenuActionId =
   | "markRoomAsRead"
   | "markRoomAsUnread"
   | "leaveRoom"
-  | "selectSpace"
   | "openSpaceInfo"
   | "leaveSpace"
   | "inviteUserToSpace"
@@ -51,12 +52,19 @@ export type ContextMenuRequest =
       roomId: string;
       eventId: string;
       isIgnored: boolean;
+      /**
+       * The visible message-text selection captured by the requesting row before
+       * the menu took focus (#1155). Empty/absent means the selection actions are
+       * not offered. It stays in renderer-local menu state for that menu only.
+       */
+      selectedText?: string;
     }
   | {
       kind: "room";
       roomId: string;
       tags?: RoomTags;
       dmUserIds?: string[];
+      canMarkRoomAsRead?: boolean;
     }
   | {
       kind: "space";
@@ -78,6 +86,19 @@ export function contextMenuItems(request: ContextMenuRequest): ContextMenuItem[]
   switch (request.kind) {
     case "message": {
       const items: ContextMenuItem[] = [];
+      if (request.selectedText) {
+        // Text the user aimed at is offered first, and these two actions need no
+        // message ownership or server event id: only selectable visible text.
+        items.push({ id: "copySelectedText", labelMessageId: "context.copySelectedText" });
+        items.push({
+          id: "searchWebForSelectedText",
+          labelMessageId: "context.searchWebForSelectedText"
+        });
+      }
+      if (!request.eventId || !request.senderUserId) {
+        // A local echo with no server identity can still offer text selection.
+        return items;
+      }
       if (request.canReply) {
         items.push({ id: "replyToMessage", labelMessageId: "timeline.replyToMessage" });
       }
@@ -134,7 +155,7 @@ export function contextMenuItems(request: ContextMenuRequest): ContextMenuItem[]
         request.tags?.low_priority
           ? { id: "removeRoomLowPriority", labelMessageId: "context.removeFromLowPriority" }
           : { id: "setRoomLowPriority", labelMessageId: "context.addToLowPriority" },
-        { id: "markRoomAsRead", labelMessageId: "room.markAsRead" },
+        ...(request.canMarkRoomAsRead ? [{ id: "markRoomAsRead" as const, labelMessageId: "room.markAsRead" as const }] : []),
         { id: "markRoomAsUnread", labelMessageId: "room.markAsUnread" },
         // #373: last, destructive, and confirmation-gated by the caller. DM copy
         // differs only for readability — both ids drive the same Matrix
@@ -151,8 +172,9 @@ export function contextMenuItems(request: ContextMenuRequest): ContextMenuItem[]
       ];
     }
     case "space":
+      // #1218: no separate Open Space entry; the Space button's click and
+      // keyboard activation already select it.
       return [
-        { id: "selectSpace", labelMessageId: "context.selectSpace" },
         { id: "openSpaceInfo", labelMessageId: "context.openSpaceInfo" },
         { id: "leaveSpace", labelMessageId: "context.leaveSpace", destructive: true }
       ];

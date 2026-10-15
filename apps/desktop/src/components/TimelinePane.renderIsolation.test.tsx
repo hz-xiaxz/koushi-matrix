@@ -391,6 +391,7 @@ describe("TimelinePane render isolation", () => {
 
   test("shows thread attention counts on the timeline header threads button", () => {
     const snapshot = makeSnapshot();
+    snapshot.state.domain.rooms[0].thread_unread_count = 3;
     snapshot.state.domain.thread_attention = {
       kind: "tracking",
       room_id: "!room-alpha:example.invalid",
@@ -442,15 +443,15 @@ describe("TimelinePane render isolation", () => {
 
     const threadsButton = screen.getByRole("button", { name: "Threads" });
     expect(threadsButton.getAttribute("data-count")).toBe("3");
-    expect(threadsButton.getAttribute("data-live-count")).toBe("2");
-    expect(threadsButton.getAttribute("data-mention-count")).toBe("1");
+    expect(threadsButton.hasAttribute("data-live-count")).toBe(false);
+    expect(threadsButton.hasAttribute("data-mention-count")).toBe(false);
   });
 });
 
 function makeSnapshot(): DesktopSnapshot {
   return {
     state: {
-      schema_version: 7,
+      schema_version: 8,
       domain: {
         session_lock_reason: null,
         session: {
@@ -477,6 +478,19 @@ function makeSnapshot(): DesktopSnapshot {
               message_previews: true,
               send_read_receipts: true,
               send_typing_notifications: true
+            },
+            delivery: {
+              enabled: false,
+              direct_messages: true,
+              mentions: true,
+              keywords: true,
+              only_when_unfocused: true,
+              dwell_secs: 300,
+              min_interval_secs: 900,
+              prefix_chars: 80,
+              prefix_consent: null,
+              watched: [],
+              sinks: []
             },
             display: {
               code_block_wrap: true,
@@ -617,6 +631,7 @@ function makeSnapshot(): DesktopSnapshot {
           pending_email: null,
           operation: { kind: "idle" }
         },
+        notification_delivery: { sinks: [], presets: [] },
         contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
         account_management_capabilities: { change_password: { kind: "unknown" } },
         soft_logout_reauth: { kind: "idle" },
@@ -722,6 +737,7 @@ function makeSnapshot(): DesktopSnapshot {
         focused_context: { kind: "closed" },
         files_view: { kind: "closed" }, history_export: { kind: "idle" },
         threads_list: { kind: "closed" },
+        scheduled_sends_list: { kind: "closed" },
         errors: [],
         basic_operation: { kind: "idle" },
         room_address_availability: { kind: "idle" }

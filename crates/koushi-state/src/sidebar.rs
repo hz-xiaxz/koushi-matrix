@@ -1,12 +1,14 @@
-use std::collections::{HashMap, HashSet};
+use std::collections::{BTreeMap, HashMap, HashSet};
 
 use serde::{Deserialize, Serialize};
 
 use crate::state::{
-    AppState, AvatarImage, InvitePreview, RoomListSort, RoomNotificationMode,
-    RoomNotificationSettings, RoomSummary, RoomTags, SidebarScopeSettings, SpaceChildMembership,
+    AppState, AvatarImage, InvitePreview, RestrictedConditions, RoomAccessCondition, RoomJoinRule,
+    RoomListSort, RoomNotificationMode, RoomNotificationSettings, RoomSummary, RoomTags,
+    SidebarScopeSettings, SidebarSectionKind, SidebarSectionReveal, SpaceChildMembership,
     SpaceChildSummary, SpaceChildrenState, SpaceLocalPresentations, SpaceSummary,
     compare_conversation_activity, room_activity_unread_count, room_attention_projection,
+    sidebar_scope_key,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
@@ -33,12 +35,107 @@ pub struct SidebarModel {
     #[serde(default)]
     pub low_priority_collapsed: bool,
     pub sections: SidebarSections,
+    /// #1363/#1366: the Rust-owned row bound of every bounded section of the
+    /// active scope. The `sections` lists stay complete so the renderer can
+    /// text-filter them; these counts decide how many rows the bound shows.
+    #[serde(default)]
+    pub section_bounds: SidebarSectionBounds,
     /// The active Space's add-existing-room rows (#1007); `None` at Home.
     #[serde(default)]
     pub space_add_rooms: Option<crate::space_add_rooms::SpaceAddRoomsModel>,
     /// Initial choices of the create-room dialog for the active scope (#1023).
     #[serde(default)]
     pub create_room_defaults: crate::room_address::CreateRoomDefaults,
+}
+
+/// #1363/#1366: the default number of conversations a sidebar section shows
+/// before the user expands it. The bound is a Rust-owned projection value; the
+/// renderer never computes it and only bypasses it for its search filter.
+pub const SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT: usize = 5;
+
+/// #1363/#1366: the projected row bound of one visible sidebar section.
+///
+/// `total_count` always reports the whole section, so the section header and its
+/// unread badge keep reporting the full section however many rows the bound
+/// shows. `expanded` is the effective state: the persisted preference, or the
+/// open conversation forcing the section open.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SidebarSectionBound {
+    /// The rows the bound shows while it applies
+    /// ([`SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT`]).
+    pub visible_limit: usize,
+    /// Every row the section holds, in its Rust-owned order.
+    pub total_count: usize,
+    /// The rows the renderer shows: at most `visible_limit`, or all of them
+    /// while `expanded`.
+    pub visible_count: usize,
+    /// `total_count - visible_count`: the count an expand control names.
+    pub hidden_count: usize,
+    /// The effective expansion state the renderer shows.
+    pub expanded: bool,
+    /// `expanded` holds only because the open conversation sits beyond the
+    /// bound. The renderer then offers no bound control: toggling the bound
+    /// cannot change what is visible while that conversation stays open.
+    pub expanded_by_active_room: bool,
+    /// Whether the renderer offers the bound control at all. A section of five
+    /// rows or fewer has nothing to reveal.
+    pub shows_expand_control: bool,
+}
+
+impl SidebarSectionBound {
+    /// Project one section's bound.
+    ///
+    /// `active_room_index` is the open conversation's position in this section,
+    /// or `None` when the open conversation is not in it. The open conversation
+    /// is never hidden by the bound: a room outside the first
+    /// [`SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT`] rows keeps its whole section
+    /// visible, whatever reordering did to its position.
+    pub fn project(
+        total_count: usize,
+        persisted_expanded: bool,
+        active_room_index: Option<usize>,
+    ) -> Self {
+        let visible_limit = SIDEBAR_SECTION_DEFAULT_VISIBLE_COUNT;
+        let active_room_beyond_bound =
+            active_room_index.is_some_and(|index| index >= visible_limit);
+        let expanded_by_active_room = !persisted_expanded && active_room_beyond_bound;
+        let expanded = persisted_expanded || active_room_beyond_bound;
+        let visible_count = if expanded {
+            total_count
+        } else {
+            total_count.min(visible_limit)
+        };
+        Self {
+            visible_limit,
+            total_count,
+            visible_count,
+            hidden_count: total_count - visible_count,
+            expanded,
+            expanded_by_active_room,
+            shows_expand_control: !expanded_by_active_room && total_count > visible_limit,
+        }
+    }
+}
+
+/// The bounded sections of one scope. `favourites` is a derived convenience
+/// list and Not joined keeps its own behavior, so neither is bounded here.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+pub struct SidebarSectionBounds {
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub rooms: Option<SidebarSectionBound>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub dms: Option<SidebarSectionBound>,
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub low_priority: Option<SidebarSectionBound>,
+}
+
+/// The projection inputs the row bound needs beyond the sections themselves.
+#[derive(Clone, Copy, Default)]
+pub struct SidebarSectionVisibility<'a> {
+    /// The open conversation, which the bound must never hide.
+    pub active_room_id: Option<&'a str>,
+    /// The section a selection revealed in this session (#1366), if any.
+    pub revealed: Option<&'a SidebarSectionReveal>,
 }
 
 /// The Rust-owned visible sidebar sections.
@@ -86,6 +183,26 @@ pub struct SpaceRailItem {
     pub unread_count: u64,
     pub highlight_count: u64,
     pub is_active: bool,
+    /// The Space's own authoritative access condition (#1166), from the same
+    /// projected slice the room rows use. `None` means it has not been projected
+    /// yet, never a guessed rule.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_join_rule: Option<RoomJoinRule>,
+    /// Restricted-rule allow-condition facts; `None` when the rule is not
+    /// restricted or has not been projected.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_restricted_conditions: Option<RestrictedConditions>,
+    /// Display labels of the rooms/Spaces a restricted rule names, resolved from
+    /// the projected room list (#1166). An entry with no label is omitted rather
+    /// than guessed at or exposed by id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub access_allowed_room_names: Vec<String>,
+    /// The verified single-Space membership route (#1220): `Some(name)` only
+    /// when the rule names exactly one distinct target, the target's create
+    /// event proves it is a Space, and its name resolves. This is the one fact
+    /// that lets the people-facing surface say the specific sentence.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_space_members_route: Option<String>,
     /// The joined child rooms the Space-leave confirmation offers to leave
     /// with this Space.
     #[serde(default)]
@@ -104,6 +221,30 @@ pub struct RoomListItem {
     /// not-joined lane is the only producer of a true.
     #[serde(default)]
     pub can_join: bool,
+    /// Issue #1410: a Space admin suggests this not-joined child to members.
+    /// Only the not-joined lane produces a true.
+    #[serde(default)]
+    pub suggested: bool,
+    /// The room's authoritative access condition (#1166), from its own
+    /// `m.room.join_rules`. `None` means it has not been projected yet, never a
+    /// guessed rule; it is independent of encryption, DM status, the viewer's
+    /// membership and `can_join`.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_join_rule: Option<RoomJoinRule>,
+    /// Whether a restricted rule has a usable allow condition (#1166). `None`
+    /// when the room's rule is not restricted or has not been projected, so a
+    /// reader never claims anything it did not inspect.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_restricted_conditions: Option<RestrictedConditions>,
+    /// Display labels of the rooms/Spaces a restricted rule names, resolved from
+    /// the projected room list (#1166). An entry with no label is omitted rather
+    /// than guessed at or exposed by id.
+    #[serde(default, skip_serializing_if = "Vec::is_empty")]
+    pub access_allowed_room_names: Vec<String>,
+    /// The verified single-Space membership route (#1220), or `None` for every
+    /// other restricted shape. See [`SpaceRailItem::access_space_members_route`].
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub access_space_members_route: Option<String>,
     pub display_name: String,
     /// Mirrors `RoomSummary.display_label_placeholder` for `display_name`
     /// (#1050): the GUI renders it through the message catalog.
@@ -117,6 +258,10 @@ pub struct RoomListItem {
     pub notification_count: u64,
     #[serde(default)]
     pub display_count: u64,
+    #[serde(default)]
+    pub main_unread_count: u64,
+    #[serde(default)]
+    pub thread_unread_count: u64,
     #[serde(default)]
     pub has_unread_content: bool,
     #[serde(default)]
@@ -159,6 +304,10 @@ pub fn compose_sidebar_with_account_facts(
         &SpaceLocalPresentations::default(),
         &SpaceChildrenState::default(),
         &[],
+        // No projected access conditions without room-list state (#1166), and no
+        // open-room or selection-reveal facts without navigation state.
+        &BTreeMap::new(),
+        SidebarSectionVisibility::default(),
     )
 }
 
@@ -179,6 +328,11 @@ pub fn compose_sidebar_for_state(state: &AppState) -> SidebarModel {
         &state.navigation.space_local_presentations,
         &state.space_children,
         &state.invites,
+        &state.room_access,
+        SidebarSectionVisibility {
+            active_room_id: state.navigation.active_room_id.as_deref(),
+            revealed: state.navigation.revealed_sidebar_section.as_ref(),
+        },
     );
     let preferred_positions: HashMap<&str, usize> = state
         .navigation
@@ -214,16 +368,32 @@ fn compose_sidebar_with_preferences(
     local_presentations: &SpaceLocalPresentations,
     space_children: &SpaceChildrenState,
     invites: &[InvitePreview],
+    // #1166: the projected per-room access conditions; empty means not yet known.
+    room_access: &BTreeMap<String, RoomAccessCondition>,
+    visibility: SidebarSectionVisibility<'_>,
 ) -> SidebarModel {
     let rooms_by_id: HashMap<&str, &RoomSummary> = rooms
         .iter()
         .map(|room| (room.room_id.as_str(), room))
+        .collect();
+    // #1166: restricted-rule entries are resolved to the labels this projection
+    // already carries; an id without a label here is omitted, never guessed at.
+    let access_names_by_room: HashMap<&str, &str> = rooms
+        .iter()
+        .map(|room| (room.room_id.as_str(), room.display_label.as_str()))
+        .chain(
+            spaces
+                .iter()
+                .map(|space| (space.space_id.as_str(), space.display_name.as_str())),
+        )
         .collect();
 
     let space_rail = spaces
         .iter()
         .map(|space| {
             let local = local_presentations.0.get(&space.space_id);
+            let (access_allowed_room_names, access_space_members_route) =
+                access_allow_names(room_access.get(&space.space_id), &access_names_by_room);
             SpaceRailItem {
                 space_id: space.space_id.clone(),
                 display_name: local
@@ -239,6 +409,14 @@ fn compose_sidebar_with_preferences(
                     room_notification_settings,
                 ),
                 is_active: active_space_id == Some(space.space_id.as_str()),
+                access_join_rule: room_access
+                    .get(&space.space_id)
+                    .and_then(|condition| condition.join_rule),
+                access_restricted_conditions: room_access
+                    .get(&space.space_id)
+                    .and_then(|condition| condition.restricted),
+                access_allowed_room_names,
+                access_space_members_route,
                 leave_candidates: crate::space_leave::space_leave_candidates(
                     space,
                     spaces,
@@ -248,21 +426,14 @@ fn compose_sidebar_with_preferences(
         })
         .collect();
 
-    let home_unread_count: u64 = rooms
-        .iter()
-        .filter(|room| contributes_attention(room, room_notification_settings))
-        .map(room_activity_unread_count)
-        .sum();
+    let account_attention =
+        account_attention_summary(rooms, room_notification_settings, pending_invite_count);
     let account_home = AccountHomeItem {
         display_name: "Home".to_owned(),
-        unread_count: home_unread_count,
-        highlight_count: rooms
-            .iter()
-            .filter(|room| contributes_attention(room, room_notification_settings))
-            .map(|room| room.highlight_count)
-            .sum(),
-        invite_count: pending_invite_count,
-        attention_count: home_unread_count + pending_invite_count,
+        unread_count: account_attention.unread_count,
+        highlight_count: account_attention.highlight_count,
+        invite_count: account_attention.invite_count,
+        attention_count: account_attention.attention_count,
         is_active: active_space_id.is_none(),
     };
 
@@ -284,7 +455,14 @@ fn compose_sidebar_with_preferences(
     );
     let space_rooms: Vec<_> = space_room_summaries
         .iter()
-        .map(|room| room_list_item(room, room_notification_settings))
+        .map(|room| {
+            room_list_item(
+                room,
+                room_notification_settings,
+                room_access,
+                &access_names_by_room,
+            )
+        })
         .collect();
 
     // Issue #961: the Space's advertised children the account is not in. The
@@ -313,10 +491,16 @@ fn compose_sidebar_with_preferences(
         // could not describe them. Encrypted/private rooms can legitimately
         // arrive as `Unknown`; hiding them makes a real Space child disappear.
         .collect();
+    // #1410: suggested rooms lead the lane, then the name order.
     not_joined_children.sort_by(|left, right| {
-        left.display_name
-            .to_lowercase()
-            .cmp(&right.display_name.to_lowercase())
+        right
+            .suggested
+            .cmp(&left.suggested)
+            .then_with(|| {
+                left.display_name
+                    .to_lowercase()
+                    .cmp(&right.display_name.to_lowercase())
+            })
             .then_with(|| left.room_id.cmp(&right.room_id))
     });
     let not_joined_space_rooms: Vec<RoomListItem> = not_joined_children
@@ -342,7 +526,14 @@ fn compose_sidebar_with_preferences(
     );
     let global_dms: Vec<_> = global_dm_summaries
         .iter()
-        .map(|room| room_list_item(room, room_notification_settings))
+        .map(|room| {
+            room_list_item(
+                room,
+                room_notification_settings,
+                room_access,
+                &access_names_by_room,
+            )
+        })
         .collect();
     // Low priority spans both scope lists and is shown once, in the Rooms
     // order, so a low-priority DM and room interleave by the same comparator.
@@ -376,9 +567,48 @@ fn compose_sidebar_with_preferences(
             .collect(),
         low_priority: low_priority_summaries
             .into_iter()
-            .map(|room| room_list_item(room, room_notification_settings))
+            .map(|room| {
+                room_list_item(
+                    room,
+                    room_notification_settings,
+                    room_access,
+                    &access_names_by_room,
+                )
+            })
             .collect(),
         not_joined: not_joined_space_rooms.clone(),
+    };
+
+    // #1366: a selection reveals the section that its persisted collapse would
+    // hide, so a notification or permalink entry still shows the selected row.
+    // The reveal applies only while the open conversation is in that section and
+    // only in the scope it was recorded for, so a stale reveal can never keep an
+    // unrelated section open. The user's own collapse choice for the same scope
+    // and section clears it; the bound toggle leaves the reveal alone.
+    let scope_key = sidebar_scope_key(active_space_id);
+    let section_revealed = |section: SidebarSectionKind, rooms: &[RoomListItem]| {
+        visibility.revealed.is_some_and(|reveal| {
+            reveal.scope == scope_key
+                && reveal.section == section
+                && active_room_position(rooms, visibility.active_room_id).is_some()
+        })
+    };
+    let section_bounds = SidebarSectionBounds {
+        rooms: Some(SidebarSectionBound::project(
+            sections.rooms.len(),
+            section_settings.rooms.expanded,
+            active_room_position(&sections.rooms, visibility.active_room_id),
+        )),
+        dms: Some(SidebarSectionBound::project(
+            sections.people.len(),
+            section_settings.dms.expanded,
+            active_room_position(&sections.people, visibility.active_room_id),
+        )),
+        low_priority: Some(SidebarSectionBound::project(
+            sections.low_priority.len(),
+            section_settings.low_priority.unwrap_or_default().expanded,
+            active_room_position(&sections.low_priority, visibility.active_room_id),
+        )),
     };
 
     SidebarModel {
@@ -390,10 +620,14 @@ fn compose_sidebar_with_preferences(
         dm_highlight_count: highlight_count(&sections.people, room_notification_settings),
         rooms_sort,
         dms_sort,
-        rooms_collapsed: section_settings.rooms.collapsed,
-        dms_collapsed: section_settings.dms.collapsed,
-        low_priority_collapsed: section_settings.low_priority.unwrap_or_default().collapsed,
+        rooms_collapsed: section_settings.rooms.collapsed
+            && !section_revealed(SidebarSectionKind::Rooms, &sections.rooms),
+        dms_collapsed: section_settings.dms.collapsed
+            && !section_revealed(SidebarSectionKind::Dms, &sections.people),
+        low_priority_collapsed: section_settings.low_priority.unwrap_or_default().collapsed
+            && !section_revealed(SidebarSectionKind::LowPriority, &sections.low_priority),
         sections,
+        section_bounds,
         space_rail,
         space_rooms,
         not_joined_space_rooms,
@@ -401,6 +635,14 @@ fn compose_sidebar_with_preferences(
         space_add_rooms: None,
         create_room_defaults: Default::default(),
     }
+}
+
+/// The open conversation's position in one section, or `None` when it is not in
+/// it. Position decides only whether the bound applies; the row order itself
+/// stays the Rust-owned sort order.
+fn active_room_position(rooms: &[RoomListItem], active_room_id: Option<&str>) -> Option<usize> {
+    let active_room_id = active_room_id?;
+    rooms.iter().position(|room| room.room_id == active_room_id)
 }
 
 fn sort_room_summaries(
@@ -482,6 +724,12 @@ fn not_joined_room_list_item(
         // Accepting an invitation this account holds is always available; for
         // everything else the server's join rule decides.
         can_join: invited || child.can_join,
+        suggested: child.suggested,
+        // #1166: the not-joined lane projects no access condition yet.
+        access_join_rule: None,
+        access_restricted_conditions: None,
+        access_allowed_room_names: Vec::new(),
+        access_space_members_route: None,
         display_name: child.display_name.clone(),
         avatar: child.avatar.clone(),
         tags: RoomTags::default(),
@@ -489,6 +737,8 @@ fn not_joined_room_list_item(
         highlight_count: 0,
         notification_count: 0,
         display_count: 0,
+        main_unread_count: 0,
+        thread_unread_count: 0,
         has_unread_content: false,
         is_attention_highlighted: false,
         has_unread_mention: false,
@@ -523,16 +773,29 @@ fn space_child_is_visible(child: &SpaceChildSummary, invited_room_ids: &HashSet<
 fn room_list_item(
     room: &RoomSummary,
     room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+    room_access: &BTreeMap<String, RoomAccessCondition>,
+    access_names_by_room: &HashMap<&str, &str>,
 ) -> RoomListItem {
     let mode = room_notification_settings
         .get(&room.room_id)
         .map(|settings| settings.mode);
     let projection = room_attention_projection(room, mode);
+    let (access_allowed_room_names, access_space_members_route) =
+        access_allow_names(room_access.get(&room.room_id), access_names_by_room);
     RoomListItem {
         display_name_placeholder: room.display_label_placeholder.clone(),
         room_id: room.room_id.clone(),
         membership: SpaceChildMembership::Joined,
         can_join: false,
+        suggested: false,
+        access_join_rule: room_access
+            .get(&room.room_id)
+            .and_then(|condition| condition.join_rule),
+        access_restricted_conditions: room_access
+            .get(&room.room_id)
+            .and_then(|condition| condition.restricted),
+        access_allowed_room_names,
+        access_space_members_route,
         display_name: room.display_label.clone(),
         avatar: room.avatar.clone(),
         tags: room.tags.clone(),
@@ -540,11 +803,54 @@ fn room_list_item(
         highlight_count: projection.highlight_count,
         notification_count: projection.notification_count,
         display_count: projection.display_count,
+        main_unread_count: projection.main_unread_count,
+        thread_unread_count: projection.thread_unread_count,
         has_unread_content: projection.has_unread_content,
         is_attention_highlighted: projection.is_attention_highlighted,
         has_unread_mention: projection.has_unread_mention,
         is_muted: projection.is_muted,
     }
+}
+
+/// Display labels for a restricted rule's named membership routes (#1166) and
+/// the verified single-Space route (#1220).
+///
+/// Only ids this projection can name become text: an unknown, invisible or
+/// id-shaped entry stays out rather than being guessed at or shown as a raw id.
+/// The specific Space route additionally requires exactly one distinct target
+/// whose create event proved it a Space, so an ordinary-room target, several
+/// targets or an unknown type never claims it.
+fn access_allow_names(
+    condition: Option<&RoomAccessCondition>,
+    names_by_room: &HashMap<&str, &str>,
+) -> (Vec<String>, Option<String>) {
+    let Some(condition) = condition else {
+        return (Vec::new(), None);
+    };
+    let resolved = |target: &crate::state::RoomAllowTarget| -> Option<&str> {
+        let name = *names_by_room.get(target.room_id.as_str())?;
+        let name = name.trim();
+        if name.is_empty() || name == target.room_id {
+            None
+        } else {
+            Some(name)
+        }
+    };
+    let names = condition
+        .allow_targets
+        .iter()
+        .filter_map(|target| resolved(target).map(str::to_owned))
+        .collect();
+    let space_members_route = match condition.restricted {
+        Some(RestrictedConditions::MembershipOnly) if condition.allow_targets.len() == 1 => {
+            let target = &condition.allow_targets[0];
+            (target.kind == crate::state::RoomAllowTargetKind::Space)
+                .then(|| resolved(target).map(str::to_owned))
+                .flatten()
+        }
+        _ => None,
+    };
+    (names, space_members_route)
 }
 
 fn unread_count(
@@ -573,12 +879,59 @@ fn highlight_count(
 ///
 /// Muted and low-priority conversations keep their own raw counts but never
 /// contribute to an aggregate badge (state-machine.md, "Sidebar Sections And
-/// Low Priority").
+/// Low Priority"). The room's notification mode is not an aggregate exclusion:
+/// a Mentions-only room keeps contributing its raw unread, exactly as before
+/// #1219.
 fn contributes_attention(
     room: &RoomSummary,
     room_notification_settings: &HashMap<String, RoomNotificationSettings>,
 ) -> bool {
     room.tags.low_priority.is_none() && !room_is_muted(&room.room_id, room_notification_settings)
+}
+
+/// One Rust-owned per-account attention policy (#1219).
+///
+/// The account tab conversation badge and that account's Home aggregate read
+/// this same `unread_count`, so the two conversation counts cannot disagree.
+/// `unread_count` is the sum of [`room_activity_unread_count`] over the rooms
+/// that [`contributes_attention`]; pending invites are counted separately and
+/// added into `attention_count` only for aggregate attention policy. The UI
+/// renders invitations separately from unread conversations.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub struct AccountAttentionSummary {
+    pub unread_count: u64,
+    pub highlight_count: u64,
+    pub invite_count: u64,
+    pub attention_count: u64,
+}
+
+pub fn account_attention_summary(
+    rooms: &[RoomSummary],
+    room_notification_settings: &HashMap<String, RoomNotificationSettings>,
+    pending_invite_count: u64,
+) -> AccountAttentionSummary {
+    let mut summary = AccountAttentionSummary {
+        invite_count: pending_invite_count,
+        ..AccountAttentionSummary::default()
+    };
+    for room in rooms {
+        if !contributes_attention(room, room_notification_settings) {
+            continue;
+        }
+        summary.unread_count += room_activity_unread_count(room);
+        summary.highlight_count += room.highlight_count;
+    }
+    summary.attention_count = summary.unread_count + summary.invite_count;
+    summary
+}
+
+/// Per-account attention for one runtime, as the account-tab snapshot reads it.
+pub fn account_attention_summary_for_state(state: &AppState) -> AccountAttentionSummary {
+    account_attention_summary(
+        &state.rooms,
+        &state.room_notification_settings,
+        state.invites.len() as u64,
+    )
 }
 
 fn room_is_muted(
@@ -602,6 +955,7 @@ mod tests {
             avatar: None,
             membership,
             can_join: false,
+            suggested: false,
             is_space: false,
             joined_members,
         }
