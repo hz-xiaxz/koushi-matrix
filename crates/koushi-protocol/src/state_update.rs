@@ -157,6 +157,9 @@ pub struct StateDeltaChangedSlices {
     pub e2ee_trust: Option<E2eeTrustState>,
     pub local_encryption: Option<LocalEncryptionState>,
     pub native_attention: Option<NativeAttentionState>,
+    /// #1427: the device-local delivery channel's runtime projection. It carries no
+    /// secret, only whether each sink holds one and how its last send ended.
+    pub notification_delivery: Option<koushi_state::NotificationDeliveryState>,
     pub cjk_text_policy: Option<CjkTextPolicyState>,
     pub errors: Option<Vec<AppError>>,
     pub sidebar: Option<SidebarModel>,

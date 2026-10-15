@@ -61,16 +61,16 @@ use super::super::diagnostics::timeline_item_diagnostic_event;
 use super::{
     apply_timeline_item_visibility, composer_document_from_event_json,
     edited_content_for_edit_target, edited_document_content_for_edit_target,
-    has_user_visible_content, link_ranges_for_message_projection,
+    eligible_activity_preview, has_user_visible_content, link_ranges_for_message_projection,
     megolm_message_index_from_original_json, membership_change_projection,
-    mentioned_user_ids_from_event_json, mentions_room_from_event_json, message_edit_target_token,
-    message_projection_from_msgtype, msgtype_carries_editable_caption,
-    project_local_megolm_rotation_reason, reaction_groups_from_sdk,
-    reply_quote_from_message_projection, reset_loading_link_previews_to_pending,
-    room_name_notice_projection, state_event_notice_body, state_event_notice_projection,
-    timeline_item_can_edit, timeline_item_can_react, timeline_item_can_redact,
-    timeline_item_should_be_hidden, validate_cancel_send, validate_redact_reaction,
-    validate_retry_send, validate_send_reaction,
+    mention_marked_message_preview, mentioned_user_ids_from_event_json,
+    mentions_room_from_event_json, message_edit_target_token, message_projection_from_msgtype,
+    msgtype_carries_editable_caption, project_local_megolm_rotation_reason,
+    reaction_groups_from_sdk, reply_quote_from_message_projection,
+    reset_loading_link_previews_to_pending, room_name_notice_projection, state_event_notice_body,
+    state_event_notice_projection, timeline_item_can_edit, timeline_item_can_react,
+    timeline_item_can_redact, timeline_item_should_be_hidden, validate_cancel_send,
+    validate_redact_reaction, validate_retry_send, validate_send_reaction,
 };
 
 use super::super::test_support::{fake_rid, room_key, timeline_item};
@@ -258,6 +258,78 @@ fn editable_document_uses_formatted_links_for_duplicate_mention_identity() {
     );
     assert!(
         matches!(document.inlines.last(), Some(ComposerInline::Text { text }) if text.ends_with("typed @Same"))
+    );
+}
+
+const ELEMENT_MENTION_HTML: &str =
+    "<a href=\"https://matrix.to/#/@bob:example.test\">Bob Example</a>: please take a look";
+
+#[test]
+fn activity_preview_spells_element_mention_fallback_with_at_marker() {
+    // Element's plain fallback drops the `@` (`Name: ...`); the preview must
+    // still read as the rendered mention pill.
+    let mut item = timeline_item(
+        "$reply:example.test",
+        Some("Bob Example: please take a look"),
+        "@carol:example.test",
+        false,
+    );
+    item.formatted = Some(koushi_protocol::event::TimelineFormattedBody {
+        html: ELEMENT_MENTION_HTML.to_owned(),
+        plain_text: "Bob Example: please take a look".to_owned(),
+        code_blocks: Vec::new(),
+    });
+    item.mentioned_user_ids = vec!["@bob:example.test".to_owned()];
+
+    assert_eq!(
+        eligible_activity_preview(&item).as_deref(),
+        Some("@Bob Example: please take a look")
+    );
+}
+
+#[test]
+fn activity_preview_keeps_link_text_without_mentions_metadata() {
+    let mut item = timeline_item(
+        "$reply:example.test",
+        Some("Bob Example: please take a look"),
+        "@carol:example.test",
+        false,
+    );
+    item.formatted = Some(koushi_protocol::event::TimelineFormattedBody {
+        html: ELEMENT_MENTION_HTML.to_owned(),
+        plain_text: "Bob Example: please take a look".to_owned(),
+        code_blocks: Vec::new(),
+    });
+
+    assert_eq!(
+        eligible_activity_preview(&item).as_deref(),
+        Some("Bob Example: please take a look")
+    );
+}
+
+#[test]
+fn message_preview_marks_mentions_without_doubling_an_existing_at() {
+    let mut mentions = Mentions::new();
+    mentions.user_ids = BTreeSet::from([
+        OwnedUserId::try_from("@bob:example.test").unwrap(),
+        OwnedUserId::try_from("@alice:example.test").unwrap(),
+    ]);
+    let msgtype = MessageType::Text(TextMessageEventContent::html(
+        "Bob Example: ping @Alice\nsecond line",
+        "<a href=\"https://matrix.to/#/@bob:example.test\">Bob Example</a>: ping <a href=\"https://matrix.to/#/%40alice%3Aexample.test\">@Alice</a><br>second line",
+    ));
+
+    assert_eq!(
+        mention_marked_message_preview(
+            &msgtype,
+            "Bob Example: ping @Alice\nsecond line",
+            Some(&mentions)
+        ),
+        "@Bob Example: ping @Alice\nsecond line"
+    );
+    assert_eq!(
+        mention_marked_message_preview(&msgtype, "Bob Example: ping @Alice\nsecond line", None),
+        "Bob Example: ping @Alice\nsecond line"
     );
 }
 

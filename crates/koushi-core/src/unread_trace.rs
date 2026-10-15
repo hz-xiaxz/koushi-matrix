@@ -215,6 +215,7 @@ mod tests {
                 sender_label: Some("Private Sender".to_owned()),
                 sender_avatar: None,
                 preview: Some("private body".to_owned()),
+                message_text: None,
                 timestamp_ms: 42,
                 is_redacted: false,
             }),

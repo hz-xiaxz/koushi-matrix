@@ -1,4 +1,5 @@
-//! Real homeserver QA binary (Phase 8 — Milestone G).
+//! Retired real homeserver QA binary (Phase 8 — Milestone G).
+//! The entry point always exits before credentials are read or a login starts.
 //!
 //! Exercises the full real-homeserver QA scenario against a live Matrix
 //! homeserver (matrix.org) using approved test-account credentials stored in
@@ -73,23 +74,8 @@ use koushi_state::{
 };
 
 fn main() -> ExitCode {
-    #[cfg(not(any(debug_assertions, test)))]
-    {
-        eprintln!("real-homeserver-qa: this binary is only available in debug/test builds");
-        return ExitCode::FAILURE;
-    }
-
-    #[cfg(any(debug_assertions, test))]
-    match run() {
-        Ok(summary) => {
-            println!("{summary}");
-            ExitCode::SUCCESS
-        }
-        Err(error) => {
-            eprintln!("Real homeserver QA failed: {error}");
-            ExitCode::FAILURE
-        }
-    }
+    eprintln!("real-homeserver QA is retired; use local Tuwunel/Synapse QA");
+    ExitCode::FAILURE
 }
 
 // ---------------------------------------------------------------------------

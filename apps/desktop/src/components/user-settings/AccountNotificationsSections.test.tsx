@@ -23,7 +23,9 @@ function actions(): AccountNotificationActions {
     submitUia: vi.fn(),
     cancelEmail: vi.fn(),
     enableEmail: vi.fn(),
-    disableEmail: vi.fn()
+    disableEmail: vi.fn(),
+    addKeyword: vi.fn(),
+    removeKeyword: vi.fn()
   };
 }
 
@@ -40,6 +42,7 @@ function snapshot(overrides: Partial<AccountNotificationsSnapshot> = {}): Accoun
     email_management: "available",
     emails: [],
     unverified_email_pusher_count: 0,
+    keywords: [],
     ...overrides
   };
 }

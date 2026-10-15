@@ -266,7 +266,22 @@ function threadSnapshot(caption: string): DesktopSnapshot {
         settings: {
           values: {
             timeline: { auto_load_older_messages: false },
-            display: { code_block_wrap: false }
+            display: { code_block_wrap: false },
+            // #1427: the settings surface renders this device's delivery on the
+            // notifications page, so even a partial snapshot fixture has to carry it.
+            delivery: {
+              enabled: false,
+              direct_messages: true,
+              mentions: true,
+              keywords: true,
+              only_when_unfocused: true,
+              dwell_secs: 300,
+              min_interval_secs: 900,
+              prefix_chars: 0,
+              prefix_consent: null,
+              watched: [],
+              sinks: []
+            }
           }
         },
         profile: { ignored_user_ids: [], users: {} },

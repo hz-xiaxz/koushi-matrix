@@ -145,7 +145,7 @@ cache.
 
 ## Verify
 
-Before claiming a real-account or GUI gate is green, check
+Before claiming a GUI gate is green, check
 [`docs/qa/known-issues.md`](docs/qa/known-issues.md).
 
 For the complete Linux/WSL setup, release build, and WSLg window check, use

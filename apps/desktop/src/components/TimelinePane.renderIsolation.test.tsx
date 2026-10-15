@@ -479,6 +479,19 @@ function makeSnapshot(): DesktopSnapshot {
               send_read_receipts: true,
               send_typing_notifications: true
             },
+            delivery: {
+              enabled: false,
+              direct_messages: true,
+              mentions: true,
+              keywords: true,
+              only_when_unfocused: true,
+              dwell_secs: 300,
+              min_interval_secs: 900,
+              prefix_chars: 80,
+              prefix_consent: null,
+              watched: [],
+              sinks: []
+            },
             display: {
               code_block_wrap: true,
               hide_redacted: false,
@@ -618,6 +631,7 @@ function makeSnapshot(): DesktopSnapshot {
           pending_email: null,
           operation: { kind: "idle" }
         },
+        notification_delivery: { sinks: [], presets: [] },
         contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
         account_management_capabilities: { change_password: { kind: "unknown" } },
         soft_logout_reauth: { kind: "idle" },

@@ -94,7 +94,7 @@ qa-bin`; plain `cargo test` does not compile that binary.
 | `login_sync` | login and first sync | — |
 | `session_status` | session state projection | — |
 | `credential_health` | credential-store health probe under the debug/test file credential-store guard; must refuse to touch the OS keychain | — |
-| `account_notifications` | #981 shared push-rule categories and email pusher guards: a second session for the same account customises rules (mixed group rules, custom DM sound, `@room` disabled); two Core loads leave the server ruleset unchanged; a group toggle writes only group rules and re-reads OFF/ON; an unencrypted mention still notifies with group OFF (encrypted-room behaviour is covered by `koushi-sdk` unit tests); the email flow reports an unsupported server and never creates a pusher for an unverified address; requires `--core`, separate from `all`. The local homeservers do not send email, so address verification and digest delivery are not covered | `account_notifications_load=ok`, `account_notifications_no_write_on_open=ok`, `account_notifications_category_write=ok`, `account_notifications_overlap=ok`, `account_notifications_category_restore=ok`, `account_notifications_email_unsupported=ok`, `account_notifications_email_requires_verified=ok`, `account_notifications=ok` |
+| `account_notifications` | #981 shared push-rule categories and email pusher guards: a second session for the same account customises rules (mixed group rules, custom DM sound, `@room` disabled); two Core loads leave the server ruleset unchanged; a group toggle writes only group rules and re-reads OFF/ON; an unencrypted mention still notifies with group OFF (encrypted-room behaviour is covered by `koushi-sdk` unit tests); the email flow reports an unsupported server and never creates a pusher for an unverified address; the #1427 keyword write, driven through the app's own commands and read back raw from the server: the minted `content` rule carries the app rule-id shape, the synthetic pattern, and exactly `["notify", {"set_tweak": "highlight"}]` with no sound tweak, the app projects it ON, the same word in another case is refused as a duplicate and adds no second rule or id, an out-of-band disable still projects OFF and still refuses a same-pattern add, and removal clears both the server ruleset and the projection; requires `--core`, separate from `all`. The local homeservers do not send email, so address verification and digest delivery are not covered | `account_notifications_load=ok`, `account_notifications_no_write_on_open=ok`, `account_notifications_category_write=ok`, `account_notifications_overlap=ok`, `account_notifications_category_restore=ok`, `account_notifications_email_unsupported=ok`, `account_notifications_email_requires_verified=ok`, `account_notifications_keyword_actions=ok`, `account_notifications_keyword_projection=ok`, `account_notifications_keyword_duplicate=ok`, `account_notifications_keyword_disabled=ok`, `account_notifications_keyword_remove=ok`, `account_notifications=ok` |
 | `user_verification` | #1024 Verify user between two freshly bootstrapped users: both Tuwunel and Synapse use a new encrypted DM; QA waits for A's own room-list projection of B's membership and then for the account actor's post-send verification-progress event — the command-acceptance projection already reports `Requested`, so it cannot stand in for the send — and only then requires B to receive and accept the in-room request; both Cores show the same seven SAS emoji and confirm; A's refreshed contact security reports B verified by A, no longer offered, and B's device confirmation unchanged; requires `--core`, separate from `all`. An open product gap keeps this scenario intermittently red: B decodes the in-room request only when its megolm room key arrives first, because the key and the room event travel on independent Sliding Sync connections (the `all_rooms` list and the `encryption` connection) and the SDK feeds an in-room verification event to the crypto machine only on a successful first-pass decryption, replaying it nowhere else. The scenario must not wait for B's room list before A may send: doing so removes the interleaving of the failures, where the room and the request arrive in one response | `user_verification_dm_joined=ok` (new-DM servers), `user_verification_offered=ok`, `user_verification_a_observed_join=ok`, `user_verification_request_sent=ok`, `user_verification_incoming_request=ok`, `user_verification_accepted=ok`, `user_verification_sas_match=ok`, `user_verification_done=ok`, `user_verification_identity_verified=ok`, `user_verification=ok` |
 | `native_attention` | notification/badge projection | `notification_candidate=ok`, `badge_state=ok`, `suppress_focus=ok`, `clear_badge=ok` |
 | `e2ee_trust` | cross-signing bootstrap, key-backup upload, wrong-secret restore failure, passphrase restore on a second device, SAS verification, identity reset | token-only |
@@ -129,6 +129,7 @@ qa-bin`; plain `cargo test` does not compile that binary.
 | `hidden_state_acl` | one ordinary message followed by 125 real `m.room.server_acl` updates (#1110/#1117): every update stays a hidden item, a re-subscription replay of the Core-held timeline (more raw items than the 120-row live-edge capacity) still contains the message, and viewing only the message converges to a server-confirmed read boundary and a zero unread count; requires `--core`, separate from `all` | `hidden_state_acl=ok` |
 | `thread_late_joiner` | in a `joined`-history room, a member who joins after the thread root was sent sees a permanent not-visible root row (`NotFound`/`Forbidden`, never a retryable failure, exported with `is_hidden == false` so its reply chip stays reachable, #1141) and can still open the thread and read the reply sent after they joined | `thread_late_joiner_root_not_visible=ok`, `thread_late_joiner_thread_panel=ok`, `thread_late_joiner=ok` |
 | `idle_sync_gap_inspection` | #1392 idle-sync gap-inspection benchmark: several resident encrypted rooms with a large persisted history run an idle window; every `core.timeline_gap_inspection` record with `continuity=complete` must report `event_bodies_decoded = 0` (healthy rooms decode nothing; gapped rooms decode only their minimal boundary events, reported separately), a completed `live_edge` inspection must be observed, the zero-room committed-response amplifier is counted, and p50/p95 inspection durations are printed (tunable via `KOUSHI_QA_IDLE_INSPECTION_ROOMS`, `KOUSHI_QA_IDLE_INSPECTION_MESSAGES_PER_ROOM`, `KOUSHI_QA_IDLE_INSPECTION_WINDOW_MS`) | `idle_sync_gap_inspection=ok` |
+| `notification_delivery` | #1427 device-local notification delivery, with the provider replaced by a loopback HTTP stub this scenario owns (never a real provider) and the sink credential written through the app's own command: the channel off leaves an unread direct message alone; with the channel on and a one second dwell the direct message produces no request before the dwell and exactly one after, authorized by the credential and addressed to the lane's own stub, naming the room by the label the badge shows with its counts, and carrying no room id, event id, account id or message text; a read that lands inside the dwell cancels the send and the same room unread again sends after a fresh dwell; a second delivery inside `min_interval_secs` is held and released, not dropped, when the window reopens; a watched room sends while every category is off, and a room that joins a watched Space after the list was written sends too; the sink secret reaches neither the settings snapshot nor the diagnostics stream; changing the endpoint a stored credential was entered for takes that sink out of service and its credential out of the file store; with the plaintext prefix option on and a consent that covers the sink, its destination and its endpoint, the delivered body leads with the full text of the room's newest message, and with the option on but no consent, with the option off, and when the newest event is a file message whose caption is the marker (no readable text), the delivery still succeeds and the marker reaches no body and no idempotency key; changing the destination, or the endpoint, that a stored consent was given for drops the consent, so the next body carries no marker and on an endpoint change nothing is sent at all; and that marker reaches no serialized app-state snapshot, no settings file, no diagnostics stream, and no file the lane wrote. Requires `--core`, separate from `all` | `notification_delivery_file_credential_store=ok`, `notification_delivery_unfocused=ok`, `notification_delivery_channel_off=ok`, `notification_delivery_dwell=ok`, `notification_delivery_request=ok`, `notification_delivery_body=ok`, `notification_delivery_read_cancels=ok`, `notification_delivery_rearm=ok`, `notification_delivery_min_interval=ok`, `notification_delivery_watched_room=ok`, `notification_delivery_watched_space=ok`, `notification_delivery_secret_hygiene=ok`, `notification_delivery_secret_binding=ok`, `notification_delivery_prefix=ok`, `notification_delivery_prefix_no_consent=ok`, `notification_delivery_prefix_option_off=ok`, `notification_delivery_prefix_no_text=ok`, `notification_delivery_prefix_consent_cleared=ok`, `notification_delivery_prefix_endpoint_cleared=ok`, `notification_delivery_prefix_hygiene=ok`, `notification_delivery=ok` |
 
 Key-backup scope: `joined_room_restore=ok` is the #30 MVP proof token for
 recovery-secret import plus currently joined-room key hydration. It is not proof
@@ -352,70 +353,9 @@ it and rejects any byte or git-status difference.
 
 ## Real-account lanes
 
-Attended, credential-bearing, and destructive if misused. These consume device
-slots on a real homeserver.
-
-- `npm --prefix apps/desktop run qa:real-homeserver` — headless real-account
-  scenarios, writes `qa.log` synchronously before leak checks and exit handling.
-- `npm --prefix apps/desktop run qa:mac-gui` — macOS GUI smoke driven through
-  `System Events`.
-
-The macOS smoke opens Account Settings with **Cmd+,**, switches to App
-Settings, selects Appearance, and activates the semantic `Compact`, `Default`,
-and `Comfortable` buttons. It then resizes
-`window 1` through System Events' native `set size` command and restores the
-original size best-effort. After each transition it polls the private-data-free
-Rust receipt title token:
-`viewport=aligned viewport_generation=N viewport_parent=true
-viewport_webview=true viewport_js=true viewport_root=true`. The generation and
-alignment values come from the Rust receipt after native repair; the harness
-never computes expected geometry or uses fixed window coordinates. The
-`viewport_decision` token records whether that receipt repaired the frame.
-
-Safety rules:
-
-- Pass credentials through `KOUSHI_QA_LOGIN_PIPE`, which contains only a FIFO
-  path in the environment
-  ([engineering rules](../policies/engineering-rules.md#secrets-and-private-data) Secrets 3). Never drive
-  real-account login by fixed window-relative coordinates.
-- Real-login GUI smoke must set `KOUSHI_SKIP_KEYCHAIN_PERSISTENCE=1`.
-  `KOUSHI_SKIP_SAVED_SESSIONS=1` only prevents saved-session reads; a successful
-  login can still prompt macOS Keychain during session persistence or encrypted
-  SDK store key creation.
-- First-run GUI smoke sets `KOUSHI_SKIP_SAVED_SESSIONS=1` to avoid Keychain
-  reads while restoring saved sessions. Real-login smoke additionally sets
-  `KOUSHI_SKIP_KEYCHAIN_PERSISTENCE=1` and `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR`.
-- Filter the child environment before spawning `npm run tauri dev`
-  ([engineering rules](../policies/engineering-rules.md#secrets-and-private-data) Secrets 4), and attempt logout cleanup after any
-  post-login failure unless `--keep-session` was requested
-  ([QA Gates And Cleanup](../../REPOSITORY_RULES.md#qa-gates-and-cleanup));
-  otherwise a failed run leaves a live smoke device on the homeserver.
-- Avoid repeated destructive real-account login cycles while debugging
-  automation. Prefer preserving the same running Tauri session while iterating
-  on panel/menu checks; restart only when the script or Tauri capability
-  changes require it.
-- `--qa-profile=<name>` is the opt-in path for persistent restore/sync QA. It
-  preserves the SDK SQLite store, cache, search index, saved session, and
-  incremental sync state under ignored
-  `.local-secrets/qa-profiles/<name>/data`. Profile names must be synthetic and
-  non-secret. It must set `KOUSHI_QA_FILE_CREDENTIAL_STORE_DIR` so unattended
-  runs do not prompt macOS Keychain; that env-controlled file credential store
-  stays behind a debug/test-only compile-time gate and release builds must
-  ignore it in favour of the OS credential store. A Keychain prompt during a
-  profile run is an automation failure — verify the env var is in `--child-env`.
-- `--allow-private-screenshots` is only for explicitly approved test accounts
-  whose post-login room and message data may be written to ignored artifacts.
-- `--allow-empty-timeline` is for sparse test accounts when the goal is
-  validating login, room-list sync, and GUI panel automation. Keep the strict
-  `timeline_items > 0` release signal for normal real-account smoke.
-
-Prompt order differs between the two entry points:
-
-- `password-login-smoke`: homeserver, username, device name, password.
-- `qa:mac-gui -- --real-login-from-stdin`: homeserver, username, password,
-  device name, then an optional recovery code. Send all five newline-terminated
-  lines; leave the fifth empty to accept `needsRecovery` as a post-login sync QA
-  state, and provide it only when verifying recovery completion to `ready`.
+Retired. Automated QA must not log in to matrix.org or another external
+homeserver, including through the macOS or Linux GUI smoke runners. Use
+`qa:headless-local -- --server=both` and the disposable local GUI lanes.
 
 ## macOS notification activation smoke
 
@@ -472,27 +412,9 @@ room/event navigation, highlight) remains an attended check on a packaged app.
 
 ## Startup latency observability
 
-Read-only timing lane for issue #123 Phase A. Full operator details are in
-[docs/qa/startup-latency-observability.md](../qa/startup-latency-observability.md);
-the implementation plan is
-[docs/superpowers/plans/2026-06-23-startup-latency-observability-phase-a.md](../superpowers/plans/2026-06-23-startup-latency-observability-phase-a.md).
-
-```bash
-npm --prefix apps/desktop run qa:real-homeserver -- --scenario=startup_latency
-```
-
-- **Run 1 performs a real login** and consumes one device slot on the
-  homeserver. This requires explicit maintainer GO before the first invocation.
-  Subsequent runs restore from the SQLite store without a new login.
-- The runner performs two passes against a persistent profile dir
-  (`.local-secrets/real-account-qa/profile/startup_latency/`, git-ignored): run 1
-  logs in and populates the event cache; run 2 does a cold restore and is the
-  measured evidence run.
-- Set `KOUSHI_STARTUP_LAT_TEARDOWN=1` to log out and remove the QA device at the
-  end of a run. Without it the session is kept so run 2+ can restore.
-- Both runs emit `startup_lat phase=… ms=N` macro-phase tokens and, when
-  `KOUSHI_STARTUP_TRACE=1` (set by the runner), `koushi.startup phase=…` and
-  `phase=origin origin=cache|network|sync` sub-phase tokens.
+The former real-server startup-latency lane is retired. Local startup timing
+should use disposable homeservers and synthetic accounts; historical details
+remain in [the observability note](../qa/startup-latency-observability.md).
 
 ## Windows updater packaging validation
 

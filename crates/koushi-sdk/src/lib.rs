@@ -5,10 +5,13 @@ mod account_notifications;
 mod auth;
 
 pub use account_notifications::{
-    AddNotificationEmailError, EMAIL_PUSHER_APP_ID, RuleActions, RuleWrite, add_notification_email,
+    AddNotificationEmailError, EMAIL_PUSHER_APP_ID, KEYWORD_PATTERN_MAX_CHARS,
+    KEYWORD_RULE_ID_MAX_CHARS, KEYWORD_RULE_ID_PREFIX, KEYWORD_RULES_MAX, KeywordRule,
+    MatrixKeywordRuleError, RuleActions, RuleWrite, add_keyword_rule, add_notification_email,
     build_account_notifications_snapshot, disable_email_notifications, email_notifications_active,
-    encrypted_event_push_enabled, fetch_push_ruleset, load_account_notifications,
-    plan_account_push_writes, plan_category_writes, request_notification_email_token,
+    encrypted_event_push_enabled, fetch_keyword_rules, fetch_push_ruleset,
+    keyword_rules_from_ruleset, load_account_notifications, plan_account_push_writes,
+    plan_category_writes, plan_keyword_rule, remove_keyword_rule, request_notification_email_token,
     set_account_push_enabled, set_email_notification_target, set_notification_category,
     summarize_categories,
 };

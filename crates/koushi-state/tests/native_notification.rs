@@ -62,6 +62,7 @@ fn latest_event(event_id: &str, sender: &str, preview: &str) -> RoomLatestEventS
         sender_label: Some(sender.to_owned()),
         sender_avatar: None,
         preview: Some(preview.to_owned()),
+        message_text: None,
         timestamp_ms: 42,
         is_redacted: false,
     }

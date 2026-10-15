@@ -1147,7 +1147,6 @@ export function InviteTargetsDialog({
   const isCompleted = workflow.operation.kind === "completed";
   const canSubmit = workflow.selected_targets.length > 0 && !isBusy && !isPending;
   const historyPolicy = workflow.history_policy;
-  const currentHistoryVisibility = historyPolicy?.current_visibility ?? "joined";
   const selectedScope = workflow.selected_scope ?? workflow.scope_plan?.default_scope ?? {
     kind: "roomOnly" as const
   };
@@ -1168,7 +1167,7 @@ export function InviteTargetsDialog({
           }
         }}
       >
-        <div className="dialog-title">{title}</div>
+        <div className="dialog-title invite-dialog-header">{title}</div>
         <div className="invite-dialog-body">
         {workflow.operation.kind === "completed" && workflow.operation.notice ? (
           <div className="invite-target-notice" role="status">
@@ -1235,54 +1234,30 @@ export function InviteTargetsDialog({
             </button>
           ) : null}
         </div>
-        <section className="invite-history-policy" aria-label={t("dialog.inviteHistory")}>
-          <h3>{t("dialog.inviteHistory")}</h3>
-          <p className="profile-settings-hint">{t("dialog.inviteHistoryCurrent")}</p>
-          <div className="invite-history-options" role="list">
-            {(["shared", "invited", "joined"] as const).map((visibility) => (
-              <div
-                className="invite-history-option"
-                data-current={currentHistoryVisibility === visibility ? "true" : "false"}
-                key={visibility}
-                role="listitem"
-              >
-                <strong>{inviteHistoryVisibilityLabel(visibility)}</strong>
-                {currentHistoryVisibility === visibility ? (
-                  <span>{t("dialog.inviteHistoryCurrentBadge")}</span>
-                ) : null}
-                <small>{inviteHistoryVisibilityDescription(visibility)}</small>
-              </div>
-            ))}
+        {historyPolicy ? (
+          <section className="invite-history-summary" aria-label={t("dialog.inviteHistory")}>
+            <h3>{t("dialog.inviteHistory")}</h3>
+            <p>{inviteHistorySummary(historyPolicy.current_visibility)}</p>
+            {historyPolicy.encrypted && inviteHistoryIncludesEarlier(historyPolicy.current_visibility) ? (
+              <p className="profile-settings-hint">{t("dialog.inviteHistoryEncryptedShared")}</p>
+            ) : null}
+            {historyPolicy.can_edit && onOpenRoomInfo ? (
+              <button className="inline-link-button" type="button" onClick={onOpenRoomInfo}>
+                {t("dialog.inviteHistoryChange")}
+              </button>
+            ) : null}
+          </section>
+        ) : null}
+        {historyPolicy?.readiness === "recoveryRequired" ? (
+          <div className="settings-notice" role="alert">
+            <span>{t("dialog.inviteHistoryRecovery")}</span>
+            {onOpenRecovery ? (
+              <button className="inline-link-button" type="button" onClick={onOpenRecovery}>
+                {t("settings.openRecovery")}
+              </button>
+            ) : null}
           </div>
-          {currentHistoryVisibility === "worldReadable" ? (
-            <p className="settings-notice" role="note">
-              {t("dialog.inviteHistoryWorldReadableWarning")}
-            </p>
-          ) : null}
-          {historyPolicy?.encrypted && currentHistoryVisibility === "shared" ? (
-            <p className="settings-notice" role="note">
-              {t("dialog.inviteHistoryEncryptedShared")}
-            </p>
-          ) : null}
-          <p className="settings-notice" role="note">
-            {t("dialog.inviteHistoryNonRetroactive")}
-          </p>
-          {historyPolicy?.readiness === "recoveryRequired" ? (
-            <div className="settings-notice" role="alert">
-              <span>{t("dialog.inviteHistoryRecovery")}</span>
-              {onOpenRecovery ? (
-                <button className="inline-link-button" type="button" onClick={onOpenRecovery}>
-                  {t("settings.openRecovery")}
-                </button>
-              ) : null}
-            </div>
-          ) : null}
-          {onOpenRoomInfo ? (
-            <button className="inline-link-button" type="button" onClick={onOpenRoomInfo}>
-              {t("dialog.openRoomInfo")}
-            </button>
-          ) : null}
-        </section>
+        ) : null}
         {workflow.scope_plan ? (
           <div className="invite-scope-options" aria-label={t("dialog.inviteScope")}>
             {workflow.scope_plan.options.map((option) => {
@@ -1302,6 +1277,7 @@ export function InviteTargetsDialog({
           </div>
         ) : null}
         </div>
+        <div className="invite-dialog-footer">
         <div className="dialog-actions">
           <button
             className="dialog-button"
@@ -1320,6 +1296,7 @@ export function InviteTargetsDialog({
             {t("action.invite")}
           </button>
         </div>
+        </div>
       </ImeSafeForm>
     </NativeModal>
   );
@@ -1329,28 +1306,20 @@ function inviteScopeKey(scope: InviteScopeSelection): string {
   return scope.kind === "roomOnly" ? "roomOnly" : `parent:${scope.space_id}`;
 }
 
-function inviteHistoryVisibilityLabel(visibility: "shared" | "invited" | "joined"): string {
+function inviteHistorySummary(visibility: RoomHistoryVisibility): string {
   switch (visibility) {
     case "shared":
-      return t("room.historyShared");
+    case "worldReadable":
+      return t("dialog.inviteHistoryShared");
     case "invited":
-      return t("room.historyInvited");
+      return t("dialog.inviteHistoryInvited");
     case "joined":
-      return t("room.historyJoined");
+      return t("dialog.inviteHistoryJoined");
   }
 }
 
-function inviteHistoryVisibilityDescription(
-  visibility: "shared" | "invited" | "joined"
-): string {
-  switch (visibility) {
-    case "shared":
-      return t("room.historySharedDescription");
-    case "invited":
-      return t("room.historyInvitedDescription");
-    case "joined":
-      return t("room.historyJoinedDescription");
-  }
+function inviteHistoryIncludesEarlier(visibility: RoomHistoryVisibility): boolean {
+  return visibility === "shared" || visibility === "worldReadable";
 }
 
 // ===== ReportReasonDialog =====

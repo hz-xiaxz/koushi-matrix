@@ -114,6 +114,8 @@ mod scenario_history_export;
 mod scenario_identity;
 #[path = "headless_core_qa/scenarios/idle_sync_gap_inspection.rs"]
 mod scenario_idle_sync_gap_inspection;
+#[path = "headless_core_qa/scenarios/notification_delivery.rs"]
+mod scenario_notification_delivery;
 #[path = "headless_core_qa/scenarios/read_state.rs"]
 mod scenario_read_state;
 #[path = "headless_core_qa/scenarios/rooms.rs"]

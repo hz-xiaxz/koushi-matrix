@@ -10,6 +10,9 @@ koushi-protocol = { path = "../koushi-protocol" }
 koushi-sdk = { path = "../koushi-sdk" }
 koushi-key = { path = "../koushi-key" }
 koushi-media = { path = "../koushi-media" }
+# #1427: the device-local senders (an HTTPS provider and SMTP relays). A leaf crate that
+# owns no product state; the core is its only consumer.
+koushi-notify = { path = "../koushi-notify" }
 jiff = "0.2"
 koushi-search = { path = "../koushi-search" }
 koushi-state = { path = "../koushi-state" }

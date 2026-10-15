@@ -93,6 +93,20 @@ impl std::fmt::Debug for NotificationEmailAddress {
     }
 }
 
+/// One of the account's own `kind: content` push rules (#1427), as the keyword
+/// editor shows it.
+///
+/// `enabled` is a server fact and not a local preference: another client can
+/// turn a rule off, and a rule that is off is still on the account, still
+/// refuses a same-pattern add, and still has to be removable, so it is listed
+/// as off rather than hidden.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NotificationKeywordRuleState {
+    pub rule_id: String,
+    pub pattern: String,
+    pub enabled: bool,
+}
+
 /// One authoritative read of the account's notification settings.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct AccountNotificationsSnapshot {
@@ -116,6 +130,13 @@ pub struct AccountNotificationsSnapshot {
     /// active delivery, so the email switch is not shown as OFF while any
     /// remain, and turning email notifications off removes them.
     pub unverified_email_pusher_count: u32,
+    /// The account's own `kind: content` rules, in the server's rule order.
+    ///
+    /// Server state, never a local edit: the list is replaced by each
+    /// authoritative read and is never appended to or removed from because the
+    /// user asked for it. Loading or opening the screen still writes nothing.
+    #[serde(default)]
+    pub keywords: Vec<NotificationKeywordRuleState>,
 }
 
 impl AccountNotificationsSnapshot {
@@ -176,6 +197,23 @@ pub enum AccountNotificationsFailureKind {
     Network,
     Server,
     SessionRequired,
+    /// The keyword input was empty after trimming, or carried control
+    /// characters that cannot be typed into the single-line field and would
+    /// never match a `content.body` (#1427).
+    EmptyPattern,
+    /// The keyword pattern is longer than [`MAX_NOTIFICATION_KEYWORD_CHARS`].
+    PatternTooLong,
+    /// A `content` rule for the same pattern already exists on the account; the
+    /// comparison is case-insensitive, matching Matrix, and includes a rule
+    /// another client turned off. It also covers the astronomically unlikely
+    /// rule-id collision with a different pattern, because the account does hold
+    /// something at that name.
+    Duplicate,
+    /// The account already holds [`MAX_NOTIFICATION_KEYWORDS`] keyword rules.
+    LimitReached,
+    /// The write names a keyword rule the account does not have; a race with
+    /// another client removed it between the load and the remove.
+    UnknownRule,
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -194,7 +232,7 @@ pub enum AccountNotificationsLoadState {
     },
 }
 
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum AccountNotificationsOperation {
     SetCategory {
@@ -209,6 +247,15 @@ pub enum AccountNotificationsOperation {
     ConfirmEmail,
     EnableEmailNotifications,
     DisableEmailNotifications,
+    /// Write one keyword as a `content` rule that notifies and highlights.
+    AddNotificationKeyword {
+        pattern: String,
+    },
+    /// Delete one keyword's `content` rule by the id the server gave it.
+    RemoveNotificationKeyword {
+        #[serde(rename = "ruleId")]
+        rule_id: String,
+    },
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
@@ -297,61 +344,72 @@ pub fn normalize_notification_email(input: &str) -> Option<String> {
     Some(trimmed.to_lowercase())
 }
 
-#[cfg(test)]
-mod tests {
-    use super::*;
+/// Maximum number of keyword rules one account may hold (#1427). Mirrors the
+/// SDK's `KEYWORD_RULES_MAX`, which caps the projection; this bound refuses an
+/// add that would exceed it rather than silently trimming the newest rule.
+pub const MAX_NOTIFICATION_KEYWORDS: usize = 64;
 
-    #[test]
-    fn normalize_accepts_plain_addresses_and_lowercases() {
-        assert_eq!(
-            normalize_notification_email("  Alice@Example.Invalid "),
-            Some("alice@example.invalid".to_owned())
-        );
-    }
+/// Maximum number of characters in one keyword pattern, after trimming
+/// (#1427). Mirrors the SDK's `KEYWORD_PATTERN_MAX_CHARS`.
+pub const MAX_NOTIFICATION_KEYWORD_CHARS: usize = 64;
 
-    #[test]
-    fn normalize_rejects_malformed_addresses() {
-        for input in [
-            "",
-            "alice",
-            "@example.invalid",
-            "alice@",
-            "alice@localhost",
-            "a b@example.invalid",
-            "alice@@example.invalid",
-            "alice@.example",
-            "alice@example.",
-        ] {
-            assert_eq!(normalize_notification_email(input), None, "{input:?}");
-        }
-        let too_long = format!("{}@example.invalid", "a".repeat(260));
-        assert_eq!(normalize_notification_email(&too_long), None);
+/// Normalize and validate a keyword pattern before anything leaves the client.
+///
+/// The product-facing refusal: trim, reject empty, reject control characters,
+/// reject over [`MAX_NOTIFICATION_KEYWORD_CHARS`], reject a pattern that matches
+/// an existing rule without regard to case (Matrix matches `content` patterns
+/// case-insensitively, so a second rule could never fire), and reject an add
+/// that would exceed [`MAX_NOTIFICATION_KEYWORDS`]. `existing` is the last
+/// authoritative rule list, disabled rules included, so a local refusal costs no
+/// request; the homeserver stays the authority for the write itself, which is
+/// why `koushi-sdk`'s `plan_keyword_rule` repeats the pattern and duplicate
+/// checks on the write path and maps to the same failure kinds.
+pub fn normalize_notification_keyword(
+    input: &str,
+    existing: &[NotificationKeywordRuleState],
+) -> Result<String, AccountNotificationsFailureKind> {
+    let trimmed = input.trim();
+    if trimmed.is_empty() {
+        return Err(AccountNotificationsFailureKind::EmptyPattern);
     }
-
-    #[test]
-    fn debug_redacts_addresses() {
-        let snapshot = AccountNotificationsSnapshot {
-            account_push_enabled: true,
-            encrypted_event_push: false,
-            categories: NotificationCategoryStates {
-                direct_messages: NotificationCategoryState::On,
-                group_messages: NotificationCategoryState::Off,
-                mentions_and_replies: NotificationCategoryState::Mixed,
-                invites: NotificationCategoryState::On,
-            },
-            email_management: NotificationEmailManagement::Available,
-            emails: vec![NotificationEmailAddress {
-                address: "secret@example.invalid".to_owned(),
-                notifications_active: true,
-            }],
-            unverified_email_pusher_count: 0,
-        };
-        let pending = PendingNotificationEmail {
-            address: "secret@example.invalid".to_owned(),
-            resend_count: 1,
-        };
-        let rendered = format!("{snapshot:?} {pending:?}");
-        assert!(!rendered.contains("secret@"), "{rendered}");
-        assert!(rendered.contains("active_email_count: 1"));
+    // A control character cannot be typed into the shared single-line field and
+    // would make a pattern that can never match a `content.body`; the frozen
+    // failure union has no invalid-character member, so a pattern that is only
+    // usable if it is stripped reads as an empty one.
+    if trimmed.chars().any(|character| character.is_control()) {
+        return Err(AccountNotificationsFailureKind::EmptyPattern);
     }
+    if trimmed.chars().count() > MAX_NOTIFICATION_KEYWORD_CHARS {
+        return Err(AccountNotificationsFailureKind::PatternTooLong);
+    }
+    if existing
+        .iter()
+        .any(|rule| rule.pattern.eq_ignore_ascii_case(trimmed))
+    {
+        return Err(AccountNotificationsFailureKind::Duplicate);
+    }
+    // A disabled rule is still on the account, so it counts toward the cap.
+    if existing.len() >= MAX_NOTIFICATION_KEYWORDS {
+        return Err(AccountNotificationsFailureKind::LimitReached);
+    }
+    Ok(trimmed.to_owned())
 }
+
+/// Whether a removal may name `rule_id`, given the last authoritative list.
+///
+/// A remove names a rule id that exists in the loaded list; an unknown id is
+/// refused without a delete request, because the account would answer with a
+/// 404 and the user cannot act on it.
+pub fn normalize_notification_keyword_removal(
+    rule_id: &str,
+    existing: &[NotificationKeywordRuleState],
+) -> Result<String, AccountNotificationsFailureKind> {
+    let trimmed = rule_id.trim();
+    if trimmed.is_empty() || existing.iter().all(|rule| rule.rule_id != trimmed) {
+        return Err(AccountNotificationsFailureKind::UnknownRule);
+    }
+    Ok(trimmed.to_owned())
+}
+
+#[cfg(test)]
+mod tests;

@@ -988,10 +988,14 @@ test("account notification settings load read-only and dispatch typed commands",
   await page.getByRole("tab", { name: "Notifications", exact: true }).click();
 
   await expect.poll(() => invocationCount(page, "load_account_notifications")).toBe(1);
-  const group = page.getByRole("switch", { name: "Group messages" });
+  // The notifications page shows this device first and the homeserver behind a tab, and the
+  // two panels name the same triggers, so the server-owned switches are scoped to their panel.
+  await page.getByRole("tab", { name: "Homeserver", exact: true }).click();
+  const serverPanel = page.getByTestId("notification-source-panel-homeserver");
+  const group = serverPanel.getByRole("switch", { name: "Group messages" });
   await expect(group).toHaveAttribute("data-state", "mixed");
   await expect(group).toHaveAttribute("aria-checked", "false");
-  await expect(page.getByRole("switch", { name: "Direct messages" })).toHaveAttribute(
+  await expect(serverPanel.getByRole("switch", { name: "Direct messages" })).toHaveAttribute(
     "aria-checked",
     "true"
   );
@@ -1012,7 +1016,7 @@ test("account notification settings load read-only and dispatch typed commands",
     await page.evaluate(() => window.__harness.invocationsOf("set_notification_category")[0]?.args)
   ).toEqual({ category: "groupMessages", enabled: true });
 
-  const email = page.getByRole("switch", { name: "Email notifications" });
+  const email = serverPanel.getByRole("switch", { name: "Email notifications" });
   await expect(email).toHaveAttribute("aria-checked", "false");
   await email.click();
   await expect.poll(() => invocationCount(page, "enable_email_notifications")).toBe(1);

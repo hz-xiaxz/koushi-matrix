@@ -6430,20 +6430,35 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
 }
 
 .invite-target-dialog {
-  /* #488: a true foreground modal — the box is bounded by the viewport and
-     only the body scrolls, so the title and Cancel / Send invite actions stay
-     reachable at every window height. vh fallback for engines without dvh. */
-  display: flex;
-  flex-direction: column;
+  /* #488/#1418: a true foreground modal bounded by the viewport. A fixed
+     header, a scrolling body and a bordered footer keep the title and
+     Cancel / Send invite outside the scroll area at every window height.
+     vh fallback for engines without dvh. */
+  display: grid;
+  grid-template-rows: auto minmax(0, 1fr) auto;
+  gap: 0;
   width: min(460px, calc(100vw - 48px));
   max-height: calc(100dvh - 48px - var(--native-titlebar-safe-block));
+  padding: 0;
+  overflow: hidden;
+}
+
+.invite-dialog-header {
+  padding: 18px 20px 12px;
 }
 
 .invite-dialog-body {
   display: grid;
+  align-content: start;
   gap: 14px;
   min-height: 0;
+  padding: 2px 20px 16px;
   overflow-y: auto;
+}
+
+.invite-dialog-footer {
+  padding: 12px 20px 16px;
+  border-top: 1px solid var(--line);
 }
 
 .invite-target-notice {
@@ -6495,46 +6510,25 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
 }
 
 .invite-target-candidates,
-.invite-scope-options,
-.invite-history-options {
+.invite-scope-options {
   display: grid;
   gap: 6px;
 }
 
-.invite-history-policy {
+.invite-history-summary {
   display: grid;
-  gap: 6px;
-  padding: 10px;
-  border: 1px solid var(--line);
-  border-radius: 8px;
-  background: color-mix(in srgb, var(--surface) 86%, var(--brand-soft));
+  gap: 4px;
+  font-size: 13px;
+  line-height: 1.4;
 }
 
-.invite-history-policy h3 {
+.invite-history-summary h3 {
   margin: 0;
   font-size: 13px;
 }
 
-.invite-history-option {
-  display: grid;
-  grid-template-columns: minmax(0, 1fr) auto;
-  gap: 2px 8px;
-  padding: 7px 8px;
-  border: 1px solid var(--line);
-  border-radius: 6px;
-  background: var(--surface);
-  font-size: 12px;
-}
-
-.invite-history-option[data-current="true"] {
-  border-color: var(--brand);
-  background: var(--brand-soft);
-}
-
-.invite-history-option small {
-  grid-column: 1 / -1;
-  color: var(--text-muted);
-  line-height: 1.35;
+.invite-history-summary p {
+  margin: 0;
 }
 
 .inline-link-button {
@@ -8074,6 +8068,13 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
 .settings-email-group {
   display: grid;
   gap: 6px;
+}
+
+/* #1427 keyword rules: the account projection beside the device switch that
+   delivers for it. */
+.settings-keyword-editor {
+  display: grid;
+  gap: 8px;
 }
 
 .settings-disclosure summary {
@@ -10137,6 +10138,33 @@ kbd {
 .settings-category { display: grid; gap: 20px; }
 .settings-category[hidden] { display: none; }
 .settings-category > .settings-section:first-child { margin-block-start: 0; padding-block-start: 0; }
+/* #1427: the nested source tabs on the Notifications page. A horizontal pair, so the
+   selected one is a filled segment rather than the category nav's full-width row. */
+.settings-subtab-list {
+  display: flex;
+  gap: 4px;
+  margin: 0 0 12px;
+  padding: 4px;
+  border: 1px solid var(--line);
+  border-radius: 10px;
+  background: var(--surface);
+}
+.settings-subtab {
+  flex: 1 1 auto;
+  border: 0;
+  border-radius: 7px;
+  padding: 8px 12px;
+  color: var(--text-muted);
+  font-size: 13px;
+  font-weight: 700;
+  background: transparent;
+  cursor: pointer;
+  overflow-wrap: anywhere;
+}
+.settings-subtab[aria-selected="true"] { color: var(--brand); background: var(--brand-weak); }
+.settings-subtab:hover { background: var(--surface-hover); }
+.settings-subtab:focus-visible { outline: 2px solid var(--brand); outline-offset: 1px; }
+[role="tabpanel"][hidden] { display: none; }
 .help-modal { inline-size: 540px; }
 .help-content { padding: 20px; overflow-wrap: anywhere; }
 .help-content p:first-child { margin-block-start: 0; }

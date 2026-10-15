@@ -1623,6 +1623,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             sender_label: Some("Other Fixture".to_owned()),
             sender_avatar: None,
             preview: Some("Fixture latest message".to_owned()),
+            message_text: None,
             timestamp_ms: 1_000_000,
             is_redacted: false,
         }),
@@ -1696,6 +1697,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             sender_label: Some("Other Fixture".to_owned()),
             sender_avatar: None,
             preview: None,
+            message_text: None,
             timestamp_ms: 900_000,
             is_redacted: true,
         }),
@@ -1821,6 +1823,20 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
                 notifications_active: true,
             }],
             unverified_email_pusher_count: 0,
+            // #1427: one enabled rule and one another client turned off, so the
+            // golden pins `enabled` as a server fact rather than a local flag.
+            keywords: vec![
+                koushi_state::NotificationKeywordRuleState {
+                    rule_id: "org.matrix.desktop.notify.keyword.0123456789abcdef".to_owned(),
+                    pattern: "fixture-keyword".to_owned(),
+                    enabled: true,
+                },
+                koushi_state::NotificationKeywordRuleState {
+                    rule_id: "org.matrix.desktop.notify.keyword.fedcba9876543210".to_owned(),
+                    pattern: "fixture-disabled".to_owned(),
+                    enabled: false,
+                },
+            ],
         }),
         pending_email: Some(koushi_state::PendingNotificationEmail {
             address: "pending@example.invalid".to_owned(),

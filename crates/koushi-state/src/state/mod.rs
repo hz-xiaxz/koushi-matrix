@@ -25,6 +25,7 @@ mod local_encryption;
 mod mention;
 mod native_attention;
 mod navigation;
+mod notification_delivery;
 mod profile;
 mod room;
 mod room_activity;
@@ -67,9 +68,11 @@ pub use contact_security::{
 pub use account_notifications::{
     AccountNotificationsFailureKind, AccountNotificationsLoadState, AccountNotificationsOperation,
     AccountNotificationsOperationState, AccountNotificationsSnapshot, AccountNotificationsState,
-    MAX_NOTIFICATION_EMAIL_LEN, NotificationCategory, NotificationCategoryState,
-    NotificationCategoryStates, NotificationEmailAddress, NotificationEmailManagement,
-    PendingNotificationEmail, normalize_notification_email,
+    MAX_NOTIFICATION_EMAIL_LEN, MAX_NOTIFICATION_KEYWORD_CHARS, MAX_NOTIFICATION_KEYWORDS,
+    NotificationCategory, NotificationCategoryState, NotificationCategoryStates,
+    NotificationEmailAddress, NotificationEmailManagement, NotificationKeywordRuleState,
+    PendingNotificationEmail, normalize_notification_email, normalize_notification_keyword,
+    normalize_notification_keyword_removal,
 };
 
 // ── Re-exports: sync ────────────────────────────────────────────────────────
@@ -125,6 +128,16 @@ pub use settings::{
     SidebarSettings, TextDirectionPreference, ThemePreference, ThreadListOrder, TimelineSettings,
     TimelineThreadRootOrder, TypographySettings, UpdatesSettings, WindowSettings,
     sidebar_scope_key,
+};
+
+// ── Re-exports: notification delivery ───────────────────────────────────────
+pub use notification_delivery::{
+    MAX_NOTIFICATION_DELIVERY_DWELL_SECS, MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
+    MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS, MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS,
+    NotificationDeliveryOutcomeState, NotificationDeliveryPrefixConsent,
+    NotificationDeliveryPresetState, NotificationDeliverySettings, NotificationDeliverySinkState,
+    NotificationDeliveryState, NotificationDeliveryTarget, NotificationSinkConfig,
+    NotificationSinkSettings, SmtpTls, bounded_notification_delivery_prefix_source,
 };
 
 // ── Re-exports: profile ─────────────────────────────────────────────────────
@@ -241,8 +254,9 @@ pub use native_attention::{
     NativeAttentionObservationKind, NativeAttentionProjection, NativeAttentionProjectionInput,
     NativeAttentionSoundOutcome, NativeAttentionState, NativeAttentionSummary,
     NativeAttentionSuppressionReason, NativeNotificationPayload, NativeNotificationTarget,
-    native_attention_capabilities_for_platform, native_attention_projection_from_rooms,
-    native_attention_state_from_rooms,
+    RoomAttentionCandidate, attention_room_candidates, attention_room_candidates_for_state,
+    attention_room_notification_modes, native_attention_capabilities_for_platform,
+    native_attention_projection_from_rooms, native_attention_state_from_rooms,
 };
 
 // ── Re-exports: cjk ─────────────────────────────────────────────────────────
@@ -384,6 +398,12 @@ pub struct AppState {
     #[serde(default)]
     pub qr_login: QrLoginState,
     pub settings: SettingsState,
+    /// #1427: the device-local notification delivery channel's runtime facts - which
+    /// sinks hold a credential and how their last send ended. App scope, never
+    /// persisted, and never a secret value. The channel's settings live in
+    /// `settings.values.delivery`.
+    #[serde(default)]
+    pub notification_delivery: NotificationDeliveryState,
     #[serde(default)]
     pub link_preview_settings: LinkPreviewSettingsState,
     #[serde(default)]
@@ -514,6 +534,7 @@ impl Default for AppState {
             soft_logout_reauth: SoftLogoutReauthState::Idle,
             qr_login: QrLoginState::Idle,
             settings: SettingsState::default(),
+            notification_delivery: NotificationDeliveryState::default(),
             link_preview_settings: LinkPreviewSettingsState::default(),
             room_preferences: RoomPreferencesState::default(),
             room_activity: RoomActivityState::default(),

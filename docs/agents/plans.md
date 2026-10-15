@@ -19,15 +19,26 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
+[#1427 device-local notification delivery](../plans/2026-10-14-issue1427-local-notification-email.md)
+makes the app deliver its own notifications and the default email path, because the
+server-owned `kind: email` pusher cannot work on a homeserver such as matrix.org: an
+app-scoped sink list (a mail provider such as Resend or a QQ Mail SMTP preset, later a
+WeChat relay) with every sink secret in the credential store, triggers taken from the
+persistent unread state after a configurable dwell, an interval-coalesced in-memory
+queue with no durable outbox, and a default-off plaintext prefix behind a
+provider-agnostic consent. The server pusher surface keeps its own meaning.
+
 [#1396 avatar thumbnails](../plans/2026-10-13-issue1396-avatar-thumbnails.md)
 requests a homeserver thumbnail sized from the 40 px avatar slot, resizes the
-fallback locally to the same long edge, keys the cache by thumbnail identity,
-retires a released source's bytes, and splits the avatar and link-preview
-budgets (8 MiB vs 32 MiB). Records the open decisions and the measured output
+fallback locally to the same long edge, keys the cache by thumbnail identity, and
+splits the avatar and link-preview budgets (8 MiB vs 32 MiB). It retired a
+released source's bytes; [#1432](../plans/2026-10-14-issue1432-avatar-source-retirement.md)
+removed the scoped-demand half of that retirement and records that a source
+the renderer can still show is never left announced as Ready. Records the open
+decisions and the measured output
 size.
 
-[#1394 resident timeline-set diagnostics](../plans/2026-10-13-issue1394-resident-timeline-diagnostics.md)
-lands the export-time counters the memory measurement record asked for before any
+[#1394 resident timeline-set diagnostics](../plans/2026-10-13-issue1394-resident-timeline-diagnostics.md)lands the export-time counters the memory measurement record asked for before any
 retention bound: resident Room/actor counts and a canonical-depth proxy, as
 `core.timeline_residency` rows next to `core.search_retention`. Observation only;
 the unbounded timeline-actor map and the depth axis stay as recorded.

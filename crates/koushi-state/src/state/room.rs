@@ -251,6 +251,18 @@ pub struct RoomLatestEventSummary {
     pub sender_avatar: Option<AvatarImage>,
     #[serde(default)]
     pub preview: Option<String>,
+    /// #1427: the decrypted body of the latest conversation event when it is a plain
+    /// text message this device can already read, for the device-local delivery
+    /// prefix. It is the latest event's body, which may be newer than the unread
+    /// event that made the room qualify.
+    ///
+    /// Never serialized. The room-list `preview` above is part of the sidebar row and
+    /// is already in the app-state snapshot; this field is the prefix source the
+    /// delivery channel adds, and it must not enter a snapshot, a state delta, an
+    /// event, or a diagnostic. It is `None` for a redacted, undecryptable, or
+    /// non-text event, so a room with nothing readable delivers without a prefix.
+    #[serde(skip)]
+    pub message_text: Option<String>,
     pub timestamp_ms: u64,
     #[serde(default)]
     pub is_redacted: bool,
@@ -286,6 +298,10 @@ impl fmt::Debug for RoomLatestEventSummary {
                 &self.sender_avatar.as_ref().map(|_| "AvatarImage(..)"),
             )
             .field("preview", &self.preview.as_ref().map(|_| "Preview(..)"))
+            .field(
+                "message_text",
+                &self.message_text.as_ref().map(|_| "MessageText(..)"),
+            )
             .field("timestamp_ms", &self.timestamp_ms)
             .field("is_redacted", &self.is_redacted)
             .finish()
@@ -515,6 +531,7 @@ mod tests {
             sender_label: Some("Private Sender".to_owned()),
             sender_avatar: None,
             preview: Some("private body".to_owned()),
+            message_text: Some("private message text".to_owned()),
             timestamp_ms: 42,
             is_redacted: true,
         };
@@ -527,8 +544,63 @@ mod tests {
             "@private-sender:example.invalid",
             "Private Sender",
             "private body",
+            "private message text",
         ] {
             assert!(!debug.contains(private_value));
+        }
+    }
+
+    /// #1427: the delivery prefix source is a fact this device holds about a room and
+    /// never a field of the app state. The room-list `preview` is serialized for the
+    /// sidebar row and stays that way; the text this feature adds must not join it.
+    #[test]
+    fn the_delivery_prefix_source_never_serializes_into_the_app_state() {
+        let mut state = koushi_state_app_state_with_room_latest_text("private delivery text");
+        let serialized = serde_json::to_string(&state).expect("the app state serializes");
+        assert!(
+            !serialized.contains("private delivery text"),
+            "the prefix source reached the app-state snapshot"
+        );
+
+        // The same state does carry the room-list preview, which is pre-existing
+        // sidebar behavior and is not what this test protects.
+        assert!(serialized.contains("private preview"));
+        // Dropping the room also drops the text, so the negative assertion above is
+        // about the field and not about an empty room list.
+        state.rooms.clear();
+        assert!(
+            !serde_json::to_string(&state)
+                .expect("the app state serializes")
+                .contains("private delivery text")
+        );
+    }
+
+    fn koushi_state_app_state_with_room_latest_text(text: &str) -> crate::AppState {
+        let mut room: super::RoomSummary = serde_json::from_value(json!({
+            "room_id": "!room:example.invalid",
+            "display_name": "Room",
+            "display_label": "Room",
+            "is_dm": false,
+            "unread_count": 1,
+            "notification_count": 1,
+            "highlight_count": 0,
+            "parent_space_ids": [],
+            "latest_event": {
+                "event_id": "$event:example.invalid",
+                "preview": "private preview",
+                "timestamp_ms": 42,
+            },
+        }))
+        .expect("a room summary with a latest event");
+        let latest_event = room.latest_event.as_mut().expect("the latest event");
+        // `message_text` is skipped on deserialize, like every other field the app
+        // state must not carry, so it is set here where the test can hold it.
+        assert!(latest_event.message_text.is_none());
+        latest_event.message_text = Some(text.to_owned());
+
+        crate::AppState {
+            rooms: vec![room],
+            ..crate::AppState::default()
         }
     }
 }

@@ -217,9 +217,9 @@ to upstream or revert.
   screenshots, or QA artifacts: real room names, message bodies, attachment
   names, Matrix IDs, email addresses, institutions, workplaces, meeting titles,
   or local home-directory paths.
-- Real-account and real-homeserver QA output is private-data-free before
-  artifact persistence; redact before write rather than leak-check afterwards
-  (engineering rules "Logging and Diagnostics" 5).
+- QA output is private-data-free before artifact persistence; redact before
+  write rather than leak-check afterwards (engineering rules "Logging and
+  Diagnostics" 5).
 - Debug output for secret-bearing commands, actions, and errors redacts
   associated values: enum/action logging may record the case/kind only, never
   passwords, tokens, recovery material, bodies, attachment names, raw SDK errors,
@@ -280,19 +280,15 @@ to upstream or revert.
 - GUI automation is a smoke layer, not the primary correctness gate. React UI,
   command shapes, fake `CoreEvent` streams, DOM scroll behavior, and Tauri IPC
   mocks are verified in headless browser tests first.
-- Destructive GUI QA during development uses disposable local Tuwunel/Synapse
-  homeservers, never matrix.org or another real homeserver.
-- Real homeserver QA is a compatibility and release/preflight gate
-  (engineering rules "Build, Dependencies, QA Gates" 4).
+- Automated QA uses disposable local Tuwunel/Synapse homeservers only. Do not
+  run QA against matrix.org or another external homeserver, including with a
+  dedicated test account. Local QA is the release/preflight gate.
 - QA scripts assert scenario-specific success tokens, not only exit codes. If a
   document promises a token, the script enforces it or the document is wrong.
 - QA binaries attempt logout cleanup after any post-login failure unless
   `--keep-session` was explicitly requested.
-- Real-account and real-homeserver QA uses cleanup guards for every resource it
-  creates (sessions/devices, rooms, spaces, memberships, stores, search indexes,
-  background processes). After the first post-login side effect, early returns
-  are allowed only inside a guard that still attempts logout and cleanup unless
-  `--keep-session` was explicitly requested.
+- QA uses cleanup guards for every resource it creates (sessions/devices,
+  rooms, spaces, memberships, stores, search indexes, background processes).
 - QA runners clean up their full process group on failure or interruption.
 - QA credentials enter only through the FIFO or the debug/test-gated file
   credential store, and child processes never inherit the unfiltered parent

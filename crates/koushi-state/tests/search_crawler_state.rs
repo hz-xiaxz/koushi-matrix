@@ -1088,6 +1088,7 @@ fn rooms_available_carries_latest_event_ids_for_catch_up() {
         sender_label: None,
         sender_avatar: None,
         preview: None,
+        message_text: None,
         timestamp_ms: 1,
         is_redacted: false,
     });

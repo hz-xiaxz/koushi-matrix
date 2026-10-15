@@ -130,7 +130,9 @@ test("settings categories change without scrolling the desktop", async ({ page }
   const accountDialog = page.getByRole("dialog", { name: "Account Settings" });
   for (const name of ["Account", "Sessions", "Notifications", "Security & Privacy", "Encryption", "Search history"]) {
     await accountDialog.getByRole("tab", { name, exact: true }).click();
-    await expect(accountDialog.getByRole("tabpanel")).toHaveCount(1);
+    // The notifications category nests its own device/homeserver tabpanels, so this
+    // counts the category panels the loop switches between, not every panel in the dialog.
+    await expect(accountDialog.locator(".settings-category[role='tabpanel']:visible")).toHaveCount(1);
     await expect(accountDialog.getByRole("tabpanel", { name, exact: true })).toBeVisible();
     expect(await page.locator(".desktop").evaluate(element => element.scrollTop)).toBe(0);
   }
@@ -140,7 +142,9 @@ test("settings categories change without scrolling the desktop", async ({ page }
   const appDialog = page.getByRole("dialog", { name: "App Settings" });
   for (const name of ["Appearance", "Notifications", "Preferences", "Keyboard", "Search history", "Help & About"]) {
     await appDialog.getByRole("tab", { name, exact: true }).click();
-    await expect(appDialog.getByRole("tabpanel")).toHaveCount(1);
+    // The app dialog shows the device delivery section too, which carries its own
+    // tabpanel, so this counts the category panels as well.
+    await expect(appDialog.locator(".settings-category[role='tabpanel']:visible")).toHaveCount(1);
     await expect(appDialog.getByRole("tabpanel", { name, exact: true })).toBeVisible();
     expect(await page.locator(".desktop").evaluate(element => element.scrollTop)).toBe(0);
   }

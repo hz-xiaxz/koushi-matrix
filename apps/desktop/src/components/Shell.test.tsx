@@ -137,6 +137,42 @@ describe("Rust-projected workspace shell", () => {
     expect(dataTransfer.setData).not.toHaveBeenCalledWith("text/plain", expect.anything());
   });
 
+  it("requests an icon again after Rust downgrades a ready thumbnail", () => {
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    const request = vi.fn();
+    const mxcUri = "mxc://example.invalid/space";
+    const { rerender } = render(
+      <EntityAvatar
+        avatar={{
+          mxc_uri: mxcUri,
+          thumbnail: {
+            kind: "ready",
+            source_ref: "avatar/0123456789abcdef",
+            width: 18,
+            height: 18,
+            mime_type: "image/png"
+          }
+        }}
+        className="test-avatar"
+        fallback="SP"
+        onRequestAvatarThumbnail={request}
+      />
+    );
+
+    expect(request).not.toHaveBeenCalled();
+    rerender(
+      <EntityAvatar
+        avatar={{ mxc_uri: mxcUri, thumbnail: { kind: "notRequested" } }}
+        className="test-avatar"
+        fallback="SP"
+        onRequestAvatarThumbnail={request}
+      />
+    );
+    MockIntersectionObserver.instances.at(-1)?.trigger();
+    expect(request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith(mxcUri);
+  });
+
   it("requests an icon only after its rendered avatar intersects", () => {
     vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
     const request = vi.fn();

@@ -183,6 +183,29 @@ pub enum AppCommand {
         request_id: RequestId,
         patch: SettingsPatch,
     },
+    /// #1427: store one delivery sink's secret in the credential store under the sink
+    /// id. The secret is written, never echoed back, never logged, and never part of any
+    /// state snapshot; `NotificationSinkSecret`'s own `Debug` redacts it even if this
+    /// command is formatted.
+    SetNotificationDeliverySecret {
+        request_id: RequestId,
+        sink_id: String,
+        secret: String,
+    },
+    /// #1427: forget the secret stored for one sink. The sink itself stays configured;
+    /// it simply stops being a sink this device can send through.
+    ClearNotificationDeliverySecret {
+        request_id: RequestId,
+        sink_id: String,
+    },
+    /// #1427: send one canned message through one sink, so the user can prove the
+    /// credential and the network path work before trusting the channel. It carries no
+    /// room, event, or message data, and it does not touch the coalescing window of real
+    /// deliveries.
+    TestNotificationDelivery {
+        request_id: RequestId,
+        sink_id: String,
+    },
     ImportLegacySettings {
         request_id: RequestId,
         patch: SettingsPatch,
@@ -533,6 +556,35 @@ impl fmt::Debug for AppCommand {
                 .debug_struct("ImportLegacySettings")
                 .field("request_id", request_id)
                 .field("patch_fields", &settings_patch_field_names(patch))
+                .finish(),
+            // The sink id is settings data and may be shown; the secret never is. A
+            // `String`'s derived `Debug` would print it, so this arm is the reason the
+            // enum has a hand-written `Debug` at all.
+            Self::SetNotificationDeliverySecret {
+                request_id,
+                sink_id,
+                secret: _,
+            } => formatter
+                .debug_struct("SetNotificationDeliverySecret")
+                .field("request_id", request_id)
+                .field("sink_id", sink_id)
+                .field("secret", &"NotificationSinkSecret(<redacted>)")
+                .finish(),
+            Self::ClearNotificationDeliverySecret {
+                request_id,
+                sink_id,
+            } => formatter
+                .debug_struct("ClearNotificationDeliverySecret")
+                .field("request_id", request_id)
+                .field("sink_id", sink_id)
+                .finish(),
+            Self::TestNotificationDelivery {
+                request_id,
+                sink_id,
+            } => formatter
+                .debug_struct("TestNotificationDelivery")
+                .field("request_id", request_id)
+                .field("sink_id", sink_id)
                 .finish(),
             Self::UpdateNavigationPreference { request_id, update } => formatter
                 .debug_struct("UpdateNavigationPreference")

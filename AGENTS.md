@@ -19,7 +19,8 @@ only through the task table below.
 - Reproduce behavior bugs with a failing headless check before fixing them.
   Manual GUI inspection is confirmation, not correctness evidence.
 - Never put secrets or real-account private data in logs, fixtures, screenshots,
-  or QA artifacts. Use disposable local homeservers for destructive GUI QA.
+  or QA artifacts. All automated QA uses disposable local homeservers; external
+  homeserver QA is retired.
 - Use the checked-out `vendor/matrix-rust-sdk` as the authoritative SDK source.
   Prefer existing Element X behavior and public SDK APIs over fork extensions.
 - User-editable text uses the shared IME-safe primitives; product text uses the

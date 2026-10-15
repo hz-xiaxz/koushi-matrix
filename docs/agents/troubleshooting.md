@@ -142,30 +142,8 @@ the lane that shows the symptom. Lane commands are in
   shortcut reaches the app running the agent and raises its own quit confirmation
   dialog, which blocks unattended automation. Let the script's process-group
   cleanup stop `tauri dev` and the app instead.
-- In this environment, starting `qa:mac-gui -- --real-login-from-stdin` through a
-  non-interactive `exec_command` can deliver immediate stdin EOF. Use a PTY with
-  terminal echo disabled, such as `stty -echo; npm --prefix apps/desktop run
-  qa:mac-gui -- --real-login-from-stdin; exit_code=$?; stty echo; exit
-  $exit_code`, then send the credential lines through stdin.
-
-## Real-account smoke
-
-- **`password-login-smoke --real-account-qa` fails at sync but
-  `--check-room-list` succeeds.** Isolate the restore path first. A no-store `restore_session` can diverge from the product path;
-  real-account QA should restore with a temporary encrypted SQLite SDK store,
-  cache path, and encrypted search index path.
-- **`qa.log` missing after a fast successful exit.** Treat it as a regression in
-  the runner; it writes the log synchronously before leak checks and exit
-  handling.
-- **`deadpool-runtime` panics with `there is no reactor running`.** Store-backed
-  Matrix SDK sessions must be dropped while a Tokio runtime context is entered.
-- **`send=failed` while login, sync, and timeline are otherwise ready.** Check
-  that the product room list excludes non-joined rooms before QA timeline
-  sampling. Matrix SDK `Room::send` requires joined room state, and a left room
-  with visible history can otherwise become the active QA room.
-- **Sparse accounts have no visible timeline items** in the automatically
-  selected room. Use `--allow-empty-timeline` for those; keep the strict
-  `timeline_items > 0` signal for normal smoke.
+- Real-server login options in GUI QA are retired. Use a disposable local
+  homeserver for GUI authentication checks.
 
 ## Local homeserver core QA
 

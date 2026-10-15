@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 /**
- * Real homeserver QA runner (Phase 8 — Milestone G).
+ * Retired real homeserver QA runner (Phase 8 — Milestone G).
+ * The entry point always exits before credentials are read or a binary is spawned.
  *
  * Runs the `real-homeserver-qa` Rust binary against a real homeserver
  * (matrix.org) using pre-approved credentials stored in
@@ -54,15 +55,10 @@ const scenarioOption = optionValue("--scenario") ?? "space_compat";
 
 const args = process.argv.slice(2);
 if (args.includes("--run")) {
-  try {
-    await run();
-    process.exit(0);
-  } catch (error) {
-    console.error(`real-homeserver-qa failed: ${error.message}`);
-    process.exit(1);
-  }
+  console.error("real-homeserver QA is retired; use qa:headless-local with disposable Tuwunel/Synapse servers.");
+  process.exit(1);
 } else {
-  printUsage();
+  console.error("real-homeserver QA is retired; use qa:headless-local with disposable Tuwunel/Synapse servers.");
 }
 
 async function run() {
