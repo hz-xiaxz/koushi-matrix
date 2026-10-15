@@ -47,7 +47,13 @@ export default defineConfig({
     // Opt a spec in by adding it here; everything else stays Chromium-only.
     {
       name: "webkit",
-      use: { browserName: "webkit" },
+      // The engine-native wheel-scroll specs are the only recorded flake left
+      // in this tier (#1425: the viewport moved by 0 px twice, then passed), and
+      // they run here. Record a trace for this project only: a trace for all
+      // 600 specs would slow the slowest gate and add the very I/O load the
+      // flake correlates with. Failing tests keep their trace; passing ones
+      // drop it. CI uploads `test-results/` on failure.
+      use: { browserName: "webkit", trace: "retain-on-failure" },
       testMatch: [
         /room-list-filter-native-clear\.spec\.ts$/,
         /upload-preview-heic\.spec\.ts$/,

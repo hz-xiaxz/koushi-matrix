@@ -23,6 +23,9 @@ rejected by the current runners. If you find one in `docs/superpowers/plans/`,
 | `--scenario=timeline_legacy_fallback` | Scenario retired; the runner rejects `timeline_legacy_*` | `--scenario=timeline_reconnect` for live catch-up |
 | `legacy_fallback_*` tokens | Emitted by the retired scenario | `live_catchup_checkpoint=ok`, `live_catchup_gap_repaired=ok` |
 | `Core homeserver QA (conduit)` CI job | Replaced | `Core invitations (tuwunel)` / `Core invitations (synapse)`, plus `Core QA binary tests` |
+| `qa:real-homeserver`, `qa:real-account`, `qa:headless-basic:real` package scripts | Removed (#1413). Automated QA never logs in to matrix.org or another external homeserver, with or without a dedicated test account | `qa:headless-local` / `qa:headless-basic:local` against a disposable local Tuwunel/Synapse |
+| `password-login-smoke --real-account-qa` | Rejected (#1413): the binary prints the retirement notice and exits non-zero before any credential is read | the same smoke against a loopback homeserver, without the flag |
+| `crates/koushi-qa` `real-homeserver-qa` binary | Retired (#1413): `main()` fails closed before credentials are read; the implementation below it is a tombstone, kept only while its boundary checker still requires it (#1435) | the local headless lanes |
 
 ## Sync backend selection and the sliding-sync probe (superseded)
 

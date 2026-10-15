@@ -131,6 +131,19 @@ jobs:
       # assertion sat red on main from #319 until #323 found it by hand.
       - name: Browser-headless DOM tests
         run: npx playwright test
+      # A failed run must leave evidence: the engine-native WebKit wheel-scroll
+      # specs failed here twice on 2026-10-15 with no artifact to read, and the
+      # failure ("the wheel moved the viewport by 0 px") cannot be reproduced
+      # locally. The WebKit project records a trace on failure; keep it (and
+      # every other failing test's page snapshot) for the next occurrence.
+      - name: Upload browser-headless artifacts on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: browser-headless-artifacts
+          path: apps/desktop/test-results/
+          if-no-files-found: ignore
+          retention-days: 7
 
   rust:
     name: Rust (workspace / src-tauri / wasm)
