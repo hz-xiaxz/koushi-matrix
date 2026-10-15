@@ -30,13 +30,15 @@ provider-agnostic consent. The server pusher surface keeps its own meaning.
 
 [#1396 avatar thumbnails](../plans/2026-10-13-issue1396-avatar-thumbnails.md)
 requests a homeserver thumbnail sized from the 40 px avatar slot, resizes the
-fallback locally to the same long edge, keys the cache by thumbnail identity,
-retires a released source's bytes, and splits the avatar and link-preview
-budgets (8 MiB vs 32 MiB). Records the open decisions and the measured output
+fallback locally to the same long edge, keys the cache by thumbnail identity, and
+splits the avatar and link-preview budgets (8 MiB vs 32 MiB). It retired a
+released source's bytes; [#1432](../plans/2026-10-14-issue1432-avatar-source-retirement.md)
+removed the scoped-demand half of that retirement and records that a source
+the renderer can still show is never left announced as Ready. Records the open
+decisions and the measured output
 size.
 
-[#1394 resident timeline-set diagnostics](../plans/2026-10-13-issue1394-resident-timeline-diagnostics.md)
-lands the export-time counters the memory measurement record asked for before any
+[#1394 resident timeline-set diagnostics](../plans/2026-10-13-issue1394-resident-timeline-diagnostics.md)lands the export-time counters the memory measurement record asked for before any
 retention bound: resident Room/actor counts and a canonical-depth proxy, as
 `core.timeline_residency` rows next to `core.search_retention`. Observation only;
 the unbounded timeline-actor map and the depth axis stay as recorded.

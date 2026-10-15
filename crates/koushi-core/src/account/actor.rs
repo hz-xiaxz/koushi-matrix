@@ -1289,10 +1289,6 @@ pub struct AccountActor {
     pub(super) avatar_demand_rx:
         tokio::sync::watch::Receiver<Option<Arc<crate::view_scope_lifecycle::ChargedAvatarDemand>>>,
     pub(super) avatar_demand: Option<Arc<crate::view_scope_lifecycle::ChargedAvatarDemand>>,
-    /// Avatar sources observed in scoped demand this session (#1396). A source
-    /// that leaves the demand retires its retained bytes instead of waiting for
-    /// LRU pressure.
-    pub(super) demanded_avatar_sources: BTreeSet<String>,
     /// The own profile's current avatar source, so a change retires the
     /// superseded bytes (#1396).
     pub(super) own_avatar_mxc_uri: Option<String>,
@@ -1533,7 +1529,6 @@ impl AccountActor {
             avatar_session_generation: avatar_session_generation.clone(),
             avatar_demand_rx,
             avatar_demand: None,
-            demanded_avatar_sources: BTreeSet::new(),
             own_avatar_mxc_uri: None,
         };
         crate::executor::spawn(actor.run());
