@@ -601,6 +601,32 @@ impl AccountActor {
             return;
         }
 
+        // #1433: a source whose bytes another source's store already evicted
+        // while it was demanded is terminal for this demand. Answer the
+        // renderer's re-request with the capacity failure instead of starting
+        // the eviction/refill loop it would otherwise drive; a changed demand
+        // set clears both this cache entry and its block.
+        if self.avatar_capacity_evicted.contains(&mxc_uri) {
+            let thumbnail = AvatarThumbnailState::Failed {
+                request_id: request_id.sequence,
+                kind: AvatarThumbnailFailureKind::Capacity,
+            };
+            self.avatar_cache.insert(mxc_uri.clone(), thumbnail.clone());
+            self.send_actions(vec![AppAction::AvatarThumbnailUpdated {
+                mxc_uri: mxc_uri.clone(),
+                thumbnail: thumbnail.clone(),
+            }])
+            .await;
+            self.emit(CoreEvent::Account(
+                AccountEvent::AvatarThumbnailDownloaded {
+                    request_id,
+                    mxc_uri,
+                    thumbnail,
+                },
+            ));
+            return;
+        }
+
         // 2. Single-flight dedup — a fetch is already running; record this
         //    request_id so the completing task will emit a terminal event for
         //    every waiter, then return without spawning a second task.
@@ -735,6 +761,13 @@ impl AccountActor {
         }])
         .await;
 
+        // #1433: storing this source may have evicted another demanded source's
+        // bytes. Downgrade that victim now and remember it, so a working set
+        // larger than the cache settles instead of refill-evicting.
+        if matches!(thumbnail, AvatarThumbnailState::Ready { .. }) {
+            self.downgrade_capacity_evicted_avatars().await;
+        }
+
         // Fix 2: deliver a terminal event to every waiter. For a Failed
         // thumbnail, rebuild the payload with each waiter's own request_id so
         // the inner AvatarThumbnailState::Failed.request_id matches the outer
@@ -793,6 +826,42 @@ impl AccountActor {
         if let Some(previous) = previous {
             self.retire_avatar_source(&previous);
         }
+    }
+
+    /// #1433: a just-stored source may have pushed another demanded source out
+    /// of the renderable cache. Every `Ready` entry whose bytes are gone is
+    /// downgraded immediately; one the scoped demand still references is also
+    /// marked capacity-terminal, so it is retried only when the demanded
+    /// resource set changes.
+    pub(super) async fn downgrade_capacity_evicted_avatars(&mut self) {
+        let victims: Vec<String> = self
+            .avatar_cache
+            .iter()
+            .filter(|(_, thumbnail)| {
+                matches!(thumbnail, AvatarThumbnailState::Ready { source_ref, .. }
+                    if !crate::renderable_thumbnail::contains_renderable_thumbnail(source_ref))
+            })
+            .map(|(mxc_uri, _)| mxc_uri.clone())
+            .collect();
+        if victims.is_empty() {
+            return;
+        }
+        let mut actions = Vec::with_capacity(victims.len());
+        for mxc_uri in victims {
+            self.avatar_cache.remove(&mxc_uri);
+            if self
+                .avatar_demand
+                .as_ref()
+                .is_some_and(|demand| demand.contains_resource(&mxc_uri))
+            {
+                self.avatar_capacity_evicted.insert(mxc_uri.clone());
+            }
+            actions.push(AppAction::AvatarThumbnailUpdated {
+                mxc_uri,
+                thumbnail: AvatarThumbnailState::NotRequested,
+            });
+        }
+        self.send_actions(actions).await;
     }
 
     pub(super) fn cancel_unwanted_avatar(&mut self, mxc_uri: &str) {

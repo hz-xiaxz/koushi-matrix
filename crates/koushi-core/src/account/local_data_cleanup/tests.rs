@@ -392,6 +392,7 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         Some(focused_projection_tx.clone()),
     );
     let mut actor = AccountActor {
+        avatar_capacity_evicted: std::collections::HashSet::new(),
         session: None,
         session_key_id: Some(key_id.clone()),
         locked_session_record: None,
