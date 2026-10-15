@@ -1105,10 +1105,29 @@ test("account notification preferences dispatch Rust-owned update_settings patch
     });
   await expect(desktopNotifications).toHaveAttribute("aria-checked", "false");
 
-  // A count-only room alert has no message preview control.
-  await expect(page.getByRole("switch", {
-    name: "Show message content in notifications"
-  })).toHaveCount(0);
+  // #1460: the verified preview switch (#994) sits in the OS section, off by default,
+  // and dispatches the same account-scoped patch.
+  const previews = page
+    .getByTestId("notifications-os")
+    .getByRole("switch", { name: "Show message content in notifications" });
+  await expect(previews).toHaveAttribute("aria-checked", "false");
+  await previews.click();
+  await expect.poll(() => invocationCount(page, "update_settings")).toBe(2);
+  await expect.poll(() => page.evaluate(() => window.__harness.invocationsOf("update_settings")[1]?.args))
+    .toEqual({
+      patch: {
+        scope: "account",
+        notifications: {
+          desktop_notifications: false,
+          sound: true,
+          badges: true,
+          message_previews: true,
+          send_read_receipts: true,
+          send_typing_notifications: true
+        }
+      }
+    });
+  await expect(previews).toHaveAttribute("aria-checked", "true");
 });
 
 test("timeline auto-load setting dispatches a Rust-owned update_settings patch", async ({

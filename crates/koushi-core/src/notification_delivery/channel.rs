@@ -536,14 +536,13 @@ impl NotificationDeliveryChannel {
         if self.take_pending_test(sink_id, idempotency_key) {
             return;
         }
-        if let Some(lane) = self.lanes.get_mut(sink_id) {
-            if lane
+        if let Some(lane) = self.lanes.get_mut(sink_id)
+            && lane
                 .inflight
                 .take_if(|attempt| attempt.intent.idempotency_key == idempotency_key)
                 .is_some()
-            {
-                lane.attempts = 0;
-            }
+        {
+            lane.attempts = 0;
         }
     }
 
