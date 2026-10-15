@@ -1,67 +1,107 @@
-//! Device-local notification delivery settings (#1427).
+//! Device-local notification delivery settings (#1427, #1460).
 //!
-//! The channel that lets this device send its own notification - to a mail provider
-//! such as Resend, or through an SMTP relay such as QQ Mail, Gmail, or iCloud - is
-//! app-scoped: it never asks the Matrix account for a destination, so it works on a
-//! homeserver that supports neither email 3PIDs nor pushers. Every value here is
-//! non-secret. A sink's credential lives in the credential store, keyed by the sink
-//! id, and is reported to the product only as a configured flag
-//! (state-machine.md, "Local Notification Delivery").
+//! "Sent from this device" is a list of destinations. Each destination is one sink -
+//! Resend, an SMTP relay such as QQ Mail, Gmail, or iCloud, or WeChat through
+//! ServerChan Turbo - with its own targets, content mode, timing, and outcome. There is
+//! no channel-wide and no per-destination enable switch: a destination is eligible when
+//! its setup is complete, its credential is stored, and one of its targets is set. The
+//! route is app-scoped: it never asks the Matrix account for a destination, so it works
+//! on a homeserver that supports neither email 3PIDs nor pushers. Every value here is
+//! non-secret. A sink's credential lives in the credential store, keyed by the sink id,
+//! and is reported to the product only as a configured flag (state-machine.md, "Local
+//! Notification Delivery").
 //!
 //! [`NotificationDeliveryState`] is the device-local *runtime* projection of that
-//! channel: the per-sink configured flag and last outcome, plus the mailbox preset
+//! route: the per-sink configured flag and last outcome, plus the mailbox preset
 //! catalog the settings screen offers. It is app scope and deliberately not part of
 //! the settings file - a restart re-observes the credential store and re-arms every
 //! timer - and it never carries a secret value.
 
 use serde::{Deserialize, Serialize};
 
-/// How long a room must stay in a qualifying attention state before this device
+mod migration;
+
+/// How long a room must stay in a qualifying attention state before a destination
 /// delivers a notification about it. Five minutes by default: long enough that a
-/// conversation the user is already reading is never mailed.
+/// conversation the user is already reading is never sent.
 pub const DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS: u64 = 300;
-/// The shortest gap between two deliveries of the same channel. Fifteen minutes by
-/// default, so a busy group cannot fill a mailbox.
+/// The shortest gap between two deliveries of the same destination. Fifteen minutes by
+/// default, so a busy group cannot fill an inbox.
 pub const DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS: u64 = 900;
 /// A day is the longest dwell that still means "while you were away"; anything
 /// longer would deliver a state the user has long since seen.
 pub const MAX_NOTIFICATION_DELIVERY_DWELL_SECS: u64 = 86_400;
 pub const MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS: u64 = 86_400;
-/// The plaintext prefix is capped so a long message cannot smuggle a page of text
-/// through a consent the user gave for a glance.
-pub const MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS: u32 = 200;
-pub const DEFAULT_NOTIFICATION_DELIVERY_PREFIX_CHARS: u32 = 80;
-/// How much of a room's newest message text a delivery candidate holds (#1427).
+/// The start-of-message mode is capped so a consent given for a glance cannot carry a
+/// page of text; the entire-message mode is the explicit way to send more.
+pub const MAX_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES: u32 = 500;
+pub const DEFAULT_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES: u32 = 80;
+/// How much of a room's newest message text a delivery candidate holds (#1460).
 ///
-/// The rendered prefix is cut at a grapheme boundary by `digest`; this bound only
-/// keeps a candidate - and the dwell state that holds it - from carrying a whole
-/// event body while the channel waits for its window.
-pub const MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS: usize = 240;
-/// Sinks are a short list the user configures by hand; the cap keeps a corrupted or
-/// hostile settings file from turning one settings load into unbounded work.
+/// This is the source bound, not what is sent: the provider budget below cuts the
+/// rendered text at a grapheme boundary. A source cut here is flagged, so the rendered
+/// text says it was truncated and is never presented as the entire message.
+pub const MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS: usize = 4000;
+/// Per-room text budget of a mail destination, in grapheme clusters.
+pub const NOTIFICATION_DELIVERY_MAIL_TEXT_BUDGET: usize = 4000;
+/// Per-room text budget of a ServerChan destination, in grapheme clusters. The relay
+/// shows the text on a web page behind the WeChat card and documents a 32 KB body;
+/// a smaller budget keeps a five-room digest well inside it.
+pub const NOTIFICATION_DELIVERY_SERVERCHAN_TEXT_BUDGET: usize = 1000;
+/// Destinations are a short list the user configures by hand; the cap keeps a corrupted
+/// or hostile settings file from turning one settings load into unbounded work.
 pub const MAX_NOTIFICATION_DELIVERY_SINKS: usize = 8;
 /// The watch list is capped as well: a candidate set is built on every attention
 /// update, so the membership lookup has to stay bounded.
 pub const MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS: usize = 64;
 pub const MAX_NOTIFICATION_DELIVERY_FIELD_CHARS: usize = 320;
 
-/// Bound message text before a delivery candidate holds it (#1427).
+/// A room's newest message text, bounded for a delivery candidate (#1460).
+#[derive(Clone, Eq, PartialEq)]
+pub struct BoundedNotificationDeliveryText {
+    pub text: String,
+    /// Whether the source was longer than
+    /// [`MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS`].
+    pub truncated_at_source: bool,
+}
+
+impl std::fmt::Debug for BoundedNotificationDeliveryText {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("BoundedNotificationDeliveryText")
+            .field("text", &"<redacted>")
+            .field("truncated_at_source", &self.truncated_at_source)
+            .finish()
+    }
+}
+
+/// Bound message text before a delivery candidate holds it.
 ///
 /// A character count on a character boundary is all this needs: what renders is
-/// decided by `digest`, which flattens the text to one line and cuts it at a grapheme
-/// boundary. An empty body is `None` because there is nothing to render; a body of
-/// only whitespace is kept, and `digest` is the one that drops it.
-pub fn bounded_notification_delivery_prefix_source(text: &str) -> Option<String> {
+/// decided by `digest`, which flattens the text and cuts it at a grapheme boundary. An
+/// empty body is `None` because there is nothing to render; a body of only whitespace
+/// is kept, and `digest` is the one that drops it.
+pub fn bounded_notification_delivery_message_source(
+    text: &str,
+) -> Option<BoundedNotificationDeliveryText> {
     if text.is_empty() {
         return None;
     }
-    match text
-        .char_indices()
-        .nth(MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS)
-    {
-        Some((index, _)) => Some(text[..index].to_owned()),
-        None => Some(text.to_owned()),
-    }
+    Some(
+        match text
+            .char_indices()
+            .nth(MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS)
+        {
+            Some((index, _)) => BoundedNotificationDeliveryText {
+                text: text[..index].to_owned(),
+                truncated_at_source: true,
+            },
+            None => BoundedNotificationDeliveryText {
+                text: text.to_owned(),
+                truncated_at_source: false,
+            },
+        },
+    )
 }
 
 const MAX_NOTIFICATION_SINK_ID_BYTES: usize = 64;
@@ -70,56 +110,28 @@ const MAX_NOTIFICATION_SINK_ID_BYTES: usize = 64;
 /// It is repeated here because `koushi-state` is a data crate with no dependency on
 /// the senders; the core compares the two when it builds a delivery.
 pub const DEFAULT_RESEND_ENDPOINT: &str = "https://api.resend.com/emails";
+/// Default endpoint of the ServerChan Turbo sink, matching
+/// `koushi_notify::SERVERCHAN_ENDPOINT`. The request path appends the SendKey, so the
+/// endpoint itself never names the recipient.
+pub const DEFAULT_SERVERCHAN_ENDPOINT: &str = "https://sctapi.ftqq.com";
 
-/// Whether this device may deliver a notification at all, and what for.
+/// The destinations this device may deliver through.
 ///
-/// The channel is OFF by default: an unconfigured app must not start sending mail.
-/// The three triggers default to ON so that turning the channel on is one decision,
-/// not four.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
+/// There is no enable switch: an empty list sends nothing, and a destination with no
+/// target or no credential sends nothing. Loading a pre-#1460 file runs the
+/// conservative migration in [`migration`].
+#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize)]
 pub struct NotificationDeliverySettings {
-    pub enabled: bool,
-    /// Deliver for a direct message.
-    pub direct_messages: bool,
-    /// Deliver for a mention, which includes a keyword hit: keywords are Matrix
-    /// `kind: content` push rules and rank as mention-kind in the attention
-    /// projection, so they need no separate delivery path.
-    pub mentions: bool,
-    /// Deliver for a keyword the user defined.
-    pub keywords: bool,
-    /// Hold delivery while this app is focused, the way the OS suppresses a banner
-    /// the user is already looking at. Recommended, and the default.
-    pub only_when_unfocused: bool,
-    pub dwell_secs: u64,
-    pub min_interval_secs: u64,
-    /// Characters of the decrypted message body to prepend in plaintext. Applied only
-    /// when `prefix_consent` matches the sink it would be sent through.
-    pub prefix_chars: u32,
-    pub prefix_consent: Option<NotificationDeliveryPrefixConsent>,
-    /// Rooms and spaces the user named, delivered whatever the three categories above
-    /// say. A watched space covers every joined room that is a child of it, resolved
-    /// from the room list when the candidate set is built, so a room added to the space
-    /// later is covered without editing this list.
-    pub watched: Vec<NotificationDeliveryTarget>,
     pub sinks: Vec<NotificationSinkSettings>,
 }
 
-impl Default for NotificationDeliverySettings {
-    fn default() -> Self {
-        Self {
-            enabled: false,
-            direct_messages: true,
-            mentions: true,
-            keywords: true,
-            only_when_unfocused: true,
-            dwell_secs: DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS,
-            min_interval_secs: DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
-            prefix_chars: DEFAULT_NOTIFICATION_DELIVERY_PREFIX_CHARS,
-            prefix_consent: None,
-            watched: Vec::new(),
-            sinks: Vec::new(),
-        }
+impl<'de> Deserialize<'de> for NotificationDeliverySettings {
+    fn deserialize<D>(deserializer: D) -> Result<Self, D::Error>
+    where
+        D: serde::Deserializer<'de>,
+    {
+        migration::NotificationDeliverySettingsWire::deserialize(deserializer)
+            .map(migration::NotificationDeliverySettingsWire::into_settings)
     }
 }
 
@@ -128,58 +140,15 @@ impl NotificationDeliverySettings {
         self.sinks.iter().find(|sink| sink.id == id)
     }
 
-    /// Whether at least one trigger is on, so the product can say why nothing is
-    /// delivered instead of looking broken.
-    pub fn has_any_trigger(&self) -> bool {
-        self.direct_messages || self.mentions || self.keywords
-    }
-
-    /// Whether any configured sink could deliver: enabled, complete, and with a
-    /// credential the core reported as present.
-    pub fn has_enabled_sink(&self) -> bool {
-        self.sinks.iter().any(|sink| sink.enabled)
-    }
-
-    /// Whether the stored consent covers this exact sink and destination.
-    ///
-    /// A change to the sink, its endpoint, or the destination is a change to what
-    /// leaves the device, so it invalidates the consent rather than inheriting it.
-    pub fn prefix_is_allowed_for(&self, sink_id: &str, destination: &str, endpoint: &str) -> bool {
-        self.prefix_chars > 0
-            && self.prefix_consent.as_ref().is_some_and(|consent| {
-                consent.sink_id == sink_id
-                    && consent.destination == destination
-                    && consent.endpoint == endpoint
-            })
-    }
-
-    /// Whether this exact room is named in the watch list. A watched space is resolved
-    /// by the caller, which knows the space's children.
-    pub fn watches_room(&self, room_id: &str) -> bool {
-        self.watched
-            .iter()
-            .any(|target| matches!(target, NotificationDeliveryTarget::Room { room_id: watched } if watched == room_id))
-    }
-
-    /// Whether this space is named in the watch list.
-    pub fn watches_space(&self, space_id: &str) -> bool {
-        self.watched
-            .iter()
-            .any(|target| matches!(target, NotificationDeliveryTarget::Space { space_id: watched } if watched == space_id))
+    pub fn sink_mut(&mut self, id: &str) -> Option<&mut NotificationSinkSettings> {
+        self.sinks.iter_mut().find(|sink| sink.id == id)
     }
 
     /// Apply what this device must never depend on a well-formed settings file for:
     /// bounded numbers, bounded strings, unique sink ids and watch targets, and a
-    /// consent that still matches a sink. Called on every load and every patch.
+    /// content consent that still matches its destination. Called on every load and
+    /// every patch.
     pub fn canonicalize(&mut self) {
-        self.dwell_secs = self.dwell_secs.min(MAX_NOTIFICATION_DELIVERY_DWELL_SECS);
-        self.min_interval_secs = self
-            .min_interval_secs
-            .min(MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS);
-        self.prefix_chars = self
-            .prefix_chars
-            .min(MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS);
-
         let mut canonical: Vec<NotificationSinkSettings> = Vec::new();
         for mut sink in std::mem::take(&mut self.sinks) {
             sink.canonicalize();
@@ -192,40 +161,12 @@ impl NotificationDeliverySettings {
             }
         }
         self.sinks = canonical;
-
-        let mut watched: Vec<NotificationDeliveryTarget> = Vec::new();
-        for mut target in std::mem::take(&mut self.watched) {
-            target.canonicalize();
-            if !target.is_usable()
-                || watched
-                    .iter()
-                    .any(|existing| existing.kind_and_id() == target.kind_and_id())
-            {
-                continue;
-            }
-            watched.push(target);
-            if watched.len() == MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS {
-                break;
-            }
-        }
-        self.watched = watched;
-
-        let consent_still_matches = self.prefix_consent.as_ref().is_some_and(|consent| {
-            self.sinks.iter().any(|sink| {
-                sink.id == consent.sink_id
-                    && sink.destination == consent.destination
-                    && sink.endpoint() == consent.endpoint
-            })
-        });
-        if !consent_still_matches {
-            self.prefix_consent = None;
-        }
     }
 }
 
-/// Deserialize hook for the settings file. A delivery block read from disk is bounded,
-/// deduplicated, and de-consented before any product code can see it, so a hand-edited
-/// or older file cannot widen what leaves the device.
+/// Deserialize hook for the settings file. A delivery block read from disk is migrated,
+/// bounded, deduplicated, and de-consented before any product code can see it, so a
+/// hand-edited or older file cannot widen what leaves the device.
 pub(crate) fn deserialize_notification_delivery<'de, D>(
     deserializer: D,
 ) -> Result<Box<NotificationDeliverySettings>, D::Error>
@@ -283,7 +224,161 @@ impl NotificationDeliveryTarget {
     }
 }
 
-/// One configured way out of the device.
+/// What one destination is sent for: one list of categories and watched targets.
+///
+/// Keywords are Matrix `kind: content` push rules on the homeserver, shared with every
+/// client of the account; a hit ranks as mention-kind in the attention projection. A
+/// watched target overrides the categories but never the read, mute, or focus
+/// suppression, and a watched space covers rooms added to it later.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationDeliveryTargets {
+    pub direct_messages: bool,
+    /// Mentions and replies that mention the user.
+    pub mentions: bool,
+    pub keywords: bool,
+    pub watched: Vec<NotificationDeliveryTarget>,
+}
+
+impl Default for NotificationDeliveryTargets {
+    fn default() -> Self {
+        Self {
+            direct_messages: true,
+            mentions: true,
+            keywords: true,
+            watched: Vec::new(),
+        }
+    }
+}
+
+impl NotificationDeliveryTargets {
+    /// Nothing selected: what a migrated destination gets when it was switched off.
+    pub fn none() -> Self {
+        Self {
+            direct_messages: false,
+            mentions: false,
+            keywords: false,
+            watched: Vec::new(),
+        }
+    }
+
+    pub fn has_any(&self) -> bool {
+        self.direct_messages || self.mentions || self.keywords || !self.watched.is_empty()
+    }
+
+    /// Whether this exact room is named in the watch list. A watched space is resolved
+    /// by the caller, which knows the space's children.
+    pub fn watches_room(&self, room_id: &str) -> bool {
+        self.watched
+            .iter()
+            .any(|target| matches!(target, NotificationDeliveryTarget::Room { room_id: watched } if watched == room_id))
+    }
+
+    /// Whether this space is named in the watch list.
+    pub fn watches_space(&self, space_id: &str) -> bool {
+        self.watched
+            .iter()
+            .any(|target| matches!(target, NotificationDeliveryTarget::Space { space_id: watched } if watched == space_id))
+    }
+
+    fn canonicalize(&mut self) {
+        let mut watched: Vec<NotificationDeliveryTarget> = Vec::new();
+        for mut target in std::mem::take(&mut self.watched) {
+            target.canonicalize();
+            if !target.is_usable()
+                || watched
+                    .iter()
+                    .any(|existing| existing.kind_and_id() == target.kind_and_id())
+            {
+                continue;
+            }
+            watched.push(target);
+            if watched.len() == MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS {
+                break;
+            }
+        }
+        self.watched = watched;
+    }
+}
+
+/// How much message text a destination may carry (#1460).
+///
+/// Anything but [`NamesOnly`](Self::NamesOnly) needs a matching
+/// [`NotificationDeliveryContentConsent`]; without one the destination is names only.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(tag = "kind", rename_all = "camelCase")]
+pub enum NotificationDeliveryContent {
+    /// Room name, kind, parent space name, and counts. No message text.
+    #[default]
+    NamesOnly,
+    /// The first `graphemes` grapheme clusters of the latest eligible text message.
+    Prefix { graphemes: u32 },
+    /// The latest eligible text message, up to the provider budget. Text cut by a
+    /// budget is marked truncated and is never called the entire message.
+    Full,
+}
+
+impl NotificationDeliveryContent {
+    pub fn carries_text(self) -> bool {
+        !matches!(self, Self::NamesOnly)
+    }
+
+    fn canonicalize(&mut self) {
+        if let Self::Prefix { graphemes } = self {
+            *graphemes = (*graphemes).min(MAX_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES);
+            if *graphemes == 0 {
+                *self = Self::NamesOnly;
+            }
+        }
+    }
+}
+
+/// The user's acceptance that one destination receives message text in plaintext.
+///
+/// Bound to the sink kind, its endpoint, and its recipient - the **Send to** address,
+/// or for ServerChan the SendKey owner. Saving or clearing a ServerChan SendKey is a
+/// recipient change, which the core applies by dropping this consent. A change to any
+/// of the three drops it and returns the destination to names only.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct NotificationDeliveryContentConsent {
+    pub sink_kind: String,
+    pub endpoint: String,
+    pub recipient: String,
+    /// When the user accepted, in milliseconds since the Unix epoch.
+    pub accepted_at_ms: i64,
+}
+
+/// When one destination sends.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(default)]
+pub struct NotificationDeliveryTiming {
+    pub dwell_secs: u64,
+    pub min_interval_secs: u64,
+    /// Hold delivery while this app is focused, the way the OS suppresses a banner the
+    /// user is already looking at. Recommended, and the default.
+    pub only_when_unfocused: bool,
+}
+
+impl Default for NotificationDeliveryTiming {
+    fn default() -> Self {
+        Self {
+            dwell_secs: DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS,
+            min_interval_secs: DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
+            only_when_unfocused: true,
+        }
+    }
+}
+
+impl NotificationDeliveryTiming {
+    fn canonicalize(&mut self) {
+        self.dwell_secs = self.dwell_secs.min(MAX_NOTIFICATION_DELIVERY_DWELL_SECS);
+        self.min_interval_secs = self
+            .min_interval_secs
+            .min(MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS);
+    }
+}
+
+/// One destination: one configured way out of the device.
 ///
 /// The id names the credential in the credential store and is the only identity a
 /// sink has; two sinks never share one.
@@ -291,8 +386,8 @@ impl NotificationDeliveryTarget {
 #[serde(default)]
 pub struct NotificationSinkSettings {
     pub id: String,
-    pub enabled: bool,
-    /// Where the message goes: the mailbox for a mail sink.
+    /// Where the message goes: the mailbox for a mail sink. Empty for ServerChan, whose
+    /// recipient is whoever owns the SendKey.
     pub destination: String,
     pub from_address: String,
     /// The name the recipient sees. Empty falls back to the bare address.
@@ -302,17 +397,21 @@ pub struct NotificationSinkSettings {
     /// [`credential_identity`](Self::credential_identity) renders. The credential store is
     /// keyed by the sink id alone, so without this a preset, host, port or username change
     /// would keep the previous mailbox's password and offer it to the new server's
-    /// `AUTH LOGIN`. Rust owns this field: the user never types it and the frontend never
-    /// sends a value for it.
+    /// `AUTH LOGIN`. Rust owns this field: the user never types it.
     pub secret_binding: Option<String>,
+    pub targets: NotificationDeliveryTargets,
+    pub content: NotificationDeliveryContent,
+    pub content_consent: Option<NotificationDeliveryContentConsent>,
+    pub timing: NotificationDeliveryTiming,
 }
 
 impl NotificationSinkSettings {
-    /// The non-secret string a prefix consent binds to, so that editing the endpoint
+    /// The non-secret string a content consent binds to, so that editing the endpoint
     /// asks for the consent again.
     pub fn endpoint(&self) -> String {
         match &self.config {
-            NotificationSinkConfig::Resend { endpoint } => endpoint.clone(),
+            NotificationSinkConfig::Resend { endpoint }
+            | NotificationSinkConfig::ServerChan { endpoint } => endpoint.clone(),
             NotificationSinkConfig::Smtp { host, port, .. } => format!("{host}:{port}"),
         }
     }
@@ -323,6 +422,9 @@ impl NotificationSinkSettings {
     pub fn credential_identity(&self) -> String {
         match &self.config {
             NotificationSinkConfig::Resend { .. } => format!("resend:{}", self.endpoint()),
+            NotificationSinkConfig::ServerChan { .. } => {
+                format!("serverchan:{}", self.endpoint())
+            }
             NotificationSinkConfig::Smtp {
                 host,
                 port,
@@ -330,6 +432,67 @@ impl NotificationSinkSettings {
                 ..
             } => format!("smtp:{host}:{port}:{username}"),
         }
+    }
+
+    /// The recipient a content consent binds to. For ServerChan it is the SendKey's
+    /// owner, which the settings never see; the binding stands in for it, and the core
+    /// drops the consent whenever the SendKey is saved or cleared.
+    pub fn consent_recipient(&self) -> String {
+        match &self.config {
+            NotificationSinkConfig::ServerChan { .. } => "sendkey-owner".to_owned(),
+            _ => self.destination.clone(),
+        }
+    }
+
+    /// The consent that would cover this destination exactly as it is configured now.
+    pub fn consent_for_current(&self, accepted_at_ms: i64) -> NotificationDeliveryContentConsent {
+        NotificationDeliveryContentConsent {
+            sink_kind: self.config.kind().to_owned(),
+            endpoint: self.endpoint(),
+            recipient: self.consent_recipient(),
+            accepted_at_ms,
+        }
+    }
+
+    fn consent_matches(&self) -> bool {
+        self.content_consent.as_ref().is_some_and(|consent| {
+            consent.sink_kind == self.config.kind()
+                && consent.endpoint == self.endpoint()
+                && consent.recipient == self.consent_recipient()
+        })
+    }
+
+    /// The content mode this destination may actually use: its chosen mode while the
+    /// consent matches, names only otherwise.
+    pub fn effective_content(&self) -> NotificationDeliveryContent {
+        if self.content.carries_text() && self.consent_matches() {
+            self.content
+        } else {
+            NotificationDeliveryContent::NamesOnly
+        }
+    }
+
+    /// Drop the content consent and return to names only: the recipient may have
+    /// changed in a way the settings cannot see (a new ServerChan SendKey).
+    pub fn revoke_content_consent(&mut self) {
+        self.content_consent = None;
+        self.content = NotificationDeliveryContent::NamesOnly;
+    }
+
+    /// The per-room text budget of this destination's provider, in grapheme clusters.
+    pub fn text_budget_graphemes(&self) -> usize {
+        match self.config {
+            NotificationSinkConfig::ServerChan { .. } => {
+                NOTIFICATION_DELIVERY_SERVERCHAN_TEXT_BUDGET
+            }
+            _ => NOTIFICATION_DELIVERY_MAIL_TEXT_BUDGET,
+        }
+    }
+
+    /// Whether this destination has a credential bound to its current configuration.
+    /// The core still checks the store before it reports the destination configured.
+    pub fn has_bound_secret(&self) -> bool {
+        self.secret_binding.is_some()
     }
 
     fn canonicalize(&mut self) {
@@ -342,6 +505,12 @@ impl NotificationSinkSettings {
                 *endpoint = trimmed_field(endpoint);
                 if endpoint.is_empty() {
                     *endpoint = DEFAULT_RESEND_ENDPOINT.to_owned();
+                }
+            }
+            NotificationSinkConfig::ServerChan { endpoint } => {
+                *endpoint = trimmed_field(endpoint).trim_end_matches('/').to_owned();
+                if endpoint.is_empty() {
+                    *endpoint = DEFAULT_SERVERCHAN_ENDPOINT.to_owned();
                 }
             }
             NotificationSinkConfig::Smtp {
@@ -362,6 +531,13 @@ impl NotificationSinkSettings {
                 *username = trimmed_field(username);
             }
         }
+        if matches!(self.config, NotificationSinkConfig::ServerChan { .. }) {
+            // The recipient is the SendKey owner; an address field would be a stale copy
+            // of a mail destination this sink no longer has.
+            self.destination.clear();
+            self.from_address.clear();
+            self.sender_name.clear();
+        }
         // A credential is only usable for the server and account it was entered for, so a
         // binding that no longer matches the configuration is dropped. This runs after the
         // fields above have been normalized and on every load and every patch, so a
@@ -369,17 +545,35 @@ impl NotificationSinkSettings {
         if self.secret_binding.as_deref() != Some(self.credential_identity().as_str()) {
             self.secret_binding = None;
         }
+        self.targets.canonicalize();
+        self.timing.canonicalize();
+        self.content.canonicalize();
+        // A ServerChan consent names the SendKey owner; without a bound key there is no
+        // owner it could still name.
+        let serverchan_without_key = matches!(self.config, NotificationSinkConfig::ServerChan { .. })
+            && self.secret_binding.is_none();
+        if !self.consent_matches() || serverchan_without_key {
+            self.revoke_content_consent();
+        }
     }
 
     /// Whether the sink carries enough to be attempted at all. A sink that fails this
     /// is dropped rather than shown as configured-but-broken.
     fn is_usable(&self) -> bool {
         is_valid_notification_sink_id(&self.id)
-            && !self.destination.is_empty()
-            && !self.from_address.is_empty()
             && match &self.config {
-                NotificationSinkConfig::Resend { endpoint } => !endpoint.is_empty(),
-                NotificationSinkConfig::Smtp { host, port, .. } => !host.is_empty() && *port > 0,
+                NotificationSinkConfig::Resend { endpoint } => {
+                    !endpoint.is_empty()
+                        && !self.destination.is_empty()
+                        && !self.from_address.is_empty()
+                }
+                NotificationSinkConfig::Smtp { host, port, .. } => {
+                    !host.is_empty()
+                        && *port > 0
+                        && !self.destination.is_empty()
+                        && !self.from_address.is_empty()
+                }
+                NotificationSinkConfig::ServerChan { endpoint } => !endpoint.is_empty(),
             }
     }
 }
@@ -400,6 +594,20 @@ pub enum NotificationSinkConfig {
         tls: SmtpTls,
         username: String,
     },
+    /// WeChat through ServerChan Turbo. The credential is the `SCT…` SendKey, which
+    /// names the recipient; the endpoint is overridable only for a local stub.
+    ServerChan { endpoint: String },
+}
+
+impl NotificationSinkConfig {
+    /// The stable kind name a consent binds to.
+    pub fn kind(&self) -> &'static str {
+        match self {
+            Self::Resend { .. } => "resend",
+            Self::Smtp { .. } => "smtp",
+            Self::ServerChan { .. } => "serverChan",
+        }
+    }
 }
 
 impl Default for NotificationSinkConfig {
@@ -420,23 +628,6 @@ pub enum SmtpTls {
     Implicit,
     /// Plaintext greeting, then `STARTTLS` before the credential, the port 587 shape.
     StartTls,
-}
-
-/// The user's acceptance of sending message text off the device unencrypted, for one
-/// sink and one destination.
-///
-/// Stored separately from the character count it enables, so a change to the sink or
-/// the destination drops the consent instead of carrying it to a different recipient.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
-pub struct NotificationDeliveryPrefixConsent {
-    pub sink_id: String,
-    pub destination: String,
-    /// The sink's non-secret endpoint at the moment of consent; see
-    /// [`NotificationSinkSettings::endpoint`].
-    pub endpoint: String,
-    /// When the user accepted, in milliseconds since the Unix epoch, so a settings
-    /// reader can say how old the acceptance is.
-    pub accepted_at_ms: i64,
 }
 
 /// The charset a sink id may use.
@@ -514,7 +705,8 @@ pub struct NotificationDeliverySinkState {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum NotificationDeliveryOutcomeState {
-    Delivered {
+    /// The provider accepted the request; never a claim that it was received.
+    Accepted {
         at_ms: u64,
     },
     InvalidSecret {

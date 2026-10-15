@@ -326,3 +326,60 @@ fn kind_specific_titles_match_the_notification_kind() {
         assert_eq!(payload.title, expected);
     }
 }
+
+/// #994: the preview switch belongs to each account. Two signed-in accounts that see
+/// the same live message each follow their own setting, and only a verified live
+/// rise carries text.
+#[test]
+fn each_account_follows_its_own_preview_setting() {
+    fn account(user: &str, message_previews: bool) -> AppState {
+        let mut state = AppState {
+            session: SessionState::Ready(SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: user.to_owned(),
+                device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            }),
+            ..AppState::default()
+        };
+        state.settings.values.notifications.message_previews = message_previews;
+        state.native_attention.summary.capabilities = capabilities();
+        state.native_attention_context.window_focused = false;
+        state
+    }
+    fn receive(state: &mut AppState) -> Option<String> {
+        let mut read = room("!dm:example.invalid", true, 0, 0);
+        read.latest_event = Some(latest_event("$old:example.invalid", "Alice", "old"));
+        reduce(
+            state,
+            AppAction::RoomListUpdated {
+                spaces: vec![],
+                rooms: vec![read],
+            },
+        );
+        let mut unread = room("!dm:example.invalid", true, 1, 0);
+        let mut event = latest_event("$new:example.invalid", "Alice", "preview");
+        event.message_text = Some("decrypted private text".to_owned());
+        unread.latest_event = Some(event);
+        reduce(
+            state,
+            AppAction::RoomListUpdated {
+                spaces: vec![],
+                rooms: vec![unread],
+            },
+        );
+        state
+            .native_attention
+            .notification
+            .as_ref()
+            .map(|payload| payload.body.clone())
+    }
+
+    let mut previews_on = account("@first:example.invalid", true);
+    let mut previews_off = account("@second:example.invalid", false);
+    assert_eq!(
+        receive(&mut previews_on).as_deref(),
+        Some("decrypted private text")
+    );
+    assert_eq!(receive(&mut previews_off).as_deref(), Some("1 unread"));
+}

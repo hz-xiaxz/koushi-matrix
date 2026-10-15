@@ -1,5 +1,5 @@
 use super::*;
-use crate::MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS;
+use crate::MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS;
 use crate::state::{RoomSummary, RoomTags};
 
 fn unread_room() -> RoomSummary {
@@ -78,7 +78,10 @@ fn a_candidate_carries_the_bounded_latest_message_text_and_never_prints_it() {
     room.display_label = "Private Room Label".to_owned();
     let candidate = candidate_of(&room);
     assert_eq!(
-        candidate.newest_message_text.as_deref(),
+        candidate
+            .newest_message_text
+            .as_ref()
+            .map(|text| text.text.as_str()),
         Some("private delivery text")
     );
     let debug = format!("{candidate:?}");
@@ -112,15 +115,16 @@ fn a_candidate_carries_the_bounded_latest_message_text_and_never_prints_it() {
 
     // The candidate holds a bounded slice, and it cuts on a character boundary: a
     // body of two-byte characters must not panic or split one in half.
-    let long = "日".repeat(MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS + 50);
+    let long = "日".repeat(MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS + 50);
     let bounded = candidate_of(&room_with_latest_text(Some(&long)))
         .newest_message_text
         .expect("a long body is still text");
     assert_eq!(
-        bounded.chars().count(),
-        MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS
+        bounded.text.chars().count(),
+        MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS
     );
-    assert!(bounded.chars().all(|character| character == '日'));
+    assert!(bounded.truncated_at_source);
+    assert!(bounded.text.chars().all(|character| character == '日'));
 }
 
 fn project(observation: NativeAttentionObservationKind) -> NativeAttentionProjection {

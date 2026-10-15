@@ -9,7 +9,9 @@ use crate::locale_profile::DisplayPlatform;
 
 use super::AppState;
 use super::errors::OperationFailureKind;
-use super::notification_delivery::bounded_notification_delivery_prefix_source;
+use super::notification_delivery::{
+    BoundedNotificationDeliveryText, bounded_notification_delivery_message_source,
+};
 #[cfg(test)]
 use super::room::RoomLatestEventSummary;
 use super::room::{
@@ -184,8 +186,8 @@ pub struct NativeAttentionProjectionInput<'a> {
     pub window_focused: bool,
     pub observation: NativeAttentionObservationKind,
     pub previous_candidate: Option<&'a NativeAttentionCandidate>,
-    /// Retained device setting; room-level alerts cannot show an event preview
-    /// until the exact unread event has been verified.
+    /// Device setting (#994): when on, a verified live alert carries the triggering
+    /// event's text instead of the count body.
     pub message_previews: bool,
     pub capabilities: NativeAttentionCapabilities,
 }
@@ -201,6 +203,10 @@ pub struct NativeAttentionProjection {
 
 struct NativeAttentionCandidateEntry<'a> {
     room_id: &'a str,
+    room: &'a RoomSummary,
+    /// Whether this room is the one whose main unread count rose in this live
+    /// observation, which is what lets its latest event stand for the alert (#994).
+    is_verified_live_room: bool,
     candidate: NativeAttentionCandidate,
 }
 
@@ -313,6 +319,9 @@ pub(crate) fn native_attention_projection_from_rooms_with_live_room(
         ) {
             candidates.push(NativeAttentionCandidateEntry {
                 room_id: &room.room_id,
+                room,
+                is_verified_live_room: require_live_room
+                    && live_room_id == Some(room.room_id.as_str()),
                 candidate: NativeAttentionCandidate {
                     room_display_name: summary.room_display_name,
                     kind: summary.kind,
@@ -362,7 +371,11 @@ pub(crate) fn native_attention_projection_from_rooms_with_live_room(
     // the payload is derived after suppression, from the same entry that won
     // the candidate selection.
     let notification = match (candidate_entry, candidate.as_ref()) {
-        (Some(entry), Some(candidate)) => Some(native_notification_payload(entry, candidate)),
+        (Some(entry), Some(candidate)) => Some(native_notification_payload(
+            entry,
+            candidate,
+            input.message_previews && input.observation == NativeAttentionObservationKind::Live,
+        )),
         _ => None,
     };
 
@@ -409,16 +422,20 @@ pub struct RoomAttentionCandidate {
     /// The spaces this room is a child of in the room list right now, so a watch list naming
     /// a space covers a room that joined it after the list was written.
     pub parent_space_ids: Vec<String>,
+    /// The display names of the first parent spaces, for the digest's room line
+    /// (#1460). Filled by [`attention_room_candidates_for_state`], which owns the space
+    /// list; empty when the room is in no space.
+    pub parent_space_labels: Vec<String>,
     /// The body of the room's latest conversation event, when it is a plain text message
-    /// this device can already read and [`bounded_notification_delivery_prefix_source`]
-    /// has bounded it (#1427).
+    /// this device can already read and [`bounded_notification_delivery_message_source`]
+    /// has bounded it (#1427, #1460).
     ///
     /// It is the *latest* event, which may be newer than the unread event that made the
     /// room qualify: a room can be unread because of an older mention while a newer plain
     /// message sits at the top, and the room list previews that same newer message. It is
     /// message text, so it is carried here and never serialized, logged, or rendered
     /// except by `digest` under a per-sink consent.
-    pub newest_message_text: Option<String>,
+    pub newest_message_text: Option<BoundedNotificationDeliveryText>,
 }
 
 impl fmt::Debug for RoomAttentionCandidate {
@@ -433,6 +450,7 @@ impl fmt::Debug for RoomAttentionCandidate {
             .field("unread", &self.unread)
             .field("mentions", &self.mentions)
             .field("parent_space_ids", &self.parent_space_ids.len())
+            .field("parent_space_labels", &self.parent_space_labels.len())
             .field(
                 "newest_message_text",
                 &self.newest_message_text.as_ref().map(|_| "MessageText(..)"),
@@ -521,12 +539,13 @@ pub fn attention_room_candidates(
             unread: u32::try_from(effective_unread_count).unwrap_or(u32::MAX),
             mentions: u32::try_from(highlight_total).unwrap_or(u32::MAX),
             parent_space_ids: room.parent_space_ids.clone(),
+            parent_space_labels: Vec::new(),
             newest_message_text: room
                 .latest_event
                 .as_ref()
                 .filter(|event| !event.is_redacted)
                 .and_then(|event| event.message_text.as_deref())
-                .and_then(bounded_notification_delivery_prefix_source),
+                .and_then(bounded_notification_delivery_message_source),
         });
     }
 
@@ -551,7 +570,7 @@ pub fn attention_room_candidates(
 /// neutral value, because this function answers one question about rooms only.
 pub fn attention_room_candidates_for_state(state: &AppState) -> Vec<RoomAttentionCandidate> {
     let room_notification_modes = attention_room_notification_modes(state);
-    attention_room_candidates(NativeAttentionProjectionInput {
+    let mut candidates = attention_room_candidates(NativeAttentionProjectionInput {
         rooms: &state.rooms,
         active_room_id: state.navigation.active_room_id.as_deref(),
         muted_room_ids: &[],
@@ -562,8 +581,28 @@ pub fn attention_room_candidates_for_state(state: &AppState) -> Vec<RoomAttentio
         previous_candidate: state.native_attention.summary.candidate.as_ref(),
         message_previews: state.settings.values.notifications.message_previews,
         capabilities: state.native_attention.summary.capabilities,
-    })
+    });
+    for candidate in &mut candidates {
+        candidate.parent_space_labels = candidate
+            .parent_space_ids
+            .iter()
+            .filter_map(|space_id| {
+                state
+                    .spaces
+                    .iter()
+                    .find(|space| &space.space_id == space_id)
+                    .map(|space| space.display_name.clone())
+            })
+            .filter(|label| !label.trim().is_empty())
+            .take(MAX_ATTENTION_PARENT_SPACE_LABELS)
+            .collect();
+    }
+    candidates
 }
+
+/// A digest names at most this many parent spaces per room; a room in more spaces is
+/// still covered by every watched space, the line only names the first ones.
+pub const MAX_ATTENTION_PARENT_SPACE_LABELS: usize = 2;
 
 /// The per-room notification modes the attention projection reads, keyed by room id.
 ///
@@ -582,21 +621,76 @@ pub fn attention_room_notification_modes(
 /// Compose the OS notification the adapter may show for the selected candidate.
 ///
 /// A room-level unread count proves the number, but does not prove that the
-/// room's latest event is itself unread. Keep the alert generic and navigate
-/// to the room, never to an unverified event or thread.
+/// room's latest event is itself unread. The alert navigates to the room, never to
+/// an unverified event or thread. Its body is the count body unless the user turned
+/// message previews on and [`verified_native_preview`] can stand the latest event
+/// for the alert (#994).
 fn native_notification_payload(
     entry: &NativeAttentionCandidateEntry<'_>,
     candidate: &NativeAttentionCandidate,
+    previews_allowed: bool,
 ) -> NativeNotificationPayload {
+    let preview = previews_allowed
+        .then(|| verified_native_preview(entry))
+        .flatten();
     NativeNotificationPayload {
         title: native_notification_title(&candidate.room_display_name, candidate.kind),
-        body: native_notification_count_body(candidate),
+        body: preview.unwrap_or_else(|| native_notification_count_body(candidate)),
         target: NativeNotificationTarget {
             room_id: entry.room_id.to_owned(),
             event_id: None,
             thread_root_event_id: None,
         },
     }
+}
+
+/// The longest OS preview, in grapheme clusters. A banner shows a line or two; the
+/// rest of the message stays in the app.
+pub const MAX_NATIVE_NOTIFICATION_PREVIEW_GRAPHEMES: usize = 120;
+
+/// The latest event's text, when it may stand for the alert (#994).
+///
+/// Verified means: the room is the one whose unread count rose in this live
+/// observation, its latest event is neither redacted nor an edit or reaction, and it
+/// carries decrypted plain text. A thread reply qualifies because it is the latest
+/// event. Anything else falls back to the count body.
+fn verified_native_preview(entry: &NativeAttentionCandidateEntry<'_>) -> Option<String> {
+    if !entry.is_verified_live_room {
+        return None;
+    }
+    let event = entry.room.latest_event.as_ref()?;
+    if event.is_redacted
+        || event.event_id.is_empty()
+        || matches!(
+            event.relation_type.as_deref(),
+            Some("m.replace" | "m.annotation")
+        )
+    {
+        return None;
+    }
+    let flattened = event
+        .message_text
+        .as_deref()?
+        .split(|character: char| {
+            character.is_whitespace() || character.is_control() || character == '\u{2028}'
+        })
+        .filter(|part| !part.is_empty())
+        .collect::<Vec<_>>()
+        .join(" ");
+    if flattened.is_empty() {
+        return None;
+    }
+    use unicode_segmentation::UnicodeSegmentation;
+    let mut graphemes = flattened.graphemes(true);
+    let bounded: String = graphemes
+        .by_ref()
+        .take(MAX_NATIVE_NOTIFICATION_PREVIEW_GRAPHEMES)
+        .collect();
+    Some(if graphemes.next().is_some() {
+        format!("{bounded}…")
+    } else {
+        bounded
+    })
 }
 
 fn native_notification_title(room_display_name: &str, kind: RoomAttentionKind) -> String {
@@ -803,3 +897,6 @@ pub enum NativeAttentionSuppressionReason {
 #[cfg(test)]
 #[path = "native_attention/tests.rs"]
 mod tests;
+#[cfg(test)]
+#[path = "native_attention/preview_tests.rs"]
+mod preview_tests;
