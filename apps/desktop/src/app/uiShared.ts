@@ -19,12 +19,18 @@ import type {
 } from "../domain/types";
 import type { ContextMenuItem } from "../domain/contextMenus";
 import { getActiveLocale, t, type MessageId } from "../i18n/messages";
-import { roomDisplayLabel } from "../domain/roomDisplayLabel";
+import { forwardDestinationsFrom } from "../domain/roomDisplayLabel";
 
+export {
+  collidingRoomLabels,
+  forwardDestinationsFrom
+} from "../domain/roomDisplayLabel";
 export {
   cappedRoomLabel,
   roomDisplayLabel,
-  roomListItemLabel
+  roomListItemLabel,
+  roomSpaceLabel,
+  roomSpaceLabelsByRoomId
 } from "../domain/roomDisplayLabel";
 
 export type { MentionCandidate } from "../domain/projectionTypes";
@@ -483,7 +489,9 @@ const pinnedEventIdsByEvents = new WeakMap<PinnedEvents, string[]>();
 const forwardDestinationsByRooms = new WeakMap<
   import("../domain/types").DesktopSnapshot["state"]["domain"]["rooms"],
   {
-    // Labels include catalog text (#1050), so a locale change invalidates them.
+    // Labels include catalog text (#1050) and Space context (#1403), so a
+    // locale or Space-projection change invalidates them.
+    spaces: import("../domain/types").DesktopSnapshot["state"]["domain"]["spaces"];
     locale: ReturnType<typeof getActiveLocale>;
     destinations: import("../domain/projectionTypes").TimelineForwardDestination[];
   }
@@ -520,16 +528,14 @@ export function pinnedEventIdsForRoom(
 export function forwardDestinationsFromSnapshot(
   snapshot: import("../domain/types").DesktopSnapshot
 ): import("../domain/projectionTypes").TimelineForwardDestination[] {
-  const rooms = snapshot.state.domain.rooms;
+  const { rooms, spaces } = snapshot.state.domain;
   const locale = getActiveLocale();
   const cached = forwardDestinationsByRooms.get(rooms);
-  let destinations = cached?.locale === locale ? cached.destinations : undefined;
+  let destinations =
+    cached?.locale === locale && cached.spaces === spaces ? cached.destinations : undefined;
   if (!destinations) {
-    destinations = rooms.map((room) => ({
-      room_id: room.room_id,
-      display_name: roomDisplayLabel(room)
-    }));
-    forwardDestinationsByRooms.set(rooms, { locale, destinations });
+    destinations = forwardDestinationsFrom(rooms, spaces);
+    forwardDestinationsByRooms.set(rooms, { locale, spaces, destinations });
   }
   return destinations;
 }

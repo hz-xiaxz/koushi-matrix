@@ -120,3 +120,39 @@ test("a refused command releases the row", async () => {
   fireEvent.click(add);
   await vi.waitFor(() => expect(add.disabled).toBe(false));
 });
+
+// #1403: names are not unique, so same-named rows must say which Space (or,
+// failing that, which room ID) they are before the user links the wrong one.
+test("only same-named rows carry Space context", () => {
+  const model: SpaceAddRoomsModel = {
+    space_id: "!bar:example.invalid",
+    candidates: [
+      { room_id: "!bar-room:example.invalid", display_name: "latticelattice", avatar: null, status: { kind: "available" } },
+      { room_id: "!foobar-room:example.invalid", display_name: "latticelattice", avatar: null, status: { kind: "available" } },
+      { room_id: "!loose:example.invalid", display_name: "latticelattice", avatar: null, status: { kind: "available" } },
+      { room_id: "!unique:example.invalid", display_name: "Ops", avatar: null, status: { kind: "available" } }
+    ]
+  };
+  render(
+    <AddExistingRoomDialog
+      model={model}
+      spaceName="Bar"
+      busy={false}
+      spaceLabelsByRoomId={{
+        "!bar-room:example.invalid": "Bar",
+        "!foobar-room:example.invalid": "foobar"
+      }}
+      onAdd={vi.fn()}
+      onClose={vi.fn()}
+    />
+  );
+
+  const renderedRows = rows();
+  expect(renderedRows[0].textContent).toContain("Bar · latticelattice");
+  expect(renderedRows[1].textContent).toContain("foobar · latticelattice");
+  // A room in no Space falls back to its room ID, the one unique value Matrix promises.
+  expect(renderedRows[2].textContent).toContain("!loose:example.invalid · latticelattice");
+  // A unique name stays unadorned.
+  expect(renderedRows[3].textContent).not.toContain("·");
+  expect(within(renderedRows[3]).getByText("Ops")).toBeTruthy();
+});

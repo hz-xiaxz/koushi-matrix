@@ -4,9 +4,12 @@ import { selectForwardDestinations } from "../domain/appStore";
 import type { DesktopSnapshot } from "../domain/types";
 import {
   cappedRoomLabel,
+  collidingRoomLabels,
+  forwardDestinationsFrom,
   forwardDestinationsFromSnapshot,
   roomDisplayLabel,
-  roomListItemLabel
+  roomListItemLabel,
+  roomSpaceLabel
 } from "./uiShared";
 
 // #1050: Rust marks the SDK's calculated empty-room name structurally; the GUI
@@ -43,7 +46,7 @@ describe("roomDisplayLabel", () => {
     const rooms = [
       { room_id: "!empty:example.invalid", display_label: "Empty Room", display_label_placeholder: { kind: "empty" } }
     ];
-    const snapshot = { state: { domain: { rooms } } } as unknown as DesktopSnapshot;
+    const snapshot = { state: { domain: { rooms, spaces: [] } } } as unknown as DesktopSnapshot;
     const store = { snapshot };
 
     expect(forwardDestinationsFromSnapshot(snapshot)[0]?.display_name).toBe("Empty room");
@@ -74,5 +77,66 @@ describe("roomDisplayLabel", () => {
       roomListItemLabel({ display_name: "Empty Room", display_name_placeholder: { kind: "empty" } })
     ).toBe("空のルーム");
     expect(roomListItemLabel({ display_name: "Ops" })).toBe("Ops");
+  });
+});
+
+// #1403: room names are not unique, so a picker row must say which Space a room
+// is in before the user sends or links the wrong one.
+describe("roomSpaceLabel", () => {
+  const spaces = [
+    {
+      space_id: "!bar:example.invalid",
+      display_name: "Bar",
+      child_room_ids: ["!in-bar:example.invalid"],
+      parent_side_child_room_ids: []
+    },
+    {
+      space_id: "!foobar:example.invalid",
+      display_name: "foobar",
+      child_room_ids: [],
+      parent_side_child_room_ids: []
+    }
+  ];
+
+  test("prefers a declared parent Space and falls back to a containing one", () => {
+    expect(
+      roomSpaceLabel(
+        { room_id: "!x:example.invalid", is_dm: false, parent_space_ids: ["!foobar:example.invalid", "!bar:example.invalid"] },
+        spaces
+      )
+    ).toBe("foobar");
+    expect(
+      roomSpaceLabel({ room_id: "!in-bar:example.invalid", is_dm: false, parent_space_ids: [] }, spaces)
+    ).toBe("Bar");
+    expect(
+      roomSpaceLabel({ room_id: "!nowhere:example.invalid", is_dm: false, parent_space_ids: [] }, spaces)
+    ).toBeNull();
+  });
+
+  test("a DM has no containing Space to name", () => {
+    expect(
+      roomSpaceLabel({ room_id: "!dm:example.invalid", is_dm: true, parent_space_ids: ["!bar:example.invalid"] }, spaces)
+    ).toBeNull();
+  });
+
+  test("colliding names are the only ones that need context", () => {
+    expect([...collidingRoomLabels(["a", "b", "a"])]).toEqual(["a"]);
+    expect([...collidingRoomLabels(["a", "b"])]).toEqual([]);
+  });
+
+  test("forward destinations name the Space only where names collide", () => {
+    const rooms = [
+      { room_id: "!bar-room:example.invalid", display_label: "latticelattice", display_label_placeholder: null, is_dm: false, parent_space_ids: ["!bar:example.invalid"] },
+      { room_id: "!foobar-room:example.invalid", display_label: "latticelattice", display_label_placeholder: null, is_dm: false, parent_space_ids: ["!foobar:example.invalid"] },
+      { room_id: "!loose-room:example.invalid", display_label: "latticelattice", display_label_placeholder: null, is_dm: false, parent_space_ids: [] },
+      { room_id: "!unique:example.invalid", display_label: "Ops", display_label_placeholder: null, is_dm: false, parent_space_ids: [] }
+    ];
+
+    expect(forwardDestinationsFrom(rooms, spaces)).toEqual([
+      { room_id: "!bar-room:example.invalid", display_name: "Bar · latticelattice" },
+      { room_id: "!foobar-room:example.invalid", display_name: "foobar · latticelattice" },
+      { room_id: "!loose-room:example.invalid", display_name: "!loose-room:example.invalid · latticelattice" },
+      { room_id: "!unique:example.invalid", display_name: "Ops" }
+    ]);
   });
 });

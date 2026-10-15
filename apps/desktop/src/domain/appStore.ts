@@ -3,7 +3,7 @@ import { subscribeWithSelector } from "zustand/middleware";
 
 import type { StateDeltaChangedSlices, StateDeltaPayload } from "./coreEvents";
 import type { MentionCandidate, TimelineForwardDestination } from "./projectionTypes";
-import { roomDisplayLabel } from "./roomDisplayLabel";
+import { forwardDestinationsFrom } from "./roomDisplayLabel";
 import { getActiveLocale, type Locale } from "../i18n/messages";
 import type {
   ActivityRow,
@@ -30,6 +30,7 @@ const ROOM_MENTION_CANDIDATE: MentionCandidate = {
 
 let cachedForwardRooms: DesktopSnapshot["state"]["domain"]["rooms"] | null = null;
 let cachedForwardLocale: Locale | null = null;
+let cachedForwardSpaces: DesktopSnapshot["state"]["domain"]["spaces"] | null = null;
 let cachedForwardDestinations: TimelineForwardDestination[] = EMPTY_FORWARD_DESTINATIONS;
 const cachedMentionCandidatesByKey = new Map<
   string,
@@ -546,17 +547,17 @@ export function selectForwardDestinations(
     cachedForwardDestinations = EMPTY_FORWARD_DESTINATIONS;
     return cachedForwardDestinations;
   }
-  // Labels include catalog text (#1050), so a locale change invalidates them.
+  const spaces = state.snapshot?.state.domain.spaces ?? [];
+  // Labels include catalog text (#1050) and Space context (#1403), so a locale
+  // or Space-projection change invalidates them.
   const locale = getActiveLocale();
-  if (rooms === cachedForwardRooms && locale === cachedForwardLocale) {
+  if (rooms === cachedForwardRooms && spaces === cachedForwardSpaces && locale === cachedForwardLocale) {
     return cachedForwardDestinations;
   }
   cachedForwardRooms = rooms;
+  cachedForwardSpaces = spaces;
   cachedForwardLocale = locale;
-  cachedForwardDestinations = rooms.map((room) => ({
-    room_id: room.room_id,
-    display_name: roomDisplayLabel(room)
-  }));
+  cachedForwardDestinations = forwardDestinationsFrom(rooms, spaces);
   return cachedForwardDestinations;
 }
 

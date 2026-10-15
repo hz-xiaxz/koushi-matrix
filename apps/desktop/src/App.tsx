@@ -260,6 +260,7 @@ import {
   composerModeProp,
   operationFailureLabel,
   roomDisplayLabel,
+  roomSpaceLabelsByRoomId,
   syncStatePresentation,
   type ActiveContextMenu,
   type ContextMenuTarget,
@@ -7967,6 +7968,10 @@ function AccountContent({
       {addExistingRoomSpaceId && snapshot.sidebar.space_add_rooms?.space_id === addExistingRoomSpaceId ? (
         <AddExistingRoomDialog
           model={snapshot.sidebar.space_add_rooms}
+          spaceLabelsByRoomId={roomSpaceLabelsByRoomId(
+            snapshot.state.domain.rooms,
+            snapshot.state.domain.spaces
+          )}
           spaceName={
             snapshot.sidebar.space_rail.find((space) => space.space_id === addExistingRoomSpaceId)
               ?.display_name ?? ""
