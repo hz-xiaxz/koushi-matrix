@@ -48,12 +48,18 @@ export default defineConfig({
     {
       name: "webkit",
       // The engine-native wheel-scroll specs are the only recorded flake left
-      // in this tier (#1425: the viewport moved by 0 px twice, then passed), and
-      // they run here. Record a trace for this project only: a trace for all
-      // 600 specs would slow the slowest gate and add the very I/O load the
-      // flake correlates with. Failing tests keep their trace; passing ones
-      // drop it. CI uploads `test-results/` on failure.
-      use: { browserName: "webkit", trace: "retain-on-failure" },
+      // in this tier (#1425: the viewport moved by 0 px twice, then passed).
+      // Tracing stays OFF in the required run: `retain-on-failure` measured
+      // 2026-10-15 on `main` doubled this spec's runtime (date dividers
+      // 18.6s -> 30.5s, threshold crossing 15.0s -> 30.2s, wheel 6.5s -> 16.6s)
+      // and broke the timing-sensitive assertions it was meant to diagnose.
+      // Collect a trace only from a dispatched diagnostic run, which sets
+      // KOUSHI_PLAYWRIGHT_TRACE and is not the required check; CI uploads
+      // `test-results/` on failure either way.
+      use: {
+        browserName: "webkit",
+        trace: process.env.KOUSHI_PLAYWRIGHT_TRACE ? "retain-on-failure" : "off"
+      },
       testMatch: [
         /room-list-filter-native-clear\.spec\.ts$/,
         /upload-preview-heic\.spec\.ts$/,

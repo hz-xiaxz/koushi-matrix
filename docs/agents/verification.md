@@ -227,6 +227,19 @@ failure rate over the observed date window, validates one unchanged SHA with
 `--sha <40-hex-sha>` or `--require-unchanged-sha`, and exits nonzero at or above
 the `--max-failure-rate` threshold (for example `0.01`).
 
+## Browser-tier trace collection
+
+The required browser-headless gate runs trace-free. `retain-on-failure` tracing
+measured on `main` (2026-10-15) doubled the WebKit `timeline-scroll-anchor-drift`
+spec's runtime — date dividers 18.6s to 30.5s, threshold crossing 15.0s to 30.2s,
+wheel 6.5s to 16.6s — and broke the timing-sensitive assertions it was meant to
+diagnose. When those specs fail without usable evidence, dispatch
+`.github/workflows/ci.yml` with `browser_trace` set: that run sets
+`KOUSHI_PLAYWRIGHT_TRACE`, records a trace for the WebKit project, and uploads
+`browser-headless-artifacts`. It is a diagnostic run and never satisfies the
+required check. Do not enable tracing in the required run to "keep evidence
+around" — a perturbed gate measures the recorder.
+
 ## IME-safe text input checks
 
 When changing any text field, textarea, password/recovery entry, upload caption,
