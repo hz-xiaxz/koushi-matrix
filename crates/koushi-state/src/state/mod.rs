@@ -71,8 +71,8 @@ pub use account_notifications::{
     MAX_NOTIFICATION_EMAIL_LEN, MAX_NOTIFICATION_KEYWORD_CHARS, MAX_NOTIFICATION_KEYWORDS,
     NotificationCategory, NotificationCategoryState, NotificationCategoryStates,
     NotificationEmailAddress, NotificationEmailManagement, NotificationKeywordRuleState,
-    PendingNotificationEmail, normalize_notification_email, normalize_notification_keyword,
-    normalize_notification_keyword_removal,
+    PendingNotificationEmail, ServerEmailDelivery, normalize_notification_email,
+    normalize_notification_keyword, normalize_notification_keyword_removal,
 };
 
 // ── Re-exports: sync ────────────────────────────────────────────────────────

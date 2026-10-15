@@ -1804,6 +1804,99 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         RoomNotificationSettings::default(),
     );
 
+    // Local notification delivery (#1427, #1460): one destination per sink kind, so the golden
+    // pins every config, content mode, target kind, consent and outcome shape the frontend
+    // mirrors. No value here is a credential: the store owns those, and the binding is an
+    // identity plus an opaque revision.
+    {
+        use koushi_state::{
+            NotificationDeliveryContent, NotificationDeliveryOutcomeState,
+            NotificationDeliveryPresetState, NotificationDeliverySinkState,
+            NotificationDeliveryTarget, NotificationSinkConfig, NotificationSinkSettings,
+            SmtpTls,
+        };
+        let mut resend = NotificationSinkSettings {
+            id: "resend".to_owned(),
+            destination: "fixture@example.invalid".to_owned(),
+            from_address: "koushi@example.invalid".to_owned(),
+            sender_name: "Koushi".to_owned(),
+            config: NotificationSinkConfig::Resend {
+                endpoint: "https://api.resend.com/emails".to_owned(),
+            },
+            content: NotificationDeliveryContent::Prefix { graphemes: 80 },
+            ..NotificationSinkSettings::default()
+        };
+        resend.secret_binding = Some(resend.credential_binding("0123abcd"));
+        resend.content_consent = Some(resend.consent_for_current(1_700_000_000_000));
+        resend.targets.watched = vec![
+            NotificationDeliveryTarget::Room {
+                room_id: "!room:example.invalid".to_owned(),
+            },
+            NotificationDeliveryTarget::Space {
+                space_id: "!space:example.invalid".to_owned(),
+            },
+        ];
+        let smtp = NotificationSinkSettings {
+            id: "smtp".to_owned(),
+            destination: "fixture@example.invalid".to_owned(),
+            from_address: "fixture@qq.example.invalid".to_owned(),
+            config: NotificationSinkConfig::Smtp {
+                preset: Some("qq-mail".to_owned()),
+                host: "smtp.qq.com".to_owned(),
+                port: 465,
+                tls: SmtpTls::Implicit,
+                username: "fixture@qq.example.invalid".to_owned(),
+            },
+            ..NotificationSinkSettings::default()
+        };
+        let mut wechat = NotificationSinkSettings {
+            id: "wechat".to_owned(),
+            config: NotificationSinkConfig::ServerChan {
+                endpoint: "https://sctapi.ftqq.com".to_owned(),
+            },
+            content: NotificationDeliveryContent::Full,
+            ..NotificationSinkSettings::default()
+        };
+        wechat.timing.dwell_secs = 120;
+        wechat.timing.min_interval_secs = 1800;
+        wechat.timing.only_when_unfocused = false;
+        state.settings.values.delivery.sinks = vec![resend, smtp, wechat];
+        state.notification_delivery.sinks = vec![
+            NotificationDeliverySinkState {
+                sink_id: "resend".to_owned(),
+                secret_configured: true,
+                last_outcome: Some(NotificationDeliveryOutcomeState::Accepted {
+                    at_ms: 1_700_000_000_000,
+                }),
+                secret_retired: false,
+            },
+            NotificationDeliverySinkState {
+                sink_id: "smtp".to_owned(),
+                secret_configured: false,
+                last_outcome: None,
+                secret_retired: true,
+            },
+            NotificationDeliverySinkState {
+                sink_id: "wechat".to_owned(),
+                secret_configured: true,
+                last_outcome: Some(NotificationDeliveryOutcomeState::RateLimited {
+                    at_ms: 1_700_000_000_000,
+                    retry_after_secs: Some(60),
+                }),
+                secret_retired: false,
+            },
+        ];
+        state.notification_delivery.presets = vec![NotificationDeliveryPresetState {
+            id: "qq-mail".to_owned(),
+            label: "QQ Mail".to_owned(),
+            host: "smtp.qq.com".to_owned(),
+            port: 465,
+            tls: SmtpTls::Implicit,
+            username_is_full_address: true,
+            secret_hint: "settings.notificationDeliverySecretHint.qqMail".to_owned(),
+        }];
+    }
+
     // account_notifications (#981) — loaded snapshot with a mixed category,
     // a pending email, and a UIA continuation.
     state.account_notifications = koushi_state::AccountNotificationsState {
@@ -1837,6 +1930,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
                     enabled: false,
                 },
             ],
+            server_email_delivery: koushi_state::ServerEmailDelivery::KnownUnavailable,
         }),
         pending_email: Some(koushi_state::PendingNotificationEmail {
             address: "pending@example.invalid".to_owned(),
