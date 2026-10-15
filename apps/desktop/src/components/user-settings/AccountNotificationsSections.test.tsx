@@ -43,6 +43,7 @@ function snapshot(overrides: Partial<AccountNotificationsSnapshot> = {}): Accoun
     emails: [],
     unverified_email_pusher_count: 0,
     keywords: [],
+    server_email_delivery: "unknown",
     ...overrides
   };
 }

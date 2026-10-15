@@ -206,13 +206,20 @@ export function AccountTabStrip({
   selectedTabId,
   onSelect,
   onAdd,
-  onRemove
+  onRemove,
+  showActivity = true
 }: {
   tabs: AccountTabSummary[];
   selectedTabId: string | null;
   onSelect: (id: string) => void;
   onAdd: () => void;
   onRemove: (id: string) => void;
+  /**
+   * #1458: the workspace strip shows each account's connection status, unread and
+   * invitation counts. The Account Settings header keeps only account selection, so it
+   * renders neither the indicators nor the status in the tab's accessible name.
+   */
+  showActivity?: boolean;
 }) {
   function statusLabel(status: AccountTabSummary["status"]): string {
     switch (status) {
@@ -252,7 +259,9 @@ export function AccountTabStrip({
               data-selected={selected}
               data-status={tab.status}
               aria-current={selected ? "page" : undefined}
-              aria-label={t("accountTabs.select", { account: label, status })}
+              aria-label={
+                showActivity ? t("accountTabs.select", { account: label, status }) : label
+              }
               title={`${label}${tab.homeserver ? ` · ${shortHomeserverName(tab.homeserver)}` : ""}`}
               onClick={() => onSelect(tab.id)}
             >
@@ -265,7 +274,7 @@ export function AccountTabStrip({
               </span>
               <span className="account-tab-label">{label}</span>
               <span className="account-tab-server">{shortHomeserverName(tab.homeserver)}</span>
-              {tab.status === "ready" ? (
+              {!showActivity ? null : tab.status === "ready" ? (
                 <>
                   {tab.unreadCount > 0 ? (
                     <span className="account-tab-unread">{tab.unreadCount > 99 ? "99+" : tab.unreadCount}</span>

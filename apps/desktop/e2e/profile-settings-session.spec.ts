@@ -988,10 +988,10 @@ test("account notification settings load read-only and dispatch typed commands",
   await page.getByRole("tab", { name: "Notifications", exact: true }).click();
 
   await expect.poll(() => invocationCount(page, "load_account_notifications")).toBe(1);
-  // The notifications page shows this device first and the homeserver behind a tab, and the
-  // two panels name the same triggers, so the server-owned switches are scoped to their panel.
-  await page.getByRole("tab", { name: "Homeserver", exact: true }).click();
-  const serverPanel = page.getByTestId("notification-source-panel-homeserver");
+  // #1460: the page stacks OS, this-device, and homeserver sections with no tabs. The device
+  // section names the same triggers inside a destination's detail, so the server-owned
+  // switches are scoped to the homeserver section.
+  const serverPanel = page.getByTestId("notifications-homeserver");
   const group = serverPanel.getByRole("switch", { name: "Group messages" });
   await expect(group).toHaveAttribute("data-state", "mixed");
   await expect(group).toHaveAttribute("aria-checked", "false");

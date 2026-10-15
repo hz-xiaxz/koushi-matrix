@@ -14,7 +14,7 @@ import {
 
 import { settingsCategories, type SettingsCategoryId } from "../domain/settingsNavigation";
 import { HelpContent } from "./HelpDialog";
-import { t, type MessageId } from "../i18n/messages";
+import { t } from "../i18n/messages";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import { KeyboardSettingsContent } from "./KeyboardSettingsPanel";
 import { SearchHistorySection } from "./user-settings/SearchHistorySection";
@@ -68,21 +68,6 @@ import type {
   TimelineSettings,
   WindowSettings
 } from "../domain/types";
-
-/**
- * #1427: the two sources of a notification, in the order they are offered. "This device" is
- * what Koushi itself delivers; "Homeserver" is the account's own pusher configuration, which
- * a homeserver applies to every device on the account.
- */
-type NotificationSourceId = "device" | "homeserver";
-
-const NOTIFICATION_SOURCE_TABS: ReadonlyArray<{
-  id: NotificationSourceId;
-  label: MessageId;
-}> = [
-  { id: "device", label: "settings.notificationsThisDevice" },
-  { id: "homeserver", label: "settings.homeserver" }
-];
 
 export function UserSettingsPanel({
   initialCategory = "account",
@@ -281,12 +266,6 @@ export function UserSettingsPanel({
       loadAccountNotifications();
     }
   }, [notificationsOwner, loadAccountNotifications]);
-  // Which notification source the Notifications page is showing. Local UI state only: the tab
-  // changes which panel renders and nothing else, and Rust never learns about it.
-  const [notificationSource, setNotificationSource] = useState<NotificationSourceId>("device");
-  // No account, no server-owned surface: the app settings page shows this device alone, with
-  // no tab list to switch away from.
-  const notificationSourceTabs = settingsScope !== "app" && Boolean(currentSession);
   const avatarInputRef = useRef<HTMLInputElement | null>(null);
   const profileBusy = profile.update.kind !== "idle";
   const displayNameBusy = profile.update.kind === "settingDisplayName";
@@ -589,70 +568,27 @@ export function UserSettingsPanel({
               <h3>{t("settings.notifications")}</h3>
               {isSaving ? <span className="settings-save-state">{t("settings.saving")}</span> : null}
             </div>
-            {/*
-              #1427: the two notification sources are different owners, so they are two tabs
-              rather than one list. Which one is showing is local UI state: a tab click
-              renders the other panel and dispatches nothing.
-            */}
-            {notificationSourceTabs ? (
-              <div
-                className="settings-subtab-list"
-                role="tablist"
-                aria-label={t("settings.notificationSource")}
-                aria-orientation="horizontal"
-              >
-                {NOTIFICATION_SOURCE_TABS.map((source, index) => (
-                  <button
-                    key={source.id}
-                    id={`settings-notifications-source-tab-${source.id}`}
-                    className="settings-subtab"
-                    role="tab"
-                    type="button"
-                    aria-selected={notificationSource === source.id}
-                    aria-controls={`settings-notifications-source-panel-${source.id}`}
-                    tabIndex={notificationSource === source.id ? 0 : -1}
-                    onClick={() => setNotificationSource(source.id)}
-                    onKeyDown={(event) => {
-                      const count = NOTIFICATION_SOURCE_TABS.length;
-                      const next =
-                        event.key === "ArrowRight"
-                          ? (index + 1) % count
-                          : event.key === "ArrowLeft"
-                            ? (index + count - 1) % count
-                            : event.key === "Home"
-                              ? 0
-                              : event.key === "End"
-                                ? count - 1
-                                : null;
-                      if (next === null) {
-                        return;
-                      }
-                      event.preventDefault();
-                      const target = NOTIFICATION_SOURCE_TABS[next];
-                      setNotificationSource(target.id);
-                      document
-                        .getElementById(`settings-notifications-source-tab-${target.id}`)
-                        ?.focus();
-                    }}
-                  >
-                    {t(source.label)}
-                  </button>
-                ))}
+          </section>
+          {/*
+            #1460: three owners, three sections, in the order a notification leaves: the OS
+            alert this device shows, what Koushi itself sends from this device, and what the
+            homeserver sends for every device on the account.
+          */}
+          <section
+            id="settings-notifications-os"
+            className="settings-section"
+            aria-label={t("settings.notificationsOs")}
+            data-testid="notifications-os"
+          >
+            <div className="settings-section-heading">
+              <div>
+                <h3>{t("settings.notificationsOs")}</h3>
+                <p>{t("settings.notificationsOsDescription")}</p>
               </div>
-            ) : null}
-            <div
-              id="settings-notifications-source-panel-device"
-              data-testid="notification-source-panel-device"
-              role="tabpanel"
-              aria-labelledby="settings-notifications-source-tab-device"
-              tabIndex={0}
-              hidden={notificationSourceTabs && notificationSource !== "device"}
-            >
-              <p className="profile-settings-hint" data-testid="notification-device-source">
-                {t("settings.notificationDeviceSource")}
-              </p>
-              <div className="settings-toggle-list">
-                {settingsScope !== "app" ? (
+            </div>
+            <div className="settings-toggle-list">
+              {settingsScope !== "app" ? (
+                <>
                   <NotificationSettingToggle
                     label={t("settings.notificationDesktop")}
                     description={t("settings.notificationDesktopDescription")}
@@ -661,77 +597,88 @@ export function UserSettingsPanel({
                     onSelect={onUpdateSettings}
                     icon={<Bell size={15} aria-hidden="true" />}
                   />
-                ) : null}
-                {settingsScope !== "account" ? (
-                  <>
-                    <NotificationSettingToggle
-                      label={t("settings.notificationSound")}
-                      settingKey="sound"
-                      current={selectedNotifications}
-                      onSelect={onUpdateSettings}
-                      icon={<Bell size={15} aria-hidden="true" />}
-                    />
-                    <NotificationSettingToggle
-                      label={t("settings.notificationBadges")}
-                      settingKey="badges"
-                      current={selectedNotifications}
-                      onSelect={onUpdateSettings}
-                      icon={<Bell size={15} aria-hidden="true" />}
-                    />
-                  </>
-                ) : null}
-              </div>
-              {/*
-                The delivery section is app-scoped and names its own scope on every patch, so
-                it reads the same from either tab.
-              */}
-              <NotificationDeliverySection
-                delivery={settings.values.delivery}
-                state={notificationDelivery}
-                rooms={rooms}
-                spaces={spaces}
-                actions={notificationDeliveryActions}
-                // #1427: the keyword rules are account state the page already
-                // loads, so the device tab renders that projection. No account
-                // snapshot (the app-scoped dialog) means no editor.
-                keywordRules={accountNotifications.snapshot?.keywords}
-                keywordOperation={accountNotifications.operation}
-                keywordActions={{
-                  add: accountNotificationActions.addKeyword,
-                  remove: accountNotificationActions.removeKeyword
-                }}
-              />
+                  <NotificationSettingToggle
+                    label={t("settings.notificationMessagePreviews")}
+                    description={t("settings.notificationMessagePreviewsDescription")}
+                    settingKey="message_previews"
+                    current={selectedNotifications}
+                    onSelect={onUpdateSettings}
+                    icon={<Bell size={15} aria-hidden="true" />}
+                  />
+                </>
+              ) : null}
+              {settingsScope !== "account" ? (
+                <>
+                  <NotificationSettingToggle
+                    label={t("settings.notificationSound")}
+                    settingKey="sound"
+                    current={selectedNotifications}
+                    onSelect={onUpdateSettings}
+                    icon={<Bell size={15} aria-hidden="true" />}
+                  />
+                  <NotificationSettingToggle
+                    label={t("settings.notificationBadges")}
+                    settingKey="badges"
+                    current={selectedNotifications}
+                    onSelect={onUpdateSettings}
+                    icon={<Bell size={15} aria-hidden="true" />}
+                  />
+                </>
+              ) : null}
             </div>
-            {notificationSourceTabs && currentSession ? (
-              <div
-                id="settings-notifications-source-panel-homeserver"
-                data-testid="notification-source-panel-homeserver"
-                role="tabpanel"
-                aria-labelledby="settings-notifications-source-tab-homeserver"
-                tabIndex={0}
-                hidden={notificationSource !== "homeserver"}
-              >
-                <p className="profile-settings-hint" data-testid="notification-homeserver-source">
-                  {t("settings.notificationHomeserverSource")}
-                </p>
-                <AccountNotificationsLoadStatus
-                  state={accountNotifications}
-                  onRetry={accountNotificationActions.load}
-                />
-                <EmailNotificationsSection
-                  state={accountNotifications}
-                  actions={accountNotificationActions}
-                  syncKey={sessionKey(currentSession)}
-                  accountManagementAvailable={Boolean(accountManagementUrl)}
-                  onManageAccount={onManageAccount}
-                />
-                <NotificationCategoriesSection
-                  state={accountNotifications}
-                  actions={accountNotificationActions}
-                />
-              </div>
-            ) : null}
           </section>
+          {/*
+            The delivery section is app-scoped and names its own scope on every patch, so it
+            reads the same from either settings scope.
+          */}
+          <NotificationDeliverySection
+            delivery={settings.values.delivery}
+            state={notificationDelivery}
+            rooms={rooms}
+            spaces={spaces}
+            actions={notificationDeliveryActions}
+            // #1427: the keyword rules are account state the page already loads, so the
+            // device section renders that projection. No account snapshot (the app-scoped
+            // dialog) means no editor.
+            keywordRules={accountNotifications.snapshot?.keywords}
+            keywordOperation={accountNotifications.operation}
+            keywordActions={{
+              add: accountNotificationActions.addKeyword,
+              remove: accountNotificationActions.removeKeyword
+            }}
+          />
+          {settingsScope !== "app" && currentSession ? (
+            <section
+              id="settings-notifications-homeserver"
+              className="settings-section"
+              aria-label={t("settings.notificationsHomeserver")}
+              data-testid="notifications-homeserver"
+            >
+              <div className="settings-section-heading">
+                <div>
+                  <h3>{t("settings.notificationsHomeserver")}</h3>
+                  <p data-testid="notification-homeserver-source">
+                    {t("settings.notificationHomeserverSource")}
+                  </p>
+                </div>
+              </div>
+              <AccountNotificationsLoadStatus
+                state={accountNotifications}
+                onRetry={accountNotificationActions.load}
+              />
+              <EmailNotificationsSection
+                state={accountNotifications}
+                actions={accountNotificationActions}
+                syncKey={sessionKey(currentSession)}
+                accountManagementAvailable={Boolean(accountManagementUrl)}
+                onManageAccount={onManageAccount}
+              />
+              <NotificationCategoriesSection
+                state={accountNotifications}
+                actions={accountNotificationActions}
+              />
+            </section>
+          ) : null}
         </div>
         <div id="settings-page-preferences" role="tabpanel" aria-labelledby="settings-tab-preferences" className="settings-category" hidden={activeCategory !== "preferences"} tabIndex={0}>
           <section id="settings-display" className="settings-section" aria-label={t("settings.display")}>

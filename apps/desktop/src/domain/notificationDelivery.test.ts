@@ -1,26 +1,33 @@
 import { afterEach, describe, expect, test } from "vitest";
 
 import {
-  MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS,
+  DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS,
+  DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
+  MAX_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES,
   MAX_NOTIFICATION_DELIVERY_SECONDS,
-  clampNotificationDeliveryPrefixChars,
+  clampNotificationDeliveryPrefixGraphemes,
   clampNotificationDeliverySeconds,
+  newNotificationSink,
+  notificationConsentForCurrent,
+  notificationConsentRecipient,
+  notificationContentConsented,
   notificationDeliveryOutcomeMessage,
-  notificationDeliveryPrefixConsented,
   notificationDeliveryServiceLabel,
   notificationDeliverySinkFailed,
-  notificationDraftReady,
+  notificationEffectiveContent,
   notificationSinkEndpoint,
-  notificationSinkFromDraft,
+  notificationSinkFieldsReady,
   notificationSinkIdFromToken,
+  notificationSinkSetup,
   notificationSmtpConfigFromPreset,
-  notificationTargetsForLabel
+  notificationTargetsForLabel,
+  notificationTextBudget,
+  serverChanSendKeyProblem
 } from "./notificationDelivery";
 import { setActiveLocaleProfile } from "../i18n/messages";
 import type {
-  NotificationDeliveryPrefixConsent,
   NotificationDeliveryPresetState,
-  NotificationDeliverySettings,
+  NotificationDeliverySinkState,
   NotificationSinkConfig,
   NotificationSinkSettings,
   NotificationDeliveryTarget,
@@ -31,18 +38,14 @@ import type {
 afterEach(() => setActiveLocaleProfile("en", "none"));
 
 const resendSink: NotificationSinkSettings = {
-  id: "sink-one",
-  enabled: true,
+  ...newNotificationSink("sink-one", "resend"),
   destination: "recipient@example.invalid",
   from_address: "sender@example.invalid",
-  sender_name: "",
-  config: { kind: "resend", endpoint: "https://api.example.invalid/emails" },
-  secret_binding: null
+  config: { kind: "resend", endpoint: "https://api.example.invalid/emails" }
 };
 
 const smtpSink: NotificationSinkSettings = {
-  id: "sink-two",
-  enabled: false,
+  ...newNotificationSink("sink-two", "smtp"),
   destination: "recipient@example.invalid",
   from_address: "sender@example.invalid",
   sender_name: "Koushi",
@@ -53,33 +56,20 @@ const smtpSink: NotificationSinkSettings = {
     port: 465,
     tls: "implicit",
     username: "sender@example.invalid"
-  },
-  secret_binding: null
+  }
 };
 
-function delivery(overrides: Partial<NotificationDeliverySettings> = {}): NotificationDeliverySettings {
-  return {
-    enabled: true,
-    direct_messages: true,
-    mentions: true,
-    keywords: true,
-    only_when_unfocused: true,
-    dwell_secs: 300,
-    min_interval_secs: 900,
-    prefix_chars: 80,
-    prefix_consent: null,
-    watched: [],
-    sinks: [resendSink, smtpSink],
-    ...overrides
-  };
-}
+const serverChanSink: NotificationSinkSettings = {
+  ...newNotificationSink("sink-three", "serverChan"),
+  secret_binding: "serverchan:https://sctapi.ftqq.com#0a1b"
+};
 
-function consent(overrides: Partial<NotificationDeliveryPrefixConsent> = {}): NotificationDeliveryPrefixConsent {
+function sinkState(overrides: Partial<NotificationDeliverySinkState> = {}): NotificationDeliverySinkState {
   return {
-    sink_id: resendSink.id,
-    destination: resendSink.destination,
-    endpoint: notificationSinkEndpoint(resendSink),
-    accepted_at_ms: 1_700_000_000_000,
+    sink_id: "sink-one",
+    secret_configured: true,
+    secret_retired: false,
+    last_outcome: null,
     ...overrides
   };
 }
@@ -115,11 +105,11 @@ describe("notification delivery bounds", () => {
     expect(clampNotificationDeliverySeconds(12.7)).toBe(12);
   });
 
-  test("clamps the plaintext prefix to the Rust maximum and to at least one character", () => {
-    expect(MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS).toBe(200);
-    expect(clampNotificationDeliveryPrefixChars(5_000)).toBe(200);
-    expect(clampNotificationDeliveryPrefixChars(80)).toBe(80);
-    expect(clampNotificationDeliveryPrefixChars(0)).toBe(1);
+  test("clamps the plaintext prefix to the Rust maximum and to at least one grapheme", () => {
+    expect(MAX_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES).toBe(500);
+    expect(clampNotificationDeliveryPrefixGraphemes(5_000)).toBe(500);
+    expect(clampNotificationDeliveryPrefixGraphemes(80)).toBe(80);
+    expect(clampNotificationDeliveryPrefixGraphemes(0)).toBe(1);
   });
 });
 
@@ -132,18 +122,18 @@ describe("notification sink identity", () => {
 });
 
 describe("notification sink endpoint", () => {
-  test("mirrors the non-secret endpoint a prefix consent binds to", () => {
+  test("mirrors the non-secret endpoint a content consent binds to", () => {
     expect(notificationSinkEndpoint(resendSink)).toBe("https://api.example.invalid/emails");
     expect(notificationSinkEndpoint(smtpSink)).toBe("smtp.example.invalid:465");
+    expect(notificationSinkEndpoint(serverChanSink)).toBe("https://sctapi.ftqq.com");
   });
-
 });
 
 describe("notification delivery outcomes", () => {
   test("translates every typed outcome, including the rate-limit wait", () => {
     expect(notificationDeliveryOutcomeMessage(null)).toBeNull();
-    expect(notificationDeliveryOutcomeMessage({ kind: "delivered", at_ms: 1 })?.id).toBe(
-      "settings.notificationDeliveryResultDelivered"
+    expect(notificationDeliveryOutcomeMessage({ kind: "accepted", at_ms: 1 })?.id).toBe(
+      "settings.notificationDeliveryResultAccepted"
     );
     expect(notificationDeliveryOutcomeMessage({ kind: "invalidSecret", at_ms: 1 })?.id).toBe(
       "settings.notificationDeliveryResultInvalidSecret"
@@ -170,9 +160,9 @@ describe("notification delivery outcomes", () => {
     expect(waited?.values).toEqual({ seconds: 120 });
   });
 
-  test("only a delivered outcome leaves a sink looking healthy", () => {
+  test("only an accepted outcome leaves a sink looking healthy", () => {
     expect(notificationDeliverySinkFailed(null)).toBe(false);
-    expect(notificationDeliverySinkFailed({ kind: "delivered", at_ms: 1 })).toBe(false);
+    expect(notificationDeliverySinkFailed({ kind: "accepted", at_ms: 1 })).toBe(false);
     for (const kind of ["invalidSecret", "notPermitted", "rejected", "transport"] as const) {
       expect(notificationDeliverySinkFailed({ kind, at_ms: 1 })).toBe(true);
     }
@@ -182,37 +172,71 @@ describe("notification delivery outcomes", () => {
   });
 });
 
-describe("plaintext prefix consent", () => {
-  test("honours a consent only for the same sink, destination and endpoint", () => {
+describe("content consent", () => {
+  test("binds to the sink kind, endpoint and recipient, and lapses when any changes", () => {
+    const consented: NotificationSinkSettings = {
+      ...resendSink,
+      content: { kind: "full" },
+      content_consent: notificationConsentForCurrent(resendSink, 1_700_000_000_000)
+    };
+    expect(notificationContentConsented(consented)).toBe(true);
+    expect(notificationEffectiveContent(consented)).toEqual({ kind: "full" });
+
+    const otherRecipient = { ...consented, destination: "other@example.invalid" };
+    expect(notificationContentConsented(otherRecipient)).toBe(false);
+    expect(notificationEffectiveContent(otherRecipient)).toEqual({ kind: "namesOnly" });
+
+    const otherEndpoint: NotificationSinkSettings = {
+      ...consented,
+      config: { kind: "resend", endpoint: "https://elsewhere.example.invalid/x" }
+    };
+    expect(notificationContentConsented(otherEndpoint)).toBe(false);
+
+    const otherKind: NotificationSinkSettings = {
+      ...consented,
+      content_consent: { ...consented.content_consent!, sink_kind: "smtp" }
+    };
+    expect(notificationContentConsented(otherKind)).toBe(false);
+    expect(notificationEffectiveContent({ ...resendSink, content: { kind: "full" } })).toEqual({
+      kind: "namesOnly"
+    });
+  });
+
+  test("names a ServerChan recipient by the bound SendKey revision, never the key", () => {
+    expect(notificationConsentRecipient(serverChanSink)).toBe("sendkey#0a1b");
+    // No bound key, no recipient: text modes cannot be consented to.
+    expect(notificationConsentRecipient({ ...serverChanSink, secret_binding: null })).toBe("");
+    const consented: NotificationSinkSettings = {
+      ...serverChanSink,
+      content: { kind: "prefix", graphemes: 80 },
+      content_consent: notificationConsentForCurrent(serverChanSink, 1)
+    };
+    expect(notificationContentConsented(consented)).toBe(true);
+    // A new SendKey is a new recipient.
     expect(
-      notificationDeliveryPrefixConsented(delivery({ prefix_consent: consent() }), resendSink)
-    ).toBe(true);
-    expect(
-      notificationDeliveryPrefixConsented(
-        delivery({ prefix_consent: consent({ destination: "other@example.invalid" }) }),
-        resendSink
-      )
+      notificationContentConsented({
+        ...consented,
+        secret_binding: "serverchan:https://sctapi.ftqq.com#ffff"
+      })
     ).toBe(false);
-    expect(
-      notificationDeliveryPrefixConsented(
-        delivery({ prefix_consent: consent({ sink_id: "sink-other" }) }),
-        resendSink
-      )
-    ).toBe(false);
-    expect(
-      notificationDeliveryPrefixConsented(
-        delivery({ prefix_consent: consent({ endpoint: "https://elsewhere.example.invalid/x" }) }),
-        resendSink
-      )
-    ).toBe(false);
-    // A stored consent with no character count is off, whatever it names.
-    expect(
-      notificationDeliveryPrefixConsented(
-        delivery({ prefix_chars: 0, prefix_consent: consent() }),
-        resendSink
-      )
-    ).toBe(false);
-    expect(notificationDeliveryPrefixConsented(delivery(), resendSink)).toBe(false);
+  });
+
+  test("applies the provider's text budget", () => {
+    expect(notificationTextBudget(resendSink)).toBe(4000);
+    expect(notificationTextBudget(serverChanSink)).toBe(1000);
+  });
+});
+
+describe("ServerChan SendKey", () => {
+  test("accepts an SCT SendKey and refuses ServerChan3 and malformed keys", () => {
+    expect(serverChanSendKeyProblem("SCT12345abcDEF")).toBeNull();
+    expect(serverChanSendKeyProblem("  SCT12345abcDEF  ")).toBeNull();
+    expect(serverChanSendKeyProblem("sctp123tABC")).toBe("serverChan3Key");
+    expect(serverChanSendKeyProblem("SCTP123")).toBe("serverChan3Key");
+    expect(serverChanSendKeyProblem("abc")).toBe("malformed");
+    expect(serverChanSendKeyProblem("SCT")).toBe("malformed");
+    expect(serverChanSendKeyProblem("SCT12-34")).toBe("malformed");
+    expect(serverChanSendKeyProblem(`SCT${"a".repeat(200)}`)).toBe("malformed");
   });
 });
 
@@ -247,73 +271,58 @@ describe("SMTP presets", () => {
 });
 
 describe("new sinks", () => {
-  test("builds a complete sink from the add form so Rust keeps it", () => {
-    const sink = notificationSinkFromDraft("sink-new", {
-      kind: "smtp",
-      from_address: "sender@example.invalid",
-      sender_name: "Koushi",
-      destination: "recipient@example.invalid",
-      endpoint: "",
-      preset: "gmail",
-      host: "smtp.example.invalid",
-      port: 587,
-      tls: "startTls",
-      username: "sender@example.invalid"
+  test("starts with the conservative Rust defaults", () => {
+    const sink = newNotificationSink("sink-new", "resend");
+    expect(sink.targets).toEqual({
+      direct_messages: true,
+      mentions: true,
+      keywords: true,
+      watched: []
     });
-    expect(sink).toEqual({
-      id: "sink-new",
-      enabled: false,
-      destination: "recipient@example.invalid",
-      from_address: "sender@example.invalid",
-      sender_name: "Koushi",
-      config: {
-        kind: "smtp",
-        preset: "gmail",
-        host: "smtp.example.invalid",
-        port: 587,
-        tls: "startTls",
-        username: "sender@example.invalid"
-      },
-      // A sink the user has never given a password to has no binding to echo back.
-      secret_binding: null
+    expect(sink.content).toEqual({ kind: "namesOnly" });
+    expect(sink.content_consent).toBeNull();
+    expect(sink.secret_binding).toBeNull();
+    expect(sink.timing).toEqual({
+      dwell_secs: DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS,
+      min_interval_secs: DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
+      only_when_unfocused: true
     });
-    // The Resend endpoint is left to Rust's default when the form leaves it empty.
-    expect(
-      notificationSinkFromDraft("sink-two", {
-        kind: "resend",
-        from_address: "sender@example.invalid",
-        sender_name: "",
-        destination: "recipient@example.invalid",
-        endpoint: "",
-        preset: null,
-        host: "",
-        port: 0,
-        tls: "implicit",
-        username: ""
-      }).config
-    ).toEqual({ kind: "resend", endpoint: "" });
+    expect(DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS).toBe(300);
+    expect(DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS).toBe(900);
+    expect(newNotificationSink("sink-sc", "serverChan").config).toEqual({
+      kind: "serverChan",
+      endpoint: "https://sctapi.ftqq.com"
+    });
   });
 
-  test("only offers to add a sink Rust would keep", () => {
-    const base = {
-      kind: "resend" as const,
-      from_address: "sender@example.invalid",
-      sender_name: "",
-      destination: "recipient@example.invalid",
-      endpoint: "",
-      preset: null,
-      host: "",
-      port: 0,
-      tls: "implicit" as const,
-      username: ""
-    };
-    expect(notificationDraftReady(base)).toBe(true);
-    expect(notificationDraftReady({ ...base, destination: "  " })).toBe(false);
-    expect(notificationDraftReady({ ...base, from_address: "" })).toBe(false);
-    expect(notificationDraftReady({ ...base, kind: "smtp" })).toBe(false);
-    expect(notificationDraftReady({ ...base, kind: "smtp", host: "smtp.example.invalid", port: 465 })).toBe(
-      true
+  test("only commits a sink Rust would keep", () => {
+    expect(notificationSinkFieldsReady(resendSink)).toBe(true);
+    expect(notificationSinkFieldsReady({ ...resendSink, destination: "  " })).toBe(false);
+    expect(notificationSinkFieldsReady({ ...resendSink, from_address: "" })).toBe(false);
+    expect(notificationSinkFieldsReady(smtpSink)).toBe(true);
+    expect(
+      notificationSinkFieldsReady({ ...smtpSink, config: { ...smtpSink.config, host: "" } as NotificationSinkConfig })
+    ).toBe(false);
+    // ServerChan has no non-secret fields: the SendKey names the recipient.
+    expect(notificationSinkFieldsReady(newNotificationSink("sink-sc", "serverChan"))).toBe(true);
+  });
+
+  test("reports setup completeness, never delivery", () => {
+    expect(notificationSinkSetup({ ...resendSink, from_address: "" }, sinkState())).toBe("incomplete");
+    expect(notificationSinkSetup(resendSink, null)).toBe("needsCredential");
+    expect(notificationSinkSetup(resendSink, sinkState({ secret_configured: false }))).toBe(
+      "needsCredential"
     );
+    expect(
+      notificationSinkSetup(
+        {
+          ...resendSink,
+          targets: { direct_messages: false, mentions: false, keywords: false, watched: [] }
+        },
+        sinkState()
+      )
+    ).toBe("needsTargets");
+    expect(notificationSinkSetup(resendSink, sinkState())).toBe("configured");
   });
 });
 

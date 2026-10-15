@@ -889,7 +889,6 @@ export type MessageId =
   | "settings.updateCheckFailed"
   | "settings.updateInstallFailed"
   | "settings.notificationDesktopDescription"
-  | "settings.notificationsThisDevice"
   | "settings.notificationRetry"
   | "settings.notificationLoading"
   | "settings.notificationCategories"
@@ -970,7 +969,6 @@ export type MessageId =
   | "settings.notificationDeliverySinks"
   | "settings.notificationDeliveryAddSink"
   | "settings.notificationDeliverySinkLimit"
-  | "settings.notificationDeliverySinkProvider"
   | "settings.notificationDeliverySinkName"
   | "settings.notificationDeliverySinkFrom"
   | "settings.notificationDeliverySinkTo"
@@ -983,33 +981,73 @@ export type MessageId =
   | "settings.notificationDeliverySinkTest"
   | "settings.notificationDeliverySinkTestSending"
   | "settings.notificationDeliverySinkRemove"
-  | "settings.notificationDeliveryLastResult"
   | "settings.notificationDeliveryNeverSent"
-  | "settings.notificationDeliveryResultDelivered"
   | "settings.notificationDeliveryResultInvalidSecret"
   | "settings.notificationDeliveryResultNotPermitted"
   | "settings.notificationDeliveryResultRejected"
   | "settings.notificationDeliveryResultRateLimited"
   | "settings.notificationDeliveryResultTransport"
-  | "settings.notificationDeliveryPrefix"
-  | "settings.notificationDeliveryPrefixDescription"
-  | "settings.notificationDeliveryPrefixChars"
-  | "settings.notificationDeliveryPrefixConsentTitle"
-  | "settings.notificationDeliveryPrefixConsentBody"
-  | "settings.notificationDeliveryPrefixConsentAccept"
-  | "settings.notificationDeliveryPrefixConsentLink"
-  | "settings.notificationSource"
-  | "settings.notificationDeviceSource"
   | "settings.notificationHomeserverSource"
-  | "settings.notificationDeliveryEnable"
+  | "settings.notificationsOs"
+  | "settings.notificationsOsDescription"
+  | "settings.notificationsHomeserver"
   | "settings.notificationDeliveryKeywordsHint"
   | "settings.notificationDeliveryWatchedPick"
   | "settings.notificationDeliveryWatchedRooms"
   | "settings.notificationDeliveryWatchedSpaces"
   | "settings.notificationDeliveryWatchedUnknown"
-  | "settings.notificationDeliverySinkEnabled"
   | "settings.notificationDeliverySinkKindResend"
   | "settings.notificationDeliverySinkKindSmtp"
+  | "settings.notificationDeliverySinkKindServerChan"
+  | "settings.notificationDeliveryResultAccepted"
+  | "settings.notificationDeliveryAcceptedHint"
+  | "settings.notificationDeliveryRunningNote"
+  | "settings.notificationDeliveryConfigured"
+  | "settings.notificationDeliveryNotConfigured"
+  | "settings.notificationDeliveryStatusConfigured"
+  | "settings.notificationDeliveryStatusNeedsCredential"
+  | "settings.notificationDeliveryStatusNeedsTargets"
+  | "settings.notificationDeliveryStatusIncomplete"
+  | "settings.notificationDeliveryBack"
+  | "settings.notificationDeliveryDraftHint"
+  | "settings.notificationDeliveryCredentials"
+  | "settings.notificationDeliveryResendHint"
+  | "settings.notificationDeliverySecretResend"
+  | "settings.notificationDeliverySecretServerChan"
+  | "settings.notificationDeliverySecretAfterSave"
+  | "settings.notificationDeliveryAdvanced"
+  | "settings.notificationDeliveryServerChanIntro"
+  | "settings.notificationDeliveryServerChanStepLogin"
+  | "settings.notificationDeliveryServerChanStepSendKey"
+  | "settings.notificationDeliveryServerChanStepChannel"
+  | "settings.notificationDeliveryServerChanOpen"
+  | "settings.notificationDeliveryServerChanLimits"
+  | "settings.notificationDeliveryServerChanKeySctp"
+  | "settings.notificationDeliveryServerChanKeyMalformed"
+  | "settings.notificationDeliveryContent"
+  | "settings.notificationDeliveryContentNamesOnly"
+  | "settings.notificationDeliveryContentPrefix"
+  | "settings.notificationDeliveryContentFull"
+  | "settings.notificationDeliveryContentPrefixCount"
+  | "settings.notificationDeliveryContentNeedsKey"
+  | "settings.notificationDeliveryContentLimit"
+  | "settings.notificationDeliveryContentFallback"
+  | "settings.notificationDeliveryContentPlaintext"
+  | "settings.notificationDeliveryContentIndependent"
+  | "settings.notificationDeliveryConsentTitle"
+  | "settings.notificationDeliveryConsentBody"
+  | "settings.notificationDeliveryConsentServerChanRecipient"
+  | "settings.notificationDeliveryConsentRebind"
+  | "settings.notificationDeliveryConsentAcknowledge"
+  | "settings.notificationDeliveryConsentAccept"
+  | "settings.notificationDeliveryTiming"
+  | "settings.notificationDeliverySecondsAsMinutes"
+  | "settings.notificationDeliveryOutcome"
+  | "settings.notificationDeliveryLastAttempt"
+  | "settings.notificationDeliveryTestNeedsSecret"
+  | "settings.notificationDeliverySaveDestination"
+  | "settings.emailNotificationsServerSupport"
+  | "settings.emailNotificationsServerUnavailable"
   | "settings.notificationDeliverySinkEndpoint"
   | "settings.notificationDeliverySinkEndpointDefault"
   | "settings.notificationDeliverySinkPreset"
@@ -1025,8 +1063,6 @@ export type MessageId =
   | "settings.notificationDeliverySinkEmpty"
   | "settings.notificationDeliverySinkFailed"
   | "settings.notificationDeliveryResultRateLimitedAfter"
-  | "settings.notificationDeliveryPrefixConsentAcknowledge"
-  | "settings.notificationDeliveryPrefixConsentRequired"
   | "settings.notificationDeliverySecretHint.qqMail"
   | "settings.notificationDeliverySecretHint.gmail"
   | "settings.notificationDeliverySecretHint.icloud"
@@ -2917,7 +2953,6 @@ const en: Catalog = {
   "timeline.linkPreviewFailed": "Could not load preview",
   "timeline.linkPreviewLoading": "Loading preview…",
   "settings.notificationDesktopDescription": "Only on this device. Email notifications are not affected.",
-  "settings.notificationsThisDevice": "This device",
   "settings.notificationRetry": "Retry",
   "settings.notificationLoading": "Loading notification settings…",
   "settings.notificationCategories": "What to notify about",
@@ -2977,25 +3012,30 @@ const en: Catalog = {
   "settings.notificationDesktop": "Desktop notifications",
   "settings.notificationMessagePreviews": "Show message content in notifications",
   "settings.notificationMessagePreviewsDescription":
-    "Message text will appear in banners and in your operating system's notification centre. This is a device-local setting.",
+    "Off by default. When on, message text appears in banners, and your operating system may keep it in its notification history. Saved on this device only.",
   "settings.notificationSound": "Sound",
-  "settings.notificationDelivery": "Notify me from this device",
+  "settings.notificationDelivery":
+    "Sent from this device",
   "settings.notificationDeliveryDescription":
-    "Koushi sends this itself, through a service you configure, so it works on a homeserver that has no email support. A room is sent only while it is still unread.",
+    "Koushi sends these itself, through a service you set up, so they work even when your homeserver cannot send email. Each destination has its own targets, content and timing.",
   "settings.notificationDeliveryTriggers": "Send for",
   "settings.notificationDeliveryDirectMessages": "Direct messages",
   "settings.notificationDeliveryMentions": "Mentions and replies",
   "settings.notificationDeliveryKeywords": "Your keywords",
-  "settings.notificationDeliveryDwell": "Wait before sending",
+  "settings.notificationDeliveryDwell":
+    "Wait before sending (seconds)",
   "settings.notificationDeliveryDwellDescription":
     "A room is included only if it is still unread after this long, so a conversation you are reading is never sent.",
-  "settings.notificationDeliveryInterval": "Shortest gap between sends",
+  "settings.notificationDeliveryInterval":
+    "Shortest gap between sends (seconds)",
   "settings.notificationDeliveryIntervalDescription":
     "Further notifications wait this long, so a busy room cannot fill your mailbox.",
-  "settings.notificationDeliveryOnlyUnfocused": "Only while Koushi is not focused",
-  "settings.notificationDeliveryWatched": "Also send for these rooms and spaces",
+  "settings.notificationDeliveryOnlyUnfocused":
+    "Only when Koushi is inactive",
+  "settings.notificationDeliveryWatched":
+    "Watched rooms and spaces",
   "settings.notificationDeliveryWatchedDescription":
-    "A chosen room is sent even when its kind is off above. Choosing a space covers every room in it, including rooms added later. A room you read or mute is still skipped.",
+    "A watched room is sent even when its category is off above, but a room you have read, muted, or have open is still skipped. Watching a space covers every room in it, including rooms added later.",
   "settings.notificationDeliveryWatchedAdd": "Add a room or space",
   "settings.notificationDeliveryWatchedEmpty": "No rooms or spaces chosen",
   // The watch list is capped in Rust; the form says so instead of letting a choice
@@ -3004,25 +3044,24 @@ const en: Catalog = {
     "The watch list holds up to {count} rooms and spaces. Remove one to add another.",
   "settings.notificationDeliveryWatchedRemove": "Remove {room}",
   "settings.notificationDeliverySinks": "Send through",
-  "settings.notificationDeliveryAddSink": "Add a service",
+  "settings.notificationDeliveryAddSink":
+    "Add a destination",
   "settings.notificationDeliverySinkLimit":
     "Up to {count} sending services. Remove one to add another.",
-  "settings.notificationDeliverySinkProvider": "Service",
   "settings.notificationDeliverySinkName": "Name",
   "settings.notificationDeliverySinkFrom": "From address",
   "settings.notificationDeliverySinkTo": "Send to",
   "settings.notificationDeliverySinkHost": "Server",
   "settings.notificationDeliverySinkPort": "Port",
   "settings.notificationDeliverySinkUsername": "Username",
-  "settings.notificationDeliverySinkSecret": "App password or API key",
+  "settings.notificationDeliverySinkSecret":
+    "App password",
   "settings.notificationDeliverySinkSecretSet": "Saved. Enter a new value to replace it.",
   "settings.notificationDeliverySinkSecretMissing": "Not set",
   "settings.notificationDeliverySinkTest": "Send a test",
   "settings.notificationDeliverySinkTestSending": "Sending…",
   "settings.notificationDeliverySinkRemove": "Remove",
-  "settings.notificationDeliveryLastResult": "Last send",
   "settings.notificationDeliveryNeverSent": "Not sent yet",
-  "settings.notificationDeliveryResultDelivered": "Delivered",
   "settings.notificationDeliveryResultInvalidSecret":
     "The service rejected the key. Enter it again.",
   "settings.notificationDeliveryResultNotPermitted":
@@ -3031,37 +3070,126 @@ const en: Catalog = {
   "settings.notificationDeliveryResultRateLimited":
     "The service is limiting how often it accepts messages. Koushi will try again later.",
   "settings.notificationDeliveryResultTransport": "Could not reach the service.",
-  "settings.notificationDeliveryPrefix": "Include the start of the message",
-  "settings.notificationDeliveryPrefixDescription":
-    "Off by default. The first characters of the message are added as plain text, so anyone who can read the message can read them.",
-  "settings.notificationDeliveryPrefixChars": "Characters",
-  "settings.notificationDeliveryPrefixConsentTitle": "Send message text unencrypted?",
-  "settings.notificationDeliveryPrefixConsentBody":
-    "The start of the message leaves this device as plain text and passes through {service} to {destination} without end-to-end encryption. Whether, and for how long, that service keeps it depends on that service's own terms, so read them before turning this on. Room names and counts are sent either way.",
-  "settings.notificationDeliveryPrefixConsentAccept": "Turn on and accept",
-  "settings.notificationDeliveryPrefixConsentLink": "Read the service's terms",
-  // The two notification sources are different owners; the tab list says which
-  // source is showing, and each body says in one line who sends it.
-  "settings.notificationSource": "Notification source",
-  "settings.notificationDeviceSource":
-    "Koushi sends these from this device, through the mailbox or relay configured here.",
+  // #1460: the three notification owners are three stacked sections; each says in one
+  // line who sends it.
+  "settings.notificationsOs": "OS notifications",
+  "settings.notificationsOsDescription": "Alerts your operating system shows on this device.",
+  "settings.notificationsHomeserver": "Homeserver notifications",
   "settings.notificationHomeserverSource":
     "Your homeserver sends these, and they apply to every device on the account.",
-  "settings.notificationDeliveryEnable": "Send notifications from this device",
   "settings.notificationDeliveryKeywordsHint":
-    "A message that matches one of your keywords arrives as a mention, so either this switch or Mentions and replies sends it.",
+    "Keywords are stored on your homeserver and shared with your other clients. A message that matches one arrives as a mention, so either this switch or Mentions and replies sends it.",
   "settings.notificationDeliveryWatchedPick": "Choose a room or space",
   "settings.notificationDeliveryWatchedRooms": "Rooms",
   "settings.notificationDeliveryWatchedSpaces": "Spaces",
   "settings.notificationDeliveryWatchedUnknown": "Not in the room list right now",
-  "settings.notificationDeliverySinkEnabled": "Send through this service",
   "settings.notificationDeliverySinkKindResend": "Resend (email API)",
   "settings.notificationDeliverySinkKindSmtp": "SMTP relay",
+  "settings.notificationDeliverySinkKindServerChan":
+    "WeChat (ServerChan Turbo)",
+  "settings.notificationDeliveryResultAccepted":
+    "Accepted by the service.",
+  "settings.notificationDeliveryAcceptedHint":
+    "“Accepted” means the service took the request. It does not confirm that the message reached an inbox or a phone.",
+  "settings.notificationDeliveryRunningNote":
+    "Sending happens on this device, so nothing is sent while Koushi is not running. Keeping it in the tray is enough.",
+  "settings.notificationDeliveryConfigured":
+    "Configured",
+  "settings.notificationDeliveryNotConfigured":
+    "Not configured",
+  "settings.notificationDeliveryStatusConfigured":
+    "Setup is complete: the fields, the credential and at least one target.",
+  "settings.notificationDeliveryStatusNeedsCredential":
+    "Not configured: save the credential.",
+  "settings.notificationDeliveryStatusNeedsTargets":
+    "Not configured: choose at least one target.",
+  "settings.notificationDeliveryStatusIncomplete":
+    "Not configured: fill in the required fields.",
+  "settings.notificationDeliveryBack":
+    "All destinations",
+  "settings.notificationDeliveryDraftHint":
+    "Fill in the fields and save the destination. Then enter its credential and choose what the messages contain.",
+  "settings.notificationDeliveryCredentials":
+    "Service and credentials",
+  "settings.notificationDeliveryResendHint":
+    "The From address must be on a domain you have verified in Resend. Send to can be any inbox.",
+  "settings.notificationDeliverySecretResend":
+    "Resend API key",
+  "settings.notificationDeliverySecretServerChan":
+    "SendKey",
+  "settings.notificationDeliverySecretAfterSave":
+    "Save the destination first; the {label} is entered afterwards.",
+  "settings.notificationDeliveryAdvanced":
+    "Advanced",
+  "settings.notificationDeliveryServerChanIntro":
+    "ServerChan Turbo forwards notifications to your WeChat. To get a SendKey:",
+  "settings.notificationDeliveryServerChanStepLogin":
+    "Open sct.ftqq.com and log in by scanning the QR code with WeChat.",
+  "settings.notificationDeliveryServerChanStepSendKey":
+    "Open the SendKey page and copy your SendKey (it starts with SCT). Paste it here after saving the destination.",
+  "settings.notificationDeliveryServerChanStepChannel":
+    "Nothing else to set up: messages arrive through the default 方糖 service account (方糖服务号).",
+  "settings.notificationDeliveryServerChanOpen":
+    "Open sct.ftqq.com",
+  "settings.notificationDeliveryServerChanLimits":
+    "The free plan shows 5 messages a day; ServerChan may accept more without showing them. The WeChat card shows only the title, which names the rooms.",
+  "settings.notificationDeliveryServerChanKeySctp":
+    "This looks like a ServerChan³ key (it starts with sctp). Only ServerChan Turbo SendKeys, which start with SCT, are supported.",
+  "settings.notificationDeliveryServerChanKeyMalformed":
+    "A SendKey starts with SCT, followed by letters and digits.",
+  "settings.notificationDeliveryContent":
+    "Message content",
+  "settings.notificationDeliveryContentNamesOnly":
+    "Space and room names only",
+  "settings.notificationDeliveryContentPrefix":
+    "Names and the first characters of each message",
+  "settings.notificationDeliveryContentFull":
+    "Names and the message text (up to {count} characters per room)",
+  "settings.notificationDeliveryContentPrefixCount":
+    "Characters to include",
+  "settings.notificationDeliveryContentNeedsKey":
+    "Save a SendKey before choosing a mode that includes message text.",
+  "settings.notificationDeliveryContentLimit":
+    "{service} carries at most {count} characters per room; longer text is cut and marked as truncated.",
+  "settings.notificationDeliveryContentFallback":
+    "Images, files, messages that could not be decrypted, and deleted messages are sent as names only.",
+  "settings.notificationDeliveryContentPlaintext":
+    "{service} receives this text as plain text, outside end-to-end encryption.",
+  "settings.notificationDeliveryContentIndependent":
+    "This is separate from the message preview setting for OS notifications.",
+  "settings.notificationDeliveryConsentTitle":
+    "Send message text unencrypted?",
+  "settings.notificationDeliveryConsentBody":
+    "Message text leaves this device as plain text and passes through {service} to {destination} without end-to-end encryption. Whether, and for how long, that service keeps it depends on that service's own terms, so read them first. Room names are sent either way.",
+  "settings.notificationDeliveryConsentServerChanRecipient":
+    "the WeChat account of the saved SendKey",
+  "settings.notificationDeliveryConsentRebind":
+    "This agreement covers this service, endpoint and recipient only. Changing any of them, or saving a new SendKey, returns this destination to names only.",
+  "settings.notificationDeliveryConsentAcknowledge":
+    "I understand that the text is sent unencrypted",
+  "settings.notificationDeliveryConsentAccept":
+    "Agree and turn on",
+  "settings.notificationDeliveryTiming":
+    "Timing",
+  "settings.notificationDeliverySecondsAsMinutes":
+    "({minutes} min)",
+  "settings.notificationDeliveryOutcome":
+    "Status",
+  "settings.notificationDeliveryLastAttempt":
+    "Last attempt {time}:",
+  "settings.notificationDeliveryTestNeedsSecret":
+    "Save the credential to send a test.",
+  "settings.notificationDeliverySaveDestination":
+    "Save destination",
+  "settings.emailNotificationsServerSupport":
+    "These emails are sent by your homeserver, so they arrive only if your homeserver supports email notifications.",
+  "settings.emailNotificationsServerUnavailable":
+    "matrix.org does not send notification emails. To be notified by email, add a destination under “Sent from this device”.",
   "settings.notificationDeliverySinkEndpoint": "Endpoint",
   // Rust fills `DEFAULT_RESEND_ENDPOINT` when this is left empty; the form says so
   // rather than repeating the URL, which Rust owns.
   "settings.notificationDeliverySinkEndpointDefault":
-    "Leave this blank to use the endpoint this service documents for its email API.",
+    "Change this only to test against a local stub. The default is the endpoint the service documents.",
   "settings.notificationDeliverySinkPreset": "Mailbox preset",
   "settings.notificationDeliverySinkPresetCustom": "Other server",
   "settings.notificationDeliverySinkPresetHint":
@@ -3078,13 +3206,11 @@ const en: Catalog = {
   "settings.notificationDeliverySinkSecretRetired":
     "The saved password was removed because the server or account changed. Enter it again.",
   "settings.notificationDeliverySinkEmpty":
-    "No service is configured yet. Nothing leaves this device until one is added and turned on.",
-  "settings.notificationDeliverySinkFailed": "This service is not sending",
+    "No destination yet. Nothing leaves this device until you add one.",
+  "settings.notificationDeliverySinkFailed":
+    "The last attempt failed",
   "settings.notificationDeliveryResultRateLimitedAfter":
     "The service is limiting how often it accepts messages. The next attempt waits about {seconds} seconds.",
-  "settings.notificationDeliveryPrefixConsentAcknowledge": "I have read those terms",
-  "settings.notificationDeliveryPrefixConsentRequired":
-    "Confirm that you have read the terms to turn this on.",
   "settings.notificationDeliverySecretHint.qqMail":
     "QQ Mail expects the authorization code from its own settings, not the account password.",
   "settings.notificationDeliverySecretHint.gmail":
@@ -4880,7 +5006,6 @@ const ja: Catalog = {
   "timeline.linkPreviewFailed": "プレビューを読み込めませんでした",
   "timeline.linkPreviewLoading": "プレビューを読み込み中…",
   "settings.notificationDesktopDescription": "この端末だけの設定です。メール通知には影響しません。",
-  "settings.notificationsThisDevice": "この端末",
   "settings.notificationRetry": "再試行",
   "settings.notificationLoading": "通知設定を読み込み中…",
   "settings.notificationCategories": "通知する内容",
@@ -4940,51 +5065,55 @@ const ja: Catalog = {
   "settings.notificationDesktop": "デスクトップ通知",
   "settings.notificationMessagePreviews": "通知にメッセージ本文を表示",
   "settings.notificationMessagePreviewsDescription":
-    "バナーとOSの通知センターにメッセージ本文が表示されます。この設定はこの端末だけに保存されます。",
+    "既定ではオフです。オンにするとバナーにメッセージ本文が表示され、OSの通知履歴に残ることがあります。この設定はこの端末だけに保存されます。",
   "settings.notificationSound": "サウンド",
-  "settings.notificationDelivery": "この端末から通知する",
+  "settings.notificationDelivery":
+    "この端末から送信",
   "settings.notificationDeliveryDescription":
-    "メール送信サービスを設定すると、Koushiがこの端末から直接送信します。メール通知に対応していないホームサーバーでも使えます。送信するのは、未読のままのルームだけです。",
+    "設定したサービスを通じてKoushi自身が送信するので、ホームサーバーがメールを送れなくても使えます。送信先ごとに対象・内容・タイミングを設定できます。",
   "settings.notificationDeliveryTriggers": "送信する対象",
   "settings.notificationDeliveryDirectMessages": "ダイレクトメッセージ",
   "settings.notificationDeliveryMentions": "メンション・返信",
   "settings.notificationDeliveryKeywords": "設定したキーワード",
-  "settings.notificationDeliveryDwell": "送信までの待ち時間",
+  "settings.notificationDeliveryDwell":
+    "送信までの待ち時間（秒）",
   "settings.notificationDeliveryDwellDescription":
     "この時間が過ぎても未読のままのルームだけを送信します。読んでいる途中の会話は送信されません。",
-  "settings.notificationDeliveryInterval": "送信の最短間隔",
+  "settings.notificationDeliveryInterval":
+    "送信の最短間隔（秒）",
   "settings.notificationDeliveryIntervalDescription":
     "続けて通知があるときは、この間隔が過ぎるまでまとめて待ちます。にぎやかなルームでメールボックスがあふれるのを防ぎます。",
-  "settings.notificationDeliveryOnlyUnfocused": "Koushiが非アクティブのときだけ",
-  "settings.notificationDeliveryWatched": "これらのルーム・スペースも送信する",
+  "settings.notificationDeliveryOnlyUnfocused":
+    "Koushiが非アクティブのときだけ",
+  "settings.notificationDeliveryWatched":
+    "見守るルーム・スペース",
   "settings.notificationDeliveryWatchedDescription":
-    "選んだルームは、上の種類がオフでも送信します。スペースを選ぶと、その中のすべてのルーム（後から追加されたルームも）が対象になります。既読にしたルームやミュートしたルームは送信しません。",
+    "見守るルームは、上の種類がオフでも送信します。ただし、既読・ミュート・表示中のルームは送信しません。スペースを選ぶと、その中のすべてのルーム（後から追加されたルームも）が対象になります。",
   "settings.notificationDeliveryWatchedAdd": "ルーム・スペースを追加",
   "settings.notificationDeliveryWatchedEmpty": "選択されたルーム・スペースはありません",
   "settings.notificationDeliveryWatchedLimit":
     "ウォッチリストに登録できるルーム・スペースは{count}件までです。追加するには1件削除してください。",
   "settings.notificationDeliveryWatchedRemove": "{room}を削除",
   "settings.notificationDeliverySinks": "送信方法",
-  "settings.notificationDeliveryAddSink": "サービスを追加",
+  "settings.notificationDeliveryAddSink":
+    "送信先を追加",
   "settings.notificationDeliverySinkLimit":
     "送信方法は{count}件までです。追加するには1件削除してください。",
-  "settings.notificationDeliverySinkProvider": "サービス",
   "settings.notificationDeliverySinkName": "名前",
   "settings.notificationDeliverySinkFrom": "差出人アドレス",
   "settings.notificationDeliverySinkTo": "送信先",
   "settings.notificationDeliverySinkHost": "サーバー",
   "settings.notificationDeliverySinkPort": "ポート",
   "settings.notificationDeliverySinkUsername": "ユーザー名",
-  "settings.notificationDeliverySinkSecret": "アプリパスワードまたはAPIキー",
+  "settings.notificationDeliverySinkSecret":
+    "アプリパスワード",
   "settings.notificationDeliverySinkSecretSet":
     "保存済みです。変更するには新しい値を入力してください。",
   "settings.notificationDeliverySinkSecretMissing": "未設定",
   "settings.notificationDeliverySinkTest": "テスト送信",
   "settings.notificationDeliverySinkTestSending": "送信中…",
   "settings.notificationDeliverySinkRemove": "削除",
-  "settings.notificationDeliveryLastResult": "前回の送信",
   "settings.notificationDeliveryNeverSent": "まだ送信していません",
-  "settings.notificationDeliveryResultDelivered": "送信しました",
   "settings.notificationDeliveryResultInvalidSecret":
     "サービスがキーを受け付けませんでした。もう一度入力してください。",
   "settings.notificationDeliveryResultNotPermitted":
@@ -4993,34 +5122,122 @@ const ja: Catalog = {
   "settings.notificationDeliveryResultRateLimited":
     "送信回数が制限されています。しばらくしてから再試行します。",
   "settings.notificationDeliveryResultTransport": "サービスに接続できませんでした。",
-  "settings.notificationDeliveryPrefix": "メッセージの冒頭を含める",
-  "settings.notificationDeliveryPrefixDescription":
-    "初期設定ではオフです。メッセージの冒頭が平文で追加されるため、メッセージを読める人には読まれます。",
-  "settings.notificationDeliveryPrefixChars": "文字数",
-  "settings.notificationDeliveryPrefixConsentTitle":
-    "メッセージ本文を暗号化せずに送信しますか？",
-  "settings.notificationDeliveryPrefixConsentBody":
-    "メッセージの冒頭は平文でこの端末を離れ、エンドツーエンド暗号化なしで{service}から{destination}へ送られます。そのサービスが本文を保持するかどうか、また保持期間は、そのサービスの規約によります。オンにする前に規約を確認してください。ルーム名と件数はどちらでも送信されます。",
-  "settings.notificationDeliveryPrefixConsentAccept": "オンにして同意する",
-  "settings.notificationDeliveryPrefixConsentLink": "サービスの規約を読む",
-  "settings.notificationSource": "通知の送信元",
-  "settings.notificationDeviceSource":
-    "これらはKoushiがこの端末から、ここで設定したメールボックスまたはリレーを通して送信します。",
+  "settings.notificationsOs": "OS通知",
+  "settings.notificationsOsDescription": "この端末でOSが表示する通知です。",
+  "settings.notificationsHomeserver": "ホームサーバーの通知",
   "settings.notificationHomeserverSource":
     "これらはホームサーバーが送信し、アカウントのすべての端末に適用されます。",
-  "settings.notificationDeliveryEnable": "この端末から通知を送信する",
   "settings.notificationDeliveryKeywordsHint":
-    "キーワードに一致したメッセージはメンションとして届くため、「設定したキーワード」と「メンション・返信」のどちらをオンにしても送信されます。",
+    "キーワードはホームサーバーに保存され、ほかのクライアントと共有されます。キーワードに一致したメッセージはメンションとして届くため、このスイッチか「メンションと返信」のどちらかがオンなら送信します。",
   "settings.notificationDeliveryWatchedPick": "ルームまたはスペースを選択",
   "settings.notificationDeliveryWatchedRooms": "ルーム",
   "settings.notificationDeliveryWatchedSpaces": "スペース",
   "settings.notificationDeliveryWatchedUnknown": "現在のルーム一覧にありません",
-  "settings.notificationDeliverySinkEnabled": "このサービスで送信する",
   "settings.notificationDeliverySinkKindResend": "Resend（メールAPI）",
   "settings.notificationDeliverySinkKindSmtp": "SMTPリレー",
+  "settings.notificationDeliverySinkKindServerChan":
+    "WeChat（ServerChan Turbo）",
+  "settings.notificationDeliveryResultAccepted":
+    "サービスが受け付けました。",
+  "settings.notificationDeliveryAcceptedHint":
+    "「受け付けました」はサービスが要求を受け取ったという意味です。受信箱や端末に届いたことまでは確認できません。",
+  "settings.notificationDeliveryRunningNote":
+    "送信はこの端末で行うため、Koushiが起動していない間は何も送信されません。トレイに常駐していれば送信されます。",
+  "settings.notificationDeliveryConfigured":
+    "設定済み",
+  "settings.notificationDeliveryNotConfigured":
+    "未設定",
+  "settings.notificationDeliveryStatusConfigured":
+    "設定は完了しています（必須項目・認証情報・1つ以上の対象）。",
+  "settings.notificationDeliveryStatusNeedsCredential":
+    "未設定：認証情報を保存してください。",
+  "settings.notificationDeliveryStatusNeedsTargets":
+    "未設定：送信する対象を1つ以上選んでください。",
+  "settings.notificationDeliveryStatusIncomplete":
+    "未設定：必須項目を入力してください。",
+  "settings.notificationDeliveryBack":
+    "送信先一覧",
+  "settings.notificationDeliveryDraftHint":
+    "項目を入力して送信先を保存してください。その後、認証情報と送信内容を設定します。",
+  "settings.notificationDeliveryCredentials":
+    "サービスと認証情報",
+  "settings.notificationDeliveryResendHint":
+    "差出人アドレスは、Resendで認証済みのドメインのものにしてください。送信先は任意の受信箱で構いません。",
+  "settings.notificationDeliverySecretResend":
+    "Resend APIキー",
+  "settings.notificationDeliverySecretServerChan":
+    "SendKey",
+  "settings.notificationDeliverySecretAfterSave":
+    "{label}は送信先を保存した後に入力します。",
+  "settings.notificationDeliveryAdvanced":
+    "詳細設定",
+  "settings.notificationDeliveryServerChanIntro":
+    "ServerChan TurboはWeChatへ通知を転送します。SendKeyの取得手順：",
+  "settings.notificationDeliveryServerChanStepLogin":
+    "sct.ftqq.comを開き、WeChatでQRコードを読み取ってログインします。",
+  "settings.notificationDeliveryServerChanStepSendKey":
+    "SendKeyページを開き、SendKey（SCTで始まる文字列）をコピーします。送信先を保存した後、ここに貼り付けてください。",
+  "settings.notificationDeliveryServerChanStepChannel":
+    "ほかに設定は不要です。既定の方糖サービスアカウント（方糖服务号）から届きます。",
+  "settings.notificationDeliveryServerChanOpen":
+    "sct.ftqq.comを開く",
+  "settings.notificationDeliveryServerChanLimits":
+    "無料プランで表示されるのは1日5件までです。それを超えると、サービスが受け付けても表示されないことがあります。WeChatのカードにはルーム名を示すタイトルだけが表示されます。",
+  "settings.notificationDeliveryServerChanKeySctp":
+    "ServerChan³のキー（sctpで始まる）のようです。対応しているのは、SCTで始まるServerChan TurboのSendKeyだけです。",
+  "settings.notificationDeliveryServerChanKeyMalformed":
+    "SendKeyは、SCTに英数字が続く形式です。",
+  "settings.notificationDeliveryContent":
+    "送信内容",
+  "settings.notificationDeliveryContentNamesOnly":
+    "スペース名とルーム名のみ",
+  "settings.notificationDeliveryContentPrefix":
+    "名前とメッセージの冒頭",
+  "settings.notificationDeliveryContentFull":
+    "名前とメッセージ本文（ルームごとに最大{count}文字）",
+  "settings.notificationDeliveryContentPrefixCount":
+    "含める文字数",
+  "settings.notificationDeliveryContentNeedsKey":
+    "本文を含むモードを選ぶ前に、SendKeyを保存してください。",
+  "settings.notificationDeliveryContentLimit":
+    "{service}で送れるのはルームごとに最大{count}文字です。超える部分は切り詰め、切り詰めたことを明記します。",
+  "settings.notificationDeliveryContentFallback":
+    "画像、ファイル、復号できなかったメッセージ、削除されたメッセージは名前のみで送信します。",
+  "settings.notificationDeliveryContentPlaintext":
+    "{service}は、この本文をエンドツーエンド暗号化の外で平文として受け取ります。",
+  "settings.notificationDeliveryContentIndependent":
+    "OS通知のメッセージプレビュー設定とは別の設定です。",
+  "settings.notificationDeliveryConsentTitle":
+    "メッセージ本文を暗号化せずに送信しますか？",
+  "settings.notificationDeliveryConsentBody":
+    "メッセージ本文は平文でこの端末を離れ、エンドツーエンド暗号化なしで{service}から{destination}へ送られます。そのサービスが本文を保持するかどうか、また保持期間は、そのサービスの規約によります。先に規約を確認してください。ルーム名はどちらでも送信されます。",
+  "settings.notificationDeliveryConsentServerChanRecipient":
+    "保存したSendKeyのWeChatアカウント",
+  "settings.notificationDeliveryConsentRebind":
+    "この同意は、このサービス・エンドポイント・受信者に限って有効です。いずれかを変更するか、新しいSendKeyを保存すると、名前のみに戻ります。",
+  "settings.notificationDeliveryConsentAcknowledge":
+    "本文が暗号化されずに送信されることを理解しました",
+  "settings.notificationDeliveryConsentAccept":
+    "同意してオンにする",
+  "settings.notificationDeliveryTiming":
+    "タイミング",
+  "settings.notificationDeliverySecondsAsMinutes":
+    "（{minutes}分）",
+  "settings.notificationDeliveryOutcome":
+    "状態",
+  "settings.notificationDeliveryLastAttempt":
+    "最終試行 {time}：",
+  "settings.notificationDeliveryTestNeedsSecret":
+    "テスト送信には、認証情報の保存が必要です。",
+  "settings.notificationDeliverySaveDestination":
+    "送信先を保存",
+  "settings.emailNotificationsServerSupport":
+    "このメールはホームサーバーが送信するため、ホームサーバーがメール通知に対応している場合だけ届きます。",
+  "settings.emailNotificationsServerUnavailable":
+    "matrix.orgは通知メールを送信しません。メールで通知を受け取るには、「この端末から送信」で送信先を追加してください。",
   "settings.notificationDeliverySinkEndpoint": "エンドポイント",
   "settings.notificationDeliverySinkEndpointDefault":
-    "空欄のままにすると、このサービスがメールAPI用に案内しているエンドポイントを使用します。",
+    "ローカルのスタブで試すとき以外は変更しないでください。既定値はサービスが公開しているエンドポイントです。",
   "settings.notificationDeliverySinkPreset": "メールボックスのプリセット",
   "settings.notificationDeliverySinkPresetCustom": "その他のサーバー",
   "settings.notificationDeliverySinkPresetHint":
@@ -5034,13 +5251,11 @@ const ja: Catalog = {
   "settings.notificationDeliverySinkSecretRetired":
     "サーバーまたはアカウントが変更されたため、保存されていたパスワードは削除されました。もう一度入力してください。",
   "settings.notificationDeliverySinkEmpty":
-    "送信方法がまだ設定されていません。追加してオンにするまで、この端末から何も送信されません。",
-  "settings.notificationDeliverySinkFailed": "このサービスは送信できていません",
+    "送信先はまだありません。追加するまで、この端末から何も送信されません。",
+  "settings.notificationDeliverySinkFailed":
+    "前回の送信に失敗しました",
   "settings.notificationDeliveryResultRateLimitedAfter":
     "送信回数が制限されています。次は約{seconds}秒後に試します。",
-  "settings.notificationDeliveryPrefixConsentAcknowledge": "上記の規約を確認しました",
-  "settings.notificationDeliveryPrefixConsentRequired":
-    "規約を確認して同意するとオンにできます。",
   "settings.notificationDeliverySecretHint.qqMail":
     "QQ Mail では、アカウントのパスワードではなく、メール設定で発行する認証コードを入力します。",
   "settings.notificationDeliverySecretHint.gmail":

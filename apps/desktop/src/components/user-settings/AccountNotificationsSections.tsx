@@ -362,6 +362,23 @@ export function EmailNotificationsSection({
           <p>{t("settings.emailNotificationsDescription")}</p>
         </div>
       </div>
+      {/*
+        #1460: registering an email pusher only asks the homeserver to send mail; whether
+        mail arrives is the server's to decide. The warning is shown only where Rust knows
+        the server does not send it.
+      */}
+      <p className="profile-settings-hint" data-testid="email-notifications-server-support">
+        {t("settings.emailNotificationsServerSupport")}
+      </p>
+      {snapshot?.server_email_delivery === "knownUnavailable" ? (
+        <p
+          className="settings-status-text"
+          role="note"
+          data-testid="email-notifications-server-unavailable"
+        >
+          {t("settings.emailNotificationsServerUnavailable")}
+        </p>
+      ) : null}
       {snapshot ? (
         <div className="settings-toggle-list">
           <button

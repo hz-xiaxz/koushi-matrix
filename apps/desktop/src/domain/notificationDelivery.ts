@@ -1,19 +1,20 @@
 import { t, type MessageId } from "../i18n/messages";
 import { roomDisplayLabel } from "./roomDisplayLabel";
 import type {
+  NotificationDeliveryContent,
+  NotificationDeliveryContentConsent,
   NotificationDeliveryOutcomeState,
   NotificationDeliveryPresetState,
-  NotificationDeliverySettings,
+  NotificationDeliverySinkState,
   NotificationDeliveryTarget,
   NotificationSinkConfig,
   NotificationSinkSettings,
   RoomSummary,
-  SmtpTls,
   SpaceSummary
 } from "./types";
 
 /**
- * #1427: the React-side half of device-local notification delivery.
+ * #1427/#1460: the React-side half of device-local notification delivery.
  *
  * Rust owns the semantics - the dwell, the interval, when a room qualifies, what a body
  * contains, whether a secret exists, and whether a stored consent still covers a sink. The
@@ -25,18 +26,32 @@ import type {
 
 /** Mirrors `MAX_NOTIFICATION_DELIVERY_DWELL_SECS` and `MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS`. */
 export const MAX_NOTIFICATION_DELIVERY_SECONDS = 86_400;
-/** Mirrors `MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS`. */
-export const MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS = 200;
+/** Mirrors `DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS`. */
+export const DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS = 300;
+/** Mirrors `DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS`. */
+export const DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS = 900;
+/** Mirrors `MAX_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES`. */
+export const MAX_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES = 500;
+/** Mirrors `DEFAULT_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES`, offered when the mode is chosen. */
+export const DEFAULT_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES = 80;
+/** Mirrors `NOTIFICATION_DELIVERY_MAIL_TEXT_BUDGET`: Resend and SMTP, per room. */
+export const NOTIFICATION_DELIVERY_MAIL_TEXT_BUDGET = 4000;
+/** Mirrors `NOTIFICATION_DELIVERY_SERVERCHAN_TEXT_BUDGET`, per room. */
+export const NOTIFICATION_DELIVERY_SERVERCHAN_TEXT_BUDGET = 1000;
 /**
  * Mirrors `MAX_NOTIFICATION_DELIVERY_SINKS`. `canonicalize` keeps the first sinks it
  * recognizes and drops the rest, so a form that offers a ninth would promise a sink Rust
  * silently discards.
  */
 export const MAX_NOTIFICATION_DELIVERY_SINKS = 8;
-/** Mirrors `MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS`, applied the same way. */
+/** Mirrors `MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS`, applied per destination. */
 export const MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS = 64;
-/** Mirrors `DEFAULT_NOTIFICATION_DELIVERY_PREFIX_CHARS`, restored when the option is turned on. */
-export const DEFAULT_NOTIFICATION_DELIVERY_PREFIX_CHARS = 80;
+/** Mirrors `DEFAULT_RESEND_ENDPOINT`, shown so an empty override field is not a mystery. */
+export const DEFAULT_RESEND_ENDPOINT = "https://api.resend.com/emails";
+/** Mirrors `DEFAULT_SERVERCHAN_ENDPOINT`. */
+export const DEFAULT_SERVERCHAN_ENDPOINT = "https://sctapi.ftqq.com";
+/** Where a ServerChan Turbo SendKey is obtained; shown in the setup steps. */
+export const SERVERCHAN_SETUP_URL = "https://sct.ftqq.com";
 
 function boundedInteger(value: number, minimum: number, maximum: number): number {
   if (!Number.isFinite(value)) {
@@ -50,21 +65,100 @@ export function clampNotificationDeliverySeconds(value: number): number {
   return boundedInteger(value, 0, MAX_NOTIFICATION_DELIVERY_SECONDS);
 }
 
-/** Characters of message text a prefix consent would expose; never below one while on. */
-export function clampNotificationDeliveryPrefixChars(value: number): number {
-  return boundedInteger(value, 1, MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS);
+/** Grapheme clusters of message text the prefix mode carries; never below one while on. */
+export function clampNotificationDeliveryPrefixGraphemes(value: number): number {
+  return boundedInteger(value, 1, MAX_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES);
 }
 
 /**
- * The non-secret string a prefix consent binds to. Rust
+ * The non-secret string a content consent binds to. Rust
  * `NotificationSinkSettings::endpoint` is the owner: a consent stored for another endpoint
- * is dropped by `NotificationDeliverySettings::canonicalize`, so a drift here asks for the
- * consent again rather than carrying it to a different destination.
+ * is dropped by `canonicalize`, so a drift here asks for the consent again rather than
+ * carrying it to a different destination.
  */
 export function notificationSinkEndpoint(sink: NotificationSinkSettings): string {
-  return sink.config.kind === "resend"
-    ? sink.config.endpoint
-    : `${sink.config.host}:${sink.config.port}`;
+  return sink.config.kind === "smtp"
+    ? `${sink.config.host}:${sink.config.port}`
+    : sink.config.endpoint;
+}
+
+/**
+ * The recipient a content consent binds to, mirroring
+ * `NotificationSinkSettings::consent_recipient`. For ServerChan it is the revision of the
+ * bound SendKey (`sendkey#<revision>`), because the SendKey's owner is the recipient and
+ * the settings never see the key; without a revisioned key there is no recipient.
+ */
+export function notificationConsentRecipient(sink: NotificationSinkSettings): string {
+  if (sink.config.kind !== "serverChan") {
+    return sink.destination;
+  }
+  const binding = sink.secret_binding ?? "";
+  const hash = binding.lastIndexOf("#");
+  const revision = hash >= 0 ? binding.slice(hash + 1) : "";
+  return /^[0-9a-fA-F]{1,32}$/.test(revision) ? `sendkey#${revision}` : "";
+}
+
+/** The consent that covers this destination exactly as configured now (`consent_for_current`). */
+export function notificationConsentForCurrent(
+  sink: NotificationSinkSettings,
+  acceptedAtMs: number
+): NotificationDeliveryContentConsent {
+  return {
+    sink_kind: sink.config.kind,
+    endpoint: notificationSinkEndpoint(sink),
+    recipient: notificationConsentRecipient(sink),
+    accepted_at_ms: acceptedAtMs
+  };
+}
+
+/**
+ * Whether the stored consent still covers this destination, mirroring
+ * `NotificationSinkSettings::consent_matches`. Rust drops a stale consent on every patch,
+ * so this only decides what the screen says before Rust's answer arrives.
+ */
+export function notificationContentConsented(sink: NotificationSinkSettings): boolean {
+  const consent = sink.content_consent;
+  if (!consent) {
+    return false;
+  }
+  const recipient = notificationConsentRecipient(sink);
+  return (
+    recipient !== "" &&
+    consent.sink_kind === sink.config.kind &&
+    consent.endpoint === notificationSinkEndpoint(sink) &&
+    consent.recipient === recipient
+  );
+}
+
+/** The mode this destination actually uses: names only unless the consent matches. */
+export function notificationEffectiveContent(
+  sink: NotificationSinkSettings
+): NotificationDeliveryContent {
+  return sink.content.kind !== "namesOnly" && notificationContentConsented(sink)
+    ? sink.content
+    : { kind: "namesOnly" };
+}
+
+/** Mirrors `NotificationSinkSettings::text_budget_graphemes`. */
+export function notificationTextBudget(sink: NotificationSinkSettings): number {
+  return sink.config.kind === "serverChan"
+    ? NOTIFICATION_DELIVERY_SERVERCHAN_TEXT_BUDGET
+    : NOTIFICATION_DELIVERY_MAIL_TEXT_BUDGET;
+}
+
+export type ServerChanSendKeyProblem = "serverChan3Key" | "malformed";
+
+/**
+ * The shape check `koushi_notify::validate_serverchan_sendkey` applies before a SendKey is
+ * stored, repeated so the field can say why before the command leaves. Rust refuses the
+ * same values again; a drift can only refuse earlier, never store a key Rust would not.
+ */
+export function serverChanSendKeyProblem(value: string): ServerChanSendKeyProblem | null {
+  const key = value.trim();
+  if (key.slice(0, 4).toLowerCase() === "sctp") {
+    return "serverChan3Key";
+  }
+  return /^SCT[A-Za-z0-9]+$/.test(key) && key.length <= 128 ? null : "malformed";
 }
 
 /**
@@ -84,70 +178,86 @@ export function createNotificationSinkId(): string {
   return notificationSinkIdFromToken(token);
 }
 
-/** The add form's non-secret working copy of one sink, before Rust sees it. */
-export interface NotificationSinkDraft {
-  kind: "resend" | "smtp";
-  from_address: string;
-  sender_name: string;
-  destination: string;
-  endpoint: string;
-  preset: string | null;
-  host: string;
-  port: number;
-  tls: SmtpTls;
-  username: string;
-}
+export type NotificationSinkKind = NotificationSinkConfig["kind"];
 
-export function emptyNotificationSinkDraft(): NotificationSinkDraft {
+/**
+ * A new destination of `kind` with the conservative defaults Rust gives one
+ * (`NotificationDeliveryTargets::default`, `NotificationDeliveryTiming::default`): DMs,
+ * mentions and keywords on, no watched targets, names only, 300 s dwell, 900 s interval,
+ * only while this app is inactive. Mail fields start empty; the detail view fills them.
+ */
+export function newNotificationSink(id: string, kind: NotificationSinkKind): NotificationSinkSettings {
+  const config: NotificationSinkConfig =
+    kind === "smtp"
+      ? { kind: "smtp", preset: null, host: "", port: 465, tls: "implicit", username: "" }
+      : kind === "serverChan"
+        ? { kind: "serverChan", endpoint: DEFAULT_SERVERCHAN_ENDPOINT }
+        : { kind: "resend", endpoint: DEFAULT_RESEND_ENDPOINT };
   return {
-    kind: "resend",
+    id,
+    destination: "",
     from_address: "",
     sender_name: "",
-    destination: "",
-    endpoint: "",
-    preset: null,
-    host: "",
-    port: 465,
-    tls: "implicit",
-    username: ""
+    config,
+    // Nothing is stored for a sink that has never had a credential: the binding Rust
+    // records is the one attached to whatever the user saves next.
+    secret_binding: null,
+    targets: { direct_messages: true, mentions: true, keywords: true, watched: [] },
+    content: { kind: "namesOnly" },
+    content_consent: null,
+    timing: {
+      dwell_secs: DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS,
+      min_interval_secs: DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
+      only_when_unfocused: true
+    }
   };
 }
 
 /**
- * Whether the add form carries the fields `NotificationSinkSettings::is_usable` requires, so
- * an "Add" a user can press never silently disappears in canonicalization. The id and the
- * Resend endpoint are Rust's to fill: an empty endpoint becomes `DEFAULT_RESEND_ENDPOINT`.
+ * Whether the non-secret setup `NotificationSinkSettings::is_usable` requires is filled
+ * in. Rust drops a sink that fails it, so the add flow only commits a sink that passes.
  */
-export function notificationDraftReady(draft: NotificationSinkDraft): boolean {
-  if (!draft.destination.trim() || !draft.from_address.trim()) {
-    return false;
+export function notificationSinkFieldsReady(sink: NotificationSinkSettings): boolean {
+  switch (sink.config.kind) {
+    case "serverChan":
+      return true;
+    case "resend":
+      return Boolean(sink.destination.trim() && sink.from_address.trim());
+    case "smtp":
+      return Boolean(
+        sink.destination.trim() &&
+          sink.from_address.trim() &&
+          sink.config.host.trim() &&
+          sink.config.port > 0
+      );
   }
-  return draft.kind === "resend" ? true : Boolean(draft.host.trim()) && draft.port > 0;
 }
 
-export function notificationSinkFromDraft(id: string, draft: NotificationSinkDraft): NotificationSinkSettings {
-  const config: NotificationSinkConfig =
-    draft.kind === "resend"
-      ? { kind: "resend", endpoint: draft.endpoint.trim() }
-      : {
-          kind: "smtp",
-          preset: draft.preset,
-          host: draft.host.trim(),
-          port: draft.port,
-          tls: draft.tls,
-          username: draft.username.trim()
-        };
-  return {
-    id,
-    enabled: false,
-    destination: draft.destination.trim(),
-    from_address: draft.from_address.trim(),
-    sender_name: draft.sender_name.trim(),
-    config,
-    // Nothing is stored for a sink that has never had a password: the binding Rust records
-    // is the one that will be attached to whatever credential the user saves next.
-    secret_binding: null
-  };
+/**
+ * Setup completeness as the list row and the outcome block state it. "Configured" is
+ * setup only - fields, a credential bound to them, and at least one target - and never a
+ * claim that anything was delivered.
+ */
+export type NotificationSinkSetup = "configured" | "needsCredential" | "needsTargets" | "incomplete";
+
+export function notificationSinkSetup(
+  sink: NotificationSinkSettings,
+  sinkState: NotificationDeliverySinkState | null
+): NotificationSinkSetup {
+  if (!notificationSinkFieldsReady(sink)) {
+    return "incomplete";
+  }
+  if (!sinkState?.secret_configured) {
+    return "needsCredential";
+  }
+  return notificationTargetsAny(sink) ? "configured" : "needsTargets";
+}
+
+export function notificationTargetsAny(sink: NotificationSinkSettings): boolean {
+  const targets = sink.targets;
+  return (
+    targets.direct_messages || targets.mentions || targets.keywords || targets.watched.length > 0
+  );
 }
 
 /**
@@ -170,7 +280,7 @@ export function notificationSmtpConfigFromPreset(
 }
 
 /**
- * The service name the consent copy names. A preset's `label` is the vendor's own proper
+ * The service name the list and the consent copy name. A preset's `label` is the vendor's own proper
  * name and is deliberately not localized; the generic kinds are catalog prose.
  */
 export function notificationDeliveryServiceLabel(
@@ -184,6 +294,9 @@ export function notificationDeliveryServiceLabel(
       return preset.label;
     }
     return t("settings.notificationDeliverySinkKindSmtp");
+  }
+  if (sink.config.kind === "serverChan") {
+    return t("settings.notificationDeliverySinkKindServerChan");
   }
   return t("settings.notificationDeliverySinkKindResend");
 }
@@ -201,8 +314,8 @@ export function notificationDeliveryOutcomeMessage(
     return null;
   }
   switch (outcome.kind) {
-    case "delivered":
-      return { id: "settings.notificationDeliveryResultDelivered" };
+    case "accepted":
+      return { id: "settings.notificationDeliveryResultAccepted" };
     case "invalidSecret":
       return { id: "settings.notificationDeliveryResultInvalidSecret" };
     case "notPermitted":
@@ -221,31 +334,11 @@ export function notificationDeliveryOutcomeMessage(
   }
 }
 
-/** Whether Rust last reported a send through this sink as anything but delivered. */
+/** Whether Rust last reported a send through this sink as anything but accepted. */
 export function notificationDeliverySinkFailed(
   outcome: NotificationDeliveryOutcomeState | null
 ): boolean {
-  return outcome !== null && outcome.kind !== "delivered";
-}
-
-/**
- * Whether the stored consent covers this exact sink, destination and endpoint, mirroring
- * `NotificationDeliverySettings::prefix_is_allowed_for`. A mismatch is what turns the option
- * back off after a sink, endpoint or destination change.
- */
-export function notificationDeliveryPrefixConsented(
-  delivery: NotificationDeliverySettings,
-  sink: NotificationSinkSettings
-): boolean {
-  const consent = delivery.prefix_consent;
-  return (
-    delivery.prefix_chars > 0 &&
-    consent !== null &&
-    consent !== undefined &&
-    consent.sink_id === sink.id &&
-    consent.destination === sink.destination &&
-    consent.endpoint === notificationSinkEndpoint(sink)
-  );
+  return outcome !== null && outcome.kind !== "accepted";
 }
 
 export interface NotificationTargetLabel {

@@ -270,16 +270,6 @@ function threadSnapshot(caption: string): DesktopSnapshot {
             // #1427: the settings surface renders this device's delivery on the
             // notifications page, so even a partial snapshot fixture has to carry it.
             delivery: {
-              enabled: false,
-              direct_messages: true,
-              mentions: true,
-              keywords: true,
-              only_when_unfocused: true,
-              dwell_secs: 300,
-              min_interval_secs: 900,
-              prefix_chars: 0,
-              prefix_consent: null,
-              watched: [],
               sinks: []
             }
           }
@@ -414,12 +404,9 @@ describe("ContextualRightPanel settings modal", () => {
 
     expect(screen.getByRole("dialog", { name: t("settings.accountSettings") })).toBeTruthy();
     expect(screen.getByRole("navigation", { name: t("settings.accountSettings") })).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", {
-      name: t("accountTabs.select", {
-        account: "Work",
-        status: t("accountTabs.ready")
-      })
-    }));
+    // #1458: the settings header keeps the switcher but carries no connection,
+    // unread, or invite state, so the tab is named by its account alone.
+    fireEvent.click(screen.getByRole("button", { name: "Work" }));
     expect(onSelectAccountTab).toHaveBeenCalledWith("work");
   });
 });

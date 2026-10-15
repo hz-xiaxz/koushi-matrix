@@ -385,16 +385,6 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
         send_typing_notifications: true
       },
       delivery: {
-        enabled: false,
-        direct_messages: true,
-        mentions: true,
-        keywords: true,
-        only_when_unfocused: true,
-        dwell_secs: 300,
-        min_interval_secs: 900,
-        prefix_chars: 80,
-        prefix_consent: null,
-        watched: [],
         sinks: []
       },
       display: {
@@ -1310,9 +1300,14 @@ function setNotificationDeliverySinkState(
  * names them, so the sink stops reading as configured exactly when Rust would say so.
  */
 function notificationSinkBinding(sink: NotificationSinkSettings): string {
-  return sink.config.kind === "resend"
-    ? `resend:${sink.config.endpoint}`
-    : `smtp:${sink.config.host}:${sink.config.port}:${sink.config.username}`;
+  switch (sink.config.kind) {
+    case "resend":
+      return `resend:${sink.config.endpoint}`;
+    case "serverChan":
+      return `serverchan:${sink.config.endpoint}`;
+    case "smtp":
+      return `smtp:${sink.config.host}:${sink.config.port}:${sink.config.username}`;
+  }
 }
 
 function withNotificationSinkBinding(
@@ -2301,6 +2296,7 @@ mock.setCommandResponse("load_account_notifications", () =>
             email_management: "available",
             emails: [{ address: "harness@example.invalid", notifications_active: false }],
             unverified_email_pusher_count: 0,
+            server_email_delivery: "unknown",
             // #1427: the keyword editor reads this projection; the harness does
             // not exercise the write commands, so the list starts empty.
             keywords: []
@@ -2347,7 +2343,7 @@ mock.setCommandResponse(
 mock.setCommandResponse(
   "test_notification_delivery",
   ({ sinkId }: { sinkId: string }) =>
-    setNotificationDeliverySinkState(sinkId, { last_outcome: { kind: "delivered", at_ms: 1 } })
+    setNotificationDeliverySinkState(sinkId, { last_outcome: { kind: "accepted", at_ms: 1 } })
 );
 mock.setCommandResponse(
   "change_password",

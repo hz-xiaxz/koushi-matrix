@@ -62,16 +62,6 @@ const baseAppSettings: SettingsState = {
       send_typing_notifications: true
     },
     delivery: {
-      enabled: false,
-      direct_messages: true,
-      mentions: true,
-      keywords: true,
-      only_when_unfocused: true,
-      dwell_secs: 300,
-      min_interval_secs: 900,
-      prefix_chars: 80,
-      prefix_consent: null,
-      watched: [],
       sinks: []
     },
     display: {
