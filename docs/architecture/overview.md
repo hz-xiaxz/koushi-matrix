@@ -783,8 +783,16 @@ revision-qualified installed-resource command and a transient renderer object
 URL. A native adapter may consume bytes directly.
 The cache is an entry-and-byte-bounded LRU: access refreshes recency, eviction
 or session clear releases the owned bytes, and an item larger than the byte
-bound fails before a Ready reference is published. It must never persist
-automatic avatar/link-preview plaintext or return `file://` URLs for them. Legacy
+bound fails before a Ready reference is published. Replacing the own profile
+avatar additionally retires the superseded source's bytes; a scoped reader
+demand leaving its window does not (#1432), because the same source can still be
+shown by an independently demanded DM, header, timeline, or profile avatar. A
+removed or superseded entry never leaves a live Ready reference: the actor
+reconciles its announced avatar sources, downgrades one whose bytes are gone to
+NotRequested so the renderer's visibility demand re-requests it, and a scoped
+demand that still references the source revalidates and refetches it on the next
+observation. It must never persist automatic avatar/link-preview plaintext or
+return `file://` URLs for them. Legacy
 plaintext thumbnail directories remain cleanup-only. After Rust resolves scoped
 visibility observations into avatar resources, `AccountActor` owns single-flight deduplication, bounded
 concurrency, two network attempts, terminal Ready/Failed caching and session-

@@ -21,6 +21,47 @@ use crate::renderable_thumbnail::{
     RenderableThumbnailKind, store_renderable_thumbnail_variant_for_account,
 };
 
+/// Wait for the actor's next `Ready` update for one MXC and return its
+/// `source_ref`.
+async fn await_ready_avatar(
+    action_rx: &mut tokio::sync::mpsc::Receiver<Vec<AppAction>>,
+    mxc_uri: &str,
+) -> String {
+    timeout(Duration::from_secs(5), async {
+        loop {
+            for action in action_rx.recv().await.expect("account action channel") {
+                if let AppAction::AvatarThumbnailUpdated {
+                    mxc_uri: updated,
+                    thumbnail: AvatarThumbnailState::Ready { source_ref, .. },
+                } = action
+                    && updated == mxc_uri
+                {
+                    return source_ref;
+                }
+            }
+        }
+    })
+    .await
+    .expect("Ready avatar update")
+}
+
+/// A session whose account scope belongs to one test only. Session teardown in
+/// another test clears its own account's retained thumbnails from the
+/// process-global cache, so an assertion about retained bytes needs an account
+/// no other test can clear.
+async fn test_session_for_account(server: &MatrixMockServer, user_id: &str) -> MatrixClientSession {
+    let client = server.client_builder().build().await;
+    MatrixClientSession::from_client_for_testing(
+        client.clone(),
+        SessionInfo {
+            homeserver: server.uri(),
+            user_id: user_id.to_owned(),
+            device_id: client.device_id().expect("mock device id").to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        },
+    )
+}
+
 async fn test_session(server: &MatrixMockServer) -> MatrixClientSession {
     let client = server.client_builder().build().await;
     MatrixClientSession::from_client_for_testing(
@@ -962,14 +1003,189 @@ async fn avatar_actor_drops_a_late_completion_from_a_retired_session() {
 }
 
 #[tokio::test]
-async fn a_scoped_demand_leaving_the_window_retires_its_retained_bytes() {
+async fn a_reader_scope_source_shared_with_another_surface_keeps_its_bytes() {
     use crate::renderable_thumbnail::{
-        is_renderable_thumbnail_cached, lookup_renderable_thumbnail,
+        clear_renderable_thumbnail_cache, lookup_renderable_thumbnail,
     };
 
     let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
+    clear_renderable_thumbnail_cache();
+    let server = MatrixMockServer::new().await;
+    // The thumbnail endpoint is unmocked, so each distinct source costs one
+    // original download: the shared source and the source the reader moves to.
+    // A third one means the shared source was fetched again for the second
+    // surface instead of being served from the retained bytes.
+    server
+        .mock_authed_media_download()
+        .ok_image()
+        .expect(2)
+        .mount()
+        .await;
+    let session = test_session_for_account(&server, "@avatar-shared-surface:example.invalid").await;
+    let account_id = session.info.user_id.clone();
+    let cred_dir = tempdir().expect("credential tempdir");
+    let data_dir = tempdir().expect("data tempdir");
+    let (handle, mut action_rx, _event_rx) =
+        spawn_actor_with_dirs(cred_dir.path(), data_dir.path());
+    assert!(
+        handle
+            .install_residency_test_session(std::sync::Arc::new(session))
+            .await
+    );
+    let context = handle.avatar_demand_context(account_id);
+    let mut demand = koushi_state::AvatarDemandState::new(context.clone());
+    let uri = "mxc://localhost/reader-shared";
+    demand.open(1).unwrap();
+    demand
+        .replace(&context, 1, 1, vec![Some(uri.into())], vec![])
+        .unwrap();
+    handle.publish_avatar_demand(Some(std::sync::Arc::new(demand.clone())));
+    let source_ref = await_ready_avatar(&mut action_rx, uri).await;
+    assert!(lookup_renderable_thumbnail(&source_ref).is_some());
+
+    // A DM row, header, or profile independently demands the same MXC while the
+    // reader still shows it.
+    let request = |sequence| RequestId {
+        connection_id: RuntimeConnectionId(21),
+        sequence,
+    };
+    handle
+        .send(AccountMessage::Command(
+            AccountCommand::DownloadAvatarThumbnail {
+                request_id: request(1),
+                mxc_uri: uri.to_owned(),
+            },
+        ))
+        .await;
+    assert_eq!(await_ready_avatar(&mut action_rx, uri).await, source_ref);
+
+    // The reader scope stops demanding the source.
+    let other = "mxc://localhost/reader-other";
+    demand.close(1);
+    demand.open(2).unwrap();
+    demand
+        .replace(&context, 2, 1, vec![Some(other.into())], vec![])
+        .unwrap();
+    handle.publish_avatar_demand(Some(std::sync::Arc::new(demand)));
+    await_ready_avatar(&mut action_rx, other).await;
+
+    assert!(
+        !lookup_renderable_thumbnail(&source_ref)
+            .expect("a source another visible surface still shows must keep its retained bytes")
+            .bytes
+            .is_empty()
+    );
+    shutdown_and_ack(&handle).await;
+}
+
+#[tokio::test]
+async fn an_announced_avatar_losing_its_bytes_is_downgraded_not_left_stale() {
+    use crate::renderable_thumbnail::{
+        MAX_RENDERABLE_THUMBNAIL_ENTRIES, RenderableThumbnailKind,
+        clear_renderable_thumbnail_cache, lookup_renderable_thumbnail, store_renderable_thumbnail,
+    };
+
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
+    clear_renderable_thumbnail_cache();
     let server = MatrixMockServer::new().await;
     server.mock_authed_media_download().ok_image().mount().await;
+    let session = test_session(&server).await;
+    let cred_dir = tempdir().expect("credential tempdir");
+    let data_dir = tempdir().expect("data tempdir");
+    let (handle, mut action_rx, _event_rx) =
+        spawn_actor_with_dirs(cred_dir.path(), data_dir.path());
+    assert!(
+        handle
+            .install_residency_test_session(std::sync::Arc::new(session))
+            .await
+    );
+    let uri = "mxc://localhost/announced-avatar";
+    let request = |sequence| RequestId {
+        connection_id: RuntimeConnectionId(22),
+        sequence,
+    };
+    handle
+        .send(AccountMessage::Command(
+            AccountCommand::DownloadAvatarThumbnail {
+                request_id: request(1),
+                mxc_uri: uri.to_owned(),
+            },
+        ))
+        .await;
+    let source_ref = await_ready_avatar(&mut action_rx, uri).await;
+    assert!(lookup_renderable_thumbnail(&source_ref).is_some());
+
+    // Cache pressure removes the retained bytes while the announced source is
+    // still projected as Ready.
+    for id in 0..MAX_RENDERABLE_THUMBNAIL_ENTRIES {
+        store_renderable_thumbnail(
+            RenderableThumbnailKind::Avatar,
+            &format!("mxc://localhost/pressure-{id}"),
+            vec![0],
+        )
+        .unwrap();
+    }
+    assert!(lookup_renderable_thumbnail(&source_ref).is_none());
+
+    // Later avatar activity reconciles the projection: the actor must downgrade
+    // it rather than leave Ready pointing at missing bytes.
+    handle
+        .send(AccountMessage::Command(
+            AccountCommand::DownloadAvatarThumbnail {
+                request_id: request(2),
+                mxc_uri: "mxc://localhost/after-pressure".to_owned(),
+            },
+        ))
+        .await;
+    timeout(Duration::from_secs(5), async {
+        loop {
+            for action in action_rx.recv().await.expect("account action channel") {
+                if let AppAction::AvatarThumbnailUpdated {
+                    mxc_uri,
+                    thumbnail: AvatarThumbnailState::NotRequested,
+                } = action
+                    && mxc_uri == uri
+                {
+                    return;
+                }
+            }
+        }
+    })
+    .await
+    .expect("an announced avatar that lost its bytes must be downgraded, not left Ready");
+
+    // The downgraded source rehydrates when it is demanded again.
+    handle
+        .send(AccountMessage::Command(
+            AccountCommand::DownloadAvatarThumbnail {
+                request_id: request(3),
+                mxc_uri: uri.to_owned(),
+            },
+        ))
+        .await;
+    assert_eq!(await_ready_avatar(&mut action_rx, uri).await, source_ref);
+    assert!(lookup_renderable_thumbnail(&source_ref).is_some());
+    shutdown_and_ack(&handle).await;
+}
+
+#[tokio::test]
+async fn a_demanded_source_whose_bytes_were_evicted_is_downgraded_before_its_refetch() {
+    use crate::renderable_thumbnail::{
+        MAX_RENDERABLE_THUMBNAIL_ENTRIES, RenderableThumbnailKind,
+        clear_renderable_thumbnail_cache, lookup_renderable_thumbnail, store_renderable_thumbnail,
+    };
+
+    let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
+    clear_renderable_thumbnail_cache();
+    let server = MatrixMockServer::new().await;
+    // The revalidated refetch is served by the account-keyed SDK media store,
+    // so only the first demand's fetch reaches the network.
+    server
+        .mock_authed_media_download()
+        .ok_image()
+        .expect(1)
+        .mount()
+        .await;
     let session = test_session(&server).await;
     let account_id = session.info.user_id.clone();
     let cred_dir = tempdir().expect("credential tempdir");
@@ -983,52 +1199,55 @@ async fn a_scoped_demand_leaving_the_window_retires_its_retained_bytes() {
     );
     let context = handle.avatar_demand_context(account_id);
     let mut demand = koushi_state::AvatarDemandState::new(context.clone());
-    let uri = "mxc://localhost/scoped-retire";
+    let uri = "mxc://localhost/demanded-avatar";
     demand.open(1).unwrap();
     demand
         .replace(&context, 1, 1, vec![Some(uri.into())], vec![])
         .unwrap();
     handle.publish_avatar_demand(Some(std::sync::Arc::new(demand.clone())));
-    let source_ref = timeout(Duration::from_secs(3), async {
-        'ready: loop {
-            for action in action_rx.recv().await.unwrap() {
-                if let AppAction::AvatarThumbnailUpdated {
-                    mxc_uri,
-                    thumbnail: AvatarThumbnailState::Ready { source_ref, .. },
-                } = action
-                    && mxc_uri == uri
-                {
-                    break 'ready source_ref;
+    let source_ref = await_ready_avatar(&mut action_rx, uri).await;
+
+    // The bytes are gone while the source is still demanded: an observation
+    // must downgrade the projection, so a refetch that is cancelled with the
+    // scope cannot leave a `Ready` pointing at missing bytes.
+    for id in 0..MAX_RENDERABLE_THUMBNAIL_ENTRIES {
+        store_renderable_thumbnail(
+            RenderableThumbnailKind::Avatar,
+            &format!("mxc://localhost/demand-pressure-{id}"),
+            vec![0],
+        )
+        .unwrap();
+    }
+    assert!(lookup_renderable_thumbnail(&source_ref).is_none());
+    demand
+        .replace(&context, 1, 2, vec![Some(uri.into())], vec![])
+        .unwrap();
+    handle.publish_avatar_demand(Some(std::sync::Arc::new(demand)));
+
+    let mut downgraded = false;
+    timeout(Duration::from_secs(5), async {
+        loop {
+            for action in action_rx.recv().await.expect("account action channel") {
+                match action {
+                    AppAction::AvatarThumbnailUpdated {
+                        mxc_uri,
+                        thumbnail: AvatarThumbnailState::NotRequested,
+                    } if mxc_uri == uri => downgraded = true,
+                    AppAction::AvatarThumbnailUpdated {
+                        mxc_uri,
+                        thumbnail: AvatarThumbnailState::Ready { .. },
+                    } if mxc_uri == uri => return,
+                    _ => {}
                 }
             }
         }
     })
     .await
-    .expect("Ready from the scoped demand");
-    assert!(lookup_renderable_thumbnail(&source_ref).is_some());
-
-    // The scope stops demanding the source (its owner's avatar changed or the
-    // row left the visible-plus-prefetch window).
-    demand.close(1);
-    demand.open(2).unwrap();
-    demand
-        .replace(
-            &context,
-            2,
-            1,
-            vec![Some("mxc://localhost/other".into())],
-            vec![],
-        )
-        .unwrap();
-    handle.publish_avatar_demand(Some(std::sync::Arc::new(demand)));
-    timeout(Duration::from_secs(5), async {
-        while is_renderable_thumbnail_cached(&source_ref) {
-            tokio::task::yield_now().await;
-        }
-    })
-    .await
-    .expect("a source that left the demand must not keep its retained bytes");
-    assert!(lookup_renderable_thumbnail(&source_ref).is_none());
+    .expect("the revalidated source is announced again");
+    assert!(
+        downgraded,
+        "the stale projection must be downgraded before its refetch, not silently dropped"
+    );
     shutdown_and_ack(&handle).await;
 }
 
