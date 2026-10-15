@@ -32,14 +32,14 @@ translated app.
 | Scope and category | Settings and actions |
 | --- | --- |
 | App Settings → Appearance (外観) | Language (English or 日本語); theme; display density; UI font and emoji style. |
-| App Settings → Notifications (通知) | Notification sounds and badge counts, and the device notification controls described under [Notifications from this device](#notifications-from-this-device). Operating-system permissions also apply. |
+| App Settings → Notifications (通知) | Notification sounds and badge counts, and the destinations described under [Notifications from this device](#notifications-from-this-device). Operating-system permissions also apply. |
 | App Settings → Preferences (環境設定) | Code-block wrapping; hiding removed messages; close to tray where configurable; automatic loading of older messages; placement of threaded conversations at their latest reply. |
 | App Settings → Keyboard (キーボード) | Send-message shortcut (Enter or the platform modifier+Enter); reference list of keyboard shortcuts and their availability. |
 | App Settings → Search history (検索履歴) | Shared background-work speed and pause/resume control. Search crawling and media prefetch use this budget across all accounts. **Off** pauses both. |
 | App Settings → Help & About (ヘルプと情報) | Public GitHub repository URL, copy button, and instructions for asking ChatGPT or another AI assistant. |
 | Account Settings → Account (アカウント) | Profile display name and avatar; account management page when provided by the server; change password and deactivate account when supported. |
 | Account Settings → Sessions (セッション) | Homeserver, user ID, device ID/name, verification, cross-signing, backup and local-store information; Sign out. This is current-session information, not a list of all remote devices. The status shown is the last checked result; Koushi re-checks it automatically when the app or account starts and after a connection outage, and the refresh action checks again immediately. |
-| Account Settings → Notifications (通知) | **This device** and **Homeserver** tabs. **This device**: desktop notifications, and notifications Koushi sends from this computer through a mailbox or relay you configure. **Homeserver**: account-wide notification rules and **Email notifications**, which apply to every device. See [Notifications from this device](#notifications-from-this-device) and [Email notifications](#email-notifications). |
+| Account Settings → Notifications (通知) | Three sections, top to bottom. **OS notifications**: desktop notifications and **Show message content in notifications**. **Sent from this device**: destinations Koushi sends to from this computer (email or WeChat). **Homeserver notifications**: account-wide notification rules and **Email notifications**, which apply to every device. See [OS notifications](#os-notifications), [Notifications from this device](#notifications-from-this-device), and [Email notifications](#email-notifications). |
 | Account Settings → Security & Privacy (セキュリティとプライバシー) | URL previews in unencrypted/encrypted rooms; sending read receipts and typing notifications. |
 | Account Settings → Encryption (暗号化) | Identity/session verification and trust; secure backup setup and passphrase changes; recovery; encrypted room-key import/export; local-encryption diagnostics and local-data reset. Actions appear according to the current encryption state. |
 | Account Settings → Search history (検索履歴) | Indexing of media captions and file names; crawler activity, per-room progress and start/stop actions; rebuild search database. |
@@ -109,7 +109,26 @@ For consequences and prerequisites, see [Search](search.md),
 [Security and recovery](security-and-recovery.md), and
 [User trust model](user-trust-model.md) before changing the corresponding settings.
 
+## OS notifications
+
+The **OS notifications** section holds the alerts your operating system shows on
+this computer. **Desktop notifications** turns them on or off.
+
+**Show message content in notifications** is **off** by default, so a banner
+names the room and the sender without the message. Turned on, a banner also shows
+the start of the message, and your operating system may keep that text in its
+notification history after the banner closes. Koushi shows the text only for a
+new message it has decrypted and read itself, cuts it to a short single line, and
+never writes it to its logs. The switch is saved for this account on this device
+only, and it does not change what any destination under **Sent from this device**
+receives.
+
 ## Email notifications
+
+**Homeserver notifications** sends mail only if your homeserver supports email
+notifications, which the section says next to the switch. matrix.org does not
+send notification emails; to be emailed there, add a destination under
+[Sent from this device](#notifications-from-this-device) instead.
 
 **Account Settings → Notifications → Email notifications** has two separate parts:
 
@@ -141,43 +160,63 @@ What you can do with addresses depends on the server:
 
 ## Notifications from this device
 
-**Account Settings → Notifications** is split into two tabs, **This device** and
-**Homeserver**. Each tab says who sends the notification: **This device** is
-Koushi sending from this computer through a mailbox or relay you configure here,
-and **Homeserver** is your own server's settings, which apply to every device on
-the account. The two are independent. The **This device** tab is selected first;
-the **Homeserver** tab appears only while you are signed in. The device settings
-are app-wide, so **App Settings → Notifications** shows the same controls without
-the tabs.
+**Sent from this device**, the middle section of **Account Settings →
+Notifications**, lists the destinations Koushi sends to itself, from this
+computer, through a service you set up. Because Koushi sends them, they work even
+when your homeserver cannot send email. **Homeserver notifications** below it are
+your server's own and independent of these. The destinations are app-wide, so
+**App Settings → Notifications** shows the same list.
 
-Device notifications are **off** by default. Koushi sends nothing from this
-device until you turn on **Send notifications from this device** and add at least
-one sending service. Koushi sends only while it is running: a notification
-waiting for its wait time or for the shortest gap is held in memory only, and
-closing Koushi discards it.
+There is no switch to turn a destination on: a destination sends once its fields,
+its credential, and at least one target are set, and its row then reads
+**Configured**; otherwise it reads **Not configured**. With no destination, nothing
+leaves this device. Koushi sends only while it is running (keeping it in the tray
+is enough): a notification still waiting is held in memory and closing Koushi
+discards it.
 
-Because Koushi sends these itself, the feature works on a homeserver with no
-email support. A notification is a summary, not the message: it names the rooms
-that need attention, each room's kind, and its unread and mention counts. No
-message text leaves this device unless you turn on the plaintext prefix below.
+Choose a destination to open its page, and **All destinations** to go back.
+**Add a destination** asks for the kind (**Resend (email API)**, **SMTP relay**,
+or **WeChat (ServerChan Turbo)**) and opens the same page for the new one; **Save
+destination** adds it. You can configure up to eight destinations. Each page has
+five parts, described below.
 
-### Choose what is sent
+### Service and credentials
 
-**Send for** has three switches, on by default:
+The destination's service fields (**From address**, **Name**, and **Send to** for
+mail; **Mailbox preset**, **Server**, **Port**, **Connection security**, and
+**Username** for an SMTP relay) and its credential: the **Resend API key**, the
+mailbox's **App password**, or the ServerChan **SendKey**. The credential field
+appears once the destination is saved.
+
+The credential field is write-only: Koushi never shows the saved value again. It
+reports **Saved. Enter a new value to replace it.** or **Not set**. The value is
+kept in your operating system's credential store, not in Koushi's settings, and a
+diagnostics report never carries it. **Clear** deletes it, and removing the
+destination deletes it too. Changing an SMTP relay's server, port, or username,
+or a service's endpoint, removes the saved password, because it was entered for
+the previous server; the page then says so.
+
+For Resend, the **From address** must be on a domain you have verified in Resend.
+**Advanced** holds the service **Endpoint**; leave it alone unless you are testing
+against a local stub.
+
+### Targets
+
+**Send for** has three switches, on by default for a new destination:
 
 - **Direct messages**
 - **Mentions and replies**
 - **Your keywords**
 
-A plain group message matches none of them. To be told about one room or a whole
-space whatever these switches say, use the watch list below.
+A plain group message matches none of them. **Watched rooms and spaces** names
+rooms and spaces that are always sent: choose **Add a room or space** and pick
+from your room list, or **Remove** an entry. A watched room is sent even when its
+category is off, but a room you have read, muted, or have open is still skipped.
+A watched space covers every room in it, including rooms added later. The list
+holds up to 64 rooms and spaces.
 
-**Also send for these rooms and spaces** names rooms and spaces that are always
-sent. Choose **Add a room or space** and pick from your room list; **Remove**
-drops an entry. A watched room is sent even when its kind is off. A watched space
-covers every room in that space, including rooms added to it later, so you do not
-have to edit the list when the space grows. A room you read or mute is still
-skipped, and the list holds up to 64 rooms and spaces.
+Each destination has its own targets, so one mailbox can receive every direct
+message while WeChat receives only one watched room.
 
 ### Keywords
 
@@ -185,15 +224,15 @@ skipped, and the list holds up to 64 rooms and spaces.
 rule on your account, matched against the message body as a whole word and
 without regard to case. A hit arrives as a mention, so either this switch or
 **Mentions and replies** sends it. The rules live on your homeserver, not in
-Koushi's settings, so a rule another Matrix client set counts here too.
+Koushi's settings, so they are shared by every destination and by your other
+Matrix clients, and a rule another client set counts here too.
 
-The words themselves are under the switch. Type one into the box and choose
-**Add a keyword**; each keyword already on the account is listed with a remove
-control beside it. Adding writes the rule to your account, which is why your
-other Matrix clients highlight the word too; removing deletes that rule for every
-client, not only for Koushi. Nothing is written until you add or remove
-something, so simply opening this screen changes nothing, and the list is what
-the server reports rather than what Koushi remembers.
+The words are listed under the switches. Type one into the box and choose
+**Add**; each keyword already on the account is listed with a remove control.
+Adding writes the rule to your account, which is why your other Matrix clients
+highlight the word too; removing deletes that rule for every client. Nothing is
+written until you add or remove something, and the list is what the server
+reports rather than what Koushi remembers.
 
 A word that another Matrix client turned off stays in the list marked as off. It
 is still on your account, which is why adding the same word again is refused
@@ -204,97 +243,80 @@ than 64 characters, a word already in the list, and a list that is already at 64
 keywords are each refused with their own message. A refusal means nothing was
 changed.
 
-### When a notification is sent
+### Message content
+
+**Space and room names only** is the default: a notification names the rooms that
+need attention, each room's kind, and its unread and mention counts, and no
+message text leaves this device. Two modes add text:
+
+- **Names and the first characters of each message**, with **Characters to
+  include** (80 by default, at most 500).
+- **Names and the message text**, up to the service's own limit per room (4000
+  characters for mail, 1000 for ServerChan). Longer text is cut and marked as
+  truncated; it is never presented as the whole message.
+
+Images, files, messages that could not be decrypted, and deleted messages are
+sent as names only whatever the mode.
+
+Choosing a text mode opens a consent. It states that the text leaves this device
+as plain text and passes through the service to the recipient without end-to-end
+encryption, and that whether and for how long the service keeps it depends on
+that service's own terms. Check **I understand that the text is sent
+unencrypted**, then **Agree and turn on**. The consent covers this service, its
+endpoint, and its recipient (the **Send to** address, or for WeChat the saved
+SendKey). Changing any of them, or saving a new SendKey, returns the destination
+to names only until you agree again. Switching between the two text modes keeps
+the consent; choosing names only clears it.
+
+This setting is separate from **Show message content in notifications** under
+**OS notifications**.
+
+### Timing
 
 A room is not sent the moment it becomes unread.
 
-- **Wait before sending** (5 minutes by default) is how long a room must stay
-  unread before it can be sent. Reading the room, muting it, or, with the focus
-  option below on, bringing Koushi to the foreground cancels the wait, and it
-  starts again the next time the room becomes unread.
-- **Shortest gap between sends** (15 minutes by default) is how long further
-  notifications wait after a send, so a busy room cannot fill your mailbox. What
-  comes due in the meantime is collected into the next summary.
-- **Only while Koushi is not focused** (on by default) holds notifications while
-  the Koushi window is in the foreground, the way the operating system suppresses
-  a banner you are already looking at.
+- **Wait before sending (seconds)** (300 seconds, 5 minutes, by default) is how
+  long a room must stay unread before it can be sent. Reading the room, muting it,
+  or, with the option below on, bringing Koushi to the foreground cancels the
+  wait, and it starts again the next time the room becomes unread.
+- **Shortest gap between sends (seconds)** (900 seconds, 15 minutes, by default)
+  is how long further notifications wait after a send, so a busy room cannot fill
+  your mailbox. What comes due in the meantime is collected into the next summary.
+- **Only when Koushi is inactive** (on by default) holds notifications while the
+  Koushi window is in the foreground.
 
-One summary names a few rooms and then counts the rest, such as "and 3 more". It
-never contains a room's internal ID.
+Each destination keeps its own timing, so one destination's send never delays
+another's. One summary names a few rooms and then counts the rest, such as "and 3
+more". It never contains a room's internal ID.
 
-### Add a sending service
+### Status
 
-**Send through** lists the services Koushi delivers through, each turned on or
-off with **Send through this service**. Add one with **Add a service**:
+**Status** repeats whether setup is complete and shows the last attempt: when it
+happened and what the service answered. **Send a test** sends one message through
+this destination with the saved credential. A test holds no room, message,
+sender, or account data and does not count toward the shortest gap.
 
-1. Choose **Service**: **Resend (email API)** or **SMTP relay**.
-2. Fill in **From address** (what the recipient sees as the sender), **Name** (an
-   optional display name), and **Send to** (where the notification goes).
-3. For **Resend (email API)**, leave **Endpoint** blank to use the endpoint the
-   service documents for its email API, unless you have a reason to point it
-   elsewhere. For **SMTP relay**, choose a **Mailbox preset** (see
-   [Set up a sending service](#set-up-a-sending-service)) or **Other server**,
-   then enter **Server**, **Port**, **Connection security**, and **Username**.
-4. Choose **Add**. In the service's card, type its password or API key into **App
-   password or API key**, then choose **Save**.
-
-The password field is write-only: Koushi never shows the saved value again. It
-reports **Saved. Enter a new value to replace it.** or **Not set**. The value is
-kept in your operating system's credential store, not in Koushi's settings, and a
-diagnostics report never carries it. **Clear** deletes it, and removing the
-service deletes it too. You can configure up to eight services.
-
-**Send a test** sends one message through the service you are editing, using the
-saved password. A test holds no room, message, sender, or account data; it does
-not count toward the shortest gap, and you can send it before the channel or the
-service is turned on. **Last send** shows the most recent result for that service,
-including a test.
-
-### What the last send result means
-
-- **Delivered**: The service accepted the message. This is the service's own
-  answer, not proof that it reached an inbox.
+- **Accepted by the service.**: The service took the request. This is the
+  service's own answer, not proof that the message reached an inbox or a phone.
 - **The service rejected the key. Enter it again.**: The saved API key, app
-  password, or authorization code is wrong, expired, or revoked. Create a new one
-  with the provider and save it.
+  password, authorization code, or SendKey is wrong, expired, or revoked.
 - **The service refused this sender or this account. Check the from address and
   the account status.**: The provider will not send as this **From address**, or
-  the account is not allowed to send yet. Some services send only from a verified
-  address or domain.
+  the account is not allowed to send yet.
 - **The service refused the message.**: The provider rejected this message or
   its recipient, not the credential or the account.
-- **The service is limiting how often it accepts messages. Koushi will try again
-  later.**: The provider asked Koushi to slow down, so the next attempt waits for
-  the provider's own delay or the shortest gap.
+- **The service is limiting how often it accepts messages.**: The provider asked
+  Koushi to slow down; the next attempt waits for the provider's own delay, which
+  the page shows in seconds when the provider gives one, or the shortest gap.
 - **Could not reach the service.**: A network, TLS, or server problem. Koushi
   retries within the shortest gap.
 
 Koushi retries only a rate limit and a connection problem. A rejected key,
 sender, or message is not retried; fix it and the next notification tries again.
-A service whose last send failed says **This service is not sending** on its row
-while its switch stays on, so an enabled service is never read as a working one.
-If nothing arrives at all, see [Notifications from this device do not
+A destination whose last attempt failed says **The last attempt failed** on its
+row, so a configured destination is never read as a working one. If nothing
+arrives at all, see [Notifications from this device do not
 arrive](troubleshooting.md#notifications-from-this-device-do-not-arrive).
-
-### Include the start of the message
-
-**Include the start of the message** is off by default. Turning it on opens a
-consent you must accept. The consent states that the start of the message leaves
-this device as plain text and passes through the service to the destination
-without end-to-end encryption; that whether, and for how long, that service keeps
-it depends on that service's own terms, which you should read before turning the
-option on; and that room names and counts are sent either way. Koushi asserts
-nothing about a particular service's retention.
-
-Once you accept, **Characters** sets how many characters of the message start are
-added (80 by default, at most 200). The text is reduced to one line and cut at a
-character boundary, so it cannot split a character or invent an extra line.
-
-The consent covers one service, one endpoint, and one destination. Changing the
-service, its server or endpoint, or its **Send to** address asks again and turns
-the option off until you accept for the new configuration. Turning the option off
-clears the consent. Turning it on for a second service replaces the consent, so
-only the service it covers adds the text.
 
 ## Set up a sending service
 
@@ -313,9 +335,8 @@ relay or the name of its credential.
 1. Create a Resend account, then create an API key on the
    [API keys page](https://resend.com/docs/dashboard/api-keys/introduction).
    Resend does not show the key again after it is created.
-2. In Koushi, add a service with **Service → Resend (email API)**, set **From
-   address** and **Send to**, and paste the API key into **App password or API
-   key**.
+2. In Koushi, add a destination of kind **Resend (email API)**, set **From
+   address** and **Send to**, and save the destination, then paste the API key into **Resend API key**.
 3. Send a test.
 
 Resend's testing sender `onboarding@resend.dev` can send only to the email
@@ -330,7 +351,7 @@ Left blank, **Endpoint** uses the email API endpoint Resend documents.
 1. Create an app-specific password in your Apple Account, following Apple's
    [app-specific password steps](https://support.apple.com/en-us/102654). Copy
    the password.
-2. In Koushi, add a service with **Service → SMTP relay**. Fill in **From
+2. In Koushi, add a destination of kind **SMTP relay**. Fill in **From
    address** first, then choose the **iCloud Mail** mailbox preset, which fills in
    the server Apple documents
    ([iCloud Mail server settings](https://support.apple.com/en-us/102525)).
@@ -347,7 +368,7 @@ Account password.
 2. Create an app password following Google's
    [app password steps](https://support.google.com/accounts/answer/185833), and
    copy the 16-character password.
-3. In Koushi, add a service with **Service → SMTP relay**. Fill in **From
+3. In Koushi, add a destination of kind **SMTP relay**. Fill in **From
    address** first, then choose the **Gmail** mailbox preset, which fills in the
    server Google documents
    ([Gmail IMAP, POP, and SMTP](https://developers.google.com/workspace/gmail/imap/imap-smtp)).
@@ -368,7 +389,7 @@ the password may be refused even with 2-Step Verification on.
    has the full steps; the code is the password for a third-party client, never
    the QQ password. Changing the QQ password invalidates every authorization code
    ([QQ Mail client sign-in guide](https://help.mail.qq.com/detail/0/1088)).
-5. In Koushi, add a service with **Service → SMTP relay**. Fill in **From
+5. In Koushi, add a destination of kind **SMTP relay**. Fill in **From
    address** first, then choose the **QQ Mail** mailbox preset, which fills in the
    relay QQ Mail documents
    ([Mac mail client settings](https://help.mail.qq.com/detail/108/1089/)), and
@@ -380,9 +401,31 @@ settings, which Koushi does not configure; see the
 [QQ Mail help centre](https://help.mail.qq.com/). It reaches WeChat only while
 QQ Mail's reminder is set up and QQ Mail is delivering the message.
 
+### Use WeChat (ServerChan Turbo)
+
+[ServerChan Turbo](https://sct.ftqq.com) (Server酱·Turbo) forwards a message to
+your WeChat through its own service account. The destination page shows these
+steps with a link to the site:
+
+1. Open [sct.ftqq.com](https://sct.ftqq.com) and log in by scanning the QR code
+   with WeChat.
+2. Open the **SendKey** page and copy your SendKey. It starts with `SCT`.
+3. Nothing else needs setting up: messages arrive through the default 方糖
+   service account (方糖服务号).
+4. In Koushi, add a destination of kind **WeChat (ServerChan Turbo)**, save it,
+   paste the SendKey into **SendKey**, and send a test.
+
+The SendKey names your WeChat account, so it is the recipient as well as the
+credential; it is kept only in the operating system's credential store. A key
+from ServerChan³, which starts with `sctp`, is refused, because only ServerChan
+Turbo is supported. The free plan shows 5 messages a day; ServerChan may accept
+more without showing them, and **Accepted by the service** does not mean the
+message was shown. The WeChat card shows only the title, which names the rooms;
+message text, if you turn it on, is on the page the card opens.
+
 ### Use another SMTP relay
 
-Any SMTP relay can be entered by hand: with **Service → SMTP relay**, choose
+Any SMTP relay can be entered by hand: for an **SMTP relay** destination, choose
 **Other server** and fill in **Server**, **Port**, **Connection security**, and
 **Username**, then save the password the relay documents. This covers a company
 relay or a server you run yourself. A self-hosted server or a provider account

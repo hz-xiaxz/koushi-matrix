@@ -207,6 +207,22 @@ describe("EmailNotificationsSection", () => {
     expect(screen.getByText("Add and confirm an email address first")).toBeTruthy();
   });
 
+  test("says server mail needs server support, and warns only where Rust knows it is absent", () => {
+    // #1460: an email pusher only asks the homeserver to send mail.
+    renderEmail(loaded(snapshot()));
+    expect(screen.getByTestId("email-notifications-server-support").textContent).toContain(
+      "homeserver supports email notifications"
+    );
+    expect(screen.queryByTestId("email-notifications-server-unavailable")).toBeNull();
+    cleanup();
+
+    renderEmail(loaded(snapshot({ server_email_delivery: "knownUnavailable" })));
+    const warning = screen.getByTestId("email-notifications-server-unavailable");
+    expect(warning.getAttribute("role")).toBe("note");
+    expect(warning.textContent).toContain("matrix.org does not send notification emails");
+    expect(warning.textContent).toContain("Sent from this device");
+  });
+
   test("shows the active pusher target and turns it off", () => {
     const handlers = renderEmail(
       loaded(

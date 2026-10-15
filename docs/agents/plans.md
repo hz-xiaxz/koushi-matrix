@@ -28,6 +28,12 @@ persistent unread state after a configurable dwell, an interval-coalesced in-mem
 queue with no durable outbox, and a default-off plaintext prefix behind a
 provider-agnostic consent. The server pusher surface keeps its own meaning.
 
+[#1460 notification routes](../plans/2026-10-16-issue1460-notification-routes.md)
+supersedes the single device channel: every destination (Resend, SMTP, WeChat via
+ServerChan Turbo) owns its targets, content mode, consent, and timing lane, with
+no master switch; the settings page stacks OS, this-device, and homeserver
+sections, and OS previews are a verified, default-off account setting.
+
 [#1396 avatar thumbnails](../plans/2026-10-13-issue1396-avatar-thumbnails.md)
 requests a homeserver thumbnail sized from the 40 px avatar slot, resizes the
 fallback locally to the same long edge, keys the cache by thumbnail identity, and

@@ -89,10 +89,10 @@ Notifications** for sounds and badges. Also check the operating system's
 notification permission for Koushi. An unread badge and a desktop notification
 are different signals. A red badge counts locally observed unread messages;
 server-only notification counts do not create a red number or a desktop alert.
-Desktop alerts state the verified room count and open the room; they do not show
-an unverified message preview or jump to an unverified event.
-The message-preview setting is hidden while exact unread event verification is
-unavailable.
+Desktop alerts state the verified room count and open the room; they do not jump
+to an unverified event. Message text appears in a banner only with **Show message
+content in notifications** on (off by default), and only for a new message Koushi
+has decrypted and read itself.
 
 If the notification you are missing is mail or a relay message sent from this
 device, see [Notifications from this device do not
@@ -100,37 +100,42 @@ arrive](#notifications-from-this-device-do-not-arrive).
 
 ## Notifications from this device do not arrive
 
-Koushi sends these itself, so check the device channel before the homeserver:
+Koushi sends these itself, so check the destination under **Sent from this
+device** before the homeserver:
 
-- **Send notifications from this device** is on.
-- At least one service is added, turned on with **Send through this service**,
-  and shows its password as **Saved**.
+- The destination's row reads **Configured**. **Not configured** names what is
+  missing: a required field, the credential, or a target.
 - At least one switch under **Send for** is on, or the room, or a space that
-  contains it, is in **Also send for these rooms and spaces**. A plain group
-  message is sent only through the watch list.
-- **Wait before sending** has elapsed while the room stayed unread. Reading the
-  room, muting it, or leaving Koushi focused cancels the wait.
-- **Shortest gap between sends** has passed since the last send.
-- With **Only while Koushi is not focused** on, the Koushi window must not be in
-  the foreground.
+  contains it, is under **Watched rooms and spaces**. A plain group message is
+  sent only through the watch list.
+- **Wait before sending (seconds)** has elapsed while the room stayed unread.
+  Reading the room, muting it, or leaving Koushi focused cancels the wait.
+- **Shortest gap between sends (seconds)** has passed since that destination's
+  last send.
+- With **Only when Koushi is inactive** on, the Koushi window must not be in the
+  foreground.
 - Koushi is running. The waiting list is kept only in Koushi's memory: nothing
   is sent while Koushi is closed, and a waiting notification is discarded when
   Koushi exits.
-- **Last send** on the service's row tells you what happened. If the row also
-  says **This service is not sending**, see [What the last send result
-  means](settings.md#what-the-last-send-result-means).
+- **Status** on the destination's page shows the last attempt. If its row says
+  **The last attempt failed**, see [Status](settings.md#status).
+- For WeChat, **Accepted by the service** means ServerChan took the request. The
+  free plan shows 5 messages a day, so later messages may be accepted without
+  appearing in WeChat.
 
-Notifications from the **Homeserver** tab are separate: mail from your server
-arriving does not mean the device channel is working. See [the homeserver
+**Homeserver notifications** are separate: mail from your server arriving does
+not mean a destination on this device is working. See [the homeserver
 setting](#the-homeserver-still-sends-its-own-notifications).
 
 ### The message arrives with no text
 
-By design, the summary carries room names, kinds, and counts, not message text.
-Text is added only when **Include the start of the message** is on for the
-service that sent it and you have accepted its consent. If you turned it on but
-then changed the service, its server or endpoint, or the **Send to** address, the
-consent no longer applies and the text is dropped until you accept again.
+By default a destination's **Message content** is **Space and room names only**:
+room names, kinds, and counts, not message text. Text is added only with a text
+mode chosen for that destination and its consent accepted. If you then changed
+the service, its endpoint, the **Send to** address, or the saved SendKey, the
+consent no longer applies and the destination is back to names only until you
+agree again. Images, files, undecryptable messages, and deleted messages are
+always sent as names only.
 
 ### The password field is empty again after changing the server or account
 
@@ -140,7 +145,7 @@ removes the saved value on purpose, so a password entered for one mailbox is
 never offered to another; the service says **The saved password was removed
 because the server or account changed. Enter it again.** Nothing was lost: save
 the password for the new server. Changing only the **Send to** address keeps the
-password but asks for the plaintext-prefix consent again.
+password but returns **Message content** to names only until you agree again.
 
 ### The provider says the credential is invalid, or the account is not permitted
 
@@ -152,6 +157,8 @@ new one with the provider and save it. The usual causes:
 - iCloud Mail needs an app-specific password created for this app.
 - QQ Mail invalidates every authorization code when the QQ password changes.
 - A Resend API key cannot be read again after it is created.
+- A ServerChan SendKey must start with `SCT`; a ServerChan³ key (`sctp…`) is
+  refused before it is saved.
 
 **The service refused this sender or this account** means the provider took the
 credential but will not send for this **From address**, or the account is not
@@ -171,11 +178,11 @@ surprising sender.
 
 ### The homeserver still sends its own notifications
 
-The **This device** and **Homeserver** tabs are separate. The **Homeserver**
-tab's **Email notifications** switch controls your server's pusher, which applies
-to every device on the account, and nothing on the **This device** tab changes
-it. Turning this device's channel off leaves the server setting as it was; turn
-the server setting off on the **Homeserver** tab if you do not want both. See
+**Sent from this device** and **Homeserver notifications** are separate. The
+**Email notifications** switch under **Homeserver notifications** controls your
+server's pusher, which applies to every device on the account, and no destination
+on this device changes it. Removing a destination leaves the server setting as it
+was; turn the server setting off too if you do not want both. See
 [Email notifications](settings.md#email-notifications).
 
 ### A message looks stale, or repeats a room you already read
