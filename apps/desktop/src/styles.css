@@ -6445,6 +6445,15 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
 
 .invite-dialog-header {
   padding: 18px 20px 12px;
+  /* #1405: this grid row sizes to its content and the title embeds a room name
+     that any member who can rename the room controls, so clamp it. Without the
+     clamp a long name pushes the scrolling body (the whole invite form) to zero
+     height. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
 }
 
 .invite-dialog-body {
@@ -7217,6 +7226,13 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
 .space-members-header h2 {
   font-size: 19px;
   line-height: 1.2;
+  /* #1405: the Space invite flow uses the same unbounded title template. */
+  display: -webkit-box;
+  -webkit-box-orient: vertical;
+  -webkit-line-clamp: 2;
+  overflow: hidden;
+  overflow-wrap: anywhere;
+  min-inline-size: 0;
 }
 
 .space-members-count {

@@ -21,7 +21,11 @@ import type { ContextMenuItem } from "../domain/contextMenus";
 import { getActiveLocale, t, type MessageId } from "../i18n/messages";
 import { roomDisplayLabel } from "../domain/roomDisplayLabel";
 
-export { roomDisplayLabel, roomListItemLabel } from "../domain/roomDisplayLabel";
+export {
+  cappedRoomLabel,
+  roomDisplayLabel,
+  roomListItemLabel
+} from "../domain/roomDisplayLabel";
 
 export type { MentionCandidate } from "../domain/projectionTypes";
 

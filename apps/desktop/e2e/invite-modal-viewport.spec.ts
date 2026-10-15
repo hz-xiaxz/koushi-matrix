@@ -121,6 +121,51 @@ async function seedInviteWorkflow(page: Page, seed: WorkflowSeed = {}): Promise<
   );
 }
 
+/**
+ * Give the harness room an over-long name through the real snapshot. Matrix sets
+ * no length limit on `m.room.name`, and above 10,240 characters WebKit's
+ * `text-overflow: ellipsis` draws nothing but the ellipsis (#1404).
+ */
+async function seedLongRoomName(page: Page, name: string): Promise<void> {
+  await page.evaluate(
+    ({ roomId, name }) => {
+      const snapshot = window.__harness.currentSnapshot();
+      window.__harness.setSnapshot({
+        ...snapshot,
+        state: {
+          ...snapshot.state,
+          domain: {
+            ...snapshot.state.domain,
+            rooms: snapshot.state.domain.rooms.map((room) =>
+              room.room_id === roomId
+                ? {
+                    ...room,
+                    display_name: name,
+                    display_label: name,
+                    original_display_label: name
+                  }
+                : room
+            )
+          }
+        },
+        sidebar: {
+          ...snapshot.sidebar,
+          space_rooms: snapshot.sidebar.space_rooms.map((room) =>
+            room.room_id === roomId ? { ...room, display_name: name } : room
+          ),
+          sections: {
+            ...snapshot.sidebar.sections,
+            rooms: snapshot.sidebar.sections.rooms.map((room) =>
+              room.room_id === roomId ? { ...room, display_name: name } : room
+            )
+          }
+        }
+      });
+    },
+    { roomId: ROOM_ID, name }
+  );
+}
+
 /** Open the invite dialog through the real user path: Room info → Invite people. */
 async function openInviteDialog(page: Page): Promise<void> {
   await page.getByRole("button", { name: "Room info" }).click();
@@ -255,6 +300,38 @@ test("the footer sits outside the scrolling body at a short height (#1418)", asy
     () => document.querySelector(".invite-dialog-footer")!.getBoundingClientRect().top
   );
   expect(footerTopAfter).toBeCloseTo(layout.footerTop!, 0);
+});
+
+test("a room name above WebKit's ellipsis limit keeps the invite form usable (#1405)", async ({
+  page
+}) => {
+  await page.setViewportSize(SHORT_VIEWPORT);
+  await gotoReadyShell(page);
+  // 12,000 characters: above the 10,240-character WebKit cutoff for
+  // `text-overflow: ellipsis` (#1404), which used to leave the title taller
+  // than the dialog and the form with zero height.
+  await seedLongRoomName(page, "long-room-".repeat(1200));
+  await seedInviteWorkflow(page);
+  await openInviteDialog(page);
+
+  const layout = await page.evaluate(() => {
+    const dialog = document.querySelector<HTMLElement>(".invite-target-dialog")!;
+    const title = dialog.querySelector<HTMLElement>(".invite-dialog-header")!;
+    const body = dialog.querySelector<HTMLElement>(".invite-dialog-body")!;
+    return {
+      dialogHeight: dialog.getBoundingClientRect().height,
+      titleHeight: title.getBoundingClientRect().height,
+      titleText: title.textContent ?? "",
+      bodyHeight: body.clientHeight
+    };
+  });
+
+  // The title is clamped to a couple of lines instead of taking the dialog.
+  expect(layout.titleHeight).toBeLessThan(layout.dialogHeight / 2);
+  expect(layout.titleText.length).toBeGreaterThan(0);
+  // The scrolling body keeps the form and its first control reachable.
+  expect(layout.bodyHeight).toBeGreaterThan(120);
+  await expect(page.getByRole("textbox", { name: t("dialog.inviteSearch") })).toBeVisible();
 });
 
 test("scrolling inside the dialog moves only the dialog body, never the page", async ({
