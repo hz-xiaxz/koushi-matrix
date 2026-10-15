@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::sync::{
     Arc, Mutex,
     atomic::{AtomicU64, Ordering},
@@ -1236,8 +1236,8 @@ impl TimelineActor {
             Some(item_count),
         );
     }
-    pub(super) fn emit_navigation_if_changed(&mut self) {
-        let snapshot = derive_timeline_navigation_snapshot_with_read_state(
+    fn current_navigation_snapshot(&self) -> TimelineNavigationSnapshot {
+        let mut snapshot = derive_timeline_navigation_snapshot_with_read_state(
             &self.key.kind,
             &self.navigation_items,
             self.fully_read_event_id.as_deref(),
@@ -1249,6 +1249,23 @@ impl TimelineActor {
             &self.viewport_observation,
             self.own_user_id.as_ref().map(|user_id| user_id.as_str()),
         );
+        align_first_unread_display_to_display_rows(
+            &self.key.kind,
+            &self.navigation_items,
+            self.display_projection.display_items(),
+            self.own_user_id.as_ref().map(|user_id| user_id.as_str()),
+            &mut snapshot,
+        );
+        align_read_marker_display_to_display_rows(
+            &self.key.kind,
+            &self.navigation_items,
+            self.display_projection.display_items(),
+            &mut snapshot,
+        );
+        snapshot
+    }
+    pub(super) fn emit_navigation_if_changed(&mut self) {
+        let snapshot = self.current_navigation_snapshot();
         if self.last_navigation_snapshot.as_ref() == Some(&snapshot) {
             return;
         }
@@ -1453,6 +1470,7 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
         read_marker_event_id: server_confirmed_read_event_id.clone(),
         read_marker_display_event_id: display_marker,
         first_unread_event_id: None,
+        first_unread_display_event_id: None,
         unread_event_count: 0,
         unread_position: TimelineUnreadPosition::None,
         newer_event_count: 0,
@@ -1486,6 +1504,7 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
     if let Some((first_unread_index, first_unread)) = unread_items.first() {
         snapshot.first_unread_event_id =
             timeline_item_event_id(first_unread).map(ToOwned::to_owned);
+        snapshot.first_unread_display_event_id = snapshot.first_unread_event_id.clone();
         snapshot.unread_position =
             unread_position_for_index(items, *first_unread_index, observation);
         return snapshot;
@@ -1506,6 +1525,96 @@ pub(super) fn derive_timeline_navigation_snapshot_with_read_state(
         snapshot.read_marker_display_event_id = Some(own_event_id.to_owned());
     }
     snapshot
+}
+
+/// Key the Room "Read up to here" divider to a displayed row.
+///
+/// Latest-reply ordering shows a thread root at its newest reply's position, so
+/// a root the canonical boundary already covers can render below the boundary
+/// row. The divider follows the last displayed row whose content is at or
+/// before the boundary, named by that row's activity identity — the identity
+/// React matches. Thread replies stay out of Room unread state; while main
+/// conversation content is unread, the unread divider owns placement.
+pub(super) fn align_read_marker_display_to_display_rows(
+    kind: &TimelineKind,
+    navigation_items: &[TimelineItem],
+    display_items: &[TimelineItem],
+    snapshot: &mut TimelineNavigationSnapshot,
+) {
+    if !matches!(kind, TimelineKind::Room { .. }) || snapshot.first_unread_event_id.is_some() {
+        return;
+    }
+    let Some(boundary) = snapshot
+        .read_marker_display_event_id
+        .as_deref()
+        .or(snapshot.read_marker_event_id.as_deref())
+    else {
+        return;
+    };
+    let canonical_positions = navigation_items
+        .iter()
+        .enumerate()
+        .filter_map(|(index, item)| timeline_item_event_id(item).map(|event_id| (event_id, index)))
+        .collect::<HashMap<_, _>>();
+    let Some(&boundary_index) = canonical_positions.get(boundary) else {
+        return;
+    };
+    let anchor = display_items.iter().rev().find_map(|row| {
+        let metadata = row.display_metadata.as_ref()?;
+        let content_index = canonical_positions.get(metadata.content_event_id.as_deref()?)?;
+        (*content_index <= boundary_index)
+            .then_some(metadata.activity_event_id.as_deref())
+            .flatten()
+    });
+    if let Some(anchor) = anchor
+        && anchor != boundary
+    {
+        snapshot.read_marker_display_event_id = Some(anchor.to_owned());
+    }
+}
+
+/// Key the Room "New messages" divider to a displayed row.
+///
+/// `first_unread_event_id` stays canonical for counts and diagnostics. Latest-
+/// reply ordering shows an unread thread root at its newest reply's position,
+/// possibly after other unread rows, so the divider precedes the first
+/// displayed row whose content is unread, named by that row's activity
+/// identity — the identity React matches.
+pub(super) fn align_first_unread_display_to_display_rows(
+    kind: &TimelineKind,
+    navigation_items: &[TimelineItem],
+    display_items: &[TimelineItem],
+    own_user_id: Option<&str>,
+    snapshot: &mut TimelineNavigationSnapshot,
+) {
+    if !matches!(kind, TimelineKind::Room { .. }) || snapshot.first_unread_event_id.is_none() {
+        return;
+    }
+    let Some(boundary_index) = snapshot
+        .read_marker_event_id
+        .as_deref()
+        .and_then(|event_id| item_index_for_event_id(navigation_items, event_id))
+    else {
+        return;
+    };
+    let unread_content = navigation_items
+        .iter()
+        .skip(boundary_index.saturating_add(1))
+        .filter(|item| {
+            navigation_item_in_scope(kind, item) && is_unread_navigation_item(item, own_user_id)
+        })
+        .filter_map(timeline_item_event_id)
+        .collect::<HashSet<_>>();
+    let anchor = display_items.iter().find_map(|row| {
+        let metadata = row.display_metadata.as_ref()?;
+        unread_content
+            .contains(metadata.content_event_id.as_deref()?)
+            .then_some(metadata.activity_event_id.as_deref())
+            .flatten()
+    });
+    if let Some(anchor) = anchor {
+        snapshot.first_unread_display_event_id = Some(anchor.to_owned());
+    }
 }
 
 fn timeline_unread_position_token(position: TimelineUnreadPosition) -> &'static str {

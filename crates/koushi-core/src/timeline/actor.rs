@@ -1364,7 +1364,6 @@ impl TimelineActor {
                 }
             }
 
-            let canonical_set_applied = canonical_set.is_some();
             let display_diffs = if let Some((index, item)) = canonical_set {
                 let context = self.display_projection_context();
                 super::display_projection::apply_non_sdk_item_set_diffs_to_display_items(
@@ -1389,9 +1388,8 @@ impl TimelineActor {
                 display_diffs,
             ) {
                 self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
-                if canonical_set_applied {
-                    self.emit_navigation_if_changed();
-                }
+                // A reprojected root can move the read divider's display row.
+                self.emit_navigation_if_changed();
             }
         }
     }
@@ -2802,6 +2800,7 @@ impl TimelineActor {
                             diffs,
                         ) {
                             self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
+                            self.emit_navigation_if_changed();
                         }
                     }
                 }

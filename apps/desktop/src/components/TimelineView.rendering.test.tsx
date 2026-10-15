@@ -160,6 +160,7 @@ describe("TimelineView", () => {
       "an unread marker on the current row",
       navigationSnapshot({
         first_unread_event_id: "$second:example.invalid",
+        first_unread_display_event_id: "$second:example.invalid",
         unread_event_count: 1,
         unread_position: "insideViewport"
       })

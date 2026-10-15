@@ -434,6 +434,8 @@ pub struct TimelineNavigationSnapshot {
     pub read_marker_event_id: Option<String>,
     pub read_marker_display_event_id: Option<String>,
     pub first_unread_event_id: Option<String>,
+    /// Activity identity of the displayed row the unread divider precedes.
+    pub first_unread_display_event_id: Option<String>,
     pub unread_event_count: u64,
     pub unread_position: TimelineUnreadPosition,
     pub newer_event_count: u64,
@@ -460,6 +462,13 @@ impl fmt::Debug for TimelineNavigationSnapshot {
             .field(
                 "first_unread_event_id",
                 &self.first_unread_event_id.as_ref().map(|_| "EventId(..)"),
+            )
+            .field(
+                "first_unread_display_event_id",
+                &self
+                    .first_unread_display_event_id
+                    .as_ref()
+                    .map(|_| "EventId(..)"),
             )
             .field(
                 "local_viewed_event_id",

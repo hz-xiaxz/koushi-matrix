@@ -70,7 +70,8 @@ use super::{
     InitialItemsRequestIdentity, NavigationProjectionCleanup, NavigationProjectionIngress,
     NavigationProjectionIntent, PaginationAttempt, ROOM_REPLAY_INITIAL_ITEMS_MAX,
     TimelineActorGenerationGate, acquire_pagination_permit_and_emit_paginating,
-    activity_row_from_timeline_item, backward_pagination_changed_oldest_edge,
+    activity_row_from_timeline_item, align_first_unread_display_to_display_rows,
+    align_read_marker_display_to_display_rows, backward_pagination_changed_oldest_edge,
     bounded_paginate_with, derive_timeline_navigation_snapshot,
     derive_timeline_navigation_snapshot_with_read_state, emit_initial_items_for_generation,
     receive_navigation_projection, replay_initial_items_window,
@@ -2562,6 +2563,240 @@ fn confirmed_hidden_thread_boundary_uses_a_visible_divider() {
     assert_eq!(
         snapshot.read_marker_display_event_id.as_deref(),
         Some("$own:test")
+    );
+}
+
+/// Project `canonical` the way a Room timeline does under latest-reply root
+/// ordering, with one thread rooted at `$root:test` whose newest reply is
+/// `$reply:test`.
+fn latest_reply_display_rows(
+    canonical: &[koushi_protocol::event::TimelineItem],
+) -> Vec<koushi_protocol::event::TimelineItem> {
+    use super::super::display_projection::{DisplayProjectionContext, DisplayProjectionState};
+    let root = canonical
+        .iter()
+        .find(|item| timeline_item_event_id(item) == Some("$root:test"))
+        .cloned();
+    let mut state = DisplayProjectionState::from_canonical_window(canonical, 0..canonical.len());
+    let context = DisplayProjectionContext::for_timeline(
+        &room_key().kind,
+        &TimelineViewportObservation::default(),
+    )
+    .with_thread_roots(
+        koushi_state::TimelineThreadRootOrder::LatestReply,
+        vec![crate::threads_list::ThreadRootDisplayData {
+            root_event_id: "$root:test".to_owned(),
+            activity_event_id: "$reply:test".to_owned(),
+            activity_timestamp_ms: Some(400),
+            item: root,
+            aggregate: crate::threads_list::AuthoritativeThreadAggregate {
+                reply_count: 1,
+                latest_event_id: Some("$reply:test".to_owned()),
+                latest_sender: Some("@other:test".to_owned()),
+                latest_sender_label: Some("Other".to_owned()),
+                latest_body_preview: Some("reply".to_owned()),
+                latest_timestamp_ms: Some(400),
+            },
+            pending: false,
+            failure_kind: None,
+            unread: 0,
+        }],
+    );
+    state.reproject(&context);
+    state.display_items().to_vec()
+}
+
+#[test]
+fn read_divider_follows_a_read_root_reordered_by_a_newer_reply() {
+    let before = timeline_item("$before:test", Some("before"), "@other:test", false);
+    let root = timeline_item("$root:test", Some("root"), "@other:test", false);
+    let between = timeline_item("$between:test", Some("between"), "@other:test", false);
+    let mut reply = timeline_item("$reply:test", Some("reply"), "@other:test", false);
+    reply.thread_root = Some("$root:test".to_owned());
+
+    // The root was read before the boundary; its newer reply moved the root row
+    // below the boundary row. The divider must not claim the root is unread.
+    // Then a root posted after the boundary row and already read: the divider
+    // must still render, after the row that shows that root.
+    for (canonical, boundary) in [
+        (
+            vec![before.clone(), root.clone(), between.clone(), reply.clone()],
+            "$between:test",
+        ),
+        (
+            vec![before.clone(), between.clone(), root.clone(), reply.clone()],
+            "$root:test",
+        ),
+    ] {
+        let display = latest_reply_display_rows(&canonical);
+        let display_activity = display
+            .iter()
+            .filter_map(|item| item.display_metadata.as_ref())
+            .filter_map(|metadata| metadata.activity_event_id.as_deref())
+            .collect::<Vec<_>>();
+        assert_eq!(
+            display_activity,
+            ["$before:test", "$between:test", "$reply:test"],
+            "latest-reply ordering shows the root row last"
+        );
+        let mut snapshot = derive_timeline_navigation_snapshot_with_read_state(
+            &room_key().kind,
+            &canonical,
+            Some(boundary),
+            Some(boundary),
+            Some(boundary),
+            TimelineReadStateSync::Synced,
+            &TimelineViewportObservation::default(),
+            Some("@me:test"),
+        );
+        assert_eq!(snapshot.first_unread_event_id, None);
+        align_read_marker_display_to_display_rows(
+            &room_key().kind,
+            &canonical,
+            &display,
+            &mut snapshot,
+        );
+        assert_eq!(
+            snapshot.read_marker_display_event_id.as_deref(),
+            Some("$reply:test"),
+            "the divider renders after the root row, keyed by its activity identity"
+        );
+        assert_eq!(snapshot.read_marker_event_id.as_deref(), Some(boundary));
+    }
+}
+
+#[test]
+fn read_divider_stays_above_an_unread_root_reordered_by_a_newer_reply() {
+    let before = timeline_item("$before:test", Some("before"), "@other:test", false);
+    let root = timeline_item("$root:test", Some("root"), "@other:test", false);
+    let mut reply = timeline_item("$reply:test", Some("reply"), "@other:test", false);
+    reply.thread_root = Some("$root:test".to_owned());
+    let canonical = vec![before, root, reply];
+    let display = latest_reply_display_rows(&canonical);
+    let mut snapshot = derive_timeline_navigation_snapshot_with_read_state(
+        &room_key().kind,
+        &canonical,
+        Some("$before:test"),
+        Some("$before:test"),
+        Some("$before:test"),
+        TimelineReadStateSync::Synced,
+        &TimelineViewportObservation::default(),
+        Some("@me:test"),
+    );
+    let unaligned = snapshot.clone();
+    align_read_marker_display_to_display_rows(
+        &room_key().kind,
+        &canonical,
+        &display,
+        &mut snapshot,
+    );
+    assert_eq!(
+        snapshot, unaligned,
+        "an unread root keeps its unread divider"
+    );
+}
+
+#[test]
+fn unread_divider_follows_an_unread_root_reordered_by_a_newer_reply() {
+    let before = timeline_item("$before:test", Some("before"), "@other:test", false);
+    let root = timeline_item("$root:test", Some("root"), "@other:test", false);
+    let between = timeline_item("$between:test", Some("between"), "@other:test", false);
+    let mine = timeline_item("$mine:test", Some("mine"), "@me:test", false);
+    let mut reply = timeline_item("$reply:test", Some("reply"), "@other:test", false);
+    reply.thread_root = Some("$root:test".to_owned());
+
+    // The unread root is shown at its newest reply's position, so the divider
+    // keys to that row's activity identity. When the root is displaced past
+    // other unread rows, the divider precedes the first unread row in display
+    // order; the current user's own rows are never that row.
+    for (canonical, expected_display, case) in [
+        (
+            vec![before.clone(), root.clone(), reply.clone()],
+            "$reply:test",
+            "only the reordered root is unread",
+        ),
+        (
+            vec![before.clone(), root.clone(), between.clone(), reply.clone()],
+            "$between:test",
+            "an unread row is displayed before the reordered root",
+        ),
+        (
+            vec![before.clone(), root.clone(), mine.clone(), reply.clone()],
+            "$reply:test",
+            "an own row displayed before the reordered root is not unread",
+        ),
+    ] {
+        let display = latest_reply_display_rows(&canonical);
+        let mut snapshot = derive_timeline_navigation_snapshot_with_read_state(
+            &room_key().kind,
+            &canonical,
+            Some("$before:test"),
+            Some("$before:test"),
+            Some("$before:test"),
+            TimelineReadStateSync::Synced,
+            &TimelineViewportObservation::default(),
+            Some("@me:test"),
+        );
+        assert_eq!(
+            snapshot.first_unread_display_event_id, snapshot.first_unread_event_id,
+            "{case}: before alignment the divider names the canonical row"
+        );
+        align_first_unread_display_to_display_rows(
+            &room_key().kind,
+            &canonical,
+            &display,
+            Some("@me:test"),
+            &mut snapshot,
+        );
+        assert_eq!(
+            snapshot.first_unread_event_id.as_deref(),
+            Some("$root:test"),
+            "{case}: the canonical first unread stays the root"
+        );
+        assert_eq!(
+            snapshot.first_unread_display_event_id.as_deref(),
+            Some(expected_display),
+            "{case}"
+        );
+        let unaligned_read = snapshot.clone();
+        align_read_marker_display_to_display_rows(
+            &room_key().kind,
+            &canonical,
+            &display,
+            &mut snapshot,
+        );
+        assert_eq!(
+            snapshot, unaligned_read,
+            "{case}: the read divider stays suppressed"
+        );
+    }
+}
+
+#[test]
+fn unread_divider_without_display_rows_keeps_the_canonical_row() {
+    let before = timeline_item("$before:test", Some("before"), "@other:test", false);
+    let after = timeline_item("$after:test", Some("after"), "@other:test", false);
+    let canonical = vec![before, after];
+    let mut snapshot = derive_timeline_navigation_snapshot_with_read_state(
+        &room_key().kind,
+        &canonical,
+        Some("$before:test"),
+        Some("$before:test"),
+        Some("$before:test"),
+        TimelineReadStateSync::Synced,
+        &TimelineViewportObservation::default(),
+        Some("@me:test"),
+    );
+    align_first_unread_display_to_display_rows(
+        &room_key().kind,
+        &canonical,
+        &[],
+        Some("@me:test"),
+        &mut snapshot,
+    );
+    assert_eq!(
+        snapshot.first_unread_display_event_id.as_deref(),
+        Some("$after:test")
     );
 }
 
