@@ -1,5 +1,7 @@
 #[path = "rooms/address.rs"]
 mod address;
+#[path = "rooms/knock.rs"]
+mod knock;
 #[path = "rooms/space_access.rs"]
 mod space_access;
 #[path = "rooms/space_add_existing.rs"]
@@ -925,6 +927,7 @@ pub(super) async fn run_room_management_stage(
     space_access::verify(config, conn_a, conn_b).await?;
     space_add_existing::verify(config, conn_a).await?;
     space_leave_children::verify(conn_a).await?;
+    knock::verify(config, conn_a).await?;
 
     Ok(())
 }
