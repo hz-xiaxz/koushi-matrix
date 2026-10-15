@@ -252,7 +252,6 @@ fn synthetic_projection_items(count: usize) -> Vec<TimelineItem> {
 fn historical_display_projection_context() -> DisplayProjectionContext {
     DisplayProjectionContext {
         max_live_edge_items: None,
-        include_prepend: true,
         include_append: true,
         project_thread_roots: true,
         thread_root_order: TimelineThreadRootOrder::RootEvent,
@@ -755,31 +754,6 @@ fn sparse_indexed_structural_envelope_is_independent_of_canonical_history_length
 }
 
 #[test]
-fn display_projection_backward_push_front_prepends_historical_page() {
-    let mut canonical_items = synthetic_projection_items(200);
-    let mut state = DisplayProjectionState::from_canonical_window(&canonical_items, 80..200);
-    let display_before = state.display_items().to_vec();
-    let older = timeline_item("$older:test", Some("older"), "@sender:test", false);
-
-    let projection = project_sdk_batch(
-        &mut canonical_items,
-        &mut state,
-        &[TimelineDiff::PushFront {
-            item: older.clone(),
-        }],
-        &historical_display_projection_context(),
-    );
-
-    assert!(!projection.used_reset_fallback);
-    assert_display_projection_converges(display_before, &projection);
-    assert_eq!(state.display_items().first(), Some(&displayed(&older)));
-    assert_eq!(
-        state.display_items().len(),
-        ROOM_REPLAY_INITIAL_ITEMS_MAX + 1
-    );
-}
-
-#[test]
 fn display_projection_front_insertion_requires_adjacency_to_the_displayed_window() {
     // #1443: a bounded live-edge window trims the older canonical prefix. A
     // later PushFront (the SDK timeline start or an older page) must not jump
@@ -831,7 +805,92 @@ fn display_projection_front_insertion_joins_an_adjacent_displayed_window() {
 
     assert!(!projection.used_reset_fallback);
     assert_eq!(state.display_items().first(), Some(&displayed(&older)));
-    assert_eq!(state.display_items().len(), ROOM_REPLAY_INITIAL_ITEMS_MAX + 1);
+    assert_eq!(
+        state.display_items().len(),
+        ROOM_REPLAY_INITIAL_ITEMS_MAX + 1
+    );
+}
+
+#[test]
+fn rematerialize_window_reaches_the_hidden_prefix_as_prepends() {
+    // #1443: leaving the live edge re-materializes the trimmed canonical prefix
+    // in order, as incremental prepends, without dropping pending sends.
+    let canonical_items = synthetic_projection_items(328);
+    let mut state = DisplayProjectionState::from_canonical_window(&canonical_items, 208..328);
+    assert_eq!(state.first_visible_canonical_index(), Some(208));
+
+    let mut pending = timeline_item("$pending:test", Some("pending"), "@sender:test", false);
+    pending.id = TimelineItemId::Transaction {
+        transaction_id: "client-transaction".to_owned(),
+    };
+    pending.send_state = Some(TimelineSendState::Sending);
+    state.replace_pending(
+        vec![pending.clone()],
+        Default::default(),
+        &historical_display_projection_context(),
+    );
+    let display_before = state.display_items().to_vec();
+
+    let diffs = state.rematerialize_window(
+        &canonical_items,
+        0..canonical_items.len(),
+        &historical_display_projection_context(),
+    );
+
+    assert_eq!(state.first_visible_canonical_index(), Some(0));
+    assert_eq!(state.display_items().len(), canonical_items.len() + 1);
+    assert!(
+        state
+            .display_items()
+            .iter()
+            .any(|item| item.id == pending.id),
+        "a pending send must survive re-materializing the window"
+    );
+    let mut desktop_model = display_before;
+    apply_timeline_diffs_to_items(&mut desktop_model, &diffs);
+    assert_eq!(desktop_model, state.display_items());
+    assert!(
+        diffs
+            .iter()
+            .all(|diff| matches!(diff, TimelineDiff::Insert { .. })),
+        "the prefix expansion must be emitted as incremental prepends, not a reset"
+    );
+    assert!(
+        diffs
+            .iter()
+            .any(|diff| matches!(diff, TimelineDiff::Insert { index: 0, .. }))
+    );
+}
+
+#[test]
+fn leaving_the_live_edge_makes_a_later_timeline_start_visible() {
+    // #1443 end-to-end at the projection boundary: the bounded live-edge window,
+    // the viewport leaving the bottom, then the SDK timeline start arriving.
+    let mut canonical_items = synthetic_projection_items(328);
+    let mut state = DisplayProjectionState::from_canonical_window(&canonical_items, 208..328);
+    let _ = state.rematerialize_window(
+        &canonical_items,
+        0..canonical_items.len(),
+        &historical_display_projection_context(),
+    );
+    assert_eq!(state.first_visible_canonical_index(), Some(0));
+
+    let mut start = timeline_item("$start:test", None, "@sender:test", false);
+    start.id = TimelineItemId::Synthetic {
+        synthetic_id: "timeline-start".to_owned(),
+    };
+    let projection = project_sdk_batch(
+        &mut canonical_items,
+        &mut state,
+        &[TimelineDiff::PushFront {
+            item: start.clone(),
+        }],
+        &historical_display_projection_context(),
+    );
+
+    assert!(!projection.used_reset_fallback);
+    assert_eq!(state.display_items()[0].id, start.id);
+    assert_eq!(state.display_items().len(), canonical_items.len());
 }
 
 #[test]

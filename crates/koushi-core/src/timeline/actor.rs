@@ -1063,6 +1063,38 @@ impl TimelineActor {
         self.display_projection.reproject(&context)
     }
 
+    /// #1443: when the reader leaves the live edge, re-materialize the canonical
+    /// prefix the bounded window trimmed, so the older rows become reachable in
+    /// order and later front insertions are boundary-adjacent. Emits incremental
+    /// prepends, never a replay or reset, so the reader's anchor is preserved.
+    async fn materialize_hidden_history(&mut self) {
+        if !matches!(self.key.kind, TimelineKind::Room { .. }) {
+            return;
+        }
+        if !matches!(
+            self.display_projection.first_visible_canonical_index(),
+            Some(index) if index > 0
+        ) {
+            return;
+        }
+        let context = self.display_projection_context();
+        let end = self.navigation_items.len();
+        let diffs =
+            self.display_projection
+                .rematerialize_window(&self.navigation_items, 0..end, &context);
+        if !diffs.is_empty() {
+            self.emit_items_updated(diffs);
+        }
+        // #1443: the newly displayed prefix can expose a gap whose boundaries were
+        // both hidden. Rebuild the projected gap set through the ordinary
+        // inspection instead of shifting stale display-relative offsets. Rooms
+        // with no known gaps do not pay for an extra inspection.
+        if self.gap_repair.gap_count > 0 || !self.gap_repair.projected_gaps.is_empty() {
+            self.request_timeline_gap_inspection(TimelineGapRepairTrigger::Automatic)
+                .await;
+        }
+    }
+
     pub(super) fn update_send_status(
         &mut self,
         transaction_id: &str,
@@ -2469,7 +2501,11 @@ impl TimelineActor {
                 self.handle_own_read_receipt_changed().await;
             }
             TimelineActorMessage::ObserveViewport { observation } => {
+                let was_at_bottom = self.viewport_observation.at_bottom;
                 self.viewport_observation = observation;
+                if was_at_bottom && !self.viewport_observation.at_bottom {
+                    self.materialize_hidden_history().await;
+                }
                 if let Some(target) = self.observe_local_viewed_boundary() {
                     let _ = self
                         .manager_tx

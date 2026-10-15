@@ -2607,7 +2607,10 @@ stateDiagram-v2
   uses that event to retry pagination commands rejected while repair owned the
   scheduler.
 - **Start of conversation** is enabled only by the matching-generation
-  `Complete`/`StartReached` proof.
+  `Complete`/`StartReached` proof, and is shown only while the displayed oldest
+  row reaches the canonical start: Core carries the hidden timeline-start row
+  only when a front insertion is boundary-adjacent, so the marker cannot sit
+  above a trimmed prefix (#1443).
 
 ## Timeline Reactions
 
