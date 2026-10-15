@@ -1009,11 +1009,13 @@ pub(super) fn create_room_request(
         request.visibility = matrix_sdk::ruma::api::client::room::Visibility::Public;
         request.preset =
             Some(matrix_sdk::ruma::api::client::room::create_room::v3::RoomPreset::PublicChat);
-    } else if options.invited_only || options.parent_space.is_none() {
+    } else if !has_explicit_policy && (options.invited_only || options.parent_space.is_none()) {
         // Make the invite-only behaviour explicit. Without a preset, the
         // homeserver infers private_chat from visibility, but an explicit
         // preset keeps the result consistent across homeservers and makes the
-        // access policy visible in the request itself.
+        // access policy visible in the request itself. An explicit access policy
+        // (#1177/#1421) writes its own join rule, and the private_chat preset
+        // would otherwise win over it on the server.
         request.preset =
             Some(matrix_sdk::ruma::api::client::room::create_room::v3::RoomPreset::PrivateChat);
     }
