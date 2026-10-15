@@ -102,6 +102,12 @@ Points worth keeping:
   published for versions before 0.23.46 fail `cargo deny check` against the lock
   `origin/main` carries too (`d84342c7`). Each fix was verified with the failing
   job's own command.
+- Two browser-tier failures are flakes rather than this change: a `[webkit]`
+  virtualized scroll assertion that wants a 20px delta and saw 19664 against
+  19684, and the harness's own "composer draft lease is not current" guard firing
+  under load in `app-harness-resource-lifecycle`. Both pass on a re-run, the guard
+  is on `origin/main`, and this branch's harness diff touches no lease or draft
+  line.
 
 ## Known limitations, left as they are
 
