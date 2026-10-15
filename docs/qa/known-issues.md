@@ -4,6 +4,8 @@
 > file. The current runtime requires Simplified Sliding Sync and the active
 > local QA supports only Tuwunel/Synapse; old `conduit`, `LegacySync`, and
 > `--core-backend` commands below are archival evidence, not runnable gates.
+> Real-server QA is also retired; historical observations below are not
+> instructions to repeat them.
 
 This file records currently known product/QA blockers that should be easy to
 find before claiming a release gate is green.
@@ -159,7 +161,7 @@ Follow-up:
   `e2ee_identity_reset=skipped`.
 - Determine whether Element Desktop needs to re-verify/trust the reset
   identity, request missing keys, or clear stale local sessions.
-- Add private-data-free diagnostics to real-account send QA for encrypted
+- Add private-data-free diagnostics to local send QA for encrypted
   target DMs: room encrypted, target device count known before send, and whether
   the SDK observed room-key sharing/withheld failures. Do not print event IDs,
   room IDs, sender keys, session IDs, ciphertext, access tokens, or message
@@ -167,10 +169,8 @@ Follow-up:
 - Decide whether the release gate requires Koushi to actively re-share old
   outbound room keys after recipient key requests, or whether manual
   re-verification/key-request handling in the recipient client is sufficient.
-- Add a real-account QA assertion for encrypted recipient decryptability, not
-  just local send completion. When full recipient-device automation is not
-  available, record a manual Element Desktop/iPhone check as part of the release
-  gate.
+- Add a local QA assertion for encrypted recipient decryptability, not just
+  send completion. Use disposable local Tuwunel/Synapse accounts.
 
 ## Tuwunel Local Strict Recipient-Device E2EE
 
@@ -282,17 +282,8 @@ send session=ready sync=running rooms=5 spaces=1 active_room=true timeline_subsc
 logout session=signedOut sync=stopped rooms=0 spaces=0 active_room=false timeline_subscribed=false timeline_items=0 errors=0 error_code=none panel=userSettings send=sent
 ```
 
-Recommended retry command shape:
-
-```bash
-npm --prefix apps/desktop run qa:mac-gui -- --real-login-from-stdin --allow-empty-timeline --send-smoke-message --verbose --timeout-ms=30000 --send-timeout-ms=20000
-```
-
-For a writable real-account send assertion, include:
-
-```bash
---send-smoke-user-id=@hiroshi.shinaoka:matrix.org
-```
+The former real-server retry command is retired. Reproduce send behavior with
+disposable local accounts instead.
 
 The macOS GUI smoke runner now writes a private-data-free
 `qa-diagnostics.log` into each artifact directory. Use `--verbose` for a

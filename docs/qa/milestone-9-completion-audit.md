@@ -25,7 +25,7 @@ These are distribution gates, not code-level Milestone 9 implementation gaps:
 
 - macOS signing/notarization needs Xcode, Apple Developer credentials, and `APPLE_SIGNING_IDENTITY`, `APPLE_ID`, `APPLE_PASSWORD`, and `APPLE_TEAM_ID`.
 - Windows signing needs a Windows signing certificate or `WINDOWS_SIGN_COMMAND`; Windows MSI/NSIS packaging should be run on Windows CI or a configured cross-signing host.
-- A real-account smoke check has verified password login, in-memory persistable session export/import, SDK session restore, one SDK sync, private-data-free room-list counts, private-data-free selected-room timeline item counts after timeline backfill, and logout. Full manual QA must still be executed against a real Matrix account before shipping a release build.
+- A real-account smoke check has verified password login, in-memory persistable session export/import, SDK session restore, one SDK sync, private-data-free room-list counts, private-data-free selected-room timeline item counts after timeline backfill, and logout. Real-server QA was retired; current release gates use disposable local homeservers.
 - macOS live OS credential-store ignored tests have been run locally with `cargo test -p koushi-key --test key_management -- --ignored --nocapture`.
 - Windows live OS credential-store ignored tests should be run on Windows before distribution packaging.
 
@@ -34,7 +34,6 @@ These are distribution gates, not code-level Milestone 9 implementation gaps:
 ```bash
 cargo test --manifest-path apps/desktop/src-tauri/Cargo.toml
 cargo test -p koushi-key --test key_management -- --ignored --nocapture
-cargo run -p koushi-sdk --features smoke --bin password-login-smoke -- --real-account-qa
 npm --prefix apps/desktop test
 npm --prefix apps/desktop run typecheck
 npm --prefix apps/desktop run build

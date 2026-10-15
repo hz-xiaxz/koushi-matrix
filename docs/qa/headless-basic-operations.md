@@ -1,24 +1,22 @@
 # Headless Basic Operations QA
 
 > Current contract (Issue #412, 2026-08-04): this document is retained as a
-> historical record for the older multi-backend QA design. The active runner
-> uses one Element X-compatible Simplified Sliding Sync engine only. Use
+> historical record for the older multi-backend QA design. Real-server QA is
+> retired. The active runner uses one Element X-compatible Simplified Sliding
+> Sync engine only. Use
 > `--server=tuwunel`, `--server=synapse`, or `--server=both`; `conduit`,
 > `--core-backend`, `KOUSHI_QA_FORCE_SYNC_BACKEND`, and legacy fallback
 > scenarios are rejected. For current commands, use the package scripts and
 > `scripts/lib/local-homeserver-qa.test.mjs` contract.
 
-This contract covers three lanes:
+The current QA contract covers two lanes:
 
 - Local headless QA, verified through `CoreCommand`/`CoreEvent` only.
-- matrix.org compatibility QA, using the same core operations with a reduced
-  token set and one login per run.
 - Linux virtual-display client QA, using the real Tauri client under Xvfb.
 
 Current GUI-operation policy: room creation, space creation, replies,
 media/file sends and downloads, and other destructive Matrix operations are
-iterated only against disposable local Conduit/Tuwunel homeservers. matrix.org
-is a final compatibility gate, not a GUI development or retry loop.
+iterated only against disposable local Tuwunel/Synapse homeservers.
 
 ## Local homeserver binary search path
 
@@ -611,64 +609,9 @@ Success tokens are `gui_local_timeline_unread_jump=ok`,
 The lane must not print Matrix room IDs, event IDs, user IDs, message bodies,
 or raw SDK errors.
 
-## matrix.org compatibility lane
+## matrix.org compatibility lane (retired)
 
-This lane is reserved for the last compatibility pass after local headless and
-Linux virtual-display lanes are green. Do not use it while iterating on GUI
-controls or UI state models.
-
-Run:
-
-```bash
-npm --prefix apps/desktop run qa:headless-basic:real
-```
-
-This lane validates the same core flows against matrix.org with a bounded
-compatibility subset. It must avoid OS keychain access, use one login per run,
-and clean up created rooms, spaces, and sessions even after earlier failures.
-
-The real lane completes existing-identity recovery before waiting for login
-admission and starting room sync. Login/restore completion, recovery completion,
-and the Ready snapshot may arrive in either order; the QA collector retains
-them under one deadline. Failed initial login admission logs out through the
-still-owned connection, including a provisional session that has not been
-persisted. Restore failure preserves the cleanup owner so it can validate the
-expected account and leave/forget QA rooms before logout.
-
-The subset exercises room creation, space creation, space-child linking,
-send/edit/redact/search, and — added once reply was proven on the local lanes
-(roadmap Phase 15) — **reply** (`SendReply`). It leaves and forgets every
-created room and space. Real-homeserver run tokens include `real_reply=ok`,
-`leave_room=ok forget_room=ok`, and `real_space_cleanup=ok`.
-
-The default scenario is `space_compat` (full cleanup-proving lane); `compat` is
-a reduced debug subset. Required success tokens for the default `space_compat`
-lane (the runner enforces these via `scripts/lib/qa-token-contract.mjs`, not just
-the process exit code):
-
-```text
-login=ok
-sync=running
-qa_room=created
-send_msg1=ok
-send_search=ok
-send_msg2=ok
-real_reply=ok
-edit_msg1=ok
-redact_msg2=ok
-search=ok
-store_restore=ok
-leave_room=ok
-forget_room=ok
-real_space_create=ok
-real_space_child=ok
-real_space_cleanup=ok
-logout=ok
-post_logout_restore=not_found
-```
-
-Real QA output is private-data-free: the runner additionally rejects any Matrix
-identifier (`@user:server`, `!room:server`, `$event:server`) in the output.
+This lane is retired. Use the disposable local Tuwunel/Synapse lanes above.
 
 ## Linux virtual-display client lane
 
@@ -716,8 +659,7 @@ basic-operation controls through WebDriver against a disposable local
 homeserver: clicking `Create room`/`Create space`, submitting the dialog, and
 replying to a real timeline event. They assert the Rust-owned snapshot reacts
 (`rooms`/`spaces` counts grow; a `data-reply="true"` row renders) rather than
-relying on React-only state. These destructive operations stay local-only;
-matrix.org is reserved for the final compatibility gate.
+relying on React-only state. These destructive operations stay local-only.
 
 `local-logout-relogin` proves the real GUI session can transition through
 logout and back to a ready synced state before Mac dogfood. The first login is
