@@ -4,7 +4,8 @@ use koushi_protocol::view::{
 };
 
 /// Exercise the public source/ACK/observation path against the live SDK data.
-/// The seeded reader must progress from an observed identity to real scoped PNG bytes.
+/// The seeded reader must progress from an observed identity to real scoped
+/// avatar bytes, which the cache re-encodes to WebP (#1396).
 pub(super) async fn verify_live_reader_scope(
     conn: &mut CoreConnection,
     key: &TimelineKey,
@@ -99,7 +100,7 @@ pub(super) async fn verify_live_reader_scope(
                                 ..
                             }) = &row.avatar
                             {
-                                verify_png(&reader, revision, source_ref)?;
+                                verify_avatar_bytes(&reader, revision, source_ref)?;
                                 ready_resource = Some((revision, source_ref.clone()));
                             }
                             return Ok::<_, String>(revision);
@@ -142,7 +143,7 @@ pub(super) async fn verify_live_reader_scope(
                                     ..
                                 }) = ready
                                 {
-                                    verify_png(&reader, revision, source_ref)?;
+                                    verify_avatar_bytes(&reader, revision, source_ref)?;
                                     ready_resource = Some((revision, source_ref.clone()));
                                     return Ok::<_, String>(());
                                 }
@@ -162,7 +163,7 @@ pub(super) async fn verify_live_reader_scope(
             // Drop the first subscription and its model/lease owners before
             // accessing the surviving scope's independent capability.
             drop(first);
-            verify_png(&reader, ready_revision, &source_ref)?;
+            verify_avatar_bytes(&reader, ready_revision, &source_ref)?;
             reader
                 .observe_avatars(ready_revision, 2, &[expected_reader.to_owned()], &[])
                 .map_err(|_| "reader avatar: surviving demand rejected".to_owned())?;
@@ -200,7 +201,7 @@ fn verify_closed(
     Ok(())
 }
 
-fn verify_png(
+fn verify_avatar_bytes(
     reader: &koushi_core::runtime::ReaderSubscription,
     revision: koushi_protocol::view::ViewRevision,
     source_ref: &str,
@@ -209,11 +210,16 @@ fn verify_png(
         .resource_content(revision, source_ref)
         .map_err(|_| "reader avatar: scoped resource rejected".to_owned())?
         .ok_or_else(|| "reader avatar: Ready bytes missing".to_owned())?;
-    if !content
-        .bytes
-        .starts_with(&[137, 80, 78, 71, 13, 10, 26, 10])
-    {
-        return Err("reader avatar: invalid PNG resource".to_owned());
+    if !is_re_encoded_avatar_webp(&content.bytes) {
+        return Err("reader avatar: bytes are not re-encoded WebP (#1396)".to_owned());
     }
     Ok(())
+}
+
+/// The avatar cache retains only re-encoded output (#1396): every decodable
+/// source, server thumbnail included, is re-encoded to WebP before it is
+/// stored, so a `Ready` avatar's bytes are not the uploaded PNG. Only sources
+/// that cannot be decoded (GIF, animated WebP/PNG) pass through unchanged.
+fn is_re_encoded_avatar_webp(bytes: &[u8]) -> bool {
+    bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP"
 }
