@@ -57,6 +57,7 @@ fn room(
             sender_label: Some("Sender".to_owned()),
             sender_avatar: None,
             preview: Some("Observed message".to_owned()),
+            message_text: None,
             timestamp_ms: 1,
             is_redacted: false,
         }),

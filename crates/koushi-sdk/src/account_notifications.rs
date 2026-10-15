@@ -18,7 +18,7 @@
 use koushi_state::{
     AccountNotificationsFailureKind, AccountNotificationsSnapshot, IdentityResetAuthRequest,
     NotificationCategory, NotificationCategoryState, NotificationCategoryStates,
-    NotificationEmailAddress, NotificationEmailManagement,
+    NotificationEmailAddress, NotificationEmailManagement, NotificationKeywordRuleState,
 };
 use matrix_sdk::ruma::{
     api::client::push::{
@@ -30,6 +30,13 @@ use matrix_sdk::ruma::{
 };
 
 use crate::MatrixClientSession;
+
+mod keyword_rules;
+pub use keyword_rules::{
+    KEYWORD_PATTERN_MAX_CHARS, KEYWORD_RULE_ID_MAX_CHARS, KEYWORD_RULE_ID_PREFIX,
+    KEYWORD_RULES_MAX, KeywordRule, MatrixKeywordRuleError, add_keyword_rule, fetch_keyword_rules,
+    keyword_rules_from_ruleset, plan_keyword_rule, remove_keyword_rule,
+};
 
 /// Element Web's app id for email pushers.
 pub const EMAIL_PUSHER_APP_ID: &str = "m.email";
@@ -48,14 +55,15 @@ pub enum RuleActions {
     Notify,
     /// `["notify", {"set_tweak": "sound", "value": "default"}]`.
     NotifyWithSound,
-    /// `["notify", {"set_tweak": "highlight"}]`.
+    /// `["notify", {"set_tweak": "highlight"}]`. This is the keyword shape:
+    /// the highlight tweak is what reaches the mention-kind authority.
     NotifyHighlight,
     /// `["notify", sound default, highlight]`.
     NotifyHighlightWithSound,
 }
 
 impl RuleActions {
-    fn to_ruma(self) -> Vec<Action> {
+    pub(crate) fn to_ruma(self) -> Vec<Action> {
         let sound = || Action::SetTweak(Tweak::Sound(SoundTweakValue::Default));
         let highlight = || Action::SetTweak(Tweak::Highlight(true.into()));
         match self {
@@ -411,6 +419,17 @@ pub fn build_account_notifications_snapshot(
         email_management,
         emails,
         unverified_email_pusher_count,
+        // #1427: the keyword list is a projection of the same authoritative
+        // ruleset this read already fetched, so it costs no extra request and
+        // stays in the server's own rule order.
+        keywords: keyword_rules_from_ruleset(ruleset)
+            .into_iter()
+            .map(|rule| NotificationKeywordRuleState {
+                rule_id: rule.rule_id,
+                pattern: rule.pattern,
+                enabled: rule.enabled,
+            })
+            .collect(),
     }
 }
 

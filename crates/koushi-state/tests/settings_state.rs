@@ -104,6 +104,7 @@ fn settings_loaded_replaces_values_without_requiring_a_session() {
             url_previews_enabled: true,
             encrypted_url_previews_enabled: true,
         },
+        delivery: Box::default(),
         media: MediaSettings {
             ..MediaSettings::default()
         },

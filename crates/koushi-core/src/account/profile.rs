@@ -549,7 +549,12 @@ impl AccountActor {
         }
     }
 
-    pub(super) fn cached_avatar_thumbnail(
+    /// Cache-first avatar lookup. A `Ready` entry whose retained bytes are gone
+    /// (LRU eviction, a superseded own avatar, another account's pressure) is
+    /// dropped and downgraded to `NotRequested`, so a stale reference is never
+    /// served and no live `Ready` keeps pointing at missing bytes. The caller
+    /// refetches when it needs bytes.
+    pub(super) async fn cached_avatar_thumbnail(
         &mut self,
         mxc_uri: &str,
     ) -> Option<AvatarThumbnailState> {
@@ -558,6 +563,11 @@ impl AccountActor {
                 if !crate::renderable_thumbnail::is_renderable_thumbnail_cached(source_ref))
         }) {
             self.avatar_cache.remove(mxc_uri);
+            self.send_actions(vec![AppAction::AvatarThumbnailUpdated {
+                mxc_uri: mxc_uri.to_owned(),
+                thumbnail: AvatarThumbnailState::NotRequested,
+            }])
+            .await;
         }
         self.avatar_cache.get(mxc_uri).cloned()
     }
@@ -574,7 +584,7 @@ impl AccountActor {
         mxc_uri: String,
     ) {
         // 1. Cache hit — Ready and terminal Failed states both settle without I/O.
-        if let Some(cached) = self.cached_avatar_thumbnail(&mxc_uri) {
+        if let Some(cached) = self.cached_avatar_thumbnail(&mxc_uri).await {
             let thumbnail = avatar_thumbnail_for_request(&cached, request_id);
             self.send_actions(vec![AppAction::AvatarThumbnailUpdated {
                 mxc_uri: mxc_uri.clone(),
@@ -753,22 +763,23 @@ impl AccountActor {
         self.start_pending_avatar_fetches();
     }
 
-    /// #1396: retire a superseded source's retained bytes. Called only from the
-    /// signals that mean "this source is no longer referenced": a scoped demand
-    /// dropping it, or the own profile moving to a new avatar. Never from a
-    /// renderer cancel — the renderer cancels its request as soon as the avatar
-    /// becomes `Ready`, which is not the end of its display lifetime.
+    /// #1396: retire a superseded source's retained bytes. Called only when the
+    /// own profile moves to a new avatar, which is the one signal that the source
+    /// is superseded. Never from a renderer cancel or a scoped demand leaving
+    /// the window (#1432): the renderer cancels its request as soon as the
+    /// avatar becomes `Ready`, and a DM row, header, timeline copy, or own
+    /// profile can demand the same MXC outside the reader scope, so neither
+    /// proves the source is unused.
     ///
     /// A terminal failure owns no bytes and stays cached so a returning renderer
     /// does not retry it.
+    ///
+    /// The avatar-cache entry is left in place: `cached_avatar_thumbnail`
+    /// revalidates a dead `source_ref` and `reconcile_avatar_demand` downgrades
+    /// the projection, so the removal is never silent.
     pub(super) fn retire_avatar_source(&mut self, mxc_uri: &str) {
-        if let Some(session) = &self.session
-            && retire_renderable_thumbnail_source_for_account(
-                session.info.user_id.as_str(),
-                mxc_uri,
-            ) > 0
-        {
-            self.avatar_cache.remove(mxc_uri);
+        if let Some(session) = &self.session {
+            retire_renderable_thumbnail_source_for_account(session.info.user_id.as_str(), mxc_uri);
         }
     }
 
@@ -827,7 +838,6 @@ impl AccountActor {
         self.avatar_pending.clear();
         self.avatar_active_fetches = 0;
         self.avatar_cache.clear();
-        self.demanded_avatar_sources.clear();
         self.own_avatar_mxc_uri = None;
         if let Some(session) = &self.session {
             clear_renderable_thumbnail_cache_for_account(session.info.user_id.as_str());

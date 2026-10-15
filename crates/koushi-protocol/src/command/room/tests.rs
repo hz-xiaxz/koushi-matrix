@@ -310,6 +310,7 @@ fn room_access_draft_wire_shape_is_camel_case() {
             visibility: koushi_state::CreateRoomVisibility::Private,
             invited_only: false,
             parent_space_id: Some("!space:example.invalid".to_owned()),
+            address_suffix: None,
         }),
     };
     let open_wire = serde_json::json!({

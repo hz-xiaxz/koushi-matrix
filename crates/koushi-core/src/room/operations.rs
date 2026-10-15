@@ -516,8 +516,7 @@ impl RoomActor {
         };
         self.stop_room_address_check().await;
         let user_id = session.info.user_id.clone();
-        let preview =
-            koushi_sdk::preview_room_address("", Some(&alias_localpart), None, Some(&user_id));
+        let preview = koushi_sdk::preview_room_address(&alias_localpart, Some(&user_id));
         let Some(full_alias) = preview.full_alias else {
             // An invalid or empty draft has nothing to look up.
             self.reduce_reliable(vec![AppAction::RoomAddressAvailabilityCleared])
@@ -551,7 +550,7 @@ impl RoomActor {
                 .then(|| {
                     let localpart =
                         koushi_state::suggest_alternative_room_alias_localpart(&preview.localpart);
-                    koushi_sdk::preview_room_address("", Some(&localpart), None, Some(&user_id))
+                    koushi_sdk::preview_room_address(&localpart, Some(&user_id))
                         .full_alias
                         .map(|full_alias| RoomAddressSuggestion {
                             localpart,

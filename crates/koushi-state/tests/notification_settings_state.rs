@@ -759,6 +759,7 @@ fn message_previews_setting_cannot_expose_an_unverified_event() {
             sender_label: Some("Alice".to_owned()),
             sender_avatar: None,
             preview: Some("private body".to_owned()),
+            message_text: None,
             timestamp_ms: 42,
             is_redacted: false,
         });

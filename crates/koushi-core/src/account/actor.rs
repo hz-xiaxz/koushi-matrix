@@ -1202,6 +1202,11 @@ pub struct AccountActor {
     /// validation session id and UIA continuation stay actor-private.
     pub(super) pending_notification_email:
         Option<super::account_notifications::PendingNotificationEmailVerification>,
+    /// Last authoritative keyword-rule projection (#1427). Actor-private so a
+    /// duplicate, an over-cap add, or an unknown removal is refused before any
+    /// request; it is replaced by every authoritative notification read and is
+    /// never edited by an optimistic write.
+    pub(super) notification_keywords: Vec<koushi_state::NotificationKeywordRuleState>,
     /// Opaque legacy UIAA continuation or local retry context. Raw SDK data
     /// never enters reducer state or diagnostics.
     pub(super) pending_device_cleanup: Option<PendingDeviceCleanup>,
@@ -1284,10 +1289,6 @@ pub struct AccountActor {
     pub(super) avatar_demand_rx:
         tokio::sync::watch::Receiver<Option<Arc<crate::view_scope_lifecycle::ChargedAvatarDemand>>>,
     pub(super) avatar_demand: Option<Arc<crate::view_scope_lifecycle::ChargedAvatarDemand>>,
-    /// Avatar sources observed in scoped demand this session (#1396). A source
-    /// that leaves the demand retires its retained bytes instead of waiting for
-    /// LRU pressure.
-    pub(super) demanded_avatar_sources: BTreeSet<String>,
     /// The own profile's current avatar source, so a change retires the
     /// superseded bytes (#1396).
     pub(super) own_avatar_mxc_uri: Option<String>,
@@ -1489,6 +1490,7 @@ impl AccountActor {
             identity_reset_timeout_task: None,
             pending_uia_operations: BTreeMap::new(),
             pending_notification_email: None,
+            notification_keywords: Vec::new(),
             pending_device_cleanup: None,
             pending_oidc_login: None,
             #[cfg(test)]
@@ -1527,7 +1529,6 @@ impl AccountActor {
             avatar_session_generation: avatar_session_generation.clone(),
             avatar_demand_rx,
             avatar_demand: None,
-            demanded_avatar_sources: BTreeSet::new(),
             own_avatar_mxc_uri: None,
         };
         crate::executor::spawn(actor.run());

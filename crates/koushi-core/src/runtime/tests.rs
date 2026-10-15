@@ -248,7 +248,7 @@ fn closed_forward_space_member_fixture(
 /// never reach it.
 const RUNTIME_LIVENESS: Duration = Duration::from_secs(60);
 
-async fn wait_for_runtime_snapshot(
+pub(super) async fn wait_for_runtime_snapshot(
     connection: &mut CoreConnection,
     predicate: impl Fn(&AppState) -> bool,
 ) -> AppState {
@@ -1294,6 +1294,11 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
     let (composer_draft_rejected_tx, composer_draft_rejected_rx) = mpsc::unbounded_channel();
     let (_focused_projection_tx, focused_projection_rx) = mpsc::unbounded_channel();
     let (event_navigation_prepared_tx, event_navigation_prepared_rx) = mpsc::unbounded_channel();
+    let notification_delivery =
+        crate::notification_delivery::channel::NotificationDeliveryChannel::new(
+            &state.settings.values.delivery,
+        );
+    let (notification_delivery_outcome_tx, notification_delivery_outcome_rx) = mpsc::channel(1);
     let actor = AppActor {
         view_scopes: crate::view_scope_lifecycle::ViewScopeRegistry::default(),
         command_tx: command_tx.downgrade(),
@@ -1343,6 +1348,11 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
         cancelled_date_navigation_request_id: None,
+        notification_delivery,
+        notification_delivery_sends: Vec::new(),
+        notification_delivery_outcome_tx,
+        notification_delivery_outcome_rx,
+        notification_delivery_test_sequence: 1,
     };
     let actor_task = executor::spawn(actor.run());
 
@@ -1721,6 +1731,11 @@ async fn same_batch_select_room_settles_only_final_selection() {
     let (composer_draft_rejected_tx, composer_draft_rejected_rx) = mpsc::unbounded_channel();
     let (_focused_projection_tx, focused_projection_rx) = mpsc::unbounded_channel();
     let (event_navigation_prepared_tx, event_navigation_prepared_rx) = mpsc::unbounded_channel();
+    let notification_delivery =
+        crate::notification_delivery::channel::NotificationDeliveryChannel::new(
+            &state.settings.values.delivery,
+        );
+    let (notification_delivery_outcome_tx, notification_delivery_outcome_rx) = mpsc::channel(1);
     let actor = AppActor {
         view_scopes: crate::view_scope_lifecycle::ViewScopeRegistry::default(),
         command_tx: command_tx.downgrade(),
@@ -1770,6 +1785,11 @@ async fn same_batch_select_room_settles_only_final_selection() {
         latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
         cancelled_date_navigation_request_id: None,
+        notification_delivery,
+        notification_delivery_sends: Vec::new(),
+        notification_delivery_outcome_tx,
+        notification_delivery_outcome_rx,
+        notification_delivery_test_sequence: 1,
     };
     let actor_task = executor::spawn(actor.run());
 
@@ -3395,6 +3415,11 @@ fn app_actor_fixture_with_account_capacity(
     let (composer_draft_rejected_tx, composer_draft_rejected_rx) = mpsc::unbounded_channel();
     let (focused_projection_tx, focused_projection_rx) = mpsc::unbounded_channel();
     let (event_navigation_prepared_tx, event_navigation_prepared_rx) = mpsc::unbounded_channel();
+    let notification_delivery =
+        crate::notification_delivery::channel::NotificationDeliveryChannel::new(
+            &state.settings.values.delivery,
+        );
+    let (notification_delivery_outcome_tx, notification_delivery_outcome_rx) = mpsc::channel(1);
     let actor = AppActor {
         view_scopes: crate::view_scope_lifecycle::ViewScopeRegistry::default(),
         command_tx: command_tx.downgrade(),
@@ -3444,6 +3469,11 @@ fn app_actor_fixture_with_account_capacity(
         latest_focused_projection_generation: HashMap::new(),
         pending_date_navigation_request_id: None,
         cancelled_date_navigation_request_id: None,
+        notification_delivery,
+        notification_delivery_sends: Vec::new(),
+        notification_delivery_outcome_tx,
+        notification_delivery_outcome_rx,
+        notification_delivery_test_sequence: 1,
     };
     (
         actor,

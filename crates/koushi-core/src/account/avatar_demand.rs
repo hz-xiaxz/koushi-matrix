@@ -1,6 +1,6 @@
 //! Reconcile the latest Rust-owned demand into the existing avatar downloader.
 
-use koushi_state::AppAction;
+use koushi_state::{AppAction, AvatarThumbnailState};
 
 use super::{
     actor::AccountActor,
@@ -43,21 +43,38 @@ impl AccountActor {
             .as_ref()
             .map(|demand| demand.resources_by_priority())
             .unwrap_or_default();
-        // #1396: a source that leaves the scoped demand is no longer referenced
-        // by a scoped reader, so its retained bytes are superseded. The demand
-        // carries the visible plus prefetch window, so scrolling back inside the
-        // window does not retire.
-        let demanded: std::collections::BTreeSet<String> =
-            resources.iter().map(|uri| (*uri).to_owned()).collect();
-        for uri in self
-            .demanded_avatar_sources
-            .difference(&demanded)
-            .cloned()
-            .collect::<Vec<_>>()
-        {
-            self.retire_avatar_source(&uri);
+        // #1432: leaving the scoped demand does not prove the source is unused.
+        // A DM row, header, own profile, or timeline copy demands the same MXC
+        // through its own path, so the bounded cache and the session lifecycle
+        // own the release policy. A source whose bytes were removed (LRU
+        // eviction, a superseded own avatar, another account's pressure) must
+        // never stay silently `Ready`: downgrade it so its renderer re-requests
+        // it. URIs the scoped demand still references keep the revalidation and
+        // refetch path below, which is guarded against an endless
+        // eviction/refill loop.
+        let invalidated: Vec<String> = self
+            .avatar_cache
+            .iter()
+            .filter(|(mxc_uri, thumbnail)| {
+                matches!(thumbnail, AvatarThumbnailState::Ready { source_ref, .. }
+                    if !crate::renderable_thumbnail::contains_renderable_thumbnail(source_ref))
+                    && !demand
+                        .as_ref()
+                        .is_some_and(|demand| demand.contains_resource(mxc_uri))
+            })
+            .map(|(mxc_uri, _)| mxc_uri.clone())
+            .collect();
+        if !invalidated.is_empty() {
+            let mut actions = Vec::with_capacity(invalidated.len());
+            for mxc_uri in invalidated {
+                self.avatar_cache.remove(&mxc_uri);
+                actions.push(AppAction::AvatarThumbnailUpdated {
+                    mxc_uri,
+                    thumbnail: AvatarThumbnailState::NotRequested,
+                });
+            }
+            self.send_actions(actions).await;
         }
-        self.demanded_avatar_sources = demanded;
         let obsolete: Vec<_> = self
             .avatar_inflight
             .keys()
@@ -86,7 +103,7 @@ impl AccountActor {
             // every completion: a working set larger than the renderable LRU
             // must not drive an endless eviction/refill loop.
             let cached = if revalidate_ready {
-                self.cached_avatar_thumbnail(uri)
+                self.cached_avatar_thumbnail(uri).await
             } else {
                 self.avatar_cache.get(uri).cloned()
             };

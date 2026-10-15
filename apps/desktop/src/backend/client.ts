@@ -414,6 +414,44 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandAdmission>("disable_email_notifications");
   }
 
+  /**
+   * #1427 keyword push rules. `pattern` is the raw field text: Rust trims and
+   * validates it and mints the rule id, so the renderer never invents one. As
+   * with the neighbouring account-notification commands, the wrapper adds the
+   * optional `accountTabId` when this client is bound to a tab, and the request
+   * id stays Rust's business.
+   */
+  async addNotificationKeyword(pattern: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("add_notification_keyword", { pattern });
+  }
+
+  async removeNotificationKeyword(ruleId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("remove_notification_keyword", { ruleId });
+  }
+
+  /**
+   * Device-local notification delivery (#1427). `secret` is a write-only value: the command
+   * stores it in the OS credential store and the answer carries only an admission. It is
+   * never put in a URL, a log, or a snapshot, and it is never read back to the renderer.
+   */
+  async setNotificationDeliverySecret(
+    sinkId: string,
+    secret: string
+  ): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("set_notification_delivery_secret", {
+      sinkId,
+      secret
+    });
+  }
+
+  async clearNotificationDeliverySecret(sinkId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("clear_notification_delivery_secret", { sinkId });
+  }
+
+  async testNotificationDelivery(sinkId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("test_notification_delivery", { sinkId });
+  }
+
   async loadAccountManagementCapabilities(): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("load_account_management_capabilities");
   }
@@ -1268,8 +1306,8 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandSettlement>("join_room", { roomId });
   }
 
-  async previewRoomAddress(name: string, aliasLocalpart: string | null): Promise<RoomAddressPreview> {
-    return this.invokeCommand<RoomAddressPreview>("preview_room_address", { name, aliasLocalpart });
+  async previewRoomAddress(createSessionId: number, aliasLocalpart: string | null): Promise<RoomAddressPreview> {
+    return this.invokeCommand<RoomAddressPreview>("preview_room_address", { createSessionId, aliasLocalpart });
   }
 
   async setRoomAccessDraft(command: RoomAccessDraftCommand): Promise<CommandAdmission> {

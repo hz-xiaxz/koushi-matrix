@@ -10,7 +10,7 @@
 
 use koushi_protocol::command::AccountNotificationsRequest;
 use koushi_state::{
-    AccountNotificationsFailureKind, AccountNotificationsLoadState,
+    AccountNotificationsFailureKind, AccountNotificationsLoadState, AccountNotificationsOperation,
     AccountNotificationsOperationState, AccountNotificationsState, NotificationCategory,
     NotificationCategoryState, NotificationEmailManagement,
 };
@@ -18,7 +18,7 @@ use matrix_sdk::ruma::{
     api::client::push::{
         get_pushers, get_pushrules_all, set_pushrule_actions, set_pushrule_enabled,
     },
-    push::{Action, RuleKind, Ruleset},
+    push::{Action, PatternedPushRule, RuleKind, Ruleset},
 };
 
 use super::event_wait::QaEventDeadline;
@@ -26,6 +26,15 @@ use super::registry::{EVENT_TIMEOUT, QaConfig};
 use super::{AccountCommand, AuthSecret, CoreCommand, CoreConnection, CoreEvent, RequestId};
 
 const QA_CUSTOM_SOUND: &str = "koushi-qa-custom-sound";
+
+/// Synthetic keyword pattern for this lane's disposable account (#1427).
+/// `vantor` is not a word in any language: the pattern only has to be a glob
+/// the server stores and matches whole-word, so it is never a real keyword.
+const QA_KEYWORD_PATTERN: &str = "qa-keyword-vantor";
+
+/// The same pattern in another case. Matrix matches `content` patterns
+/// case-insensitively, so the account already holds this keyword.
+const QA_KEYWORD_PATTERN_OTHER_CASE: &str = "QA-KEYWORD-VANTOR";
 
 async fn fetch_rules(raw: &koushi_sdk::MatrixClientSession) -> Result<Ruleset, String> {
     raw.client()
@@ -169,6 +178,236 @@ fn rule_json(ruleset: &Ruleset, kind: RuleKind, rule_id: &str) -> Option<serde_j
         "enabled": rule.enabled(),
         "actions": serde_json::to_value(rule.actions()).ok()?,
     }))
+}
+
+/// The 16 lowercase hex characters after the app's keyword prefix, if the rule
+/// id has exactly that shape. The spec reserves a dot prefix for server-default
+/// rules, so an account keyword id is the app prefix plus a fixed-width hash.
+fn keyword_rule_id_suffix(rule_id: &str) -> Option<&str> {
+    let suffix = rule_id.strip_prefix(koushi_sdk::KEYWORD_RULE_ID_PREFIX)?;
+    (suffix.len() == 16
+        && suffix
+            .bytes()
+            .all(|byte| byte.is_ascii_digit() || (b'a'..=b'f').contains(&byte)))
+    .then_some(suffix)
+}
+
+/// The account's own `content` rules that name a Koushi keyword for `pattern`,
+/// compared Matrix's own case-insensitive way.
+fn keyword_rules_with_pattern<'a>(
+    ruleset: &'a Ruleset,
+    pattern: &str,
+) -> Vec<&'a PatternedPushRule> {
+    ruleset
+        .content
+        .iter()
+        .filter(|rule| {
+            !rule.default
+                && keyword_rule_id_suffix(&rule.rule_id).is_some()
+                && rule.pattern.eq_ignore_ascii_case(pattern)
+        })
+        .collect()
+}
+
+/// #1427 keyword delivery, driven through the app's own commands and read back
+/// raw from the disposable homeserver.
+///
+/// A keyword is a `kind: content` push rule, and the only reason it reaches the
+/// mention trigger is the rule's action array: the write must store exactly
+/// `["notify", {"set_tweak": "highlight"}]`. The vendored SDK's own keyword
+/// helper writes a default sound and no highlight, so this client does not use
+/// it, and only the server can confirm what the app actually wrote.
+async fn run_keyword_phase(
+    conn: &mut CoreConnection,
+    raw: &koushi_sdk::MatrixClientSession,
+) -> Result<(), String> {
+    let state = settle_operation(
+        conn,
+        AccountNotificationsRequest::AddKeyword {
+            pattern: QA_KEYWORD_PATTERN.to_owned(),
+        },
+        "add keyword",
+    )
+    .await?;
+    if !matches!(
+        state.operation,
+        AccountNotificationsOperationState::Succeeded { .. }
+    ) {
+        return Err("account_notifications: keyword add did not succeed".to_owned());
+    }
+
+    // 1. Read the minted rule back raw from the server: one rule, the app's id
+    // shape, the minted pattern, and the highlight tweak in the content
+    // position. The actions comparison is element by element, so a default
+    // sound, a custom tweak, or a second highlight fails where a substring
+    // check would pass.
+    let rule_id = {
+        let rules = fetch_rules(raw).await?;
+        let matching = keyword_rules_with_pattern(&rules, QA_KEYWORD_PATTERN);
+        if matching.len() != 1 {
+            return Err(format!(
+                "account_notifications: keyword add left {} matching content rules",
+                matching.len()
+            ));
+        }
+        let rule = matching[0];
+        if keyword_rule_id_suffix(&rule.rule_id).is_none() {
+            return Err("account_notifications: keyword rule id is not the app shape".to_owned());
+        }
+        if rule.pattern != QA_KEYWORD_PATTERN {
+            return Err(
+                "account_notifications: keyword rule pattern is not the minted word".to_owned(),
+            );
+        }
+        let expected_actions = serde_json::json!(["notify", {"set_tweak": "highlight"}]);
+        let stored_actions = serde_json::to_value(&rule.actions).map_err(|_| {
+            "account_notifications: keyword actions serialization failed".to_owned()
+        })?;
+        if stored_actions != expected_actions {
+            return Err(format!(
+                "account_notifications: keyword actions were {stored_actions}"
+            ));
+        }
+        rule.rule_id.clone()
+    };
+    println!("account_notifications_keyword_actions=ok");
+
+    // 2. The app projects the rule with the minted pattern and ON.
+    let projected = state
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| {
+            snapshot
+                .keywords
+                .iter()
+                .find(|keyword| keyword.rule_id == rule_id)
+        })
+        .ok_or("account_notifications: keyword add is missing from the projection")?;
+    if projected.pattern != QA_KEYWORD_PATTERN || !projected.enabled {
+        return Err("account_notifications: keyword projection is not the minted rule".to_owned());
+    }
+    println!("account_notifications_keyword_projection=ok");
+
+    // 3. The same word in another case is the same keyword: the add is refused
+    // and the refusal writes no second rule and no second id.
+    let state = settle_operation(
+        conn,
+        AccountNotificationsRequest::AddKeyword {
+            pattern: QA_KEYWORD_PATTERN_OTHER_CASE.to_owned(),
+        },
+        "duplicate keyword",
+    )
+    .await?;
+    if !matches!(
+        &state.operation,
+        AccountNotificationsOperationState::Failed {
+            failure_kind: AccountNotificationsFailureKind::Duplicate,
+            operation: AccountNotificationsOperation::AddNotificationKeyword { .. },
+            ..
+        }
+    ) {
+        return Err("account_notifications: second-case keyword add was not refused".to_owned());
+    }
+    let rules = fetch_rules(raw).await?;
+    if keyword_rules_with_pattern(&rules, QA_KEYWORD_PATTERN).len() != 1 {
+        return Err(
+            "account_notifications: duplicate refusal wrote a second content rule".to_owned(),
+        );
+    }
+    println!("account_notifications_keyword_duplicate=ok");
+
+    // 4. Another client turns the rule off out of band. Off is not gone: the
+    // projection shows it OFF and the account still refuses a same-pattern add.
+    raw_set_enabled(raw, RuleKind::Content, &rule_id, false).await?;
+    // The raw server agrees the rule is off before the app re-reads it.
+    let rules = fetch_rules(raw).await?;
+    let raw_enabled = rule_json(&rules, RuleKind::Content, &rule_id)
+        .and_then(|rule| rule.get("enabled").and_then(serde_json::Value::as_bool));
+    if raw_enabled != Some(false) {
+        return Err(
+            "account_notifications: out-of-band keyword disable did not reach the server"
+                .to_owned(),
+        );
+    }
+    // A completed load carries no request id and the previous operation already
+    // left the load state at `Loaded`, so wait for the projection to carry the
+    // server's new fact rather than for `Loaded` to be reached again.
+    let _ = send_request(conn, AccountNotificationsRequest::Load, "keyword reload").await?;
+    let state = wait_for(conn, "keyword reload", |state| {
+        state.snapshot.as_ref().is_some_and(|snapshot| {
+            snapshot
+                .keywords
+                .iter()
+                .any(|keyword| keyword.rule_id == rule_id && !keyword.enabled)
+        })
+    })
+    .await?;
+    let projected = state
+        .snapshot
+        .as_ref()
+        .and_then(|snapshot| {
+            snapshot
+                .keywords
+                .iter()
+                .find(|keyword| keyword.rule_id == rule_id)
+        })
+        .ok_or("account_notifications: disabled keyword left the projection")?;
+    if projected.enabled {
+        return Err("account_notifications: disabled keyword is still projected ON".to_owned());
+    }
+    if projected.pattern != QA_KEYWORD_PATTERN {
+        return Err("account_notifications: disabled keyword lost its pattern".to_owned());
+    }
+    let state = settle_operation(
+        conn,
+        AccountNotificationsRequest::AddKeyword {
+            pattern: QA_KEYWORD_PATTERN.to_owned(),
+        },
+        "disabled keyword duplicate",
+    )
+    .await?;
+    if !matches!(
+        &state.operation,
+        AccountNotificationsOperationState::Failed {
+            failure_kind: AccountNotificationsFailureKind::Duplicate,
+            ..
+        }
+    ) {
+        return Err(
+            "account_notifications: disabled keyword did not refuse a same-pattern add".to_owned(),
+        );
+    }
+    println!("account_notifications_keyword_disabled=ok");
+
+    // 5. Removal deletes that rule from the account, not from a local list.
+    let state = settle_operation(
+        conn,
+        AccountNotificationsRequest::RemoveKeyword {
+            rule_id: rule_id.clone(),
+        },
+        "remove keyword",
+    )
+    .await?;
+    if !matches!(
+        state.operation,
+        AccountNotificationsOperationState::Succeeded { .. }
+    ) {
+        return Err("account_notifications: keyword removal did not succeed".to_owned());
+    }
+    let rules = fetch_rules(raw).await?;
+    if !keyword_rules_with_pattern(&rules, QA_KEYWORD_PATTERN).is_empty() {
+        return Err("account_notifications: removed keyword is still on the server".to_owned());
+    }
+    if state.snapshot.as_ref().is_some_and(|snapshot| {
+        snapshot
+            .keywords
+            .iter()
+            .any(|keyword| keyword.rule_id == rule_id)
+    }) {
+        return Err("account_notifications: removed keyword is still projected".to_owned());
+    }
+    println!("account_notifications_keyword_remove=ok");
+    Ok(())
 }
 
 pub(super) async fn run_account_notifications_stage(
@@ -419,6 +658,11 @@ async fn run_with_fixture(
         return Err("account_notifications: unverified email produced an email pusher".to_owned());
     }
     println!("account_notifications_email_requires_verified=ok");
+
+    // #1427: the keyword write and its raw server readback, through the app's
+    // own commands.
+    run_keyword_phase(conn, raw).await?;
+
     println!("account_notifications=ok");
     Ok(())
 }

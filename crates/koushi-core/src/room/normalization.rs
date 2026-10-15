@@ -117,6 +117,10 @@ pub(super) fn normalize_rooms_with_previous(
                         sender_label: event.sender_label.clone(),
                         sender_avatar: avatar_from_mxc_uri(event.sender_avatar_mxc_uri.as_deref()),
                         preview: event.preview.clone(),
+                        // #1427: the delivery prefix source, in memory only. The
+                        // room-list `preview` above is the sidebar's row and is
+                        // serialized; this field is skipped by serde.
+                        message_text: event.message_text.clone(),
                         timestamp_ms: event.timestamp_ms,
                         is_redacted: event.is_redacted,
                     }

@@ -432,6 +432,30 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   `SettingsValues.notifications.sound`. React may pass that DTO value into native
   adapter routing so sound is skipped, but it must not create an independent
   notification preference or mutate native attention state locally.
+- Device-local notification delivery (#1427) is Rust-owned the same way: the
+  enabled sinks, their non-secret fields, the dwell, the interval, the focus
+  gating, the optional plaintext prefix and its consent, and the per-sink outcome
+  are Rust state, and the dwell timer runs on the core executor's clock. React
+  renders that DTO and dispatches typed commands; it must not decide whether a
+  delivery happens, start or reset a timer, assemble a body, or read a sink secret.
+  Whether a stored credential still belongs to a sink is Rust's answer as well: the
+  binding it was saved under, and the `secret_retired` flag that says this device
+  deleted it, are core facts, so React must not compare endpoints or hosts to guess
+  them or keep its own list of which credentials it has seen. The keyword list is not
+  local settings at all: it is the account's own `content` push rules, read and
+  written through the account notification surface, so a rule another client wrote is
+  visible here and a failed write is never shown as saved. React adds a keyword by
+  sending the pattern and nothing else: Rust trims it, rejects the empty, oversized,
+  and duplicate cases, enforces the cap, and mints the rule id, and a refusal reaches
+  the screen as one of that surface's typed failures. A rule's `enabled` flag is also
+  the server's, so a rule another client turned off is rendered as off - it is still on
+  the account and still refuses a same-pattern add - and React must not hide it,
+  re-enable it, or keep an enabled list of its own. The plaintext prefix's
+  source is the message body the room list already holds, marked never to be
+  serialized, and it reaches the send request without passing through any DTO.
+  The same attention projection that drives the badge and the unread marks is the
+  only source of what is delivered, so a delivered message cannot describe a state
+  the badge does not show.
 - Candidate projection uses private-data-minimized room labels and counts only.
   Native attention uses `RoomSummary.display_label` for its safe room label, but
   serialized candidates still must not carry room IDs, sender IDs, event IDs, or
@@ -660,17 +684,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   Core derives `via` from the SDK. `create_room` returns
   `spaceLinkFailure` because a failed link does not fail creation. Browser tests
   push Rust-shaped `space_add_rooms` snapshots after the command receipt.
-- The create-room address preview (`preview_room_address`, #838/#1006) is Rust
-  owned: normalization, the `<space>-<room>` suggestion from the selected
-  Space's Matrix name (dropped when it would exceed 255 bytes), validation, the
-  full alias, and the `server_name` whose alias namespace all Spaces share.
-  React keeps only whether the address was edited, and re-requests the preview
-  for the current draft; an `aliasInUse` create failure is rendered with the
-  attempted full address and server captured from that preview. A submitted
-  alias is never renamed or retried automatically. The preview's
-  `without_address` (#1023) is Rust's verdict that an unnamed public room
-  may be created without an address (a named room never is);
-  React renders it and does not decide when an address is optional.
+- The create-room address preview (`preview_room_address`, #838/#1006/#1416)
+  is Rust owned: the create session's random default address (Core draws the
+  suffix into the create draft; the prefix is the attachment Space's Matrix
+  name, or `room`), normalization, validation, the full alias, and the
+  `server_name` whose alias namespace all Spaces share. The default never
+  follows the room name. React sends the create session id and the edited
+  address (or none), and re-requests the preview when either changes; an
+  `aliasInUse` create failure is rendered with the attempted full address and
+  server captured from that preview. A submitted alias is never renamed or
+  retried automatically, and a public room is never created without one.
 - The create-room dialog's initial choices (#1023) are
   `SidebarModel.create_room_defaults` (`create_room_defaults_for_state`): public
   in a Space whose synced join rule is public, otherwise private. React seeds the

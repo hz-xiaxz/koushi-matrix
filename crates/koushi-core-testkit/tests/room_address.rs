@@ -1,103 +1,92 @@
 use koushi_core::CoreConnection;
 use koushi_protocol::state_update::VersionedAppStateSnapshot;
 use koushi_state::{
-    AppState, RoomAddressError, SessionAuthenticationMethod, SessionInfo, SessionState,
+    AppAction, AppState, CreateRoomAccessSeed, CreateRoomVisibility, RoomAccessDraftScope,
+    RoomAddressError, SessionAuthenticationMethod, SessionInfo, SessionState, reduce,
 };
 
-#[test]
-fn room_address_preview_uses_current_ready_identity_without_mutating_state() {
-    let (connection, control) = CoreConnection::new_for_testing(8);
-    assert_eq!(
-        connection.preview_room_address("Name", None).error,
-        Some(RoomAddressError::NotReady)
-    );
-    let state = AppState {
+fn ready_state() -> AppState {
+    AppState {
         session: SessionState::Ready(SessionInfo {
             homeserver: "https://delegated.example.invalid".into(),
             user_id: "@member:matrix.example.invalid:8448".into(),
             device_id: "SYNTHETIC".into(),
             authentication_method: SessionAuthenticationMethod::Unknown,
         }),
-        ..Default::default()
-    };
-    control.send_snapshot(VersionedAppStateSnapshot {
-        generation: 1,
-        state,
-    });
-    assert_eq!(
-        connection
-            .preview_room_address("Example Room", None)
-            .full_alias
-            .as_deref(),
-        Some("#example-room:matrix.example.invalid:8448")
-    );
-    assert_eq!(
-        connection
-            .preview_room_address("Changed Name", Some("manual"))
-            .localpart,
-        "manual"
-    );
-    assert_eq!(connection.state_generation(), 1);
-    control.send_snapshot(VersionedAppStateSnapshot {
-        generation: 2,
-        state: AppState::default(),
-    });
-    assert_eq!(
-        connection.preview_room_address("Name", None).error,
-        Some(RoomAddressError::NotReady)
-    );
-}
-
-/// #1006: a public room created from a Space suggests `<space>-<room>`; the
-/// display name is unchanged and a manual address is preserved.
-#[test]
-fn room_address_suggestion_is_prefixed_with_the_selected_space_name() {
-    let (connection, control) = CoreConnection::new_for_testing(8);
-    let mut state = AppState {
-        session: SessionState::Ready(SessionInfo {
-            homeserver: "https://example.invalid".into(),
-            user_id: "@member:example.invalid".into(),
-            device_id: "SYNTHETIC".into(),
-            authentication_method: SessionAuthenticationMethod::Unknown,
-        }),
         spaces: vec![koushi_state::SpaceSummary {
             space_id: "!space:example.invalid".into(),
-            raw_name: Some("research-group".into()),
-            display_name: "research-group".into(),
+            raw_name: Some("Research Group".into()),
+            display_name: "local presentation name".into(),
             avatar: None,
             join_rule: None,
             child_room_ids: Vec::new(),
             parent_side_child_room_ids: Vec::new(),
         }],
         ..Default::default()
-    };
-    state.navigation.active_space_id = Some("!space:example.invalid".into());
+    }
+}
+
+fn open_create(state: &mut AppState, session_id: u64, parent: Option<&str>, suffix: &str) {
+    reduce(
+        state,
+        AppAction::RoomAccessDraftOpened {
+            scope: RoomAccessDraftScope::Create { session_id },
+            create: Some(CreateRoomAccessSeed {
+                visibility: CreateRoomVisibility::Public,
+                invited_only: false,
+                parent_space_id: parent.map(str::to_owned),
+                address_suffix: Some(suffix.to_owned()),
+            }),
+        },
+    );
+}
+
+/// #1416: an unedited address is the create session's random default, with
+/// the attachment Space's Matrix name as the prefix; it never follows the name.
+#[test]
+fn an_unedited_address_is_the_create_sessions_random_default() {
+    let (connection, control) = CoreConnection::new_for_testing(8);
+    assert_eq!(
+        connection.preview_room_address(None, 1).error,
+        Some(RoomAddressError::NotReady)
+    );
+    let mut state = ready_state();
+    open_create(&mut state, 1, Some("!space:example.invalid"), "3fa9c2");
     control.send_snapshot(VersionedAppStateSnapshot {
         generation: 1,
         state: state.clone(),
     });
-
-    let preview = connection.preview_room_address("papers", None);
-    assert_eq!(preview.localpart, "research-group-papers");
+    let preview = connection.preview_room_address(None, 1);
+    assert_eq!(preview.localpart, "research-group-3fa9c2");
     assert_eq!(
         preview.full_alias.as_deref(),
-        Some("#research-group-papers:example.invalid")
+        Some("#research-group-3fa9c2:matrix.example.invalid:8448")
+    );
+    // An edited address wins; an edited empty address is empty.
+    assert_eq!(
+        connection.preview_room_address(Some("papers"), 1).localpart,
+        "papers"
     );
     assert_eq!(
-        connection
-            .preview_room_address("papers", Some("papers-2026"))
-            .localpart,
-        "papers-2026"
+        connection.preview_room_address(Some(""), 1).error,
+        Some(RoomAddressError::Empty)
     );
+    // Another session's default is never shown.
+    assert_eq!(
+        connection.preview_room_address(None, 2).error,
+        Some(RoomAddressError::Empty)
+    );
+    assert_eq!(connection.state_generation(), 1);
 
-    // At Home there is no Space prefix.
-    state.navigation.active_space_id = None;
+    // At Home the prefix is `room`.
+    let mut home = ready_state();
+    open_create(&mut home, 3, None, "0b1c2d");
     control.send_snapshot(VersionedAppStateSnapshot {
         generation: 2,
-        state,
+        state: home,
     });
     assert_eq!(
-        connection.preview_room_address("papers", None).localpart,
-        "papers"
+        connection.preview_room_address(None, 3).localpart,
+        "room-0b1c2d"
     );
 }

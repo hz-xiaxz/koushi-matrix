@@ -1,10 +1,10 @@
 //! #1023: rooms created from a public Space on a real homeserver.
 //!
 //! The create-room defaults select a public room in a public Space, an unnamed
-//! room omits `m.room.name` and shows the SDK-calculated name, an unnamed
-//! public room is created without an address unless one is entered (then the
-//! canonical alias names it), a conflict on that address is reported, the room
-//! can be named later, and explicitly choosing private still creates a
+//! room omits `m.room.name`, an unnamed public room is rejected without an
+//! address and created with the session's random default (#1416), whose
+//! canonical alias then names it, a conflict on that address is reported, the
+//! room can be named later, and explicitly choosing private still creates a
 //! restricted Space room.
 
 use super::*;
@@ -37,11 +37,6 @@ pub(super) async fn verify(conn_a: &mut CoreConnection) -> Result<(), String> {
     }
     println!("room_public_space_default=ok");
 
-    // Unnamed, no address: public, listed, linked, calculated name.
-    let preview = conn_a.preview_room_address("", None);
-    if preview.error.is_some() || !preview.without_address {
-        return Err("unnamed: an unnamed room was not allowed without an address".into());
-    }
     let options = |alias_localpart: Option<String>| CreateRoomOptions {
         name: String::new(),
         topic: None,
@@ -55,48 +50,68 @@ pub(super) async fn verify(conn_a: &mut CoreConnection) -> Result<(), String> {
         access_policy: None,
         history: None,
     };
-    let unnamed_id = create(conn_a, options(None), "unnamed public").await?;
+
+    // #1416: a public room always has an address, named or not.
+    let rejected_id = conn_a.next_request_id();
+    conn_a
+        .command(CoreCommand::Room(RoomCommand::CreateRoom {
+            request_id: rejected_id,
+            options: options(None),
+        }))
+        .await
+        .map_err(|_| "unnamed: address-less submission failed")?;
+    let deadline = QaEventDeadline::after(EVENT_TIMEOUT);
+    loop {
+        match deadline
+            .recv(conn_a)
+            .await
+            .map_err(|_| "unnamed: address-less outcome timeout")?
+            .map_err(|_| "unnamed: address-less event stream lagged")?
+        {
+            CoreEvent::OperationFailed { request_id, .. } if request_id == rejected_id => break,
+            CoreEvent::Room(RoomEvent::RoomCreated { request_id, .. })
+                if request_id == rejected_id =>
+            {
+                return Err("unnamed: a public room was created without an address".into());
+            }
+            _ => {}
+        }
+    }
+
+    // The session's default address: public, listed, linked, and the
+    // canonical alias names the unnamed room (the SDK shows its localpart).
+    let preview = open_create_draft_for_qa(conn_a, Some(&space_id), "unnamed default").await?;
+    if !preview.localpart.starts_with("koushi-open-space-") {
+        return Err("unnamed: the default address did not carry the Space prefix".into());
+    }
+    let alias_localpart = preview.localpart.clone();
+    let unnamed_id = create(
+        conn_a,
+        options(Some(alias_localpart.clone())),
+        "unnamed public",
+    )
+    .await?;
     wait_for_linked(conn_a, &space_id, &unnamed_id).await?;
     let settings = load_room_settings_for_qa(conn_a, &unnamed_id, "unnamed settings").await?;
-    if settings.join_rule != RoomJoinRule::Public
-        || settings.canonical_alias.is_some()
-        || settings.name.is_some()
-    {
+    if settings.join_rule != RoomJoinRule::Public || settings.name.is_some() {
         return Err(format!(
-            "unnamed: unexpected state (join_rule={:?}, has_alias={}, has_name={})",
+            "unnamed: unexpected state (join_rule={:?}, has_name={})",
             settings.join_rule,
-            settings.canonical_alias.is_some(),
             settings.name.is_some()
         ));
     }
-    let calculated =
-        wait_for_display_name(conn_a, &unnamed_id, "unnamed calculated name", |name| {
-            !name.trim().is_empty() && name != unnamed_id
-        })
-        .await?;
+    println!("room_unnamed_public_space=ok");
+    wait_for_display_name(conn_a, &unnamed_id, "unnamed alias name", |name| {
+        name == alias_localpart
+    })
+    .await?;
     // Link acknowledgement and the room name can precede the Space's synced
     // child projection. Wait for the exact sidebar row, not a fixed delay.
-    wait_for_state(conn_a, "unnamed: Space calculated-name row", |state| {
+    wait_for_state(conn_a, "unnamed: Space alias-name row", |state| {
         compose_sidebar_for_state(state)
             .space_rooms
             .iter()
-            .any(|row| row.room_id == unnamed_id && row.display_name == calculated)
-    })
-    .await?;
-    println!("room_unnamed_public_space=ok");
-
-    // An entered address becomes the canonical alias, which names an unnamed
-    // room ahead of any member-derived name (the SDK shows its localpart).
-    let alias_localpart = format!("koushi-unnamed-{}", std::process::id());
-    let aliased_id = create(
-        conn_a,
-        options(Some(alias_localpart.clone())),
-        "unnamed alias",
-    )
-    .await?;
-    wait_for_linked(conn_a, &space_id, &aliased_id).await?;
-    wait_for_display_name(conn_a, &aliased_id, "unnamed alias name", |name| {
-        name == alias_localpart
+            .any(|row| row.room_id == unnamed_id && row.display_name == alias_localpart)
     })
     .await?;
     println!("room_unnamed_alias_name=ok");

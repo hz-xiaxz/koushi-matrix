@@ -71,6 +71,7 @@ import { ThreadsListView } from "./ThreadsListView";
 import { UserSettingsPanel } from "./UserSettingsPanel";
 import { AccountTabStrip, type RuntimeAlert } from "./Shell";
 import type { AccountNotificationActions } from "./user-settings/AccountNotificationsSections";
+import type { NotificationDeliveryActions } from "./user-settings/NotificationDeliverySection";
 import { PeoplePanel, ProfilePanel } from "./PeoplePanel";
 import type { ContactSecurityActions } from "./ContactSecurityDetails";
 import {
@@ -225,6 +226,7 @@ export function ContextualRightPanel({
   onLoadAccountManagementCapabilities = () => undefined,
   onChangePassword = () => undefined,
   accountNotificationActions,
+  notificationDeliveryActions,
   contactSecurityActions,
   onDeactivateAccount = () => undefined,
   onSubmitAccountManagementUia = () => undefined,
@@ -384,6 +386,7 @@ export function ContextualRightPanel({
   onLoadAccountManagementCapabilities?: () => void;
   onChangePassword?: (newPassword: string) => void;
   accountNotificationActions?: AccountNotificationActions;
+  notificationDeliveryActions?: NotificationDeliveryActions;
   contactSecurityActions?: ContactSecurityActions;
   onDeactivateAccount?: (eraseData: boolean) => void;
   onSubmitAccountManagementUia?: (flowId: number, password: string) => void;
@@ -668,12 +671,14 @@ export function ContextualRightPanel({
           onChangePassword={onChangePassword ?? (() => undefined)}
           accountNotifications={snapshot.state.domain.account_notifications}
           accountNotificationActions={accountNotificationActions}
+          notificationDeliveryActions={notificationDeliveryActions}
           onDeactivateAccount={onDeactivateAccount ?? (() => undefined)}
           onSubmitAccountManagementUia={onSubmitAccountManagementUia ?? (() => undefined)}
           onStartCrawlRoom={onStartCrawlRoom}
           onStopCrawlRoom={onStopCrawlRoom}
           onDisplayDensityChange={onDisplayDensityChange}
           rooms={snapshot.state.domain.rooms}
+          spaces={snapshot.state.domain.spaces}
         />
       </ModalDialog>
     );

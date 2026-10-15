@@ -3936,14 +3936,23 @@ stateDiagram-v2
   omits `m.room.name`, and the room shows the SDK-calculated display name:
   canonical alias (its localpart) before a member-derived name, then the SDK's
   `Empty Room` fallback. Setting a name later replaces the calculated name.
-- Address: `public_room_address_required(name)` is false only for an unnamed
-  room (empty or blank name). Then a public room with no entered address is
-  created without an alias, and `preview_room_address` reports
-  `without_address` instead of `empty`. Every named room keeps the #1006 rule:
-  a cleared suggestion, or a name that offers none (for example `🎉`), is
-  `empty` and needs a manually entered address. The join rule (`public`
-  via the `public_chat` preset) and the directory listing do not depend on an
-  alias; `CreatePublicDirectoryRoom` still requires one.
+- Address (#1416): a public room is always created with an address; there is
+  no unnamed-public-without-address path, and the address is never derived
+  from the room name, so the name stays the human label and the address stays
+  the link. Opening a create session gives the Rust create draft a random,
+  per-session address suffix (Core generates it and passes it in
+  `RoomAccessDraftOpened`, so the reducer stays deterministic). The default
+  local part is `default_room_alias_localpart(space, suffix)`: the ASCII slug
+  of the attachment Space's Matrix name (at most 24 bytes), or `room` at Home
+  or when the name has no ASCII letters or digits, then `-` and six lowercase
+  hex characters. `preview_room_address(alias, create_session_id)` resolves an
+  unedited address (`alias == None`) to that default for the matching create
+  session, and an edited address to itself; an edited empty address is
+  `empty`. The dialog shows the full alias read-only with a Change action and
+  opens the editor (with `#` and `:server` fixed outside the input) for a
+  change or a conflict. The join rule (`public` via the `public_chat` preset)
+  and the directory listing do not depend on the alias; Create rejects a
+  public room whose address does not resolve with `InvalidRoomAlias`.
 
 ### Advisory room address availability (#1006)
 
@@ -3979,8 +3988,12 @@ stateDiagram-v2
   append `-2`), validated on the same server. It has not been checked; using it
   changes the draft, and the new address gets its own check.
 - The renderer chooses when to ask (400 ms after the shown address stops
-  changing), shows a result only when its `full_alias` is the address shown, and
-  never blocks submission on it.
+  changing) and shows a result only when its `full_alias` is the address shown.
+  Create of a public room is enabled only once the shown address has a
+  `checked` result that is not `inUse` (#1416): `inUse` shows an inline error
+  with the suggestion and opens the address editor, `checking` or a result for
+  another address keeps Create disabled, and `unknown` allows Create because
+  the check is advisory and Create still reports `AliasInUse`.
 
 ## Room Management
 
@@ -4162,9 +4175,16 @@ stateDiagram-v2
   (>= 8, today V9). Supplying `history` sends exactly one initial-state event;
   omitting it keeps the legacy default. The private option keeps its
   encryption/invitation draft while public is selected; only the effective
-  submitted values are stripped. Membership selection is offered wherever the
-  viewer is joined to at least one Space; this is a product choice, not a Matrix
-  restriction, and the picker lists the viewer's joined Spaces.
+  submitted values are stripped. Membership selection is offered only when the
+  room is created in a Space (#1416); a room created at Home is outside every
+  Space and chooses between invite-only and public. This is a product choice,
+  not a Matrix restriction. Selecting membership in a create draft whose
+  target set is empty selects the attachment Space, so the choice labelled with
+  that Space's name always names it; the picker still lists the viewer's other
+  joined Spaces. The create dialog offers two history choices, `shared`
+  (members can read earlier messages) and `invited` (only from when they were
+  invited), plus a world-readable checkbox shown only for a public room;
+  leaving public drops a world-readable choice back to `shared`.
 - A successful local settings change installs its accepted value as a delta, not
   a level copy (#1177). The pre-send read may still lag the SDK echo of the other
   locally editable property, so an access change keeps the locally held history
@@ -6109,6 +6129,113 @@ Email notifications:
 - OAuth/MAS sessions project `DelegatedToAccountManagement` and link to the
   account-management destination; `m.3pid_changes: false` projects
   `Unsupported`. Neither offers the add flow.
+
+## Local Notification Delivery
+
+Delivering a notification from this device (#1427) is a separate channel from the
+server-owned pusher above. It is device-local product state, and it is the default
+implementation of email notification in Koushi. Delivery goes through sinks that all
+consume the same selected candidate, so the channel is not tied to one transport or to
+one country's infrastructure:
+
+- **Sinks.** Two are implemented. A mail provider API, Resend, and a generic SMTP
+  relay, which covers the cheap relays (Amazon SES, Brevo, Mailjet, Elastic Email) and
+  the Chinese providers (Aliyun DirectMail, Tencent Cloud SES). A mailbox preset is the
+  practical route inside China: QQ Mail is the same SMTP sink with its host, port and
+  authorization-code field filled in, and because the mailbox's own new-mail reminder
+  can surface the message in WeChat, that one sink reaches both destinations. A WeChat
+  relay is the other kind of sink the boundary is shaped for - a WeCom group-robot
+  webhook, with a WeCom self-built app or a third-party relay (ServerChan, PushPlus,
+  WxPusher) behind the same boundary - but it is **not implemented** and no screen
+  offers one: adding it is a new arm of `NotificationSink` and a new configuration
+  variant, with no change to the settings, the digest, or the decision engine. Every
+  sink is individually enabled and carries its own non-secret configuration plus a
+  `configured` secret flag.
+- **Settings.** The enabled sinks, their addresses and endpoints, the dwell, the
+  minimum interval, the focus suppression, the optional plaintext prefix and its
+  consent live in `SettingsValues.delivery` at app scope, which is a different group
+  from `SettingsValues.notifications` (this device's banners). The Matrix account is
+  never consulted for a destination, so the channel works on a homeserver that supports
+  neither email 3PIDs nor pushers.
+- **Secrets.** Every sink secret - a provider API key or an SMTP password today, and a
+  webhook key or a relay send key for a sink added later - is held only by the
+  credential store. Settings and diagnostics carry a
+  `configured` flag and never a value, and a secret is read when the sink is configured
+  or by the send itself, never on the settings or dispatch hot path.
+- **One authority.** The channel reads the same Rust-owned attention projection that
+  drives the badge and the unread/mention marks; the transient candidate feeds the
+  toast. Both derive from one `RoomAttentionKind` and count authority, so a mail can
+  never describe a state the badge does not show.
+- **Triggers.** Direct messages, mentions, and the user's own keywords, each
+  individually enabled. Keywords are Matrix `kind: content` push rules written
+  only on explicit user action; the SDK evaluates them into the highlight
+  counter, so a hit ranks as a mention-kind candidate and raises the badge exactly
+  as it does in Element. Opening the settings screen writes nothing.
+- **Keyword rules.** The keyword list is the account's own `content` rules, read back
+  from the homeserver as the authority rather than mirrored into local settings, so a
+  rule another client wrote shows up here too. Adding a keyword writes one `content`
+  rule whose action both notifies and sets the highlight tweak, because that tweak is
+  what makes the hit reach the mention-kind authority above; removing a keyword deletes
+  that rule. Matching therefore stays exactly Matrix's: a whole-word, case-insensitive
+  match on the message body, evaluated in the `content` position of the rule order
+  (`override > content > room > sender > underride`), so a keyword wins over a room rule
+  while a mute, which is an override, still wins over the keyword. The list is bounded,
+  a pattern is bounded and trimmed, a duplicate is refused rather than written twice,
+  and a failed write is reported as a failure instead of being shown as saved. The rule
+  name is minted from the pattern rather than taken from the user: a prefix this client
+  owns plus a hash of the trimmed text, so the same keyword cannot become two rules, no
+  pattern text travels in a URL path, and an id that collides with a different pattern is
+  refused instead of overwriting a rule this client did not write. A rule another client
+  turned off is listed as off and not hidden, because it is still on the account, still
+  refuses a same-pattern add, and still has to be removable.
+- **Watch list.** The user can name rooms and spaces that are delivered regardless
+  of the three categories, so a busy space can be watched without turning on every
+  group message. A watched space covers every joined room that is a child of it,
+  resolved from the room list when the candidate set is built, so a room added to
+  the space later is covered without editing the list. The list holds ids only, never
+  a label: the label is the same safe room label the badge uses, read at send time.
+  Reading the room, muting it, or the dwell still win, and an unfocused device is
+  still required under the focus option.
+- **Dwell.** A room becomes deliverable only when its qualifying attention state
+  persists for the configured dwell. The timer is anchored on the transition into
+  that state, so a room that keeps receiving messages still comes due, while a room
+  that is read, muted, or (under the focus option) focused before the dwell expires
+  is cancelled and re-armed on the next transition. Rust owns the timer, it uses the
+  core executor's clock, and it restarts after a restart rather than being persisted.
+- **Delivery.** At send time the body is recomputed from the current projection, so
+  the message matches the badge at that moment: a digest of the rooms that came due,
+  with each room's safe display label, kind, and counts. The plaintext prefix below is
+  the only other text a body can carry, and only under its consent. The subject
+  and body are notification payload text and follow the OS notification wording that
+  Core already owns, not the React message catalog: they never render inside the app,
+  they are counts-only, and localizing them is a separate decision that has not been
+  made. A
+  channel-level minimum interval coalesces further mail, the queue is in-memory and
+  bounded and is discarded on exit, and there is no durable outbox. A failed delivery
+  never leaves a sink reading as ON: the last outcome
+  is projected to React per sink, an invalid key, a suspended account, or a rejected
+  webhook is its own typed state, and only a rate limit or a transport failure is
+  retried.
+- **Plaintext prefix.** OFF by default, added only when a stored consent names the
+  sink, the destination, and the endpoint it was given for and all three still
+  match. The text is the newest message this device already holds for the room - the
+  room list's latest event, which may be newer than the event that made the room
+  qualify - and a room whose latest event is redacted, undecryptable, or not a text
+  message is delivered without a prefix rather than failing. The consent is held for
+  one sink at a time: consenting for another
+  replaces it, which the replaced sink's own row shows as the option being off,
+  and that sink then sends without text. A settings load drops a consent that no
+  longer matches a configured sink, so a hand-edited or older settings file cannot
+  widen what leaves the device. It is independent of the OS notification preview
+  switch, is bounded and trimmed at a grapheme boundary, and adds no room, event,
+  sender, or transaction identifiers. The consent copy is provider-agnostic: it
+  states that the text leaves the device unencrypted, that whether and how long the
+  configured service stores it depends on that service's own terms, and that the
+  user must check those terms before enabling the option. The app asserts no
+  provider-specific retention as fact.
+- **Server surface unchanged.** The pusher surface above keeps its own meaning and
+  is only labelled as the server's, so two controls for one channel are not read
+  as one.
 
 ## Contact Security Details
 

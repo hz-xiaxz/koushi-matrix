@@ -544,6 +544,7 @@ pub(crate) fn handle_room_access_draft_opened(
                     create.invited_only,
                     create.parent_space_id.as_deref(),
                 );
+                draft.create_address_suffix = create.address_suffix;
             }
         }
     }

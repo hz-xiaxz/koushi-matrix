@@ -35,6 +35,7 @@ pub mod media_staging;
 pub(crate) mod mention_candidates;
 pub mod native_artifact;
 pub mod native_image_decoder;
+pub mod notification_delivery;
 pub(crate) mod read_state;
 pub mod renderable_thumbnail;
 mod report;
