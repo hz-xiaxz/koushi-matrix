@@ -20,11 +20,11 @@ describe("qaSendSmoke", () => {
   });
 
   test("normalizes an optional synthetic send target user id", () => {
-    expect(qaSendSmokeTargetUserIdFromEnv("  @hiroshi.shinaoka:matrix.org  ")).toBe(
-      "@hiroshi.shinaoka:matrix.org"
+    expect(qaSendSmokeTargetUserIdFromEnv("  @approved-self-dm:example.invalid  ")).toBe(
+      "@approved-self-dm:example.invalid"
     );
-    expect(qaSendSmokeTargetUserIdFromEnv("hiroshi.shinaoka:matrix.org")).toBe(
-      "@hiroshi.shinaoka:matrix.org"
+    expect(qaSendSmokeTargetUserIdFromEnv("approved-self-dm:example.invalid")).toBe(
+      "@approved-self-dm:example.invalid"
     );
     expect(qaSendSmokeTargetUserIdFromEnv("   ")).toBeNull();
     expect(qaSendSmokeTargetUserIdFromEnv(undefined)).toBeNull();
@@ -32,18 +32,18 @@ describe("qaSendSmoke", () => {
 
   test("finds the DM room for a synthetic send target without exposing room names", async () => {
     const api = createDesktopApiFixture();
-    const snapshot = await commandSnapshot(api, api.startDirectMessage("@hiroshi.shinaoka:matrix.org"));
+    const snapshot = await commandSnapshot(api, api.startDirectMessage("@approved-self-dm:example.invalid"));
 
-    const room = qaSendSmokeTargetRoom(snapshot, "@hiroshi.shinaoka:matrix.org");
+    const room = qaSendSmokeTargetRoom(snapshot, "@approved-self-dm:example.invalid");
 
     expect(room?.is_dm).toBe(true);
-    expect(room?.dm_user_ids).toContain("@hiroshi.shinaoka:matrix.org");
+    expect(room?.dm_user_ids).toContain("@approved-self-dm:example.invalid");
   });
 
   test("summarizes target DM encryption without exposing identifiers", async () => {
     const api = createDesktopApiFixture();
-    const started = await commandSnapshot(api, api.startDirectMessage("@hiroshi.shinaoka:matrix.org"));
-    const room = qaSendSmokeTargetRoom(started, "@hiroshi.shinaoka:matrix.org");
+    const started = await commandSnapshot(api, api.startDirectMessage("@approved-self-dm:example.invalid"));
+    const room = qaSendSmokeTargetRoom(started, "@approved-self-dm:example.invalid");
     expect(room).not.toBeNull();
     const encryptedSnapshot = {
       ...started,
@@ -67,7 +67,7 @@ describe("qaSendSmoke", () => {
 
     const tokens = qaSendSmokeTargetDiagnosticTokens(
       encryptedSnapshot,
-      "@hiroshi.shinaoka:matrix.org"
+      "@approved-self-dm:example.invalid"
     );
 
     expect(tokens).toEqual(["target_dm=encrypted", "target_selected=true", "target_members=2"]);

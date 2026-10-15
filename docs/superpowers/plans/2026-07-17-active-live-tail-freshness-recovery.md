@@ -41,7 +41,7 @@
 
 ### Task 1: SDK authoritative live-tail snapshot and commit
 
-**Worktree:** `/Users/hiroshi/projects/Element-dev/matrix-desktop/.worktrees/matrix-sdk-room-absent-fence`
+**Worktree:** `<repo>/.worktrees/matrix-sdk-room-absent-fence`
 
 **Files:**
 - Create: `crates/matrix-sdk/src/event_cache/caches/room/live_tail.rs`
@@ -223,7 +223,7 @@ Record the resulting SDK commit SHA; Task 2 pins exactly that SHA.
 
 ### Task 2: Koushi SDK privacy adapter and SDK pin
 
-**Worktree:** `/Users/hiroshi/projects/Element-dev/matrix-desktop/.worktrees/issue-275-room-absent-recovery`
+**Worktree:** `<repo>/.worktrees/issue-275-room-absent-recovery`
 
 **Files:**
 - Modify: `vendor/matrix-rust-sdk`
@@ -639,7 +639,7 @@ git commit -m "test(core): cover stale active live-tail recovery"
 
 - [ ] **Step 1: Run complete SDK verification**
 
-In `/Users/hiroshi/projects/Element-dev/matrix-desktop/.worktrees/matrix-sdk-room-absent-fence`:
+In `<repo>/.worktrees/matrix-sdk-room-absent-fence`:
 
 ```bash
 cargo fmt --all -- --check
@@ -651,7 +651,7 @@ Expected: all event-cache unit and integration tests pass.
 
 - [ ] **Step 2: Run complete superproject verification**
 
-In `/Users/hiroshi/projects/Element-dev/matrix-desktop/.worktrees/issue-275-room-absent-recovery`:
+In `<repo>/.worktrees/issue-275-room-absent-recovery`:
 
 ```bash
 cargo fmt --all -- --check

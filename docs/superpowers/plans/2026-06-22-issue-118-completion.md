@@ -654,7 +654,7 @@ claude -p --permission-mode dontAsk --effort high \
 
 Fix every P1/P2 finding or document why it is not applicable with code evidence.
 
-Attempted with `/Users/hiroshi/.local/bin/claude -p --permission-mode dontAsk --effort high`, but the CLI produced no output and was terminated by the 120s guard. The same no-output timeout occurred during Task 6, Task 7, and Task 8 design/implementation reviews, so no Claude findings were available to apply.
+Attempted with `<home>/.local/bin/claude -p --permission-mode dontAsk --effort high`, but the CLI produced no output and was terminated by the 120s guard. The same no-output timeout occurred during Task 6, Task 7, and Task 8 design/implementation reviews, so no Claude findings were available to apply.
 
 - [x] **Step 4: Update GitHub issues**
 

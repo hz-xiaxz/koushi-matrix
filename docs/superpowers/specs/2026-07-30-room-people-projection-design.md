@@ -213,7 +213,7 @@ Ranking is deterministic:
 4. existing Rust-owned collation/display order;
 5. user ID as the final stable identity tie-breaker.
 
-This preserves matches such as `Hiroshi Shinaoka` by either name component and
+This preserves matches such as `Synthetic Member` by either name component and
 Japanese full names by surname or given-name substring regardless of display
 order. A strong textual match never makes a non-member eligible.
 

@@ -1079,11 +1079,11 @@ describe("TimelineView", () => {
           fully_read_event_id: null,
           focused_receipts_by_event: {},
           thread_receipts_by_event: {},
-          typing_user_ids: ["@hironeishida:matrix.org"],
+          typing_user_ids: ["@member-three:example.invalid"],
           typing_users: [
             {
-              user_id: "@hironeishida:matrix.org",
-              display_label: "Hirone Ishida"
+              user_id: "@member-three:example.invalid",
+              display_label: "Member 3"
             }
           ]
         }
@@ -1099,11 +1099,11 @@ describe("TimelineView", () => {
         onReply={vi.fn()}
         liveSignals={liveSignals}
         profileUsers={{
-          "@hironeishida:matrix.org": {
-            user_id: "@hironeishida:matrix.org",
-            display_name: "Hirone Ishida",
-            display_label: "Hirone Ishida",
-            original_display_label: "Hirone Ishida",
+          "@member-three:example.invalid": {
+            user_id: "@member-three:example.invalid",
+            display_name: "Member 3",
+            display_label: "Member 3",
+            original_display_label: "Member 3",
             mention_search_terms: [],
             avatar: null
           }
@@ -1111,8 +1111,8 @@ describe("TimelineView", () => {
       />
     );
 
-    expect(screen.getByText("Hirone Ishida is typing")).toBeTruthy();
-    expect(screen.queryByText("@hironeishida:matrix.org is typing")).toBeNull();
+    expect(screen.getByText("Member 3 is typing")).toBeTruthy();
+    expect(screen.queryByText("@member-three:example.invalid is typing")).toBeNull();
   });
 
 

@@ -262,7 +262,7 @@ fn composer_core_respects_math_mode_off_for_sent_content() {
 #[test]
 fn sender_profile_projects_display_name_and_avatar_mxc() {
     let profile = TimelineDetails::Ready(Profile {
-        display_name: Some("kamohara".to_owned()),
+        display_name: Some("Member 2".to_owned()),
         display_name_ambiguous: false,
         avatar_url: Some(matrix_sdk::ruma::OwnedMxcUri::from(
             "mxc://matrix.org/avatar".to_owned(),
@@ -271,7 +271,7 @@ fn sender_profile_projects_display_name_and_avatar_mxc() {
 
     assert_eq!(
         timeline_sender_label_from_profile(&profile),
-        Some("kamohara".to_owned())
+        Some("Member 2".to_owned())
     );
     let avatar = timeline_sender_avatar_from_profile(&profile).expect("avatar");
     assert_eq!(avatar.mxc_uri, "mxc://matrix.org/avatar");

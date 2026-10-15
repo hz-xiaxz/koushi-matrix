@@ -66,7 +66,7 @@ the fallback.
 ## Preservation comparison
 
 The comparison source was the untouched dirty timeline reference at
-`/Users/hiroshi/projects/Element-dev/matrix-desktop/crates/koushi-core/src/timeline.rs`.
+`crates/koushi-core/src/timeline.rs`.
 Comparing it with base `2b7eef8` identified 139 unique non-empty pre-existing
 added lines. All 139 lines remain present in the current worktree after the
 Task 3 changes (`missing_from_current=0`). The latency functions/tokens

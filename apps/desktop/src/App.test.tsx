@@ -145,13 +145,13 @@ describe("ContextualRightPanel", () => {
     const markup = renderToStaticMarkup(
       <PersistentAccountShell
         accountTabs={{
-          selectedTabId: "account:@hiroshi:matrix.org",
+          selectedTabId: "account:@member-one:example.invalid",
           tabs: [
             {
-              id: "account:@hiroshi:matrix.org",
-              accountKey: "@hiroshi:matrix.org",
+              id: "account:@member-one:example.invalid",
+              accountKey: "@member-one:example.invalid",
               homeserver: "https://matrix.org",
-              displayName: "Hiroshi",
+              displayName: "Member 1",
               avatarSourceRef: null,
               status: "ready",
               unreadCount: 3
@@ -168,7 +168,7 @@ describe("ContextualRightPanel", () => {
           ],
           badgeCount: 3
         }}
-        selectedAccountTabId="account:@hiroshi:matrix.org"
+        selectedAccountTabId="account:@member-one:example.invalid"
         onSelectAccountTab={() => undefined}
         onAddAccountTab={() => undefined}
         onRemoveSignedOutAccountTab={() => undefined}
@@ -180,7 +180,7 @@ describe("ContextualRightPanel", () => {
     );
 
     expect(markup).toContain("AuthScreen");
-    expect(markup).toContain('aria-label="Hiroshi: Ready"');
+    expect(markup).toContain('aria-label="Member 1: Ready"');
     expect(markup).toContain('aria-label="Lab: Needs verification"');
     expect(markup).toContain('aria-label="Add account"');
     expect(markup).toContain('aria-label="App Settings"');
@@ -2440,8 +2440,8 @@ describe("Timeline item row rendering", () => {
         item={
           {
             id: { Event: { event_id: "$avatar:example.invalid" } },
-            sender: "@kamohara:matrix.org",
-            sender_label: "kamohara",
+            sender: "@member-two:example.invalid",
+            sender_label: "Member 2",
             sender_avatar: {
               mxc_uri: "mxc://matrix.org/avatar",
               thumbnail: {
