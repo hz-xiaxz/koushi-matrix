@@ -1560,14 +1560,15 @@ every Matrix client on the account, so they are a separate Rust slice,
 `AppState.account_notifications`, never folded into `SettingsValues`. The
 device-local app switch (`desktop_notifications`) gates only this device's
 banners; server email delivery is a `kind: email` pusher and is independent of it.
-The device-local notification delivery (#1427) is a second, app-scoped path: it
-delivers through sinks the user configures (the Resend API and a generic SMTP relay,
-including the iCloud, Gmail and QQ Mail presets), reads the same unread/mention
-projection as the badge after a configurable dwell, keeps every sink secret in the
-credential store and never in `SettingsValues`, and is the default implementation of
-email notification (state-machine.md, "Local Notification Delivery"). A non-mail sink
-such as a WeCom group-robot webhook is what the sink boundary is shaped for, but none
-is implemented yet, so no screen offers one.
+The device-local notification delivery (#1427, #1460) is a second, app-scoped
+route, "Sent from this device": a list of destinations the user configures (the
+Resend API, a generic SMTP relay including the iCloud, Gmail and QQ Mail presets,
+and WeChat through ServerChan Turbo), each with its own targets, content mode and
+consent, and timing, and no enable switch. It reads the same unread/mention
+projection as the badge after each destination's dwell, sends only while the app
+runs, keeps every sink secret in the credential store and never in `SettingsValues`
+(state-machine.md, "Local Notification Delivery"). Settings present three routes:
+OS notifications, Sent from this device, and Homeserver notifications.
 The four ON/OFF categories are projections of standard predefined push rules
 read from `GET /pushrules/`; email targets are validated email 3PIDs plus
 `GET /pushers`. The AccountActor owns every read and write through
