@@ -2,7 +2,12 @@ import { afterEach, describe, expect, test } from "vitest";
 import { setActiveLocaleProfile } from "../i18n/messages";
 import { selectForwardDestinations } from "../domain/appStore";
 import type { DesktopSnapshot } from "../domain/types";
-import { forwardDestinationsFromSnapshot, roomDisplayLabel, roomListItemLabel } from "./uiShared";
+import {
+  cappedRoomLabel,
+  forwardDestinationsFromSnapshot,
+  roomDisplayLabel,
+  roomListItemLabel
+} from "./uiShared";
 
 // #1050: Rust marks the SDK's calculated empty-room name structurally; the GUI
 // renders catalog text for it and keeps every other label as caller data.
@@ -46,6 +51,21 @@ describe("roomDisplayLabel", () => {
     setActiveLocaleProfile("ja", "none");
     expect(forwardDestinationsFromSnapshot(snapshot)[0]?.display_name).toBe("空のルーム");
     expect(selectForwardDestinations(store)[0]?.display_name).toBe("空のルーム");
+  });
+
+  // #1404: a room name past WebKit's 10,240-character `text-overflow: ellipsis`
+  // cutoff must still render a name, so the shared helpers cap caller data.
+  test("caps an over-long room label so a single-line surface still shows a name", () => {
+    const longName = "long-".repeat(2100);
+    expect(longName.length).toBeGreaterThan(10_240);
+
+    const capped = roomDisplayLabel({ display_label: longName, display_label_placeholder: null });
+    expect(capped).toHaveLength(512);
+    expect(capped.endsWith("…")).toBe(true);
+    expect(capped.trim()).not.toBe("");
+    expect(roomListItemLabel({ display_name: longName })).toBe(capped);
+    expect(cappedRoomLabel(longName)).toBe(capped);
+    expect(cappedRoomLabel("Ops")).toBe("Ops");
   });
 
   test("labels sidebar rows from their mirrored placeholder", () => {

@@ -11,6 +11,7 @@ import { useEffect, useState } from "react";
 import { t } from "../i18n/messages";
 import type { SpaceAddRoomCandidate, SpaceAddRoomsModel } from "../domain/types";
 import { operationFailureLabel } from "../app/uiShared";
+import { cappedRoomLabel } from "../domain/roomDisplayLabel";
 import { ImeTextField } from "./ImeTextControl";
 import { ModalDialog } from "./ModalDialog";
 
@@ -107,7 +108,8 @@ function SpaceAddRoomRow({
   disabled: boolean;
   onAdd: () => void;
 }) {
-  const roomName = candidate.display_name;
+  // #1404: the row is single-line, so the label is capped before CSS ellipsis.
+  const roomName = cappedRoomLabel(candidate.display_name);
   const status = candidate.status;
   return (
     <li className="space-add-room" data-status={status.kind}>

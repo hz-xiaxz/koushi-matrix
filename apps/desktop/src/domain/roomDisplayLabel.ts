@@ -7,6 +7,26 @@ import type {
   SpaceChildSummary
 } from "./types";
 
+/**
+ * Longest room label a single-line surface may render.
+ *
+ * `m.room.name` has no length limit, and WebKit's `text-overflow: ellipsis`
+ * draws nothing but the ellipsis once the text passes 10,240 characters
+ * (#1404) — so anyone who can rename a room decides whether the sidebar, the
+ * room header and the room pickers can show that room at all. A few hundred
+ * characters is far more than any of those surfaces can display, and the full
+ * name stays available in Room Info's own name field.
+ */
+const MAX_ROOM_LABEL_CHARS = 512;
+
+/** Cap a caller-data room label for a single-line surface (#1404). */
+export function cappedRoomLabel(label: string): string {
+  const characters = [...label];
+  return characters.length > MAX_ROOM_LABEL_CHARS
+    ? `${characters.slice(0, MAX_ROOM_LABEL_CHARS - 1).join("")}…`
+    : label;
+}
+
 function roomNamePlaceholderText(placeholder: RoomNamePlaceholder): string {
   switch (placeholder.kind) {
     case "empty":
@@ -26,7 +46,7 @@ export function roomDisplayLabel(
 ): string {
   return room.display_label_placeholder
     ? roomNamePlaceholderText(room.display_label_placeholder)
-    : room.display_label;
+    : cappedRoomLabel(room.display_label);
 }
 
 /** `roomDisplayLabel` for a Rust sidebar row. */
@@ -35,7 +55,7 @@ export function roomListItemLabel(
 ): string {
   return room.display_name_placeholder
     ? roomNamePlaceholderText(room.display_name_placeholder)
-    : room.display_name;
+    : cappedRoomLabel(room.display_name);
 }
 
 /** The localized people-facing name shown for an invite preview. */
@@ -44,7 +64,7 @@ export function invitePreviewLabel(
 ): string {
   return invite.display_name_placeholder
     ? roomNamePlaceholderText(invite.display_name_placeholder)
-    : invite.display_name;
+    : cappedRoomLabel(invite.display_name);
 }
 
 /** `roomDisplayLabel` for a Space child the account has not joined (#1070). */
@@ -53,5 +73,5 @@ export function spaceChildLabel(
 ): string {
   return child.display_name_placeholder
     ? roomNamePlaceholderText(child.display_name_placeholder)
-    : child.display_name;
+    : cappedRoomLabel(child.display_name);
 }
