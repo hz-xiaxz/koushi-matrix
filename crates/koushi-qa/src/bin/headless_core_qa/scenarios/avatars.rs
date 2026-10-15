@@ -275,8 +275,8 @@ async fn run_window(
                             .resource_content(revision, source_ref)
                             .map_err(|_| "avatar bytes rejected".to_owned())?
                             .ok_or("avatar bytes missing")?;
-                        if !bytes.bytes.starts_with(&[137, 80, 78, 71, 13, 10, 26, 10]) {
-                            return Err("avatar PNG invalid".to_owned());
+                        if !is_re_encoded_avatar_webp(&bytes.bytes) {
+                            return Err("avatar bytes are not re-encoded WebP (#1396)".to_owned());
                         }
                         ready += 1;
                     }
@@ -507,4 +507,12 @@ async fn next_window(
     })
     .await
     .map_err(|_| format!("avatar model timed out observed_total={observed_total}"))?
+}
+
+/// The avatar cache retains only re-encoded output (#1396): every decodable
+/// source, server thumbnail included, is re-encoded to WebP before it is
+/// stored, so a `Ready` avatar's bytes are not the uploaded PNG. Only sources
+/// that cannot be decoded (GIF, animated WebP/PNG) pass through unchanged.
+fn is_re_encoded_avatar_webp(bytes: &[u8]) -> bool {
+    bytes.len() >= 12 && &bytes[..4] == b"RIFF" && &bytes[8..12] == b"WEBP"
 }
