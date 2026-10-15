@@ -1,45 +1,54 @@
-//! #1427: device-local notification delivery, proved end to end against a
-//! disposable local homeserver and a loopback stand-in for the provider.
+//! #1427, #1460: device-local notification delivery, proved end to end against a
+//! disposable local homeserver and loopback stand-ins for the providers.
 //!
 //! User A is the device under test; user B is the peer that produces the
-//! attention. A configures exactly one Resend sink whose endpoint is a stub
+//! attention. A configures one Resend destination whose endpoint is a stub
 //! listener this lane owns on `127.0.0.1`, writes the sink credential through the
-//! app's own typed command, and never enables the channel until the phases that
-//! assert it. The stub records only what the lane must assert: whether the
-//! request carried the expected bearer, the idempotency key, and the request body.
-//! It compares the bearer against the expected value without ever keeping it, so
-//! the lane cannot leak the credential into its own artifacts.
+//! app's own typed command, and selects no target for it until the phases that
+//! assert delivery. There is no channel switch (#1460): a destination with every
+//! category off and no watch sends nothing. The stub records only what the lane
+//! must assert: whether the request carried the expected bearer or the expected
+//! SendKey path, the idempotency key, and the request body. It compares the
+//! credential against the expected value without ever keeping it, so the lane
+//! cannot leak the credential into its own artifacts.
 //!
 //! Every assertion is about what left the device and when:
 //!
-//! 1. the channel off produces no request at all, however long the room stays
-//!    unread;
-//! 2. with the channel on and a one second dwell, a direct message produces no
+//! 1. a destination with no target produces no request at all, however long the
+//!    room stays unread;
+//! 2. with its categories on and a one second dwell, a direct message produces no
 //!    request before the dwell and exactly one after, addressed to this lane's own
 //!    stub, authorized by the sink credential, naming the room by the label the
 //!    badge shows, and carrying none of the room id, the event id, the sender, or
 //!    the message text;
 //! 3. a read that lands inside the dwell cancels the delivery, and the same room
 //!    made unread again delivers after a fresh dwell;
-//! 4. a second delivery inside `min_interval_secs` is held, and is released - not
-//!    dropped - when the window reopens;
-//! 5. a room on the watch list delivers while its category is off, and a room that
-//!    joins a watched Space after the list was written delivers too;
+//! 4. a second delivery inside the destination's `min_interval_secs` is held, and
+//!    is released - not dropped - when the window reopens;
+//! 5. a room on the destination's watch list delivers while its category is off,
+//!    and a room that joins a watched Space after the list was written delivers too;
 //! 6. the sink secret reaches neither the settings snapshot, nor the diagnostics
 //!    stream, nor this lane's own captured requests;
-//! 7. the plaintext prefix of the room's newest message reaches the body only with
-//!    the option on and a consent that covers this sink, destination, and endpoint;
-//!    with no consent, with the option off, and when the newest event yields no
-//!    readable text, the body carries none of it and the delivery still succeeds, so
-//!    a missing prefix is never a failure;
-//! 8. changing the destination a consent was given for, or the endpoint, drops the
-//!    consent, so the next delivery carries no message text;
+//! 7. the start of the room's newest message reaches the body, as a quoted line
+//!    under the room's own line, only with the `Prefix` content mode and a consent
+//!    bound to this sink kind, endpoint, and recipient; with no consent, with names
+//!    only, and when the newest event yields no readable text, the body carries none
+//!    of it and the delivery still succeeds, so missing text is never a failure;
+//! 8. changing the recipient a consent was given for, or the endpoint, makes the app
+//!    clear the stored consent and return the destination to names only, so the next
+//!    delivery carries no message text;
 //! 9. that message text reaches no serialized app-state snapshot, no settings file,
-//!    no diagnostics stream, and no file this lane wrote.
+//!    no diagnostics stream, and no file this lane wrote;
+//! 10. a second destination of kind ServerChan, pointed at its own loopback stub,
+//!     takes a synthetic SendKey through the same typed command, loses a consent when
+//!     the SendKey is saved again (a new recipient), and sends exactly one accepted
+//!     request whose path carries the SendKey, whose form body carries no message
+//!     text, and whose key reaches no snapshot, diagnostics stream, or capture.
 //!
 //! Private data: the lane prints tokens and counts only. Room ids, event ids,
-//! account ids, room labels, and message bodies stay inside the process, and the
-//! leak assertions are evaluated here so only a boolean reaches the transcript.
+//! account ids, room labels, message bodies, and credentials stay inside the
+//! process, and the leak assertions are evaluated here so only a boolean reaches
+//! the transcript.
 
 use std::io::{BufRead, BufReader, Read, Write};
 use std::net::{Shutdown, TcpListener, TcpStream};
@@ -49,9 +58,10 @@ use std::thread::{self, JoinHandle};
 use std::time::{Duration, Instant};
 
 use koushi_state::{
-    AppState, NotificationDeliveryPrefixConsent, NotificationDeliverySettings,
-    NotificationDeliveryTarget, NotificationSinkConfig, NotificationSinkSettings, SettingsPatch,
-    SettingsPatchScope, room_activity_unread_count,
+    AppState, NotificationDeliveryContent, NotificationDeliveryContentConsent,
+    NotificationDeliveryOutcomeState, NotificationDeliverySettings, NotificationDeliveryTarget,
+    NotificationDeliveryTargets, NotificationDeliveryTiming, NotificationSinkConfig,
+    NotificationSinkSettings, SettingsPatch, SettingsPatchScope, room_activity_unread_count,
 };
 
 use super::cleanup::cleanup_logged_in_runtime;
@@ -75,9 +85,13 @@ use super::{
     TimelineKey, TimelineKind, UploadMediaKind, UploadMediaRequest, build_formatted_message_draft,
 };
 
-/// The one sink this lane configures. Sink ids are the credential store's own
-/// alphabet, so the id can also be a file name component inside the QA store.
+/// The Resend destination every phase but the last configures. Sink ids are the
+/// credential store's own alphabet, so the id can also be a file name component inside
+/// the QA store.
 const QA_DELIVERY_SINK_ID: &str = "qa-stub-sink";
+
+/// The ServerChan destination the last phase adds next to the Resend one.
+const QA_DELIVERY_SERVERCHAN_SINK_ID: &str = "qa-serverchan-sink";
 
 /// The path the stub answers on. The product posts to whatever endpoint the
 /// sink holds, so the path only has to be recognizable in a capture.
@@ -126,9 +140,13 @@ const QA_DELIVERY_PREFIX_MARKER: &str = "qa-notification-prefix-alpine";
 /// read any message body rather than only a readable text message.
 const QA_DELIVERY_PREFIX_MEDIA_CAPTION: &str = "qa-notification-prefix-nontext";
 
-/// Characters of the newest message the prefix may render, far more than the marker, so
-/// an option that is on renders all of it and an option that is off renders none.
-const QA_DELIVERY_PREFIX_CHARS: u32 = 80;
+/// Grapheme clusters of the newest message the `Prefix` mode may render, far more than
+/// the marker, so a consented prefix renders all of it and names only renders none.
+const QA_DELIVERY_PREFIX_GRAPHEMES: u32 = 80;
+/// The content mode the prefix phases choose.
+const QA_DELIVERY_PREFIX: NotificationDeliveryContent = NotificationDeliveryContent::Prefix {
+    graphemes: QA_DELIVERY_PREFIX_GRAPHEMES,
+};
 
 /// A second synthetic mailbox, so changing where a consented sink delivers is a change
 /// the lane owns and never a real address.
@@ -138,6 +156,9 @@ const QA_DELIVERY_PREFIX_OTHER_DESTINATION: &str = "other-recipient@example.inva
 /// whose tokens are the lane's evidence.
 pub(super) async fn run_notification_delivery_scenario(config: &QaConfig) -> Result<(), String> {
     let secret = format!("qa-notification-delivery-{}", std::process::id());
+    // A ServerChan Turbo SendKey is `SCT` and letters and digits; this one is synthetic
+    // and names no WeChat account.
+    let sendkey = format!("SCTqa{}", std::process::id());
     let stub = QaDeliveryStub::start(&secret)?;
     let user_a = format!("@{}:{}", config.user_a, config.server_name);
     let user_b = format!("@{}:{}", config.user_b, config.server_name);
@@ -182,6 +203,7 @@ pub(super) async fn run_notification_delivery_scenario(config: &QaConfig) -> Res
         stub: &stub,
         sink_id: QA_DELIVERY_SINK_ID,
         secret: &secret,
+        sendkey: &sendkey,
         user_a: &user_a,
         user_b: &user_b,
         conn_a: &mut conn_a,
@@ -219,6 +241,8 @@ struct QaDeliveryFlow<'a> {
     stub: &'a QaDeliveryStub,
     sink_id: &'a str,
     secret: &'a str,
+    /// The synthetic ServerChan SendKey the last phase stores.
+    sendkey: &'a str,
     user_a: &'a str,
     user_b: &'a str,
     conn_a: &'a mut CoreConnection,
@@ -270,11 +294,15 @@ impl QaDeliveryFlow<'_> {
         self.report_unfocused().await?;
         println!("notification_delivery_unfocused=ok");
 
-        // Install the sink with the channel off, then write its credential through
+        // Install the destination with no target, then write its credential through
         // the app's own command. Both land before any phase that asserts delivery,
         // so a missing request is never explained by an unconfigured sink.
-        self.settings.dwell_secs = QA_DELIVERY_DWELL_SECS;
-        self.settings.min_interval_secs = 0;
+        {
+            let sink = self.primary_sink_mut()?;
+            sink.targets = NotificationDeliveryTargets::none();
+            sink.timing.dwell_secs = QA_DELIVERY_DWELL_SECS;
+            sink.timing.min_interval_secs = 0;
+        }
         self.apply_settings("notification delivery install sink")
             .await?;
         self.store_secret().await?;
@@ -291,6 +319,7 @@ impl QaDeliveryFlow<'_> {
         self.assert_secret_hygiene().await?;
         self.assert_secret_binding(&dm_room_id, &dm_key_b).await?;
         self.assert_prefix_text(&dm_room_id, &dm_key_b).await?;
+        self.assert_serverchan(&dm_room_id, &dm_key_b).await?;
 
         println!("notification_delivery=ok");
         Ok(())
@@ -321,15 +350,7 @@ impl QaDeliveryFlow<'_> {
     /// Apply the whole delivery block and wait until the snapshot holds it, so a
     /// phase never races the settings it is about to assert against.
     async fn apply_settings(&mut self, label: &str) -> Result<(), String> {
-        // `UpdateSettings` replaces the whole delivery block, and `secret_binding` is
-        // Rust's own field rather than one the lane may choose, so carry the current
-        // value through instead of clearing it with the patch.
-        let current = self.conn_a.snapshot().settings.values.delivery.clone();
-        for sink in &mut self.settings.sinks {
-            sink.secret_binding = current
-                .sink(&sink.id)
-                .and_then(|existing| existing.secret_binding.clone());
-        }
+        self.sync_bindings();
         let request_id = self.conn_a.next_request_id();
         self.conn_a
             .command(CoreCommand::App(AppCommand::UpdateSettings {
@@ -350,40 +371,60 @@ impl QaDeliveryFlow<'_> {
         .await
     }
 
-    /// Write the sink credential and wait for the projection to read the sink as
-    /// configured, which is also the lane's evidence that the store took it.
+    /// Write the Resend sink credential and wait for the projection to read the sink
+    /// as configured, which is also the lane's evidence that the store took it.
     async fn store_secret(&mut self) -> Result<(), String> {
+        let sink_id = self.sink_id.to_owned();
+        let secret = self.secret_value();
+        self.store_sink_secret(&sink_id, secret).await
+    }
+
+    /// Write one sink's credential through the app's typed command, and wait until the
+    /// app has bound a credential revision this write minted - not the one before it -
+    /// and the projection reads the sink as configured.
+    async fn store_sink_secret(&mut self, sink_id: &str, secret: String) -> Result<(), String> {
+        let previous = self
+            .stored_sink(sink_id)
+            .and_then(|sink| sink.secret_binding);
         let request_id = self.conn_a.next_request_id();
         self.conn_a
             .command(CoreCommand::App(
                 AppCommand::SetNotificationDeliverySecret {
                     request_id,
-                    sink_id: self.sink_id.to_owned(),
-                    secret: self.secret_value(),
+                    sink_id: sink_id.to_owned(),
+                    secret,
                 },
             ))
             .await
             .map_err(|error| format!("notification delivery: store sink secret failed: {error}"))?;
-        let sink_id = self.sink_id.to_owned();
+        let sink_id = sink_id.to_owned();
         let conn = &mut *self.conn_a;
         wait_for_condition(
             conn,
             "notification delivery sink configured",
             EVENT_TIMEOUT,
             move |state| {
-                state
+                let rebound = state
+                    .settings
+                    .values
+                    .delivery
+                    .sink(&sink_id)
+                    .and_then(|sink| sink.secret_binding.clone())
+                    .is_some_and(|binding| previous.as_deref() != Some(binding.as_str()));
+                let configured = state
                     .notification_delivery
                     .sinks
                     .iter()
-                    .any(|sink| sink.sink_id == sink_id && sink.secret_configured)
-                    .then_some(())
+                    .any(|sink| sink.sink_id == sink_id && sink.secret_configured);
+                (rebound && configured).then_some(())
             },
         )
         .await
     }
 
-    /// Assertion 1: with the channel off, an unread direct message produces no
-    /// request at all, however long the lane waits.
+    /// Assertion 1: with no target selected, an unread direct message produces no
+    /// request at all, however long the lane waits. The evidence token keeps its
+    /// pre-#1460 name: "delivery off" is now a destination that sends for nothing.
     async fn assert_channel_off(
         &mut self,
         room_id: &str,
@@ -403,7 +444,7 @@ impl QaDeliveryFlow<'_> {
         settle(self.conn_a, QA_DELIVERY_ABSENCE_WINDOW * 8).await;
         if self.stub.count() != 0 {
             return Err(format!(
-                "notification delivery off: {} request(s) left the device while the channel was off",
+                "notification delivery off: {} request(s) left the device while the destination had no target",
                 self.stub.count()
             ));
         }
@@ -428,10 +469,13 @@ impl QaDeliveryFlow<'_> {
         room_key_b: &TimelineKey,
         label: &str,
     ) -> Result<(), String> {
-        self.settings.enabled = true;
-        self.settings.dwell_secs = QA_DELIVERY_DWELL_SECS;
-        self.settings.min_interval_secs = 0;
-        self.apply_settings("notification delivery enable channel")
+        {
+            let sink = self.primary_sink_mut()?;
+            sink.targets = NotificationDeliveryTargets::default();
+            sink.timing.dwell_secs = QA_DELIVERY_DWELL_SECS;
+            sink.timing.min_interval_secs = 0;
+        }
+        self.apply_settings("notification delivery select targets")
             .await?;
 
         // The room is read, so the channel has nothing to deliver and the message
@@ -532,7 +576,7 @@ impl QaDeliveryFlow<'_> {
             "notification delivery cancelled: no delivered event to read".to_owned()
         })?;
         self.mark_room_read(room_id, &delivered_event).await?;
-        self.settings.dwell_secs = QA_DELIVERY_LONG_DWELL_SECS;
+        self.primary_sink_mut()?.timing.dwell_secs = QA_DELIVERY_LONG_DWELL_SECS;
         self.apply_settings("notification delivery long dwell")
             .await?;
         let requests_before = self.stub.count();
@@ -615,8 +659,11 @@ impl QaDeliveryFlow<'_> {
             "notification delivery min interval: no delivered event to read".to_owned()
         })?;
         self.mark_room_read(room_id, &delivered_event).await?;
-        self.settings.dwell_secs = QA_DELIVERY_DWELL_SECS;
-        self.settings.min_interval_secs = QA_DELIVERY_MIN_INTERVAL_SECS;
+        {
+            let timing = &mut self.primary_sink_mut()?.timing;
+            timing.dwell_secs = QA_DELIVERY_DWELL_SECS;
+            timing.min_interval_secs = QA_DELIVERY_MIN_INTERVAL_SECS;
+        }
         self.apply_settings("notification delivery coalesce window")
             .await?;
         let requests_before = self.stub.count();
@@ -637,7 +684,7 @@ impl QaDeliveryFlow<'_> {
             ));
         }
 
-        self.settings.min_interval_secs = 0;
+        self.primary_sink_mut()?.timing.min_interval_secs = 0;
         self.apply_settings("notification delivery reopen window")
             .await?;
         self.wait_requests(
@@ -668,11 +715,14 @@ impl QaDeliveryFlow<'_> {
     /// Space after the list was written.
     async fn assert_watch_list(&mut self) -> Result<(), String> {
         // Every category trigger off: from here only the watch list can qualify.
-        self.settings.direct_messages = false;
-        self.settings.mentions = false;
-        self.settings.keywords = false;
-        self.settings.dwell_secs = QA_DELIVERY_DWELL_SECS;
-        self.settings.min_interval_secs = 0;
+        {
+            let sink = self.primary_sink_mut()?;
+            sink.targets.direct_messages = false;
+            sink.targets.mentions = false;
+            sink.targets.keywords = false;
+            sink.timing.dwell_secs = QA_DELIVERY_DWELL_SECS;
+            sink.timing.min_interval_secs = 0;
+        }
 
         let watched_room_id = create_room_for_qa(
             self.conn_a,
@@ -720,7 +770,7 @@ impl QaDeliveryFlow<'_> {
         )
         .await?;
 
-        self.settings.watched = vec![NotificationDeliveryTarget::Room {
+        self.primary_sink_mut()?.targets.watched = vec![NotificationDeliveryTarget::Room {
             room_id: watched_room_id.clone(),
         }];
         self.apply_settings("notification delivery watch room")
@@ -777,7 +827,7 @@ impl QaDeliveryFlow<'_> {
             "notification delivery watched space list",
         )
         .await?;
-        self.settings.watched = vec![NotificationDeliveryTarget::Space {
+        self.primary_sink_mut()?.targets.watched = vec![NotificationDeliveryTarget::Space {
             space_id: space_id.clone(),
         }];
         self.apply_settings("notification delivery watch space")
@@ -939,18 +989,16 @@ impl QaDeliveryFlow<'_> {
             );
         }
         let moved = QaDeliveryStub::start(self.secret)?;
-        for sink in &mut self.settings.sinks {
-            if let NotificationSinkConfig::Resend { endpoint } = &mut sink.config {
-                *endpoint = moved.endpoint().to_owned();
-            }
-        }
         // Put the categories back and retire the watch list, so the fresh message
         // below qualifies on its own merits. Only the sink's configuration can then
         // keep the credential on this device.
-        self.settings.direct_messages = true;
-        self.settings.mentions = true;
-        self.settings.keywords = true;
-        self.settings.watched.clear();
+        {
+            let sink = self.primary_sink_mut()?;
+            if let NotificationSinkConfig::Resend { endpoint } = &mut sink.config {
+                *endpoint = moved.endpoint().to_owned();
+            }
+            sink.targets = NotificationDeliveryTargets::default();
+        }
         self.apply_settings("notification delivery change endpoint")
             .await?;
 
@@ -1040,28 +1088,25 @@ impl QaDeliveryFlow<'_> {
         Ok(())
     }
 
-    /// Put the sink back in service on this lane's own stub, with the channel off.
+    /// Put the sink back in service on this lane's own stub, with no target selected.
     ///
     /// The binding phase above moved the endpoint and retired the credential, so the
     /// prefix assertions re-enter it exactly as a user would: point the sink at this
-    /// lane's stub again and save the credential. The channel stays off while the room
+    /// lane's stub again and save the credential. The sink selects nothing while the room
     /// that phase left unread is read, so this phase's first delivery is armed by its own
     /// message and never by that leftover.
     async fn restore_prefix_sink(&mut self, room_id: &str) -> Result<(), String> {
-        self.settings.enabled = false;
-        self.settings.direct_messages = true;
-        self.settings.mentions = false;
-        self.settings.keywords = false;
-        self.settings.watched.clear();
-        self.settings.dwell_secs = QA_DELIVERY_DWELL_SECS;
-        self.settings.min_interval_secs = 0;
-        self.settings.prefix_chars = 0;
-        self.settings.prefix_consent = None;
         let endpoint = self.stub.endpoint().to_owned();
-        if let NotificationSinkConfig::Resend { endpoint: current } =
-            &mut self.primary_sink_mut()?.config
         {
-            *current = endpoint;
+            let sink = self.primary_sink_mut()?;
+            sink.targets = NotificationDeliveryTargets::none();
+            sink.timing.dwell_secs = QA_DELIVERY_DWELL_SECS;
+            sink.timing.min_interval_secs = 0;
+            sink.content = NotificationDeliveryContent::NamesOnly;
+            sink.content_consent = None;
+            if let NotificationSinkConfig::Resend { endpoint: current } = &mut sink.config {
+                *current = endpoint;
+            }
         }
         self.apply_settings("notification delivery prefix restore sink")
             .await?;
@@ -1069,17 +1114,20 @@ impl QaDeliveryFlow<'_> {
         self.mark_room_read_to_latest(room_id).await
     }
 
-    /// With the option on and a consent that covers this sink, destination, and endpoint,
-    /// the delivered body leads with the room's newest message text.
+    /// With a prefix chosen and a consent that covers this sink's kind, recipient, and
+    /// endpoint, the delivered body quotes the room's newest message text under the room
+    /// line.
     async fn assert_prefix_rendered(
         &mut self,
         room_id: &str,
         room_key_b: &TimelineKey,
     ) -> Result<(), String> {
         let requests_before = self.stub.count();
-        self.settings.enabled = true;
-        self.settings.prefix_chars = QA_DELIVERY_PREFIX_CHARS;
-        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        self.primary_sink_mut()?.targets = NotificationDeliveryTargets {
+            direct_messages: true,
+            ..NotificationDeliveryTargets::none()
+        };
+        self.set_primary_content(QA_DELIVERY_PREFIX, true)?;
         self.apply_settings("notification delivery prefix consent")
             .await?;
         if self.stored_prefix_consent().is_none() {
@@ -1097,7 +1145,7 @@ impl QaDeliveryFlow<'_> {
             .await?;
         let request = self.request(requests_before)?;
         let label = self.room_label(room_id)?;
-        assert_prefix_leads(
+        assert_prefix_quoted(
             &request.body,
             "notification delivery prefix",
             &label,
@@ -1108,8 +1156,8 @@ impl QaDeliveryFlow<'_> {
         Ok(())
     }
 
-    /// With the option on but no consent stored, the delivery still succeeds and carries
-    /// none of the message text.
+    /// With a prefix chosen but no consent stored, the delivery still succeeds and carries
+    /// none of the message text. The app reads the unconsented choice back as names only.
     async fn assert_prefix_without_consent(
         &mut self,
         room_id: &str,
@@ -1118,10 +1166,15 @@ impl QaDeliveryFlow<'_> {
         let label = self.room_label(room_id)?;
         self.mark_room_read_to_latest(room_id).await?;
         let requests_before = self.stub.count();
-        self.settings.prefix_chars = QA_DELIVERY_PREFIX_CHARS;
-        self.settings.prefix_consent = None;
+        self.set_primary_content(QA_DELIVERY_PREFIX, false)?;
         self.apply_settings("notification delivery prefix without consent")
             .await?;
+        if !self.stored_content_is_names_only_without_consent() {
+            return Err(
+                "notification delivery prefix no consent: an unconsented prefix did not read back as names only"
+                    .to_owned(),
+            );
+        }
 
         self.send_from_b(
             room_key_b,
@@ -1152,7 +1205,7 @@ impl QaDeliveryFlow<'_> {
         Ok(())
     }
 
-    /// With the option off, a stored consent still renders nothing, and the delivery
+    /// With names only chosen, a stored consent still renders nothing, and the delivery
     /// still succeeds.
     async fn assert_prefix_option_off(
         &mut self,
@@ -1162,13 +1215,14 @@ impl QaDeliveryFlow<'_> {
         let label = self.room_label(room_id)?;
         self.mark_room_read_to_latest(room_id).await?;
         let requests_before = self.stub.count();
-        self.settings.prefix_chars = 0;
-        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        self.set_primary_content(NotificationDeliveryContent::NamesOnly, true)?;
         self.apply_settings("notification delivery prefix option off")
             .await?;
         // The acceptance is kept: what is off is the option, not the consent.
-        let delivery = self.conn_a.snapshot().settings.values.delivery.clone();
-        if delivery.prefix_chars != 0 || delivery.prefix_consent.is_none() {
+        let stored = self.stored_sink(self.sink_id);
+        if !stored.is_some_and(|sink| {
+            sink.content == NotificationDeliveryContent::NamesOnly && sink.content_consent.is_some()
+        }) {
             return Err(
                 "notification delivery prefix option off: the option and the stored consent did not read as off-but-consented"
                     .to_owned(),
@@ -1215,8 +1269,7 @@ impl QaDeliveryFlow<'_> {
         let label = self.room_label(room_id)?;
         self.mark_room_read_to_latest(room_id).await?;
         let requests_before = self.stub.count();
-        self.settings.prefix_chars = QA_DELIVERY_PREFIX_CHARS;
-        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        self.set_primary_content(QA_DELIVERY_PREFIX, true)?;
         self.apply_settings("notification delivery prefix non-text")
             .await?;
 
@@ -1264,8 +1317,8 @@ impl QaDeliveryFlow<'_> {
         Ok(())
     }
 
-    /// Changing where a consented sink delivers drops the consent, so the next delivery
-    /// carries no message text.
+    /// Changing where a consented sink delivers drops the consent and returns the sink to
+    /// names only, so the next delivery carries no message text.
     async fn assert_prefix_consent_cleared(
         &mut self,
         room_id: &str,
@@ -1276,12 +1329,11 @@ impl QaDeliveryFlow<'_> {
         let requests_before = self.stub.count();
         // Set the option and a consent that covers the sink as it is, then change the
         // destination in the same patch: the app is the one that must drop the consent.
-        self.settings.prefix_chars = QA_DELIVERY_PREFIX_CHARS;
-        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        self.set_primary_content(QA_DELIVERY_PREFIX, true)?;
         self.primary_sink_mut()?.destination = QA_DELIVERY_PREFIX_OTHER_DESTINATION.to_owned();
         self.apply_settings("notification delivery prefix changed destination")
             .await?;
-        if self.stored_prefix_consent().is_some() {
+        if !self.stored_content_is_names_only_without_consent() {
             return Err(
                 "notification delivery prefix changed destination: the consent survived a different destination"
                     .to_owned(),
@@ -1414,17 +1466,21 @@ impl QaDeliveryFlow<'_> {
         // Bring the destination back and store a consent that covers that configuration,
         // so the endpoint change below is the one thing the next patch changes.
         self.primary_sink_mut()?.destination = destination.to_owned();
-        self.settings.prefix_chars = QA_DELIVERY_PREFIX_CHARS;
-        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        self.set_primary_content(QA_DELIVERY_PREFIX, true)?;
         self.apply_settings("notification delivery prefix restore destination")
             .await?;
-        self.settings.prefix_consent = Some(self.prefix_consent()?);
+        if self.stored_prefix_consent().is_none() {
+            return Err(
+                "notification delivery prefix restore destination: a consent matching the sink was dropped"
+                    .to_owned(),
+            );
+        }
         if let NotificationSinkConfig::Resend { endpoint } = &mut self.primary_sink_mut()?.config {
             *endpoint = moved.endpoint().to_owned();
         }
         self.apply_settings("notification delivery prefix changed endpoint")
             .await?;
-        if self.stored_prefix_consent().is_some() {
+        if !self.stored_content_is_names_only_without_consent() {
             return Err(
                 "notification delivery prefix changed endpoint: the consent survived a different endpoint"
                     .to_owned(),
@@ -1454,6 +1510,230 @@ impl QaDeliveryFlow<'_> {
             );
         }
         println!("notification_delivery_prefix_endpoint_cleared=ok");
+        Ok(())
+    }
+
+    /// The ServerChan Turbo destination (#1460), as a second sink beside the Resend one.
+    ///
+    /// The SendKey is synthetic and saved through the app's own typed command, and the
+    /// provider is a loopback stub, so nothing leaves the machine. The phase asserts
+    /// that saving a SendKey drops a text consent (the key's owner is the recipient),
+    /// that the one request it makes carries the key only in its path and sends names
+    /// and counts as a form, that the app reads the stub's answer as accepted, and that
+    /// the key reaches no serialized artifact.
+    async fn assert_serverchan(
+        &mut self,
+        room_id: &str,
+        room_key_b: &TimelineKey,
+    ) -> Result<(), String> {
+        let stub = QaDeliveryStub::start(self.sendkey)?;
+        self.mark_room_read_to_latest(room_id).await?;
+        let resend_before = self.stub.count();
+        self.primary_sink_mut()?.targets = NotificationDeliveryTargets::none();
+        self.settings.sinks.push(NotificationSinkSettings {
+            id: QA_DELIVERY_SERVERCHAN_SINK_ID.to_owned(),
+            destination: String::new(),
+            from_address: String::new(),
+            sender_name: String::new(),
+            config: NotificationSinkConfig::ServerChan {
+                endpoint: stub.endpoint().to_owned(),
+            },
+            secret_binding: None,
+            targets: NotificationDeliveryTargets {
+                direct_messages: true,
+                ..NotificationDeliveryTargets::none()
+            },
+            content: NotificationDeliveryContent::NamesOnly,
+            content_consent: None,
+            timing: NotificationDeliveryTiming {
+                dwell_secs: QA_DELIVERY_DWELL_SECS,
+                min_interval_secs: 0,
+                only_when_unfocused: true,
+            },
+        });
+        self.apply_settings("notification delivery serverchan install sink")
+            .await?;
+        self.store_sink_secret(QA_DELIVERY_SERVERCHAN_SINK_ID, self.sendkey.to_owned())
+            .await?;
+        println!("notification_delivery_serverchan_configured=ok");
+
+        // Accept text for the SendKey bound right now, then save a SendKey again. Every
+        // save mints a new credential revision, which names a different recipient, so
+        // the app must drop the consent and return the destination to names only.
+        self.set_sink_content(QA_DELIVERY_SERVERCHAN_SINK_ID, QA_DELIVERY_PREFIX, true)?;
+        self.apply_settings("notification delivery serverchan consent")
+            .await?;
+        if self
+            .stored_sink(QA_DELIVERY_SERVERCHAN_SINK_ID)
+            .and_then(|sink| sink.content_consent)
+            .is_none()
+        {
+            return Err(
+                "notification delivery serverchan: a consent matching the bound SendKey was dropped"
+                    .to_owned(),
+            );
+        }
+        self.store_sink_secret(QA_DELIVERY_SERVERCHAN_SINK_ID, self.sendkey.to_owned())
+            .await?;
+        if !self
+            .stored_sink(QA_DELIVERY_SERVERCHAN_SINK_ID)
+            .is_some_and(|sink| {
+                sink.content == NotificationDeliveryContent::NamesOnly
+                    && sink.content_consent.is_none()
+            })
+        {
+            return Err(
+                "notification delivery serverchan: saving a SendKey kept the text consent"
+                    .to_owned(),
+            );
+        }
+        // The lane's copy follows the app: names only, no consent.
+        self.set_sink_content(
+            QA_DELIVERY_SERVERCHAN_SINK_ID,
+            NotificationDeliveryContent::NamesOnly,
+            false,
+        )?;
+        println!("notification_delivery_serverchan_sendkey_drops_consent=ok");
+
+        self.send_from_b(
+            room_key_b,
+            "qa-delivery-serverchan",
+            QA_DELIVERY_PREFIX_MARKER,
+        )
+        .await?;
+        let unread = self
+            .wait_room_unread(room_id, "notification delivery serverchan unread")
+            .await?;
+        {
+            let stub = &stub;
+            let conn = &mut *self.conn_a;
+            wait_for_condition(
+                conn,
+                "notification delivery serverchan request",
+                EVENT_TIMEOUT,
+                |_| (stub.count() >= 1).then_some(()),
+            )
+            .await?;
+        }
+        let sink_id = QA_DELIVERY_SERVERCHAN_SINK_ID;
+        wait_for_condition(
+            &mut *self.conn_a,
+            "notification delivery serverchan accepted",
+            EVENT_TIMEOUT,
+            |state| {
+                state
+                    .notification_delivery
+                    .sinks
+                    .iter()
+                    .find(|sink| sink.sink_id == sink_id)
+                    .and_then(|sink| sink.last_outcome)
+                    .filter(|outcome| {
+                        matches!(outcome, NotificationDeliveryOutcomeState::Accepted { .. })
+                    })
+                    .map(|_| ())
+            },
+        )
+        .await?;
+        settle(self.conn_a, Duration::from_millis(1500)).await;
+        if stub.count() != 1 {
+            return Err(format!(
+                "notification delivery serverchan: expected 1 request at the ServerChan stub, saw {}",
+                stub.count()
+            ));
+        }
+        if self.stub.count() != resend_before {
+            return Err(
+                "notification delivery serverchan: the Resend sink sent although it selected nothing"
+                    .to_owned(),
+            );
+        }
+        let request = stub
+            .requests()
+            .into_iter()
+            .next()
+            .ok_or_else(|| "notification delivery serverchan: no request".to_owned())?;
+        if !request.path_carries_secret || !request.form_encoded || request.authorization_present {
+            return Err(
+                "notification delivery serverchan: the request was not a form POST to {endpoint}/{SendKey}.send"
+                    .to_owned(),
+            );
+        }
+        let (Some(title), Some(desp)) =
+            (request.form_title.as_deref(), request.form_desp.as_deref())
+        else {
+            return Err(
+                "notification delivery serverchan: the form carried no title or desp".to_owned(),
+            );
+        };
+        if !title.starts_with("Direct message in")
+            || !desp.contains("Direct message in")
+            || !desp.contains(&format!("{unread} unread"))
+        {
+            return Err(
+                "notification delivery serverchan: the form did not name the room kind and its unread count"
+                    .to_owned(),
+            );
+        }
+        println!("notification_delivery_serverchan_request=ok");
+
+        // Markdown escaping puts a backslash before each hyphen, so search for both
+        // spellings of the marker.
+        let escaped_marker = QA_DELIVERY_PREFIX_MARKER.replace('-', "\\-");
+        let carries_text = [title, desp, request.body.as_str()].iter().any(|field| {
+            field.contains(QA_DELIVERY_PREFIX_MARKER) || field.contains(&escaped_marker)
+        });
+        if carries_text || carries_matrix_identifier(title) || carries_matrix_identifier(desp) {
+            return Err(
+                "notification delivery serverchan: the form carried message text or a Matrix identifier without consent"
+                    .to_owned(),
+            );
+        }
+        // Positive control: the room list held the text, so the consent kept it out.
+        self.assert_room_latest_text(room_id, QA_DELIVERY_PREFIX_MARKER)?;
+        println!("notification_delivery_serverchan_no_text=ok");
+
+        self.assert_serverchan_hygiene(&request)
+    }
+
+    /// The SendKey reaches only the request path: no snapshot, settings file,
+    /// diagnostics record, captured body, or idempotency key carries it.
+    fn assert_serverchan_hygiene(&self, request: &QaDeliveryStubRequest) -> Result<(), String> {
+        let key = self.sendkey;
+        let snapshot = serde_json::to_string(&self.conn_a.snapshot()).map_err(|_| {
+            "notification delivery serverchan hygiene: the app-state snapshot is not serializable"
+                .to_owned()
+        })?;
+        let diagnostics = serde_json::to_string(&koushi_diagnostics::snapshot()).map_err(|_| {
+            "notification delivery serverchan hygiene: the diagnostics are not serializable"
+                .to_owned()
+        })?;
+        let settings_path = qa_data_dir("notification-delivery-a")
+            .join("settings")
+            .join("settings.json");
+        let settings_file = std::fs::read(&settings_path).map_err(|_| {
+            "notification delivery serverchan hygiene: the settings file was not readable"
+                .to_owned()
+        })?;
+        let leaked = snapshot.contains(key)
+            || diagnostics.contains(key)
+            || bytes_contain(&settings_file, key)
+            || request.body.contains(key)
+            || request
+                .idempotency_key
+                .as_deref()
+                .is_some_and(|value| value.contains(key))
+            || self
+                .stub
+                .requests()
+                .iter()
+                .any(|captured| captured.body.contains(key));
+        if leaked || !request.path_mentions_secret {
+            return Err(
+                "notification delivery serverchan hygiene: the SendKey reached somewhere other than the request path"
+                    .to_owned(),
+            );
+        }
+        println!("notification_delivery_serverchan_secret_hygiene=ok");
         Ok(())
     }
 
@@ -1522,28 +1802,71 @@ impl QaDeliveryFlow<'_> {
             .ok_or_else(|| "notification delivery prefix: the lane has no sink".to_owned())
     }
 
-    /// A prefix consent that covers the sink as it is configured right now, which is what
-    /// the user gives when they turn the option on. The timestamp is synthetic: this lane
-    /// asserts the binding, not the clock.
-    fn prefix_consent(&self) -> Result<NotificationDeliveryPrefixConsent, String> {
-        let sink = self.primary_sink()?;
-        Ok(NotificationDeliveryPrefixConsent {
-            sink_id: sink.id.clone(),
-            destination: sink.destination.clone(),
-            endpoint: sink.endpoint(),
-            accepted_at_ms: 0,
-        })
+    /// Choose the primary sink's content mode, with or without a consent that covers the
+    /// sink as it is configured right now - what the user gives when they accept text in
+    /// plaintext. The timestamp is synthetic: this lane asserts the binding, not the clock.
+    fn set_primary_content(
+        &mut self,
+        content: NotificationDeliveryContent,
+        consented: bool,
+    ) -> Result<(), String> {
+        let sink_id = self.sink_id;
+        self.set_sink_content(sink_id, content, consented)
     }
 
-    /// The consent the app's own state holds right now, if any.
-    fn stored_prefix_consent(&self) -> Option<NotificationDeliveryPrefixConsent> {
+    fn set_sink_content(
+        &mut self,
+        sink_id: &str,
+        content: NotificationDeliveryContent,
+        consented: bool,
+    ) -> Result<(), String> {
+        // A ServerChan consent names the bound SendKey revision, so the lane's copy must
+        // carry the binding the app stored before the consent is computed from it.
+        self.sync_bindings();
+        let sink = self
+            .settings
+            .sink_mut(sink_id)
+            .ok_or_else(|| "notification delivery: the lane has no such sink".to_owned())?;
+        sink.content = content;
+        sink.content_consent = consented.then(|| sink.consent_for_current(0));
+        Ok(())
+    }
+
+    /// Carry the app's stored `secret_binding` into the lane's copy. `UpdateSettings`
+    /// replaces the whole delivery block, and the binding is Rust's own field rather
+    /// than one the lane may choose, so a patch must carry it through, never clear it.
+    fn sync_bindings(&mut self) {
+        let current = self.conn_a.snapshot().settings.values.delivery.clone();
+        for sink in &mut self.settings.sinks {
+            sink.secret_binding = current
+                .sink(&sink.id)
+                .and_then(|existing| existing.secret_binding.clone());
+        }
+    }
+
+    /// One sink as the app's own state holds it right now.
+    fn stored_sink(&self, sink_id: &str) -> Option<NotificationSinkSettings> {
         self.conn_a
             .snapshot()
             .settings
             .values
             .delivery
-            .prefix_consent
-            .clone()
+            .sink(sink_id)
+            .cloned()
+    }
+
+    /// The primary sink's content consent as the app's own state holds it, if any.
+    fn stored_prefix_consent(&self) -> Option<NotificationDeliveryContentConsent> {
+        self.stored_sink(self.sink_id)
+            .and_then(|sink| sink.content_consent)
+    }
+
+    /// Whether the app holds the primary sink at names only with no consent, which is
+    /// what Rust guarantees after a consent stops matching.
+    fn stored_content_is_names_only_without_consent(&self) -> bool {
+        self.stored_sink(self.sink_id).is_some_and(|sink| {
+            sink.content == NotificationDeliveryContent::NamesOnly && sink.content_consent.is_none()
+        })
     }
 
     /// The room's newest event id, which is what the room list holds right now.
@@ -1835,9 +2158,9 @@ fn carries_matrix_identifier(body: &str) -> bool {
     })
 }
 
-/// Assert the delivered body leads with `marker`, the room's newest message text,
-/// and still names the room with its own counts.
-fn assert_prefix_leads(
+/// Assert the delivered body names the room with its own counts and quotes `marker`,
+/// the room's newest message text, on a `> ` line under that room line.
+fn assert_prefix_quoted(
     body: &str,
     context: &str,
     room_label: &str,
@@ -1845,9 +2168,9 @@ fn assert_prefix_leads(
     marker: &str,
 ) -> Result<(), String> {
     let headline = format!("Direct message in {room_label}");
-    let Some(marker_at) = body.find(marker) else {
+    let Some(marker_at) = body.find(&format!("> {marker}")) else {
         return Err(format!(
-            "{context}: the body carried none of the room's newest message text"
+            "{context}: the body carried none of the room's newest message text as a quoted line"
         ));
     };
     let Some(headline_at) = body.find(&headline) else {
@@ -1855,9 +2178,10 @@ fn assert_prefix_leads(
             "{context}: the body did not name the room by its safe display label"
         ));
     };
-    if marker_at >= headline_at {
+    // #1460: the room's own line comes first and its message text is quoted under it.
+    if marker_at <= headline_at {
         return Err(format!(
-            "{context}: the message text did not lead the room's own line"
+            "{context}: the message text was not quoted under the room's own line"
         ));
     }
     if !body.contains(&format!("{unread} unread")) {
@@ -1944,23 +2268,12 @@ fn directory_holds_text(dir: &std::path::Path, needle: &str) -> bool {
     false
 }
 
-/// The settings every phase starts from: one enabled sink pointing at the stub,
-/// and the channel off until a phase turns it on.
+/// The settings every phase starts from: one Resend sink pointing at the stub, selecting
+/// no target until a phase selects one.
 fn delivery_settings(stub: &QaDeliveryStub, sink_id: &str) -> NotificationDeliverySettings {
     NotificationDeliverySettings {
-        enabled: false,
-        direct_messages: true,
-        mentions: true,
-        keywords: true,
-        only_when_unfocused: true,
-        dwell_secs: QA_DELIVERY_DWELL_SECS,
-        min_interval_secs: 0,
-        prefix_chars: 0,
-        prefix_consent: None,
-        watched: Vec::new(),
         sinks: vec![NotificationSinkSettings {
             id: sink_id.to_owned(),
-            enabled: true,
             destination: "recipient@example.invalid".to_owned(),
             from_address: "sender@example.invalid".to_owned(),
             sender_name: "Koushi QA".to_owned(),
@@ -1971,6 +2284,14 @@ fn delivery_settings(stub: &QaDeliveryStub, sink_id: &str) -> NotificationDelive
             // sink and dropped when the sink stops matching it. The lane carries
             // whatever the app stored rather than asserting a value it cannot own.
             secret_binding: None,
+            targets: NotificationDeliveryTargets::none(),
+            content: NotificationDeliveryContent::NamesOnly,
+            content_consent: None,
+            timing: NotificationDeliveryTiming {
+                dwell_secs: QA_DELIVERY_DWELL_SECS,
+                min_interval_secs: 0,
+                only_when_unfocused: true,
+            },
         }],
     }
 }
@@ -2067,11 +2388,22 @@ struct QaDeliveryStubRequest {
     authorization_present: bool,
     authorization_matches: bool,
     idempotency_key: Option<String>,
+    /// Whether the request path is exactly ServerChan's `{endpoint}/{SendKey}.send` for
+    /// the expected secret. The path itself is never kept: it carries the key.
+    path_carries_secret: bool,
+    /// Whether the expected secret appears anywhere in the request path.
+    path_mentions_secret: bool,
+    /// Whether the body was sent as `application/x-www-form-urlencoded`.
+    form_encoded: bool,
     body: String,
+    /// The decoded `title` and `desp` fields of a form body, if it was one.
+    form_title: Option<String>,
+    form_desp: Option<String>,
 }
 
-/// The provider stand-in: a loopback listener that answers any request with a 2xx,
-/// so the sink records `Delivered`, and keeps what the lane asserts about.
+/// The provider stand-in: a loopback listener that answers any request with a 2xx and
+/// ServerChan's `{"code":0}`, so either sink kind records `Accepted`, and keeps what the
+/// lane asserts about.
 struct QaDeliveryStub {
     endpoint: String,
     requests: Arc<Mutex<Vec<QaDeliveryStubRequest>>>,
@@ -2092,14 +2424,14 @@ impl QaDeliveryStub {
         })?;
         let requests = Arc::new(Mutex::new(Vec::new()));
         let shutdown = Arc::new(AtomicBool::new(false));
-        let expected = format!("Bearer {expected_secret}");
+        let expected_secret = expected_secret.to_owned();
         let thread_requests = Arc::clone(&requests);
         let thread_shutdown = Arc::clone(&shutdown);
         let handle = thread::spawn(move || {
             while !thread_shutdown.load(Ordering::SeqCst) {
                 match listener.accept() {
                     Ok((stream, _)) => {
-                        if let Some(request) = read_stub_request(stream, &expected)
+                        if let Some(request) = read_stub_request(stream, &expected_secret)
                             && let Ok(mut recorded) = thread_requests.lock()
                         {
                             recorded.push(request);
@@ -2147,10 +2479,18 @@ impl Drop for QaDeliveryStub {
 
 /// Read one request and answer it. The expected bearer is compared and discarded;
 /// the secret itself is never stored.
-fn read_stub_request(mut stream: TcpStream, expected: &str) -> Option<QaDeliveryStubRequest> {
+fn read_stub_request(
+    mut stream: TcpStream,
+    expected_secret: &str,
+) -> Option<QaDeliveryStubRequest> {
+    let expected = format!("Bearer {expected_secret}");
     stream.set_read_timeout(Some(Duration::from_secs(5))).ok()?;
     let mut reader = BufReader::new(stream.try_clone().ok()?);
-    read_stub_line(&mut reader)?;
+    let request_line = read_stub_line(&mut reader)?;
+    let path = request_line.split_whitespace().nth(1).unwrap_or_default();
+    let path_carries_secret = path == format!("{QA_STUB_PATH}/{expected_secret}.send");
+    let path_mentions_secret = path.contains(expected_secret);
+    let mut form_encoded = false;
     let mut content_length = 0_usize;
     let mut authorization_present = false;
     let mut authorization_matches = false;
@@ -2171,6 +2511,11 @@ fn read_stub_request(mut stream: TcpStream, expected: &str) -> Option<QaDelivery
                 authorization_present = true;
                 authorization_matches = value == expected;
             }
+            "content-type" => {
+                form_encoded = value
+                    .to_ascii_lowercase()
+                    .starts_with("application/x-www-form-urlencoded");
+            }
             "idempotency-key" => idempotency_key = Some(value.to_owned()),
             _ => {}
         }
@@ -2179,17 +2524,67 @@ fn read_stub_request(mut stream: TcpStream, expected: &str) -> Option<QaDelivery
     if !body.is_empty() {
         reader.read_exact(&mut body).ok()?;
     }
+    // Resend reads any 2xx as accepted; ServerChan also needs `code` 0.
+    let answer = "{\"code\":0,\"id\":\"qa-stub\"}";
     let _ = stream.write_all(
-        b"HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: 16\r\nConnection: close\r\n\r\n{\"id\":\"qa-stub\"}",
+        format!(
+            "HTTP/1.1 200 OK\r\nContent-Type: application/json\r\nContent-Length: {}\r\nConnection: close\r\n\r\n{answer}",
+            answer.len()
+        )
+        .as_bytes(),
     );
     let _ = stream.flush();
     let _ = stream.shutdown(Shutdown::Both);
+    let body = String::from_utf8_lossy(&body).into_owned();
+    let (form_title, form_desp) = if form_encoded {
+        (form_field(&body, "title"), form_field(&body, "desp"))
+    } else {
+        (None, None)
+    };
     Some(QaDeliveryStubRequest {
         authorization_present,
         authorization_matches,
         idempotency_key,
-        body: String::from_utf8_lossy(&body).into_owned(),
+        path_carries_secret,
+        path_mentions_secret,
+        form_encoded,
+        body,
+        form_title,
+        form_desp,
     })
+}
+
+/// One decoded field of an `application/x-www-form-urlencoded` body.
+fn form_field(body: &str, name: &str) -> Option<String> {
+    body.split('&').find_map(|pair| {
+        let (key, value) = pair.split_once('=')?;
+        (form_decode(key) == name).then(|| form_decode(value))
+    })
+}
+
+/// Undo form encoding: `+` is a space and `%XX` is one byte.
+fn form_decode(value: &str) -> String {
+    let bytes = value.as_bytes();
+    let mut decoded = Vec::with_capacity(bytes.len());
+    let mut index = 0;
+    while index < bytes.len() {
+        match bytes[index] {
+            b'+' => decoded.push(b' '),
+            b'%' if index + 2 < bytes.len() => {
+                let hex = std::str::from_utf8(&bytes[index + 1..index + 3]).ok();
+                match hex.and_then(|hex| u8::from_str_radix(hex, 16).ok()) {
+                    Some(byte) => {
+                        decoded.push(byte);
+                        index += 2;
+                    }
+                    None => decoded.push(b'%'),
+                }
+            }
+            byte => decoded.push(byte),
+        }
+        index += 1;
+    }
+    String::from_utf8_lossy(&decoded).into_owned()
 }
 
 fn read_stub_line(reader: &mut BufReader<TcpStream>) -> Option<String> {

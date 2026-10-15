@@ -768,6 +768,11 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
             "notification_delivery_prefix_consent_cleared=ok",
             "notification_delivery_prefix_endpoint_cleared=ok",
             "notification_delivery_prefix_hygiene=ok",
+            "notification_delivery_serverchan_configured=ok",
+            "notification_delivery_serverchan_sendkey_drops_consent=ok",
+            "notification_delivery_serverchan_request=ok",
+            "notification_delivery_serverchan_no_text=ok",
+            "notification_delivery_serverchan_secret_hygiene=ok",
             "notification_delivery=ok",
         ],
         QaStage::AccountNotifications => &[
@@ -920,6 +925,11 @@ fn implemented_final_tokens() -> Vec<&'static str> {
         "notification_delivery_prefix_consent_cleared=ok",
         "notification_delivery_prefix_endpoint_cleared=ok",
         "notification_delivery_prefix_hygiene=ok",
+        "notification_delivery_serverchan_configured=ok",
+        "notification_delivery_serverchan_sendkey_drops_consent=ok",
+        "notification_delivery_serverchan_request=ok",
+        "notification_delivery_serverchan_no_text=ok",
+        "notification_delivery_serverchan_secret_hygiene=ok",
         "notification_delivery=ok",
     ]
 }
