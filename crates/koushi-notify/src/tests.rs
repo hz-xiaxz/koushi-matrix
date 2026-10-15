@@ -41,8 +41,8 @@ async fn resend_sends_the_decided_message_once_with_the_key_in_the_authorization
         .await
         .send(&secret(), &request())
         .await;
-    assert_eq!(outcome, NotificationDeliveryOutcome::Delivered);
-    assert!(outcome.is_delivered());
+    assert_eq!(outcome, NotificationDeliveryOutcome::Accepted);
+    assert!(outcome.is_accepted());
     assert_eq!(outcome.failure(), None);
 
     let received = server
@@ -69,7 +69,7 @@ async fn resend_keeps_the_bare_address_when_no_usable_sender_name_is_given() {
     let mut request = request();
     request.sender_name = "Koushi <spoofed>".to_owned();
     let outcome = sink_against(&server).await.send(&secret(), &request).await;
-    assert!(outcome.is_delivered());
+    assert!(outcome.is_accepted());
 
     let received = server
         .received_requests()

@@ -138,7 +138,7 @@ fn chain(first: Vec<Turn>, second: Vec<Turn>) -> Vec<Turn> {
 /// The conversation's own result in the shape the product sees.
 fn outcome(result: Result<(), NotificationDeliveryFailure>) -> NotificationDeliveryOutcome {
     match result {
-        Ok(()) => NotificationDeliveryOutcome::Delivered,
+        Ok(()) => NotificationDeliveryOutcome::Accepted,
         Err(failure) => NotificationDeliveryOutcome::Failed(failure),
     }
 }
@@ -203,8 +203,8 @@ async fn an_implicit_tls_submission_sends_exactly_the_decided_message() {
 
     let (outcome, transcript) = run(settings(SmtpTls::Implicit), GREETING, script).await;
 
-    assert_eq!(outcome, NotificationDeliveryOutcome::Delivered);
-    assert!(outcome.is_delivered());
+    assert_eq!(outcome, NotificationDeliveryOutcome::Accepted);
+    assert!(outcome.is_accepted());
     assert_eq!(outcome.failure(), None);
     // The whole exchange, in order, and nothing after it.
     assert_eq!(transcript, expected);
@@ -258,7 +258,7 @@ async fn a_non_ascii_sender_name_is_encoded_while_the_address_stays_readable() {
         outcome(converse(client, &settings(SmtpTls::Implicit), &secret(), &request).await);
     let transcript = relay.await.expect("the relay task");
 
-    assert_eq!(outcome, NotificationDeliveryOutcome::Delivered);
+    assert_eq!(outcome, NotificationDeliveryOutcome::Accepted);
     assert!(
         transcript.contains(&format!(
             "From: =?UTF-8?B?{NON_ASCII_NAME_BASE64}?= <sender@example.invalid>\r\n"
@@ -312,7 +312,7 @@ async fn a_subject_cannot_open_a_header_of_its_own() {
         outcome(converse(client, &settings(SmtpTls::Implicit), &secret(), &request).await);
     let transcript = relay.await.expect("the relay task");
 
-    assert_eq!(outcome, NotificationDeliveryOutcome::Delivered);
+    assert_eq!(outcome, NotificationDeliveryOutcome::Accepted);
     assert!(
         !transcript.iter().any(|line| line.starts_with("Bcc:")),
         "the subject must not have become a header: {transcript:?}"

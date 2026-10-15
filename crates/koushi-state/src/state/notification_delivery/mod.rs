@@ -55,6 +55,8 @@ pub const MAX_NOTIFICATION_DELIVERY_SINKS: usize = 8;
 /// update, so the membership lookup has to stay bounded.
 pub const MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS: usize = 64;
 pub const MAX_NOTIFICATION_DELIVERY_FIELD_CHARS: usize = 320;
+/// The longest credential revision a binding may carry, in hex digits.
+pub const MAX_NOTIFICATION_CREDENTIAL_REVISION_CHARS: usize = 32;
 
 /// A room's newest message text, bounded for a delivery candidate (#1460).
 #[derive(Clone, Eq, PartialEq)]
@@ -182,7 +184,7 @@ where
 ///
 /// Only the id is stored. A label would be a copy of a name the room list already owns,
 /// and it would go stale the moment the room is renamed.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum NotificationDeliveryTarget {
     Room { room_id: String },
@@ -230,7 +232,7 @@ impl NotificationDeliveryTarget {
 /// client of the account; a hit ranks as mention-kind in the attention projection. A
 /// watched target overrides the categories but never the read, mute, or focus
 /// suppression, and a watched space covers rooms added to it later.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NotificationDeliveryTargets {
     pub direct_messages: bool,
@@ -339,7 +341,7 @@ impl NotificationDeliveryContent {
 /// or for ServerChan the SendKey owner. Saving or clearing a ServerChan SendKey is a
 /// recipient change, which the core applies by dropping this consent. A change to any
 /// of the three drops it and returns the destination to names only.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NotificationDeliveryContentConsent {
     pub sink_kind: String,
     pub endpoint: String,
@@ -382,7 +384,7 @@ impl NotificationDeliveryTiming {
 ///
 /// The id names the credential in the credential store and is the only identity a
 /// sink has; two sinks never share one.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct NotificationSinkSettings {
     pub id: String,
@@ -394,10 +396,14 @@ pub struct NotificationSinkSettings {
     pub sender_name: String,
     pub config: NotificationSinkConfig,
     /// The server and account the stored credential was entered for, in the shape
-    /// [`credential_identity`](Self::credential_identity) renders. The credential store is
-    /// keyed by the sink id alone, so without this a preset, host, port or username change
-    /// would keep the previous mailbox's password and offer it to the new server's
-    /// `AUTH LOGIN`. Rust owns this field: the user never types it.
+    /// [`credential_binding`](Self::credential_binding) renders: the
+    /// [`credential_identity`](Self::credential_identity) plus an opaque revision minted
+    /// each time a credential is saved. The credential store is keyed by the sink id
+    /// alone, so without the identity a preset, host, port or username change would keep
+    /// the previous mailbox's password and offer it to the new server's `AUTH LOGIN`;
+    /// without the revision a replaced ServerChan SendKey, whose owner is the recipient,
+    /// would look like the same destination. Rust owns this field: the user never types
+    /// it.
     pub secret_binding: Option<String>,
     pub targets: NotificationDeliveryTargets,
     pub content: NotificationDeliveryContent,
@@ -434,12 +440,37 @@ impl NotificationSinkSettings {
         }
     }
 
+    /// The binding a credential saved now under `revision` carries.
+    pub fn credential_binding(&self, revision: &str) -> String {
+        format!("{}#{revision}", self.credential_identity())
+    }
+
+    /// The revision of the bound credential, when the binding names the current
+    /// configuration. A binding written before revisions existed is exactly the identity
+    /// and has the empty revision.
+    fn credential_revision(&self) -> Option<&str> {
+        let binding = self.secret_binding.as_deref()?;
+        let rest = binding.strip_prefix(self.credential_identity().as_str())?;
+        if rest.is_empty() {
+            return Some("");
+        }
+        let revision = rest.strip_prefix('#')?;
+        let well_formed = !revision.is_empty()
+            && revision.len() <= MAX_NOTIFICATION_CREDENTIAL_REVISION_CHARS
+            && revision.bytes().all(|byte| byte.is_ascii_hexdigit());
+        well_formed.then_some(revision)
+    }
+
     /// The recipient a content consent binds to. For ServerChan it is the SendKey's
-    /// owner, which the settings never see; the binding stands in for it, and the core
-    /// drops the consent whenever the SendKey is saved or cleared.
+    /// owner, which the settings never see; the bound credential's revision stands in
+    /// for it, so saving another SendKey (a new revision) or clearing it (none) names a
+    /// different recipient and the consent no longer matches.
     pub fn consent_recipient(&self) -> String {
         match &self.config {
-            NotificationSinkConfig::ServerChan { .. } => "sendkey-owner".to_owned(),
+            NotificationSinkConfig::ServerChan { .. } => match self.credential_revision() {
+                Some(revision) if !revision.is_empty() => format!("sendkey#{revision}"),
+                _ => String::new(),
+            },
             _ => self.destination.clone(),
         }
     }
@@ -542,16 +573,17 @@ impl NotificationSinkSettings {
         // binding that no longer matches the configuration is dropped. This runs after the
         // fields above have been normalized and on every load and every patch, so a
         // settings file edited while the app was closed fails closed here too.
-        if self.secret_binding.as_deref() != Some(self.credential_identity().as_str()) {
+        if self.credential_revision().is_none() {
             self.secret_binding = None;
         }
         self.targets.canonicalize();
         self.timing.canonicalize();
         self.content.canonicalize();
-        // A ServerChan consent names the SendKey owner; without a bound key there is no
-        // owner it could still name.
-        let serverchan_without_key = matches!(self.config, NotificationSinkConfig::ServerChan { .. })
-            && self.secret_binding.is_none();
+        // A ServerChan consent names the SendKey owner; without a revisioned key there is
+        // no owner it could still name.
+        let serverchan_without_key =
+            matches!(self.config, NotificationSinkConfig::ServerChan { .. })
+                && self.consent_recipient().is_empty();
         if !self.consent_matches() || serverchan_without_key {
             self.revoke_content_consent();
         }
@@ -580,7 +612,7 @@ impl NotificationSinkSettings {
 
 /// The transport a sink speaks. Tagged by `kind` so a settings file and the frontend
 /// DTO carry the same shape the core dispatches on.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum NotificationSinkConfig {
     /// A provider HTTPS API.
@@ -753,3 +785,60 @@ pub struct NotificationDeliveryPresetState {
 
 #[cfg(test)]
 mod tests;
+
+// Hand-written `Debug` (#1460): addresses, SMTP usernames, endpoints, consent
+// recipients, and watched Matrix ids are private routing data, and these types sit
+// inside the settings and state trees that get formatted whole. Only kinds, counts,
+// booleans, and the sink id (an opaque local name) are shown.
+
+impl std::fmt::Debug for NotificationDeliveryTarget {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        match self {
+            Self::Room { .. } => formatter.write_str("Room(..)"),
+            Self::Space { .. } => formatter.write_str("Space(..)"),
+        }
+    }
+}
+
+impl std::fmt::Debug for NotificationDeliveryTargets {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NotificationDeliveryTargets")
+            .field("direct_messages", &self.direct_messages)
+            .field("mentions", &self.mentions)
+            .field("keywords", &self.keywords)
+            .field("watched", &self.watched.len())
+            .finish()
+    }
+}
+
+impl std::fmt::Debug for NotificationDeliveryContentConsent {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NotificationDeliveryContentConsent")
+            .field("sink_kind", &self.sink_kind)
+            .finish_non_exhaustive()
+    }
+}
+
+impl std::fmt::Debug for NotificationSinkConfig {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        write!(formatter, "{}(..)", self.kind())
+    }
+}
+
+impl std::fmt::Debug for NotificationSinkSettings {
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("NotificationSinkSettings")
+            .field("id", &self.id)
+            .field("config", &self.config)
+            .field("has_destination", &!self.destination.is_empty())
+            .field("secret_bound", &self.secret_binding.is_some())
+            .field("targets", &self.targets)
+            .field("content", &self.content)
+            .field("content_consent", &self.content_consent.is_some())
+            .field("timing", &self.timing)
+            .finish()
+    }
+}

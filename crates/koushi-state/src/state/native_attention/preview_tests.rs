@@ -67,6 +67,7 @@ fn banner_body(
             capabilities: NativeAttentionCapabilities::default(),
         },
         live_room_id,
+        live_room_id,
         true,
     )
     .state
@@ -132,10 +133,7 @@ fn a_thread_reply_is_the_latest_event_and_may_be_previewed() {
     let event = threaded.latest_event.as_mut().expect("event");
     event.relation_type = Some("m.thread".to_owned());
     event.thread_root_event_id = Some("$root:example.invalid".to_owned());
-    assert_eq!(
-        live_body(&threaded, true).as_deref(),
-        Some("thread reply")
-    );
+    assert_eq!(live_body(&threaded, true).as_deref(), Some("thread reply"));
 }
 
 #[test]
@@ -200,6 +198,7 @@ fn the_preview_is_one_bounded_line_and_never_printed() {
             message_previews: true,
             capabilities: NativeAttentionCapabilities::default(),
         },
+        Some(ROOM),
         Some(ROOM),
         true,
     );

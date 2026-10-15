@@ -145,7 +145,10 @@ fn a_current_file_round_trips_without_running_the_migration() {
     home.timing.dwell_secs = 60;
 
     let stored = serde_json::to_value(&settings).expect("serialize");
-    assert!(stored.get("enabled").is_none(), "no legacy field is written");
+    assert!(
+        stored.get("enabled").is_none(),
+        "no legacy field is written"
+    );
     assert!(stored["sinks"][0].get("enabled").is_none());
     let reloaded = load(stored);
     assert_eq!(reloaded, settings);
@@ -172,4 +175,23 @@ fn a_serverchan_destination_loads_with_its_default_endpoint() {
         }
     );
     assert!(wechat.targets.direct_messages);
+}
+
+#[test]
+fn a_migrated_prefix_never_exceeds_the_old_bound() {
+    let settings = load(json!({
+        "enabled": true,
+        "prefix_chars": 450,
+        "prefix_consent": {
+            "sink_id": "home",
+            "destination": "me@example.com",
+            "endpoint": "https://api.resend.com/emails",
+            "accepted_at_ms": 1,
+        },
+        "sinks": [legacy_sink("home", "me@example.com", true)],
+    }));
+    assert_eq!(
+        settings.sink("home").expect("home").effective_content(),
+        NotificationDeliveryContent::Prefix { graphemes: 200 }
+    );
 }

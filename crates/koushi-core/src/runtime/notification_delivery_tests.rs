@@ -1,4 +1,4 @@
-//! #1427: the delivery channel as the runtime actually wires it.
+//! #1427, #1460: the delivery channel as the runtime actually wires it.
 //!
 //! These tests drive the real `CoreRuntime` over an isolated data directory and a file
 //! credential store: the command path, the credential seam, the actor's own observation, and
@@ -9,11 +9,11 @@ use std::time::Duration;
 
 use koushi_protocol::command::{AppCommand, CoreCommand};
 use koushi_state::{
-    AppAction, CurrentDeviceTrustState, NotificationDeliveryOutcomeState,
-    NotificationDeliveryPrefixConsent, NotificationDeliverySettings, NotificationSinkConfig,
+    AppAction, CurrentDeviceTrustState, NotificationDeliveryContent,
+    NotificationDeliveryOutcomeState, NotificationDeliverySettings, NotificationSinkConfig,
     NotificationSinkSettings, RoomSummary, SessionInfo, SettingsPatch,
 };
-use wiremock::matchers::{method, path};
+use wiremock::matchers::{method, path, path_regex};
 use wiremock::{Mock, MockServer, ResponseTemplate};
 
 use super::tests::wait_for_runtime_snapshot;
@@ -54,24 +54,28 @@ fn unread_dm_with_text(text: &str) -> RoomSummary {
 }
 
 fn delivery_settings(endpoint: &str) -> NotificationDeliverySettings {
-    NotificationDeliverySettings {
-        enabled: true,
-        only_when_unfocused: false,
-        dwell_secs: 60,
-        min_interval_secs: 900,
-        sinks: vec![NotificationSinkSettings {
-            id: SINK.to_owned(),
-            enabled: true,
-            destination: "fixture@example.invalid".to_owned(),
-            from_address: "koushi@example.invalid".to_owned(),
-            sender_name: "Koushi".to_owned(),
-            config: NotificationSinkConfig::Resend {
-                endpoint: endpoint.to_owned(),
-            },
-            secret_binding: None,
-        }],
-        ..NotificationDeliverySettings::default()
-    }
+    let mut sink = NotificationSinkSettings {
+        id: SINK.to_owned(),
+        destination: "fixture@example.invalid".to_owned(),
+        from_address: "koushi@example.invalid".to_owned(),
+        sender_name: "Koushi".to_owned(),
+        config: NotificationSinkConfig::Resend {
+            endpoint: endpoint.to_owned(),
+        },
+        ..NotificationSinkSettings::default()
+    };
+    sink.timing.dwell_secs = 60;
+    sink.timing.min_interval_secs = 900;
+    // The headless runtime has no window, and an unknown focus reads as focused.
+    sink.timing.only_when_unfocused = false;
+    NotificationDeliverySettings { sinks: vec![sink] }
+}
+
+/// The binding the snapshot holds for the fixture sink, revision included.
+fn snapshot_binding(connection: &super::CoreConnection) -> Option<String> {
+    connection.snapshot().settings.values.delivery.sinks[0]
+        .secret_binding
+        .clone()
 }
 
 /// A runtime whose settings already carry one complete, enabled sink.
@@ -185,17 +189,25 @@ fn sink_state(connection: &super::CoreConnection) -> koushi_state::NotificationD
 }
 
 async fn set_secret(connection: &super::CoreConnection) {
+    set_secret_value(connection, SECRET).await;
+}
+
+async fn set_secret_value(
+    connection: &super::CoreConnection,
+    secret: &str,
+) -> koushi_protocol::RequestId {
     let request_id = connection.next_request_id();
     connection
         .command(CoreCommand::App(
             AppCommand::SetNotificationDeliverySecret {
                 request_id,
                 sink_id: SINK.to_owned(),
-                secret: SECRET.to_owned(),
+                secret: secret.to_owned(),
             },
         ))
         .await
         .expect("the delivery command is admitted");
+    request_id
 }
 
 /// A store over the same isolated credential directory the runtime was given, so a test can
@@ -340,12 +352,14 @@ async fn the_secret_reaches_no_snapshot_no_debug_and_no_settings_file() {
     assert!(!delivery_projection.contains(SECRET));
 
     // What the settings file gains is the binding - the server and account the credential was
-    // entered for - and never the value. The frontend never supplies the binding, so a file that
-    // carries one is a file the core wrote.
-    let binding = connection.snapshot().settings.values.delivery.sinks[0].credential_identity();
-    let configured_once = wait_for_settings_file(&settings_path).await;
-    assert_eq!(binding, "resend:https://relay.example.invalid/emails");
-    assert!(settings_file_has_binding(&stores, &binding));
+    // entered for, plus an opaque revision of this save - and never the value. The frontend
+    // never supplies the binding, so a file that carries one is a file the core wrote.
+    let binding = snapshot_binding(&connection).expect("the save bound the credential");
+    let (identity, revision) = binding.split_once('#').expect("a revisioned binding");
+    assert_eq!(identity, "resend:https://relay.example.invalid/emails");
+    assert!(!revision.is_empty() && revision.bytes().all(|byte| byte.is_ascii_hexdigit()));
+    wait_for_settings_binding(&stores, &binding).await;
+    let configured_once = std::fs::read(&settings_path).expect("the settings file is there");
     assert!(
         !configured_once
             .windows(SECRET.len())
@@ -376,16 +390,25 @@ async fn the_secret_reaches_no_snapshot_no_debug_and_no_settings_file() {
         "clearing the secret restores the settings byte for byte"
     );
 
+    // Saving again mints a new revision, so a content consent bound to the previous credential
+    // can tell it was replaced; the value itself still never reaches the file.
     set_secret(&connection).await;
     wait_for_runtime_snapshot(&mut connection, |state| {
         state.notification_delivery.sinks[0].secret_configured
     })
     .await;
-    assert_eq!(
-        configured_once,
-        std::fs::read(&settings_path).expect("the settings file is still there"),
-        "the settings depend on the configuration, not on the credential value"
-    );
+    let rebound = snapshot_binding(&connection).expect("the save bound the credential");
+    assert_ne!(rebound, binding);
+    assert!(rebound.starts_with("resend:https://relay.example.invalid/emails#"));
+    wait_for_settings_binding(&stores, &rebound).await;
+    let configured_twice = std::fs::read(&settings_path).expect("the settings file is there");
+    for bytes in [&configured_once, &configured_twice] {
+        assert!(
+            !bytes
+                .windows(SECRET.len())
+                .any(|window| window == SECRET.as_bytes())
+        );
+    }
 
     // The outcome state is a verdict with no value of its own, and it survives the projection.
     let outcome = NotificationDeliveryOutcomeState::InvalidSecret { at_ms: 5 };
@@ -400,7 +423,7 @@ async fn the_secret_reaches_no_snapshot_no_debug_and_no_settings_file() {
 }
 
 #[tokio::test]
-async fn changing_the_recipient_or_the_switch_keeps_the_credential() {
+async fn changing_the_recipient_targets_or_timing_keeps_the_credential() {
     let (runtime, stores, mut connection) =
         runtime_with_sink("https://relay.example.invalid/emails").await;
     set_secret(&connection).await;
@@ -409,19 +432,21 @@ async fn changing_the_recipient_or_the_switch_keeps_the_credential() {
     })
     .await;
 
-    // Who receives the mail, what the sender is called and whether the sink is switched on are
-    // not what the credential authenticates, so none of them may throw the password away. The
-    // block is the one the state holds, with the binding carried back untouched, which is what
-    // the settings form sends.
+    // Who receives the mail, what the sender is called, what is sent and when are not what the
+    // credential authenticates, so none of them may throw the password away. The block is the
+    // one the state holds, with the binding carried back untouched, which is what the settings
+    // form sends.
     let mut cosmetic = *connection.snapshot().settings.values.delivery;
     assert!(cosmetic.sinks[0].secret_binding.is_some());
     cosmetic.sinks[0].destination = "other@example.invalid".to_owned();
     cosmetic.sinks[0].from_address = "other@example.invalid".to_owned();
     cosmetic.sinks[0].sender_name = "Someone Else".to_owned();
-    cosmetic.sinks[0].enabled = false;
+    cosmetic.sinks[0].targets.direct_messages = false;
     put_delivery_settings(&mut connection, cosmetic).await;
     wait_for_runtime_snapshot(&mut connection, |state| {
-        !state.settings.values.delivery.sinks[0].enabled
+        !state.settings.values.delivery.sinks[0]
+            .targets
+            .direct_messages
     })
     .await;
     assert!(sink_state(&connection).secret_configured);
@@ -437,12 +462,15 @@ async fn changing_the_recipient_or_the_switch_keeps_the_credential() {
         "a cosmetic edit must not delete the credential"
     );
 
-    // Switching it back on is the same kind of edit.
-    let mut switched_on = *connection.snapshot().settings.values.delivery;
-    switched_on.sinks[0].enabled = true;
-    put_delivery_settings(&mut connection, switched_on).await;
+    // Timing is the same kind of edit.
+    let mut retimed = *connection.snapshot().settings.values.delivery;
+    retimed.sinks[0].timing.min_interval_secs = 60;
+    put_delivery_settings(&mut connection, retimed).await;
     wait_for_runtime_snapshot(&mut connection, |state| {
-        state.settings.values.delivery.sinks[0].enabled
+        state.settings.values.delivery.sinks[0]
+            .timing
+            .min_interval_secs
+            == 60
     })
     .await;
     assert!(sink_state(&connection).secret_configured);
@@ -659,7 +687,7 @@ async fn a_test_send_delivers_through_the_sink_and_records_the_outcome() {
     .await;
     assert!(matches!(
         state.notification_delivery.sinks[0].last_outcome,
-        Some(NotificationDeliveryOutcomeState::Delivered { at_ms }) if at_ms > 0
+        Some(NotificationDeliveryOutcomeState::Accepted { at_ms }) if at_ms > 0
     ));
 
     let requests = server
@@ -772,14 +800,10 @@ async fn the_rooms_newest_text_reaches_the_wire_and_never_the_app_state_snapshot
     let endpoint = format!("{}/emails", server.uri());
     let mut delivery = delivery_settings(&endpoint);
     // Due on the first observation, so the fixture room does not need the clock moved.
-    delivery.dwell_secs = 0;
-    delivery.prefix_chars = 80;
-    delivery.prefix_consent = Some(NotificationDeliveryPrefixConsent {
-        sink_id: SINK.to_owned(),
-        destination: "fixture@example.invalid".to_owned(),
-        endpoint,
-        accepted_at_ms: 1,
-    });
+    let sink = &mut delivery.sinks[0];
+    sink.timing.dwell_secs = 0;
+    sink.content = NotificationDeliveryContent::Full;
+    sink.content_consent = Some(sink.consent_for_current(1));
     let (runtime, _stores, mut connection) = runtime_with_delivery(delivery).await;
     set_secret(&connection).await;
     wait_for_runtime_snapshot(&mut connection, |state| {
@@ -818,9 +842,9 @@ async fn the_rooms_newest_text_reaches_the_wire_and_never_the_app_state_snapshot
     assert!(
         matches!(
             state.notification_delivery.sinks[0].last_outcome,
-            Some(NotificationDeliveryOutcomeState::Delivered { .. })
+            Some(NotificationDeliveryOutcomeState::Accepted { .. })
         ),
-        "the consented prefix delivery was recorded as {:?}",
+        "the consented delivery was recorded as {:?}",
         state.notification_delivery.sinks[0].last_outcome
     );
     // The room really is in the state this snapshot is made of: the negative assertion
@@ -831,18 +855,10 @@ async fn the_rooms_newest_text_reaches_the_wire_and_never_the_app_state_snapshot
             .iter()
             .any(|room| room.latest_event.is_some() && room.display_label == "Fixture Room")
     );
-    assert_eq!(state.settings.values.delivery.prefix_chars, 80);
-    let delivery = &state.settings.values.delivery;
-    assert!(
-        delivery.prefix_is_allowed_for(
-            &delivery.sinks[0].id,
-            &delivery.sinks[0].destination,
-            &delivery.sinks[0].endpoint()
-        ),
-        "the stored consent covers the sink: consent={:?} destination={} endpoint={}",
-        delivery.prefix_consent,
-        delivery.sinks[0].destination,
-        delivery.sinks[0].endpoint()
+    assert_eq!(
+        state.settings.values.delivery.sinks[0].effective_content(),
+        NotificationDeliveryContent::Full,
+        "the stored consent covers the sink"
     );
     assert!(
         state
@@ -856,7 +872,7 @@ async fn the_rooms_newest_text_reaches_the_wire_and_never_the_app_state_snapshot
     let serialized = serde_json::to_string(&state).expect("the app state serializes");
     assert!(
         !serialized.contains(TEXT),
-        "the prefix source reached the app-state snapshot"
+        "the message text reached the app-state snapshot"
     );
 
     let requests = server
@@ -868,10 +884,126 @@ async fn the_rooms_newest_text_reaches_the_wire_and_never_the_app_state_snapshot
         serde_json::from_slice(&requests[0].body).expect("the request body is JSON");
     let text = body["text"].as_str().expect("the body carries text");
     assert!(
-        text.starts_with(TEXT),
-        "the consented sink renders the room's newest text first: {text}"
+        text.starts_with("Direct message in Fixture Room: 2 unread"),
+        "the room line comes first: {text}"
     );
-    // The prefix is message text alone: the room id does not ride out with it.
+    assert!(
+        text.contains(&format!("> {TEXT}")),
+        "the consented sink quotes the room's newest text: {text}"
+    );
+    // The room id does not ride out with the text.
     assert!(!text.contains(ROOM), "{text}");
+    drop(runtime);
+}
+
+/// A ServerChan Turbo destination whose service is the loopback stub at `endpoint`.
+fn serverchan_settings(endpoint: &str) -> NotificationDeliverySettings {
+    let mut delivery = delivery_settings(endpoint);
+    let sink = &mut delivery.sinks[0];
+    sink.destination.clear();
+    sink.from_address.clear();
+    sink.config = NotificationSinkConfig::ServerChan {
+        endpoint: endpoint.to_owned(),
+    };
+    delivery
+}
+
+/// A Turbo SendKey; the fixture is not a key any account holds.
+const SENDKEY: &str = "SCTfixture0sendkey";
+
+#[tokio::test]
+async fn a_serverchan3_sendkey_is_refused_by_kind_and_never_stored() {
+    let (runtime, stores, mut connection) =
+        runtime_with_delivery(serverchan_settings("https://sctapi.ftqq.com")).await;
+    let request_id = set_secret_value(&connection, "sctp123tfixturekey").await;
+    let failure = wait_for_failure(&mut connection, request_id).await;
+    assert!(
+        matches!(
+            failure,
+            koushi_protocol::CoreFailure::NotificationDeliveryRejected {
+                kind: koushi_protocol::NotificationDeliveryFailureKind::UnsupportedSendKey
+            }
+        ),
+        "{failure:?}"
+    );
+    assert!(!sink_state(&connection).secret_configured);
+    assert!(
+        credential_store(&stores)
+            .load_notification_sink_secret(SINK)
+            .expect("the credential store is readable")
+            .is_none()
+    );
+    assert!(snapshot_binding(&connection).is_none());
+    drop(runtime);
+}
+
+#[tokio::test]
+async fn a_serverchan_test_send_posts_a_form_to_the_sendkey_path() {
+    let server = MockServer::start().await;
+    Mock::given(method("POST"))
+        .and(path_regex(r"^/SCT[A-Za-z0-9]+\.send$"))
+        .respond_with(
+            ResponseTemplate::new(200).set_body_json(serde_json::json!({"code": 0, "data": {}})),
+        )
+        .expect(1)
+        .mount(&server)
+        .await;
+    let (runtime, _stores, mut connection) =
+        runtime_with_delivery(serverchan_settings(&server.uri())).await;
+    set_secret_value(&connection, SENDKEY).await;
+    wait_for_runtime_snapshot(&mut connection, |state| {
+        state.notification_delivery.sinks[0].secret_configured
+    })
+    .await;
+    assert!(
+        snapshot_binding(&connection)
+            .is_some_and(|binding| binding.starts_with(&format!("serverchan:{}#", server.uri())))
+    );
+
+    let request_id = connection.next_request_id();
+    connection
+        .command(CoreCommand::App(AppCommand::TestNotificationDelivery {
+            request_id,
+            sink_id: SINK.to_owned(),
+        }))
+        .await
+        .expect("the test send is admitted");
+    let state = wait_for_runtime_snapshot(&mut connection, |state| {
+        state.notification_delivery.sinks[0].last_outcome.is_some()
+    })
+    .await;
+    assert!(
+        matches!(
+            state.notification_delivery.sinks[0].last_outcome,
+            Some(NotificationDeliveryOutcomeState::Accepted { .. })
+        ),
+        "{:?}",
+        state.notification_delivery.sinks[0].last_outcome
+    );
+
+    let requests = server
+        .received_requests()
+        .await
+        .expect("the stub keeps requests");
+    assert_eq!(requests.len(), 1);
+    assert_eq!(requests[0].url.path(), format!("/{SENDKEY}.send"));
+    let form: std::collections::HashMap<String, String> =
+        url::form_urlencoded::parse(&requests[0].body)
+            .into_owned()
+            .collect();
+    assert!(!form["title"].is_empty());
+    assert!(
+        form["desp"].to_ascii_lowercase().contains("test"),
+        "{form:?}"
+    );
+    // The SendKey is in the URL path only: never in the form, the snapshot or its Debug.
+    assert!(!form.values().any(|value| value.contains(SENDKEY)));
+    let snapshot = connection.snapshot();
+    assert!(!format!("{snapshot:?}").contains(SENDKEY));
+    assert!(
+        !serde_json::to_string(&snapshot)
+            .expect("serializable")
+            .contains(SENDKEY)
+    );
     drop(runtime);
 }

@@ -135,7 +135,7 @@ pub(crate) fn sender_field(sender_name: &str, from_address: &str) -> String {
 
 fn classify(status: reqwest::StatusCode, headers: &HeaderMap) -> NotificationDeliveryOutcome {
     if status.is_success() {
-        return NotificationDeliveryOutcome::Delivered;
+        return NotificationDeliveryOutcome::Accepted;
     }
     let failure = match status.as_u16() {
         401 => NotificationDeliveryFailure::InvalidSecret,

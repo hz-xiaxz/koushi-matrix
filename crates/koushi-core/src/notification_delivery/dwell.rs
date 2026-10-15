@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::time::Duration;
 
-use koushi_state::RoomAttentionKind;
+use koushi_state::{BoundedNotificationDeliveryText, RoomAttentionKind};
 
 use crate::executor::Instant;
 
@@ -28,10 +28,10 @@ use crate::executor::Instant;
 /// rendered by [`super::digest`]: the room id is the dwell identity and the
 /// ordering tiebreak, and it never reaches a message.
 ///
-/// [`Self::plaintext_prefix`] is message text the caller already extracted and
-/// bounded. This module stores it and hands it back; it never reads it, and only
-/// [`super::digest`] renders it, and only for a sink whose stored consent covers
-/// it.
+/// [`Self::message_text`] is message text the caller already extracted and
+/// bounded, and the caller sets it only for a destination whose content mode and
+/// consent allow text. This module never reads it; only [`super::digest`] renders
+/// it, at send time, from the current observation.
 #[derive(Clone, Eq, PartialEq)]
 pub struct QualifyingRoom {
     /// The room's Matrix id. It is the dwell identity and the final ordering
@@ -41,6 +41,9 @@ pub struct QualifyingRoom {
     /// which is the same label the badge and the room list show. An empty label
     /// falls back to `Room` when a digest names the room.
     pub display_label: String,
+    /// The safe labels of the room's parent spaces, from the same observation.
+    /// The digest names the first one next to the room.
+    pub space_labels: Vec<String>,
     /// Which qualifying attention state the room is in. It decides the ranking
     /// of the room inside a digest and the wording of its line.
     pub kind: RoomAttentionKind,
@@ -51,30 +54,28 @@ pub struct QualifyingRoom {
     /// The room's mention count, which includes a keyword hit: keywords are
     /// `kind: content` push rules the SDK evaluates into the highlight counter.
     pub mentions: u32,
-    /// The already-extracted, caller-bounded plaintext preview of the triggering
-    /// message, if the caller could produce one. It is rendered only under a
-    /// matching prefix consent, and only up to the configured grapheme cap.
-    pub plaintext_prefix: Option<String>,
+    /// The newest text message of the room, bounded at the source, when the
+    /// destination may carry text and the latest event is eligible plain text.
+    /// `None` renders the room as names only.
+    pub message_text: Option<BoundedNotificationDeliveryText>,
 }
 
-/// `Debug` redacts the room id, the display label, and the prefix text: a room
-/// id is a Matrix identifier and the other two may carry room and message
-/// content, so a struct dump must not become a log line.
+/// `Debug` redacts the room id, the labels, and the message text: a room id is a
+/// Matrix identifier and the others may carry room and message content, so a
+/// struct dump must not become a log line.
 impl fmt::Debug for QualifyingRoom {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("QualifyingRoom")
             .field("room_id", &"RoomId(..)")
             .field("display_label", &"RoomName(..)")
+            .field("space_labels", &self.space_labels.len())
             .field("kind", &self.kind)
             .field("unread", &self.unread)
             .field("mentions", &self.mentions)
             .field(
-                "plaintext_prefix",
-                &self
-                    .plaintext_prefix
-                    .as_ref()
-                    .map(|_| "PlaintextPrefix(..)"),
+                "message_text",
+                &self.message_text.as_ref().map(|_| "MessageText(..)"),
             )
             .finish()
     }

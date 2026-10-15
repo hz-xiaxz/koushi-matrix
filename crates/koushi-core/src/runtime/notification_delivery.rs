@@ -14,7 +14,8 @@ use std::time::Duration;
 
 use koushi_notify::{
     NotificationDeliveryFailure, NotificationDeliveryOutcome, NotificationDeliveryRequest,
-    NotificationSink, ResendSink, SmtpSettings, SmtpSink,
+    NotificationSink, ResendSink, ServerChanSink, SmtpSettings, SmtpSink,
+    validate_serverchan_sendkey,
 };
 use koushi_protocol::{CoreFailure, NotificationDeliveryFailureKind};
 use koushi_state::{
@@ -23,10 +24,8 @@ use koushi_state::{
 
 use super::AppActor;
 use crate::executor::{self, AbortOnDrop};
-use crate::notification_delivery::channel::NotificationDeliveryJob;
+use crate::notification_delivery::channel::{NotificationDeliveryJob, random_hex_token};
 use crate::notification_delivery::digest::{NotificationDeliveryIntent, test_delivery_intent};
-use crate::notification_delivery::dwell::QualifyingRoom;
-use crate::notification_delivery::qualifying::qualifying_rooms;
 use crate::store::StoreActor;
 
 /// How many sends may be in flight at once.
@@ -38,19 +37,27 @@ pub(super) const MAX_INFLIGHT_NOTIFICATION_DELIVERY_SENDS: usize = 8;
 /// What one spawned send reports back to the actor.
 ///
 /// The variants are exactly what the actor can act on: an outcome to record, or a reason no
-/// outcome could be reached at all. No variant carries the secret, the destination, or the
-/// body.
+/// outcome could be reached at all. Each carries the idempotency key of the attempt it settles,
+/// so the channel matches it to that attempt and to nothing else. No variant carries the secret,
+/// the destination, or the body.
 pub(super) enum NotificationDeliverySendResult {
     /// The sink's own typed verdict.
     Outcome {
         sink_id: String,
+        idempotency_key: String,
         outcome: NotificationDeliveryOutcome,
     },
     /// The credential store holds no secret for this sink any more. Nothing was sent, and the
     /// sink is re-read as unconfigured rather than left reading as ON.
-    SecretMissing { sink_id: String },
+    SecretMissing {
+        sink_id: String,
+        idempotency_key: String,
+    },
     /// The credential store could not be read at all. Nothing was sent.
-    StoreUnavailable { sink_id: String },
+    StoreUnavailable {
+        sink_id: String,
+        idempotency_key: String,
+    },
 }
 
 /// Send one intent through one sink, reading the credential here and nowhere else.
@@ -64,10 +71,21 @@ pub(super) async fn send_notification_delivery(
     store: StoreActor,
 ) -> NotificationDeliverySendResult {
     let sink_id = intent.sink_id.clone();
+    let idempotency_key = intent.idempotency_key.clone();
     let secret = match store.load_notification_sink_secret(&sink_id) {
         Ok(Some(secret)) => secret,
-        Ok(None) => return NotificationDeliverySendResult::SecretMissing { sink_id },
-        Err(_) => return NotificationDeliverySendResult::StoreUnavailable { sink_id },
+        Ok(None) => {
+            return NotificationDeliverySendResult::SecretMissing {
+                sink_id,
+                idempotency_key,
+            };
+        }
+        Err(_) => {
+            return NotificationDeliverySendResult::StoreUnavailable {
+                sink_id,
+                idempotency_key,
+            };
+        }
     };
     // The configuration is re-read at send time, from the settings, so an edit between the
     // decision and the send cannot put the old body on a new destination.
@@ -82,6 +100,7 @@ pub(super) async fn send_notification_delivery(
     };
     NotificationDeliverySendResult::Outcome {
         sink_id,
+        idempotency_key,
         outcome: sink.send(&secret, &request).await,
     }
 }
@@ -91,6 +110,9 @@ fn notification_sink_for(settings: &NotificationSinkSettings) -> NotificationSin
     match &settings.config {
         NotificationSinkConfig::Resend { endpoint } => {
             NotificationSink::Resend(ResendSink::with_endpoint(endpoint.clone()))
+        }
+        NotificationSinkConfig::ServerChan { endpoint } => {
+            NotificationSink::ServerChan(ServerChanSink::with_endpoint(endpoint.clone()))
         }
         NotificationSinkConfig::Smtp {
             host,
@@ -118,36 +140,19 @@ impl AppActor {
     /// the selected tab's window and reports through `ObserveNativeWindowFocus`, and the
     /// attention projection already reads the same flag to suppress the OS notification. So this
     /// is not a new signal. An unknown focus reads as focused - `NativeAttentionContext::default()`
-    /// starts there - and [`NotificationDeliverySettings::only_when_unfocused`] then delivers
+    /// starts there - and a destination whose timing says "only when inactive" then delivers
     /// nothing, so a device that has not said anything yet fails closed rather than mailing a
     /// notification the user is already looking at.
     fn notification_delivery_window_focused(&self) -> bool {
         self.state.native_attention_context.window_focused
     }
 
-    /// The rooms the delivery channel may deliver right now.
-    ///
-    /// The candidate set is the badge's own per-room projection
-    /// (`koushi_state::attention_room_candidates_for_state`), so read/unread and mute
-    /// semantics cannot drift from the badge, and the enabled trigger kinds, the watch list,
-    /// and the focus suppression are applied on top of it.
-    fn notification_delivery_qualifying_rooms(&self) -> Vec<QualifyingRoom> {
-        let settings = &self.state.settings.values.delivery;
-        if !settings.enabled {
-            return Vec::new();
-        }
-        let candidates = koushi_state::attention_room_candidates_for_state(&self.state);
-        qualifying_rooms(
-            settings,
-            &candidates,
-            self.notification_delivery_window_focused(),
-        )
-    }
-
     /// The delay until the channel next needs the actor, following the composer-debounce and
     /// scheduled-send timers: one sleep on the core executor's clock, no task per room.
     pub(super) fn notification_delivery_wake_delay(&self) -> Option<Duration> {
-        let wake_at = self.notification_delivery.next_wake_at()?;
+        let wake_at = self
+            .notification_delivery
+            .next_wake_at(&self.state.settings.values.delivery)?;
         Some(
             wake_at
                 .checked_duration_since(executor::Instant::now())
@@ -169,21 +174,24 @@ impl AppActor {
         if !self.notification_delivery.configured_sinks_match(&settings) {
             changed |= self.refresh_notification_delivery_configured().await;
         }
-        if !settings.enabled {
-            // Nothing qualifies while the channel is off. Observing the empty set is what
-            // forgets the dwell and the held rooms, so switching the channel back on anchors
-            // on a fresh transition instead of releasing a room the user turned off.
-            if self.notification_delivery.has_pending_work() {
-                self.notification_delivery.observe_empty(&settings, now);
-            }
+        if !settings.sinks.iter().any(|sink| sink.targets.has_any())
+            && !self.notification_delivery.has_pending_work()
+        {
+            // No destination sends for anything and nothing is held: building the candidate set
+            // would only prove that nothing qualifies.
             return changed;
         }
 
-        let qualifying = self.notification_delivery_qualifying_rooms();
+        // The candidate set is the badge's own per-room projection, so read/unread and mute
+        // semantics cannot drift from the badge; each lane applies its destination's targets,
+        // focus rule, and content mode on top of it. A room read on another device leaves the
+        // set on the sync that reports the read, which is what cancels it here.
+        let candidates = koushi_state::attention_room_candidates_for_state(&self.state);
+        let focused = self.notification_delivery_window_focused();
         self.notification_delivery
-            .observe(&settings, now, &qualifying);
+            .observe(&settings, now, &candidates, focused);
 
-        let mut jobs = self.notification_delivery.take_due_retries(now);
+        let mut jobs = self.notification_delivery.take_due_retries(&settings, now);
         jobs.extend(self.notification_delivery.take_send_jobs(&settings, now));
         self.spawn_notification_delivery_sends(jobs, &settings);
         changed | self.refresh_notification_delivery_projection().await
@@ -244,25 +252,40 @@ impl AppActor {
         let settings = self.state.settings.values.delivery.clone();
         let at_ms = crate::time::current_epoch_ms();
         match result {
-            NotificationDeliverySendResult::Outcome { sink_id, outcome } => {
+            NotificationDeliverySendResult::Outcome {
+                sink_id,
+                idempotency_key,
+                outcome,
+            } => {
                 self.notification_delivery.record_outcome(
                     &settings,
                     executor::Instant::now(),
                     &sink_id,
+                    &idempotency_key,
                     &outcome,
                     at_ms,
                 );
             }
-            NotificationDeliverySendResult::SecretMissing { sink_id } => {
+            NotificationDeliverySendResult::SecretMissing {
+                sink_id,
+                idempotency_key,
+            } => {
                 // The credential went away between the observation and the send. The sink is no
                 // longer one this device can send through, and it must not keep reading as ON.
+                self.notification_delivery
+                    .abandon_inflight(&sink_id, &idempotency_key);
                 for sink in &settings.sinks {
                     if sink.id == sink_id {
                         self.notification_delivery.record_credential(sink, false);
                     }
                 }
             }
-            NotificationDeliverySendResult::StoreUnavailable { sink_id } => {
+            NotificationDeliverySendResult::StoreUnavailable {
+                sink_id,
+                idempotency_key,
+            } => {
+                self.notification_delivery
+                    .abandon_inflight(&sink_id, &idempotency_key);
                 // A credential store that cannot be read is a transport failure from the
                 // sender's point of view: no verdict was reached and nothing left the device.
                 // Recording it keeps a broken store from leaving the sink reading as ON.
@@ -318,17 +341,23 @@ impl AppActor {
                 continue;
             }
             self.notification_delivery_sends
-                .retain(|task| !task.get().is_finished());
+                .retain(|(_, task)| !task.get().is_finished());
             if self.notification_delivery_sends.len() >= MAX_INFLIGHT_NOTIFICATION_DELIVERY_SENDS {
-                break;
+                // The job's lane still names it in flight; release it so the window is retried
+                // on a later observation instead of waiting for an outcome that never comes.
+                self.notification_delivery
+                    .abandon_inflight(&job.sink_id, &job.intent.idempotency_key);
+                continue;
             }
-            self.notification_delivery_sends
-                .push(spawn_notification_delivery_send(
+            self.notification_delivery_sends.push((
+                job.sink_id.clone(),
+                spawn_notification_delivery_send(
                     job.intent,
                     sink.clone(),
                     self.composer_draft_store_actor.clone(),
                     self.notification_delivery_outcome_tx.clone(),
-                ));
+                ),
+            ));
         }
     }
 
@@ -345,18 +374,25 @@ impl AppActor {
         sink_id: &str,
         secret: String,
     ) -> Result<(), CoreFailure> {
-        let Some(identity) = self
-            .state
-            .settings
-            .values
-            .delivery
-            .sink(sink_id)
-            .map(|sink| sink.credential_identity())
-        else {
+        let Some(sink) = self.state.settings.values.delivery.sink(sink_id) else {
             return Err(CoreFailure::NotificationDeliveryRejected {
                 kind: NotificationDeliveryFailureKind::UnknownSink,
             });
         };
+        if matches!(sink.config, NotificationSinkConfig::ServerChan { .. })
+            && validate_serverchan_sendkey(&secret).is_err()
+        {
+            // A ServerChan³ key or a value that is not a Turbo SendKey would only ever be
+            // refused by the service, so it is refused here instead of being stored.
+            return Err(CoreFailure::NotificationDeliveryRejected {
+                kind: NotificationDeliveryFailureKind::UnsupportedSendKey,
+            });
+        }
+        // Every save mints a new revision, so the binding names this credential and not just
+        // this configuration: a consent given for the previous SendKey no longer matches, and a
+        // late outcome of a send made with the previous credential settles nothing.
+        let binding = sink.credential_binding(&random_hex_token());
+        self.abort_notification_delivery_sends(sink_id);
         let store = self.composer_draft_store_actor.clone();
         let save_sink_id = sink_id.to_owned();
         let saved = executor::spawn_blocking(move || {
@@ -368,7 +404,7 @@ impl AppActor {
             Ok(Err(error)) => return Err(error.to_core_failure()),
             Err(_) => return Err(CoreFailure::StoreUnavailable),
         }
-        self.write_notification_delivery_binding(request_id, sink_id, Some(identity))
+        self.write_notification_delivery_binding(request_id, sink_id, Some(binding))
             .await;
         // A new password is not a removed one, so the line the frontend draws for a retired
         // credential goes away as soon as the user saves a replacement.
@@ -386,6 +422,7 @@ impl AppActor {
         sink_id: &str,
     ) -> Result<(), CoreFailure> {
         self.require_notification_delivery_sink(sink_id)?;
+        self.abort_notification_delivery_sends(sink_id);
         let store = self.composer_draft_store_actor.clone();
         let delete_sink_id = sink_id.to_owned();
         let deleted = executor::spawn_blocking(move || {
@@ -403,6 +440,16 @@ impl AppActor {
         self.notification_delivery.clear_credential_retired(sink_id);
         self.refresh_notification_delivery_configured().await;
         Ok(())
+    }
+
+    /// Abort every send in flight for one sink, before its credential is replaced or removed.
+    ///
+    /// A send reads its credential when it starts, so one that is still running after a save
+    /// may be using the credential the user just replaced; dropping its owner aborts it. The
+    /// lane it was settling is dropped with the binding change, so no outcome is waited for.
+    fn abort_notification_delivery_sends(&mut self, sink_id: &str) {
+        self.notification_delivery_sends
+            .retain(|(owner, task)| owner != sink_id && !task.get().is_finished());
     }
 
     /// Write or clear one sink's credential binding in the app-scoped settings.
@@ -477,11 +524,10 @@ impl AppActor {
         }
     }
 
-    /// The window id for one test send, unique per press so a provider never sees two test
-    /// messages under one idempotency key.
-    pub(super) fn next_notification_delivery_test_window(&mut self) -> String {
-        self.notification_delivery_test_sequence += 1;
-        format!("test-{}", self.notification_delivery_test_sequence)
+    /// The window id for one test send, unique per press and per run so a provider never sees
+    /// two test messages under one idempotency key.
+    pub(super) fn next_notification_delivery_test_window(&mut self, sink_id: &str) -> String {
+        self.notification_delivery.next_test_window_id(sink_id)
     }
 
     /// Send one canned test message through one sink, and record its typed outcome.
@@ -533,14 +579,16 @@ impl AppActor {
         }
 
         self.notification_delivery_sends
-            .retain(|task| !task.get().is_finished());
-        self.notification_delivery_sends
-            .push(spawn_notification_delivery_send(
+            .retain(|(_, task)| !task.get().is_finished());
+        self.notification_delivery_sends.push((
+            sink_id.to_owned(),
+            spawn_notification_delivery_send(
                 intent,
                 sink,
                 store,
                 self.notification_delivery_outcome_tx.clone(),
-            ));
+            ),
+        ));
         Ok(())
     }
 }

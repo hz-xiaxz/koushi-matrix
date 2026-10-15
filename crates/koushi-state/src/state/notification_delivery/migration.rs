@@ -15,6 +15,10 @@ use super::{
     NotificationSinkConfig, NotificationSinkSettings,
 };
 
+/// The prefix bound the pre-#1460 schema enforced. A migrated prefix never exceeds it,
+/// even when the file holds a larger value, so migration cannot widen what was sent.
+const LEGACY_MAX_PREFIX_CHARS: u32 = 200;
+
 #[derive(Deserialize, Default)]
 #[serde(default)]
 pub(super) struct NotificationDeliverySettingsWire {
@@ -78,7 +82,7 @@ impl NotificationDeliverySettingsWire {
         let legacy_prefix = self
             .prefix_chars
             .unwrap_or(super::DEFAULT_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES)
-            .min(super::MAX_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES);
+            .min(LEGACY_MAX_PREFIX_CHARS);
         let legacy_consent = self.prefix_consent;
 
         let sinks = self
@@ -139,8 +143,7 @@ fn migrate_legacy_sink(
             && consent.destination.trim() == sink.destination.trim()
             && consent.endpoint.trim() == sink.endpoint().trim()
     });
-    if let Some(consent) = legacy_consent.filter(|_| consent_names_this_sink && legacy_prefix > 0)
-    {
+    if let Some(consent) = legacy_consent.filter(|_| consent_names_this_sink && legacy_prefix > 0) {
         sink.content = NotificationDeliveryContent::Prefix {
             graphemes: legacy_prefix,
         };

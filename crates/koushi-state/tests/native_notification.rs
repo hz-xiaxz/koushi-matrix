@@ -383,3 +383,80 @@ fn each_account_follows_its_own_preview_setting() {
     );
     assert_eq!(receive(&mut previews_off).as_deref(), Some("1 unread"));
 }
+
+/// #994: an unread rise alone does not prove which event raised it. The preview
+/// shows text only when the latest event changed in that same observation and
+/// another user sent it; otherwise the banner keeps the count body.
+#[test]
+fn a_preview_needs_a_new_latest_event_from_another_user() {
+    fn observe(previous_event: &str, event: &str, sender: &str) -> Option<String> {
+        let mut state = AppState {
+            session: SessionState::Ready(SessionInfo {
+                homeserver: "https://example.invalid".to_owned(),
+                user_id: "@me:example.invalid".to_owned(),
+                device_id: "DEVICE".to_owned(),
+                authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+            }),
+            ..AppState::default()
+        };
+        state.settings.values.notifications.message_previews = true;
+        state.native_attention.summary.capabilities = capabilities();
+        state.native_attention_context.window_focused = false;
+        let mut read = room("!dm:example.invalid", true, 0, 0);
+        read.latest_event = Some(latest_event(previous_event, "Alice", "old"));
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: vec![],
+                rooms: vec![read],
+            },
+        );
+        let mut unread = room("!dm:example.invalid", true, 1, 0);
+        let mut latest = latest_event(event, "Alice", "preview");
+        latest.sender_id = Some(sender.to_owned());
+        latest.message_text = Some("decrypted private text".to_owned());
+        unread.latest_event = Some(latest);
+        reduce(
+            &mut state,
+            AppAction::RoomListUpdated {
+                spaces: vec![],
+                rooms: vec![unread],
+            },
+        );
+        state
+            .native_attention
+            .notification
+            .as_ref()
+            .map(|payload| payload.body.clone())
+    }
+
+    assert_eq!(
+        observe(
+            "$old:example.invalid",
+            "$new:example.invalid",
+            "@alice:example.invalid"
+        )
+        .as_deref(),
+        Some("decrypted private text")
+    );
+    // The same latest event: the rise came from something the room list does not name.
+    assert_eq!(
+        observe(
+            "$same:example.invalid",
+            "$same:example.invalid",
+            "@alice:example.invalid"
+        )
+        .as_deref(),
+        Some("1 unread")
+    );
+    // The user's own message is never shown back to them as a preview.
+    assert_eq!(
+        observe(
+            "$old:example.invalid",
+            "$new:example.invalid",
+            "@me:example.invalid"
+        )
+        .as_deref(),
+        Some("1 unread")
+    );
+}

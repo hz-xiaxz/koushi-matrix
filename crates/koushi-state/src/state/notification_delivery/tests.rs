@@ -262,20 +262,31 @@ fn a_serverchan_destination_has_no_address_and_its_consent_needs_a_bound_key() {
     wechat.canonicalize();
     assert_eq!(wechat.content_consent, None);
 
+    // A binding without a revision names no SendKey owner either.
     wechat.secret_binding = Some(wechat.credential_identity());
     wechat.content = NotificationDeliveryContent::Full;
     wechat.content_consent = Some(wechat.consent_for_current(2));
+    wechat.canonicalize();
+    assert_eq!(wechat.content_consent, None);
+
+    wechat.secret_binding = Some(wechat.credential_binding("a1"));
+    wechat.content = NotificationDeliveryContent::Full;
+    wechat.content_consent = Some(wechat.consent_for_current(3));
     wechat.canonicalize();
     assert_eq!(
         wechat.effective_content(),
         NotificationDeliveryContent::Full
     );
-    // A new SendKey is a new recipient; the core revokes on save.
-    wechat.revoke_content_consent();
+    // A new SendKey is a new revision, so a new recipient: the consent no longer
+    // matches, whoever wrote the binding and whenever the settings are next read.
+    wechat.secret_binding = Some(wechat.credential_binding("b2"));
     assert_eq!(
         wechat.effective_content(),
         NotificationDeliveryContent::NamesOnly
     );
+    wechat.canonicalize();
+    assert_eq!(wechat.content_consent, None);
+    assert_eq!(wechat.content, NotificationDeliveryContent::NamesOnly);
 }
 
 #[test]
@@ -400,4 +411,50 @@ fn message_source_is_bounded_on_a_character_boundary_and_flags_a_cut() {
     );
     assert!(bounded.truncated_at_source);
     assert!(!format!("{bounded:?}").contains('日'));
+}
+
+#[test]
+fn a_binding_keeps_only_a_bounded_hex_revision() {
+    let mut mail = sink("mail", "me@example.com");
+    for (binding, kept) in [
+        (mail.credential_binding("0123abcd"), true),
+        (mail.credential_identity(), true),
+        (mail.credential_binding(""), false),
+        (mail.credential_binding("not-hex"), false),
+        (mail.credential_binding(&"a".repeat(33)), false),
+        (format!("{}x", mail.credential_identity()), false),
+    ] {
+        mail.secret_binding = Some(binding.clone());
+        mail.canonicalize();
+        assert_eq!(mail.secret_binding.is_some(), kept, "{binding}");
+    }
+}
+
+#[test]
+fn settings_debug_shows_no_address_endpoint_or_matrix_id() {
+    let mut mail = smtp_sink("smtp.example.org", 465, "user@example.org");
+    mail.destination = "me@example.com".to_owned();
+    mail.from_address = "from@example.org".to_owned();
+    mail.targets.watched = vec![
+        NotificationDeliveryTarget::Room {
+            room_id: "!secret:example.org".to_owned(),
+        },
+        NotificationDeliveryTarget::Space {
+            space_id: "!space:example.org".to_owned(),
+        },
+    ];
+    mail.content_consent = Some(mail.consent_for_current(1));
+    let settings = NotificationDeliverySettings { sinks: vec![mail] };
+    let printed = format!("{settings:?}");
+    for private in [
+        "example.com",
+        "example.org",
+        "user@",
+        "!secret",
+        "!space",
+        "465",
+    ] {
+        assert!(!printed.contains(private), "{private} in {printed}");
+    }
+    assert!(printed.contains("watched: 2"));
 }

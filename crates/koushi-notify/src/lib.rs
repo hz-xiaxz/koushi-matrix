@@ -6,10 +6,11 @@
 //! it is given, once, and reports a typed outcome. It must not choose recipients,
 //! coalesce, suppress, or build content (state-ownership.md, "Threads and attention").
 //!
-//! Two kinds of sink reach the wire today: Resend's HTTPS API, which needs no mailbox of
-//! the user's own, and SMTP against a mailbox the user already has — the cheap relays,
-//! and the providers in [`presets`] (QQ Mail, Gmail, iCloud Mail) whose authorization
-//! code or app password is the only credential a third-party client may use.
+//! Three kinds of sink reach the wire today: Resend's HTTPS API, which needs no mailbox of
+//! the user's own; SMTP against a mailbox the user already has — the cheap relays, and the
+//! providers in [`presets`] (QQ Mail, Gmail, iCloud Mail) whose authorization code or app
+//! password is the only credential a third-party client may use; and ServerChan Turbo,
+//! which relays to the SendKey owner's WeChat (#1460).
 //!
 //! Crate ownership (engineering rules, "Crate Ownership And Projection Authority"):
 //! `koushi-sdk` owns SDK-facing Matrix primitives, `koushi-store` owns credential and
@@ -18,6 +19,7 @@
 
 mod presets;
 mod resend;
+mod serverchan;
 mod smtp;
 
 use std::fmt;
@@ -30,6 +32,9 @@ mod tests;
 
 pub use presets::{SMTP_PRESETS, SmtpPreset, preset};
 pub use resend::{RESEND_ENDPOINT, ResendSink};
+pub use serverchan::{
+    SERVERCHAN_ENDPOINT, ServerChanSendKeyError, ServerChanSink, validate_serverchan_sendkey,
+};
 pub use smtp::{SmtpSettings, SmtpSink, SmtpTls};
 
 /// One notification this device has already decided to deliver.
@@ -94,18 +99,20 @@ pub enum NotificationDeliveryFailure {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub enum NotificationDeliveryOutcome {
-    Delivered,
+    /// The provider accepted the request. No sink can prove the message reached the
+    /// recipient, so this is never reported as received.
+    Accepted,
     Failed(NotificationDeliveryFailure),
 }
 
 impl NotificationDeliveryOutcome {
-    pub fn is_delivered(self) -> bool {
-        matches!(self, Self::Delivered)
+    pub fn is_accepted(self) -> bool {
+        matches!(self, Self::Accepted)
     }
 
     pub fn failure(self) -> Option<NotificationDeliveryFailure> {
         match self {
-            Self::Delivered => None,
+            Self::Accepted => None,
             Self::Failed(failure) => Some(failure),
         }
     }
@@ -119,6 +126,7 @@ impl NotificationDeliveryOutcome {
 pub enum NotificationSink {
     Resend(ResendSink),
     Smtp(SmtpSink),
+    ServerChan(ServerChanSink),
 }
 
 impl NotificationSink {
@@ -136,6 +144,7 @@ impl NotificationSink {
         match self {
             Self::Resend(sink) => sink.send(secret, request).await,
             Self::Smtp(sink) => sink.send(secret, request).await,
+            Self::ServerChan(sink) => sink.send(secret, request).await,
         }
     }
 }

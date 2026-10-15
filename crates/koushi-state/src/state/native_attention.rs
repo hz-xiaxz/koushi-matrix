@@ -219,14 +219,19 @@ pub fn native_attention_state_from_rooms(
 pub fn native_attention_projection_from_rooms(
     input: NativeAttentionProjectionInput<'_>,
 ) -> NativeAttentionProjection {
-    native_attention_projection_from_rooms_with_live_room(input, None, false)
+    native_attention_projection_from_rooms_with_live_room(input, None, None, false)
 }
 
 /// Production projection: a transient alert may only target the room whose
 /// SDK-local unread count increased in this room-list observation.
+///
+/// `preview_room_id` is that room again when the reducer also saw its latest event
+/// change to one another user sent; only then may the event's text stand for the
+/// alert (#994). Otherwise the alert carries the count body.
 pub(crate) fn native_attention_projection_from_rooms_with_live_room(
     input: NativeAttentionProjectionInput<'_>,
     live_room_id: Option<&str>,
+    preview_room_id: Option<&str>,
     require_live_room: bool,
 ) -> NativeAttentionProjection {
     let mut unread_count = 0;
@@ -321,7 +326,8 @@ pub(crate) fn native_attention_projection_from_rooms_with_live_room(
                 room_id: &room.room_id,
                 room,
                 is_verified_live_room: require_live_room
-                    && live_room_id == Some(room.room_id.as_str()),
+                    && live_room_id == Some(room.room_id.as_str())
+                    && preview_room_id == Some(room.room_id.as_str()),
                 candidate: NativeAttentionCandidate {
                     room_display_name: summary.room_display_name,
                     kind: summary.kind,
@@ -651,8 +657,9 @@ pub const MAX_NATIVE_NOTIFICATION_PREVIEW_GRAPHEMES: usize = 120;
 /// The latest event's text, when it may stand for the alert (#994).
 ///
 /// Verified means: the room is the one whose unread count rose in this live
-/// observation, its latest event is neither redacted nor an edit or reaction, and it
-/// carries decrypted plain text. A thread reply qualifies because it is the latest
+/// observation, its latest event changed in that same observation and was sent by
+/// another user, it is neither redacted nor an edit or reaction, and it carries
+/// decrypted plain text. A thread reply qualifies because it is the latest
 /// event. Anything else falls back to the count body.
 fn verified_native_preview(entry: &NativeAttentionCandidateEntry<'_>) -> Option<String> {
     if !entry.is_verified_live_room {
@@ -895,8 +902,8 @@ pub enum NativeAttentionSuppressionReason {
 }
 
 #[cfg(test)]
-#[path = "native_attention/tests.rs"]
-mod tests;
-#[cfg(test)]
 #[path = "native_attention/preview_tests.rs"]
 mod preview_tests;
+#[cfg(test)]
+#[path = "native_attention/tests.rs"]
+mod tests;

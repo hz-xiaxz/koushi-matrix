@@ -847,12 +847,10 @@ impl CoreRuntime {
         let view_scopes = crate::view_scope_lifecycle::ViewScopeRegistry::default();
         let (notification_delivery_outcome_tx, notification_delivery_outcome_rx) =
             mpsc::channel(notification_delivery::MAX_INFLIGHT_NOTIFICATION_DELIVERY_SENDS);
-        // The channel is created from the settings the state was just loaded with, so the dwell
-        // it arms on the first observation is the user's, not the default.
+        // Each lane arms its dwell from its own destination's timing on its first observation,
+        // so the channel itself starts empty, with a fresh idempotency nonce for this run.
         let notification_delivery =
-            crate::notification_delivery::channel::NotificationDeliveryChannel::new(
-                &initial_state.settings.values.delivery,
-            );
+            crate::notification_delivery::channel::NotificationDeliveryChannel::new();
         let actor = AppActor {
             view_scopes: view_scopes.clone(),
             command_tx: command_tx.downgrade(),
@@ -908,7 +906,6 @@ impl CoreRuntime {
             notification_delivery_sends: Vec::new(),
             notification_delivery_outcome_tx,
             notification_delivery_outcome_rx,
-            notification_delivery_test_sequence: 1,
         };
         let view_lifetime = crate::view_scope_lifecycle::ViewRuntimeLifetime(view_scopes.clone());
         let (actor_completion_tx, actor_completion_rx) = watch::channel(None);
@@ -1324,14 +1321,13 @@ struct AppActor {
     /// rooms held for the next coalescing window, which sinks hold a credential, and the
     /// armed retries. In memory only, and it never holds a secret.
     notification_delivery: crate::notification_delivery::channel::NotificationDeliveryChannel,
-    /// One retained owner per in-flight delivery send, so dropping the actor aborts them.
-    notification_delivery_sends: Vec<AbortOnDrop<()>>,
+    /// One retained owner per in-flight delivery send, keyed by its sink id, so dropping the
+    /// actor aborts them and saving or clearing a sink's credential aborts that sink's sends.
+    notification_delivery_sends: Vec<(String, AbortOnDrop<()>)>,
     notification_delivery_outcome_tx:
         mpsc::Sender<notification_delivery::NotificationDeliverySendResult>,
     notification_delivery_outcome_rx:
         mpsc::Receiver<notification_delivery::NotificationDeliverySendResult>,
-    /// Monotonic counter for the window half of a test send's idempotency key.
-    notification_delivery_test_sequence: u64,
 }
 
 #[derive(Clone, Copy)]
@@ -3693,7 +3689,7 @@ impl AppActor {
                             request_id,
                             sink_id,
                         } => {
-                            let window_id = self.next_notification_delivery_test_window();
+                            let window_id = self.next_notification_delivery_test_window(&sink_id);
                             let result = self
                                 .dispatch_notification_delivery_test(&sink_id, window_id)
                                 .await;
