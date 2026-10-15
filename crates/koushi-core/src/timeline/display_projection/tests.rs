@@ -780,6 +780,61 @@ fn display_projection_backward_push_front_prepends_historical_page() {
 }
 
 #[test]
+fn display_projection_front_insertion_requires_adjacency_to_the_displayed_window() {
+    // #1443: a bounded live-edge window trims the older canonical prefix. A
+    // later PushFront (the SDK timeline start or an older page) must not jump
+    // that hidden prefix, so the display stays a contiguous canonical run.
+    let mut canonical_items = synthetic_projection_items(328);
+    let mut state = DisplayProjectionState::from_canonical_window(&canonical_items, 208..328);
+    assert_eq!(state.display_items().len(), ROOM_REPLAY_INITIAL_ITEMS_MAX);
+    let display_before = state.display_items().to_vec();
+    let older = timeline_item("$older:test", Some("older"), "@sender:test", false);
+
+    let projection = project_sdk_batch(
+        &mut canonical_items,
+        &mut state,
+        &[TimelineDiff::PushFront {
+            item: older.clone(),
+        }],
+        &historical_display_projection_context(),
+    );
+
+    assert!(!projection.used_reset_fallback);
+    assert_display_projection_converges(display_before.clone(), &projection);
+    assert_eq!(state.display_items(), display_before.as_slice());
+    assert!(
+        state
+            .display_items()
+            .iter()
+            .all(|item| timeline_item_event_id(item) != Some("$older:test")),
+        "a front insertion behind the hidden prefix must stay undisplayed"
+    );
+}
+
+#[test]
+fn display_projection_front_insertion_joins_an_adjacent_displayed_window() {
+    let mut canonical_items = synthetic_projection_items(ROOM_REPLAY_INITIAL_ITEMS_MAX);
+    let mut state = DisplayProjectionState::from_canonical_window(
+        &canonical_items,
+        0..ROOM_REPLAY_INITIAL_ITEMS_MAX,
+    );
+    let older = timeline_item("$older:test", Some("older"), "@sender:test", false);
+
+    let projection = project_sdk_batch(
+        &mut canonical_items,
+        &mut state,
+        &[TimelineDiff::PushFront {
+            item: older.clone(),
+        }],
+        &historical_display_projection_context(),
+    );
+
+    assert!(!projection.used_reset_fallback);
+    assert_eq!(state.display_items().first(), Some(&displayed(&older)));
+    assert_eq!(state.display_items().len(), ROOM_REPLAY_INITIAL_ITEMS_MAX + 1);
+}
+
+#[test]
 fn display_projection_clear_and_reset_replace_authoritative_display() {
     let mut canonical_items = vec![
         timeline_item("$one:test", Some("one"), "@sender:test", false),
