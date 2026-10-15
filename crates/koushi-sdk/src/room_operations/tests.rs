@@ -150,6 +150,72 @@ fn create_room_request_projects_space_room_options() {
     );
 }
 #[test]
+fn create_room_request_pins_and_writes_a_knock_restricted_policy() {
+    let request = create_room_request(MatrixCreateRoomOptions {
+        name: "Synthetic Knock".to_owned(),
+        topic: None,
+        alias_localpart: None,
+        encrypted: true,
+        invited_only: false,
+        visibility: MatrixCreateRoomVisibility::Private,
+        parent_space: None,
+        access_policy: Some(MatrixCreateRoomAccessPolicy {
+            rule: MatrixRoomJoinRule::KnockRestricted,
+            allow: vec!["!space:example.invalid".to_owned()],
+        }),
+        history: None,
+    })
+    .expect("knock_restricted is a settable create policy");
+    // knock_restricted needs a supporting room version, pinned explicitly.
+    assert_eq!(
+        request
+            .room_version
+            .as_ref()
+            .map(|version| version.as_str()),
+        Some("10")
+    );
+    let initial_state = initial_state_json(&request);
+    let join_rules = initial_state
+        .iter()
+        .find(|event| {
+            event.get("type").and_then(serde_json::Value::as_str) == Some("m.room.join_rules")
+        })
+        .expect("join rules");
+    assert_eq!(
+        join_rules
+            .get("content")
+            .and_then(|content| content.get("join_rule"))
+            .and_then(serde_json::Value::as_str),
+        Some("knock_restricted")
+    );
+
+    // Both restricted-family rules need an allow target.
+    for rule in [
+        MatrixRoomJoinRule::Restricted,
+        MatrixRoomJoinRule::KnockRestricted,
+    ] {
+        let rejected = create_room_request(MatrixCreateRoomOptions {
+            name: "Synthetic Empty".to_owned(),
+            topic: None,
+            alias_localpart: None,
+            encrypted: true,
+            invited_only: false,
+            visibility: MatrixCreateRoomVisibility::Private,
+            parent_space: None,
+            access_policy: Some(MatrixCreateRoomAccessPolicy {
+                rule,
+                allow: Vec::new(),
+            }),
+            history: None,
+        });
+        assert!(matches!(
+            rejected,
+            Err(MatrixRoomOperationError::EmptyAccessPolicyTargets)
+        ));
+    }
+}
+
+#[test]
 fn create_room_request_projects_public_alias_without_encryption() {
     let request = create_room_request(MatrixCreateRoomOptions {
         name: "Synthetic Public".to_owned(),

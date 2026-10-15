@@ -974,11 +974,18 @@ pub(super) fn create_room_request(
         if options.invited_only {
             return Err(MatrixRoomOperationError::ExplicitAccessPolicyWithInvitedOnly);
         }
-        if is_public && matches!(policy.rule, MatrixRoomJoinRule::Restricted) {
+        if is_public
+            && matches!(
+                policy.rule,
+                MatrixRoomJoinRule::Restricted | MatrixRoomJoinRule::KnockRestricted
+            )
+        {
             return Err(MatrixRoomOperationError::PublicRoomWithRestrictedAccess);
         }
-        if matches!(policy.rule, MatrixRoomJoinRule::Restricted)
-            && policy.allow.iter().all(|target| target.trim().is_empty())
+        if matches!(
+            policy.rule,
+            MatrixRoomJoinRule::Restricted | MatrixRoomJoinRule::KnockRestricted
+        ) && policy.allow.iter().all(|target| target.trim().is_empty())
         {
             return Err(MatrixRoomOperationError::EmptyAccessPolicyTargets);
         }
@@ -1052,10 +1059,6 @@ pub(super) fn create_room_request(
             )
         })
     });
-    let restricted = matches!(
-        join_rule,
-        Some(matrix_sdk::ruma::events::room::join_rules::JoinRule::Restricted(_))
-    );
 
     if let Some(parent_space) = options.parent_space {
         let via_servers = parent_space
@@ -1083,16 +1086,29 @@ pub(super) fn create_room_request(
         );
     }
 
-    // A restricted rule needs a room version that supports it (>= 8): the
-    // legacy private-in-Space preset pins V9, and an explicit restricted policy
-    // pins the same version. An explicit non-restricted policy does not pin.
-    let pin_v9 = if has_explicit_policy {
-        restricted
-    } else {
-        !is_public && parent_space_id.is_some()
+    // #1421: a restricted rule needs a version that supports it (>= 8) and a
+    // knock_restricted rule needs one that supports knocking on a restricted
+    // room (>= 10). Each is pinned explicitly rather than trusting a server
+    // default; a non-restricted explicit policy does not pin.
+    let membership_rule_version = match join_rule {
+        Some(matrix_sdk::ruma::events::room::join_rules::JoinRule::Restricted(_)) => {
+            Some(matrix_sdk::ruma::RoomVersionId::V9)
+        }
+        Some(matrix_sdk::ruma::events::room::join_rules::JoinRule::KnockRestricted(_)) => {
+            Some(matrix_sdk::ruma::RoomVersionId::V10)
+        }
+        _ => None,
     };
-    if pin_v9 {
-        request.room_version = Some(matrix_sdk::ruma::RoomVersionId::V9);
+    let pinned_version = if has_explicit_policy {
+        membership_rule_version
+    } else if !is_public && parent_space_id.is_some() {
+        // The legacy private-in-Space preset always writes a restricted rule.
+        Some(matrix_sdk::ruma::RoomVersionId::V9)
+    } else {
+        None
+    };
+    if let Some(version) = pinned_version {
+        request.room_version = Some(version);
     }
     if let Some(join_rule) = join_rule {
         request.initial_state.push(

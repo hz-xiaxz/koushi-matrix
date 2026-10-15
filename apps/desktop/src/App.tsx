@@ -462,8 +462,12 @@ export function createRoomRequestFromDraft(
     accessPolicy: rule
       ? {
           rule,
-          // A non-restricted rule carries no allow list; the writer rejects one.
-          allowTargets: rule === "restricted" ? accessDraft?.allowTargets ?? [] : []
+          // A rule that carries a membership allow list sends it; every other
+          // rule carries none and the writer rejects one (#1177, #1421).
+          allowTargets:
+            rule === "restricted" || rule === "knockRestricted"
+              ? accessDraft?.allowTargets ?? []
+              : []
         }
       : null,
     history: accessDraft?.history ?? null,
