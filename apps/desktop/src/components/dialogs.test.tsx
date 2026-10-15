@@ -971,18 +971,20 @@ describe("InviteTargetsDialog history policy", () => {
     };
   }
 
-  it("explains all normal history choices and exposes Room Info and Recovery", () => {
-    const onOpenRoomInfo = vi.fn();
-    const onOpenRecovery = vi.fn();
-    render(
+  function renderInvite(
+    policy: Partial<NonNullable<InviteWorkflowState["history_policy"]>>,
+    handlers: { onOpenRoomInfo?: () => void; onOpenRecovery?: () => void } = {}
+  ) {
+    const base = workflow();
+    return render(
       <InviteTargetsDialog
         isBusy={false}
         query="alice"
         title={t("dialog.invitePeopleTitle")}
-        workflow={workflow()}
+        workflow={{ ...base, history_policy: { ...base.history_policy!, ...policy } }}
         onCancel={vi.fn()}
-        onOpenRecovery={onOpenRecovery}
-        onOpenRoomInfo={onOpenRoomInfo}
+        onOpenRecovery={handlers.onOpenRecovery}
+        onOpenRoomInfo={handlers.onOpenRoomInfo}
         onQueryChange={vi.fn()}
         onRemoveTarget={vi.fn()}
         onScopeChange={vi.fn()}
@@ -990,15 +992,62 @@ describe("InviteTargetsDialog history policy", () => {
         onSubmit={vi.fn()}
       />
     );
+  }
 
-    expect(screen.getByText("Shared history")).toBeTruthy();
-    expect(screen.getByText("Since invite")).toBeTruthy();
-    expect(screen.getByText("Since join")).toBeTruthy();
-    expect(screen.getByText("Current")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open Room Info" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open recovery" }));
+  // #1418: the invite dialog reports what the invitee can read in one
+  // sentence; it never presents the room setting as choices.
+  it.each([
+    ["shared", "dialog.inviteHistoryShared"],
+    ["worldReadable", "dialog.inviteHistoryShared"],
+    ["invited", "dialog.inviteHistoryInvited"],
+    ["joined", "dialog.inviteHistoryJoined"]
+  ] as const)("summarizes %s history in one sentence without options", (visibility, key) => {
+    renderInvite({ current_visibility: visibility, encrypted: false });
+    const region = screen.getByRole("region", { name: t("dialog.inviteHistory") });
+    expect(within(region).getByText(t(key))).toBeTruthy();
+    expect(within(region).queryAllByRole("listitem")).toHaveLength(0);
+    expect(within(region).queryAllByRole("list")).toHaveLength(0);
+    expect(within(region).queryAllByRole("radio")).toHaveLength(0);
+    expect(within(region).queryByText("Current")).toBeNull();
+  });
+
+  it("adds the encrypted caveat only when earlier messages depend on key sharing", () => {
+    renderInvite({ current_visibility: "shared", encrypted: true });
+    expect(screen.getByText(t("dialog.inviteHistoryEncryptedShared"))).toBeTruthy();
+    cleanup();
+    renderInvite({ current_visibility: "joined", encrypted: true });
+    expect(screen.queryByText(t("dialog.inviteHistoryEncryptedShared"))).toBeNull();
+    cleanup();
+    renderInvite({ current_visibility: "shared", encrypted: false });
+    expect(screen.queryByText(t("dialog.inviteHistoryEncryptedShared"))).toBeNull();
+  });
+
+  it("links to Room Info only when the user can change history visibility", () => {
+    const onOpenRoomInfo = vi.fn();
+    renderInvite({ can_edit: true }, { onOpenRoomInfo });
+    fireEvent.click(screen.getByRole("button", { name: t("dialog.inviteHistoryChange") }));
     expect(onOpenRoomInfo).toHaveBeenCalledTimes(1);
+    cleanup();
+    renderInvite({ can_edit: false }, { onOpenRoomInfo });
+    expect(screen.queryByRole("button", { name: t("dialog.inviteHistoryChange") })).toBeNull();
+  });
+
+  it("keeps the recovery alert", () => {
+    const onOpenRecovery = vi.fn();
+    renderInvite({ readiness: "recoveryRequired" }, { onOpenRecovery });
+    expect(screen.getByRole("alert").textContent).toContain(t("dialog.inviteHistoryRecovery"));
+    fireEvent.click(screen.getByRole("button", { name: "Open recovery" }));
     expect(onOpenRecovery).toHaveBeenCalledTimes(1);
+  });
+
+  it("puts the actions in a footer outside the scrolling body", () => {
+    const { container } = renderInvite({});
+    const body = container.ownerDocument.querySelector(".invite-dialog-body");
+    const footer = container.ownerDocument.querySelector(".invite-dialog-footer");
+    expect(body).not.toBeNull();
+    expect(footer).not.toBeNull();
+    expect(body!.contains(footer)).toBe(false);
+    expect(footer!.querySelector(".dialog-actions")).not.toBeNull();
   });
 
   it("offers Done after a completed invite instead of leaving only Cancel", () => {
