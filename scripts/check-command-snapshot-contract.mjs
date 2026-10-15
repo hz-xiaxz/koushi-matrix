@@ -7,6 +7,9 @@ const root = join(fileURLToPath(new URL(".", import.meta.url)), "..");
 const commands = join(root, "apps/desktop/src-tauri/src/commands");
 const forbidden = /\b(?:FrontendDesktopSnapshot|current_snapshot)\b/;
 const allowed = new Set(["get_snapshot", "settlement_snapshot", "resync_snapshot"]);
+// The renderer's command names are a frozen half of this contract, so the check below
+// refuses to pass vacuously if the file that names them moves or stops matching.
+const MIN_RENDERER_COMMANDS = 100;
 const violations = [];
 const removedAcknowledgement = /(?:AcknowledgeTimeline(?:Projection|BatchRendered)|acknowledge_timeline_(?:projection|batch_rendered)|acknowledgeTimeline(?:Projection|BatchRendered)|timelineAcknowledgementDelivery)/;
 
@@ -68,6 +71,55 @@ for (const name of [
 const helper = join(commands, "mod.rs");
 if (/async fn current_snapshot\b/.test(readFileSync(helper, "utf8"))) {
   violations.push(`${relative(root, helper)} current_snapshot helper`);
+}
+
+// The IPC snapshot contract version exists in two languages, and the renderer rejects every
+// snapshot whose version it does not recognize, so a bump on one side alone ships an app that
+// renders its own recovery screen instead of the app. Both constants are read and compared.
+const versionSources = [
+  ["apps/desktop/src-tauri/src/dto.rs", /pub const SNAPSHOT_SCHEMA_VERSION: u32 = (\d+);/],
+  ["apps/desktop/src/domain/types.ts", /export const SNAPSHOT_SCHEMA_VERSION = (\d+);/]
+];
+const versions = versionSources.map(([name, pattern]) => {
+  const match = readFileSync(join(root, name), "utf8").match(pattern);
+  if (!match) violations.push(`${name} has no SNAPSHOT_SCHEMA_VERSION`);
+  return [name, match ? Number(match[1]) : null];
+});
+if (versions.every(([, version]) => version !== null)) {
+  const [[rustName, rust], [tsName, ts]] = versions;
+  if (rust !== ts) violations.push(`${rustName} says ${rust} while ${tsName} says ${ts}`);
+}
+
+// A Tauri command name is a contract in two languages: the renderer invokes a string and
+// Rust declares a function and registers it. Getting either half wrong is not a compile
+// error anywhere, it is a command that fails at the moment a user clicks it. So every name
+// the renderer invokes must exist as a command function and be registered in the handler.
+const rendererSources = sourceFiles(join(root, "apps/desktop/src/backend"));
+const invoked = new Set();
+for (const path of rendererSources) {
+  const source = readFileSync(path, "utf8");
+  for (const match of source.matchAll(/invokeCommand(?:<[^>]*>)?\(\s*"([a-z0-9_]+)"/g)) {
+    invoked.add(match[1]);
+  }
+}
+if (invoked.size < MIN_RENDERER_COMMANDS) {
+  violations.push(
+    `only ${invoked.size} renderer commands were found; the invocation scan expects at least ${MIN_RENDERER_COMMANDS}`
+  );
+}
+const declared = new Set();
+for (const path of sourceFiles(join(root, "apps/desktop/src-tauri/src"))) {
+  if (!path.endsWith(".rs")) continue;
+  const source = readFileSync(path, "utf8");
+  for (const match of source.matchAll(/pub (?:async )?fn ([a-z0-9_]+)\s*\(/g)) declared.add(match[1]);
+}
+const handler = readFileSync(join(root, "apps/desktop/src-tauri/src/lib.rs"), "utf8");
+const registered = new Set(
+  [...handler.matchAll(/commands::([a-z0-9_:]+)/g)].map((match) => match[1].split(":").pop())
+);
+for (const name of invoked) {
+  if (!declared.has(name)) violations.push(`renderer invokes ${name}, which no Rust command declares`);
+  if (!registered.has(name)) violations.push(`renderer invokes ${name}, which the invoke handler does not register`);
 }
 
 if (violations.length) {

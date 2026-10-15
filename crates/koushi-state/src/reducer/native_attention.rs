@@ -1,8 +1,6 @@
-use std::collections::HashMap;
-
 use crate::{
     effect::{AppEffect, UiEvent},
-    state::{AppState, NativeAttentionObservationKind, RoomNotificationMode},
+    state::{AppState, NativeAttentionObservationKind},
 };
 
 use super::is_session_ready;
@@ -85,11 +83,7 @@ fn projected_native_attention_from_rooms(
     observation: NativeAttentionObservationKind,
     live_room_id: Option<&str>,
 ) -> crate::state::NativeAttentionProjection {
-    let room_notification_modes: HashMap<String, RoomNotificationMode> = state
-        .room_notification_settings
-        .iter()
-        .map(|(room_id, settings)| (room_id.clone(), settings.mode))
-        .collect();
+    let room_notification_modes = crate::state::attention_room_notification_modes(state);
     let previous_candidate = state.native_attention.summary.candidate.as_ref();
     let mut projection = crate::state::native_attention_projection_from_rooms_with_live_room(
         crate::state::NativeAttentionProjectionInput {

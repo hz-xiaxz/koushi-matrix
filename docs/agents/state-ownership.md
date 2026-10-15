@@ -432,6 +432,30 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   `SettingsValues.notifications.sound`. React may pass that DTO value into native
   adapter routing so sound is skipped, but it must not create an independent
   notification preference or mutate native attention state locally.
+- Device-local notification delivery (#1427) is Rust-owned the same way: the
+  enabled sinks, their non-secret fields, the dwell, the interval, the focus
+  gating, the optional plaintext prefix and its consent, and the per-sink outcome
+  are Rust state, and the dwell timer runs on the core executor's clock. React
+  renders that DTO and dispatches typed commands; it must not decide whether a
+  delivery happens, start or reset a timer, assemble a body, or read a sink secret.
+  Whether a stored credential still belongs to a sink is Rust's answer as well: the
+  binding it was saved under, and the `secret_retired` flag that says this device
+  deleted it, are core facts, so React must not compare endpoints or hosts to guess
+  them or keep its own list of which credentials it has seen. The keyword list is not
+  local settings at all: it is the account's own `content` push rules, read and
+  written through the account notification surface, so a rule another client wrote is
+  visible here and a failed write is never shown as saved. React adds a keyword by
+  sending the pattern and nothing else: Rust trims it, rejects the empty, oversized,
+  and duplicate cases, enforces the cap, and mints the rule id, and a refusal reaches
+  the screen as one of that surface's typed failures. A rule's `enabled` flag is also
+  the server's, so a rule another client turned off is rendered as off - it is still on
+  the account and still refuses a same-pattern add - and React must not hide it,
+  re-enable it, or keep an enabled list of its own. The plaintext prefix's
+  source is the message body the room list already holds, marked never to be
+  serialized, and it reaches the send request without passing through any DTO.
+  The same attention projection that drives the badge and the unread marks is the
+  only source of what is delivered, so a delivered message cannot describe a state
+  the badge does not show.
 - Candidate projection uses private-data-minimized room labels and counts only.
   Native attention uses `RoomSummary.display_label` for its safe room label, but
   serialized candidates still must not carry room IDs, sender IDs, event IDs, or

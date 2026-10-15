@@ -29,6 +29,9 @@ export interface AccountNotificationActions {
   cancelEmail: () => void;
   enableEmail: (address: string) => void;
   disableEmail: () => void;
+  /** #1427: the account's own `content` push rules; the raw text goes to Rust. */
+  addKeyword: (pattern: string) => void;
+  removeKeyword: (ruleId: string) => void;
 }
 
 export const noopAccountNotificationActions: AccountNotificationActions = {
@@ -41,7 +44,9 @@ export const noopAccountNotificationActions: AccountNotificationActions = {
   submitUia: () => undefined,
   cancelEmail: () => undefined,
   enableEmail: () => undefined,
-  disableEmail: () => undefined
+  disableEmail: () => undefined,
+  addKeyword: () => undefined,
+  removeKeyword: () => undefined
 };
 
 const categoryRows: {
@@ -88,11 +93,39 @@ const failureMessages: Record<AccountNotificationsFailureKind, MessageId> = {
   rateLimited: "settings.notificationFailureRateLimited",
   network: "settings.notificationFailureNetwork",
   server: "settings.notificationFailureServer",
-  sessionRequired: "settings.notificationFailureServer"
+  sessionRequired: "settings.notificationFailureServer",
+  emptyPattern: "settings.notificationKeywordErrorEmpty",
+  patternTooLong: "settings.notificationKeywordErrorTooLong",
+  duplicate: "settings.notificationKeywordErrorDuplicate",
+  limitReached: "settings.notificationKeywordErrorLimit",
+  unknownRule: "settings.notificationKeywordErrorUnknownRule"
 };
 
+/** The one place a Rust notification failure kind becomes a catalog id. */
+export function accountNotificationsFailureMessage(
+  kind: AccountNotificationsFailureKind
+): MessageId {
+  return failureMessages[kind];
+}
+
+/**
+ * A keyword write is account state too (#1427), but it is neither a category
+ * switch nor an email operation, so each consumer asks for the kind it owns
+ * rather than excluding "everything that is not email".
+ */
+export function isKeywordOperation(operation: AccountNotificationsOperation): boolean {
+  return (
+    operation.kind === "addNotificationKeyword" ||
+    operation.kind === "removeNotificationKeyword"
+  );
+}
+
+function isCategoryOperation(operation: AccountNotificationsOperation): boolean {
+  return operation.kind === "setCategory" || operation.kind === "setAccountPush";
+}
+
 function isEmailOperation(operation: AccountNotificationsOperation): boolean {
-  return operation.kind !== "setCategory" && operation.kind !== "setAccountPush";
+  return !isCategoryOperation(operation) && !isKeywordOperation(operation);
 }
 
 function isBusy(state: AccountNotificationsState): boolean {
@@ -137,7 +170,7 @@ export function NotificationCategoriesSection({
   const snapshot = state.snapshot;
   const busy = isBusy(state);
   const failedCategory =
-    state.operation.kind === "failed" && !isEmailOperation(state.operation.operation)
+    state.operation.kind === "failed" && isCategoryOperation(state.operation.operation)
       ? state.operation.failureKind
       : null;
   return (

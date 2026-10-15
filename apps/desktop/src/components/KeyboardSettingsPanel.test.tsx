@@ -2,6 +2,22 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, test } from "vitest";
 
 import { KeyboardSettingsPanel } from "./KeyboardSettingsPanel";
+import type { NotificationDeliverySettings } from "../domain/types";
+
+// Mirrors the Rust default for the required `SettingsValues.delivery` field.
+const defaultDelivery: NotificationDeliverySettings = {
+  enabled: false,
+  direct_messages: true,
+  mentions: true,
+  keywords: true,
+  only_when_unfocused: true,
+  dwell_secs: 300,
+  min_interval_secs: 900,
+  prefix_chars: 80,
+  prefix_consent: null,
+  watched: [],
+  sinks: []
+};
 
 describe("KeyboardSettingsPanel", () => {
   test("renders Element-like shortcut groups and parity statuses", () => {
@@ -23,6 +39,7 @@ describe("KeyboardSettingsPanel", () => {
               send_read_receipts: true,
               send_typing_notifications: true
             },
+            delivery: defaultDelivery,
             display: {
               code_block_wrap: true,
               hide_redacted: false,
@@ -90,6 +107,7 @@ describe("KeyboardSettingsPanel", () => {
               send_read_receipts: true,
               send_typing_notifications: true
             },
+            delivery: defaultDelivery,
             display: {
               code_block_wrap: true,
               hide_redacted: false,

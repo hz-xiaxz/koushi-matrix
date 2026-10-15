@@ -31,6 +31,7 @@ fn observed_latest_event() -> RoomLatestEventSummary {
         sender_label: None,
         sender_avatar: None,
         preview: None,
+        message_text: None,
         timestamp_ms: 1,
         is_redacted: false,
     }

@@ -164,6 +164,7 @@ fn native_attention_recomputed_diagnostic_records_private_safe_fields_child() {
         sender_label: Some("Private sender".to_owned()),
         sender_avatar: None,
         preview: Some(private_message.to_owned()),
+        message_text: None,
         timestamp_ms: 42,
         is_redacted: false,
     });

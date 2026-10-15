@@ -98,8 +98,12 @@ export type ComposerDraftAccountOwner = SavedSessionInfo;
  * Version 9 adds the persisted sidebar section bound
  * (`SidebarSectionSettings.expanded`) and its projection
  * (`SidebarModel.section_bounds`).
+ * Version 10 adds the device-local notification delivery projection (#1427).
+ * Version 11 adds the keyword-rule projection
+ * (`AccountNotificationsSnapshot.keywords`), the account's own `content` rules
+ * in server order with their server-owned enabled flag (#1427).
  */
-export const SNAPSHOT_SCHEMA_VERSION = 9;
+export const SNAPSHOT_SCHEMA_VERSION = 11;
 
 /**
  * Snapshot state. #87 Phase 4 sectioned this into domain (Matrix/product, Rust-owned,
@@ -124,6 +128,12 @@ export interface AppDomainState {
   account_management: AccountManagementState;
   account_management_capabilities: AccountManagementCapabilities;
   account_notifications: AccountNotificationsState;
+  /**
+   * #1427: the app-scoped runtime half of this device's own notification delivery. The
+   * settings half is `settings.values.delivery`; a sink's credential is never here, only
+   * whether one is configured. App state, never part of the settings file.
+   */
+  notification_delivery: NotificationDeliveryState;
   contact_security: ContactSecurityState;
   soft_logout_reauth: SoftLogoutReauthState;
   qr_login: QrLoginState;
@@ -198,6 +208,7 @@ export interface SettingsValues {
   keyboard: KeyboardSettings;
   composer: ComposerSettings;
   notifications: NotificationSettings;
+  delivery: NotificationDeliverySettings;
   display: DisplaySettings;
   window: WindowSettings;
   updates: UpdatesSettings;
@@ -218,6 +229,7 @@ export interface SettingsPatch {
   keyboard?: KeyboardSettings;
   composer?: ComposerSettings;
   notifications?: NotificationSettings;
+  delivery?: NotificationDeliverySettings;
   display?: DisplaySettings;
   window?: WindowSettings;
   updates?: UpdatesSettings;
@@ -363,6 +375,123 @@ export interface DisplaySettings {
   hide_redacted: boolean;
   url_previews_enabled: boolean;
   encrypted_url_previews_enabled: boolean;
+}
+
+/**
+ * #1427: this device's own notification delivery. App scope, so the Matrix account is
+ * never asked for a destination, and a sink's credential never crosses this boundary:
+ * the settings carry the id the credential store is keyed by and nothing else.
+ */
+export interface NotificationDeliverySettings {
+  enabled: boolean;
+  direct_messages: boolean;
+  mentions: boolean;
+  keywords: boolean;
+  only_when_unfocused: boolean;
+  dwell_secs: number;
+  min_interval_secs: number;
+  prefix_chars: number;
+  prefix_consent?: NotificationDeliveryPrefixConsent | null;
+  /**
+   * Rooms and spaces delivered whatever the triggers say. A watched space covers every
+   * joined room that is a child of it, resolved from the room list, so a room added
+   * later is covered. Only ids are stored; the room list supplies the label.
+   */
+  watched: NotificationDeliveryTarget[];
+  sinks: NotificationSinkSettings[];
+}
+
+// Rust NotificationDeliveryTarget is #[serde(tag = "kind", rename_all = "camelCase")].
+export type NotificationDeliveryTarget =
+  | { kind: "room"; room_id: string }
+  | { kind: "space"; space_id: string };
+
+export interface NotificationSinkSettings {
+  id: string;
+  enabled: boolean;
+  destination: string;
+  from_address: string;
+  sender_name: string;
+  config: NotificationSinkConfig;
+  /**
+   * What the stored credential was entered for; Rust drops it when the server or account
+   * changes. The user never edits it: a new sink sends `null`, an existing one echoes what
+   * Rust last reported. A binding with no credential beside it is a password Rust retired
+   * because the sink stopped being the server or account it was given for.
+   */
+  secret_binding: string | null;
+}
+
+/**
+ * #1427: app state for this device's own notification delivery. The settings file holds
+ * the policy; this holds what only the running app knows - whether a sink's credential is
+ * in the credential store, and what its last send did. Rust owns every field.
+ */
+export interface NotificationDeliveryState {
+  sinks: NotificationDeliverySinkState[];
+  /** Mailbox presets Rust ships; `secret_hint` is a catalog key, resolved through `t`. */
+  presets: NotificationDeliveryPresetState[];
+}
+
+export interface NotificationDeliverySinkState {
+  sink_id: string;
+  /** A credential exists in the OS credential store; the value itself never crosses IPC. */
+  secret_configured: boolean;
+  /**
+   * Rust deleted a stored credential for this sink because its binding no longer named the
+   * sink's server and account, whether on a patch or on the settings load that reconciled a
+   * binding-less record. The reason is Rust's to state: the credential and the binding go in
+   * the same round trip, so no comparison over the settings can recover why the password is
+   * gone. False again as soon as a secret is saved or the user clears one.
+   */
+  secret_retired: boolean;
+  last_outcome: NotificationDeliveryOutcomeState | null;
+}
+
+export type NotificationDeliveryOutcomeState =
+  | { kind: "delivered"; at_ms: number }
+  | { kind: "invalidSecret"; at_ms: number }
+  | { kind: "notPermitted"; at_ms: number }
+  | { kind: "rejected"; at_ms: number }
+  | { kind: "rateLimited"; at_ms: number; retry_after_secs: number | null }
+  | { kind: "transport"; at_ms: number };
+
+export interface NotificationDeliveryPresetState {
+  id: string;
+  /** The vendor's own proper name, deliberately not localized. */
+  label: string;
+  host: string;
+  port: number;
+  tls: SmtpTls;
+  username_is_full_address: boolean;
+  /** A catalog key; resolve it through the catalog, never render it directly. */
+  secret_hint: MessageId;
+}
+
+// Rust NotificationSinkConfig is #[serde(tag = "kind", rename_all = "camelCase")].
+export type NotificationSinkConfig =
+  | { kind: "resend"; endpoint: string }
+  | {
+      kind: "smtp";
+      preset?: string | null;
+      host: string;
+      port: number;
+      tls: SmtpTls;
+      username: string;
+    };
+
+export type SmtpTls = "implicit" | "startTls";
+
+/**
+ * The user's acceptance of sending message text off the device unencrypted, for one
+ * sink and one destination. Rust drops it when the sink, its endpoint, or the
+ * destination changes, so the option turns itself off rather than following the text.
+ */
+export interface NotificationDeliveryPrefixConsent {
+  sink_id: string;
+  destination: string;
+  endpoint: string;
+  accepted_at_ms: number;
 }
 
 export interface WindowSettings {
@@ -606,6 +735,18 @@ export interface NotificationEmailAddress {
   notifications_active: boolean;
 }
 
+/** One account `content` push rule shown by the keyword editor (#1427). */
+export interface NotificationKeywordRule {
+  rule_id: string;
+  pattern: string;
+  /**
+   * Whether the account has this rule switched on. A rule another client turned
+   * off is still on the account: it still refuses a same-pattern add and is
+   * still removable here, so the list shows it and says it is off.
+   */
+  enabled: boolean;
+}
+
 export interface AccountNotificationsSnapshot {
   account_push_enabled: boolean;
   encrypted_event_push: boolean;
@@ -613,6 +754,8 @@ export interface AccountNotificationsSnapshot {
   email_management: NotificationEmailManagement;
   emails: NotificationEmailAddress[];
   unverified_email_pusher_count: number;
+  /** The account's own `kind: content` rules, in the server's rule order. */
+  keywords: NotificationKeywordRule[];
 }
 
 export type AccountNotificationsFailureKind =
@@ -627,7 +770,18 @@ export type AccountNotificationsFailureKind =
   | "rateLimited"
   | "network"
   | "server"
-  | "sessionRequired";
+  | "sessionRequired"
+  // #1427 keyword-rule validation, decided by Rust before the homeserver is
+  // asked. `emptyPattern` is empty after trimming, `patternTooLong` exceeds the
+  // character bound, `duplicate` matches an existing rule without regard to
+  // case, `limitReached` means the account already holds the maximum number of
+  // keyword rules, and `unknownRule` is a write that names a rule the account
+  // does not have (a race with another client, not a condition the user made).
+  | "emptyPattern"
+  | "patternTooLong"
+  | "duplicate"
+  | "limitReached"
+  | "unknownRule";
 
 export type AccountNotificationsLoadState =
   | { kind: "notLoaded" }
@@ -642,7 +796,9 @@ export type AccountNotificationsOperation =
   | { kind: "resendEmailToken" }
   | { kind: "confirmEmail" }
   | { kind: "enableEmailNotifications" }
-  | { kind: "disableEmailNotifications" };
+  | { kind: "disableEmailNotifications" }
+  | { kind: "addNotificationKeyword"; pattern: string }
+  | { kind: "removeNotificationKeyword"; ruleId: string };
 
 export type AccountNotificationsOperationState =
   | { kind: "idle" }

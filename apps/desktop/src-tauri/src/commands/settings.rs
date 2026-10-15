@@ -72,6 +72,58 @@ pub async fn set_room_url_preview_override(
     Ok(admission)
 }
 
+#[tauri::command]
+pub async fn set_notification_delivery_secret(
+    account_tab_id: Option<String>,
+    sink_id: String,
+    secret: String,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_set_notification_delivery_secret_command(request_id, sink_id, secret),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(admission)
+}
+
+#[tauri::command]
+pub async fn clear_notification_delivery_secret(
+    account_tab_id: Option<String>,
+    sink_id: String,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_clear_notification_delivery_secret_command(request_id, sink_id),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(admission)
+}
+
+#[tauri::command]
+pub async fn test_notification_delivery(
+    account_tab_id: Option<String>,
+    sink_id: String,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_test_notification_delivery_command(request_id, sink_id),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(admission)
+}
+
 pub(super) fn build_update_settings_command(
     request_id: koushi_protocol::RequestId,
     patch: SettingsPatch,
@@ -101,6 +153,40 @@ pub(super) fn build_set_room_url_preview_override_command(
         request_id,
         room_id,
         enabled,
+    })
+}
+
+/// #1427: the sink secret crosses this boundary once, in the command, and is moved straight into
+/// the core command. Nothing here logs it, returns it, or copies it into an event.
+pub(super) fn build_set_notification_delivery_secret_command(
+    request_id: koushi_protocol::RequestId,
+    sink_id: String,
+    secret: String,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::SetNotificationDeliverySecret {
+        request_id,
+        sink_id,
+        secret,
+    })
+}
+
+pub(super) fn build_clear_notification_delivery_secret_command(
+    request_id: koushi_protocol::RequestId,
+    sink_id: String,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::ClearNotificationDeliverySecret {
+        request_id,
+        sink_id,
+    })
+}
+
+pub(super) fn build_test_notification_delivery_command(
+    request_id: koushi_protocol::RequestId,
+    sink_id: String,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::TestNotificationDelivery {
+        request_id,
+        sink_id,
     })
 }
 

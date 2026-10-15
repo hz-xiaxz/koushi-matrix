@@ -291,6 +291,51 @@ impl CredentialStoreBackend {
         }
     }
 
+    // --- Device-local notification sink secrets (#1427) ---
+
+    /// A sink secret is app-scoped, not account-scoped, so it belongs to no vault
+    /// entry: it goes to the injected backend under its own validated credential
+    /// name, the way the vault master key does.
+    pub fn save_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+        secret: &koushi_key::NotificationSinkSecret,
+    ) -> Result<(), koushi_key::LocalSecretError> {
+        match self {
+            Self::OsKeychain(store) => store.save_notification_sink_secret(id, secret),
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
+            Self::FileDir(store) => store.save_named(&id.account_name(), secret.as_str()),
+            Self::InMemory(store) => store.save_notification_sink_secret(id, secret),
+        }
+    }
+
+    pub fn load_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+    ) -> Result<koushi_key::NotificationSinkSecret, koushi_key::LocalSecretError> {
+        match self {
+            Self::OsKeychain(store) => store.load_notification_sink_secret(id),
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
+            Self::FileDir(store) => {
+                let value = store.load_named(&id.account_name())?;
+                koushi_key::NotificationSinkSecret::new(value)
+            }
+            Self::InMemory(store) => store.load_notification_sink_secret(id),
+        }
+    }
+
+    pub fn delete_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+    ) -> Result<(), koushi_key::LocalSecretError> {
+        match self {
+            Self::OsKeychain(store) => store.delete_notification_sink_secret(id),
+            #[cfg(any(debug_assertions, test, feature = "test-hooks"))]
+            Self::FileDir(store) => store.delete_named(&id.account_name()),
+            Self::InMemory(store) => store.delete_notification_sink_secret(id),
+        }
+    }
+
     pub fn save_last_session(
         &self,
         key_id: &SessionKeyId,
@@ -632,6 +677,30 @@ impl OsCredentialStore {
         self.mutate_vault(|data| data.delete_matrix_session(key_id))
     }
 
+    /// See `CredentialStoreBackend::save_notification_sink_secret`: the sink secret
+    /// stays out of the vault and is written through the injected backend.
+    fn save_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+        secret: &koushi_key::NotificationSinkSecret,
+    ) -> Result<(), koushi_key::LocalSecretError> {
+        self.primary.save_notification_sink_secret(id, secret)
+    }
+
+    fn load_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+    ) -> Result<koushi_key::NotificationSinkSecret, koushi_key::LocalSecretError> {
+        self.primary.load_notification_sink_secret(id)
+    }
+
+    fn delete_notification_sink_secret(
+        &self,
+        id: &koushi_key::NotificationSinkSecretId,
+    ) -> Result<(), koushi_key::LocalSecretError> {
+        self.primary.delete_notification_sink_secret(id)
+    }
+
     fn save_last_session(&self, key_id: &SessionKeyId) -> Result<(), koushi_key::LocalSecretError> {
         self.mutate_vault(|data| data.set_last_session(Some(key_id.clone())))
     }
@@ -939,6 +1008,12 @@ pub fn local_secret_error_health(error: &koushi_key::LocalSecretError) -> LocalE
         koushi_key::LocalSecretError::CredentialBackend(
             koushi_key::CredentialBackendErrorKind::LockedOrInaccessible,
         ) => LocalEncryptionHealth::LockedOrInaccessible,
+        // Sink-secret validation errors are caller mistakes, not storage-health
+        // facts: they are reported as unknown rather than as a corrupt store.
+        koushi_key::LocalSecretError::InvalidNotificationSinkSecretId
+        | koushi_key::LocalSecretError::InvalidNotificationSinkSecret => {
+            LocalEncryptionHealth::Unknown
+        }
     }
 }
 

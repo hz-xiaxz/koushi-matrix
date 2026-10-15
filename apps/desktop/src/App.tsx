@@ -298,6 +298,7 @@ import { ContextualRightPanel } from "./components/rightPanel";
 import type { RoomInfoRevealRequest } from "./components/RoomInfoPanel";
 import { AppSettingsDialog } from "./components/UserSettingsPanel";
 import type { AccountNotificationActions } from "./components/user-settings/AccountNotificationsSections";
+import type { NotificationDeliveryActions } from "./components/user-settings/NotificationDeliverySection";
 import type { ContactSecurityActions } from "./components/ContactSecurityDetails";
 import type { HistoryExportControls } from "./components/HistoryExportDialog";
 import { historyExportLabels } from "./domain/historyExportLabels";
@@ -820,6 +821,24 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   const registerBeforeAccountSwitch = useCallback((handler: (() => Promise<boolean>) | null) => {
     beforeAccountSwitchRef.current = handler ?? (async () => true);
   }, []);
+  // #1427: the app settings dialog is shell-level, while the delivery block is app-scoped.
+  // The whole-block patch goes through the mounted account content's settings updater, which
+  // owns snapshot settlement; the three sink commands are dispatched straight through the
+  // transport like the other shell-level commands.
+  const appNotificationDeliveryActions = useMemo<NotificationDeliveryActions>(() => ({
+    update: (delivery) => {
+      void appSettingsUpdateRef.current({ delivery, scope: "app" }).catch(() => undefined);
+    },
+    setSecret: async (sinkId, secret) => {
+      await desktopApi.setNotificationDeliverySecret(sinkId, secret).catch(() => undefined);
+    },
+    clearSecret: async (sinkId) => {
+      await desktopApi.clearNotificationDeliverySecret(sinkId).catch(() => undefined);
+    },
+    test: async (sinkId) => {
+      await desktopApi.testNotificationDelivery(sinkId).catch(() => undefined);
+    }
+  }), []);
   const consumeNotificationActivation = useCallback((target: DesktopNotificationActivation) => {
     setPendingNotificationActivation((pending) => pending === target ? null : pending);
   }, []);
@@ -1024,6 +1043,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
         {settingsScope === "app" && selectedSnapshot ? (
           <AppSettingsDialog
             snapshot={selectedSnapshot}
+            notificationDeliveryActions={appNotificationDeliveryActions}
             onUpdateSettings={(patch) => {
               void appSettingsUpdateRef.current(patch).catch(() => undefined);
             }}
@@ -3319,7 +3339,30 @@ function AccountContent({
       runInBackground(
         settleCommand(api.enableEmailNotifications(address, notificationLangRef.current))
       ),
-    disableEmail: () => runInBackground(settleCommand(api.disableEmailNotifications()))
+    disableEmail: () => runInBackground(settleCommand(api.disableEmailNotifications())),
+    // #1427: keyword rules are account state. The field text goes to Rust as
+    // typed; Rust trims, validates, and mints the rule id.
+    addKeyword: (pattern) =>
+      runInBackground(settleCommand(api.addNotificationKeyword(pattern))),
+    removeKeyword: (ruleId) =>
+      runInBackground(settleCommand(api.removeNotificationKeyword(ruleId)))
+  }), []);
+
+  // Device-local notification delivery (#1427). The delivery block always travels as a
+  // whole app-scoped patch; the three sink commands are write-only, so nothing they return
+  // carries the secret back to the renderer.
+  const notificationDeliveryActions = useMemo<NotificationDeliveryActions>(() => ({
+    update: (delivery) =>
+      runInBackground(settleCommand(api.updateSettings({ delivery, scope: "app" }))),
+    setSecret: async (sinkId, secret) => {
+      await settleCommand(api.setNotificationDeliverySecret(sinkId, secret));
+    },
+    clearSecret: async (sinkId) => {
+      await settleCommand(api.clearNotificationDeliverySecret(sinkId));
+    },
+    test: async (sinkId) => {
+      await settleCommand(api.testNotificationDelivery(sinkId));
+    }
   }), []);
 
   // Contact security details in User info (#1024): read-only load and close.
@@ -7824,6 +7867,7 @@ function AccountContent({
             runInBackground(submitAccountManagementUia(flowId, password));
           }}
           accountNotificationActions={accountNotificationActions}
+          notificationDeliveryActions={notificationDeliveryActions}
           contactSecurityActions={contactSecurityActions}
           onUpdateRoomSetting={(roomId, change) => {
             runInBackground(updateRoomSetting(roomId, change));

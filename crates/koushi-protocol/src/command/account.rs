@@ -211,6 +211,18 @@ pub enum AccountNotificationsRequest {
         lang: String,
     },
     DisableEmailNotifications,
+    /// Add one keyword as a `content` push rule whose action notifies and sets
+    /// the highlight tweak, so a hit reaches the mention-kind authority (#1427).
+    /// The pattern is trimmed and validated locally first; the homeserver stays
+    /// the authority for the write.
+    AddKeyword {
+        pattern: String,
+    },
+    /// Remove one keyword by the `content` rule id the server scoped it by
+    /// (#1427). The id must name a rule in the loaded list.
+    RemoveKeyword {
+        rule_id: String,
+    },
 }
 
 impl fmt::Debug for AccountNotificationsRequest {
@@ -244,6 +256,14 @@ impl fmt::Debug for AccountNotificationsRequest {
                 .field("lang", lang)
                 .finish(),
             Self::DisableEmailNotifications => formatter.write_str("DisableEmailNotifications"),
+            Self::AddKeyword { pattern } => formatter
+                .debug_struct("AddKeyword")
+                .field("pattern", pattern)
+                .finish(),
+            Self::RemoveKeyword { rule_id } => formatter
+                .debug_struct("RemoveKeyword")
+                .field("rule_id", rule_id)
+                .finish(),
         }
     }
 }

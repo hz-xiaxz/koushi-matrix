@@ -28,6 +28,7 @@ mod local_encryption;
 mod mention;
 mod native_attention;
 mod navigation;
+mod notification_delivery;
 mod profile;
 mod room;
 mod room_management;
@@ -675,6 +676,9 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             request_id,
             message,
         } => settings::handle_settings_persist_failed(state, request_id, message),
+        AppAction::NotificationDeliveryObserved { delivery } => {
+            notification_delivery::handle_observed(state, delivery)
+        }
         AppAction::RoomUrlPreviewOverrideSet {
             request_id,
             room_id,
