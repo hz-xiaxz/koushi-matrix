@@ -78,7 +78,11 @@ fn offline_reply_keeps_its_relation_without_fetching_the_original_event() {
     assert!(matches!(room.relates_to, Some(Relation::Reply(_))));
     let thread =
         make_offline_reply_content(content(), original, &thread_key(), None, None).unwrap();
-    assert!(matches!(thread.relates_to, Some(Relation::Thread(_))));
+    // #1426: an explicit reply inside a thread stays a genuine in-thread reply
+    // (not falling back), which is why the thread composer must not use it.
+    assert!(
+        matches!(thread.relates_to, Some(Relation::Thread(ref relation)) if !relation.is_falling_back)
+    );
 }
 
 #[test]
@@ -129,6 +133,8 @@ fn plain_thread_message_has_local_relation_before_sdk_enqueue() {
             && thread.is_falling_back
             && thread.in_reply_to.as_ref().is_some_and(|reply| reply.event_id.as_str() == "$root:test"))
     );
+    // A plain thread message names nobody: the root's sender is not mentioned.
+    assert!(content.mentions.is_none());
 }
 
 #[test]
