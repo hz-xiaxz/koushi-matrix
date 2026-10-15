@@ -110,13 +110,22 @@ Points worth keeping:
 ## Verification
 
 ```bash
-cargo test --workspace
-cargo fmt --all -- --check && cargo clippy --all-targets -- -D warnings
+cargo test --workspace --no-fail-fast
+cargo test -p koushi-qa --features qa-bin --bin headless-core-qa
+cargo fmt --all -- --check && cargo clippy --workspace --all-targets -- -D warnings
 npx tsc --noEmit && npx eslint src && npx vitest run
 node scripts/check-*.mjs
 node scripts/user-help.mjs --check
 node scripts/desktop-release-gate-check.mjs
 ```
+
+One gate is easy to miss and CI caught it: the registry that lists each stage's
+tokens lives in the QA binary, which only compiles under `--features qa-bin`, so
+`cargo test --workspace` does not run it. Two registry tests failed there because
+the aggregate and the literal the tests compare it against had drifted, and because
+neither lane's new tokens were registered. The command above is the job's own, and
+it is now part of this list: any change that adds or renames a scenario token has to
+run it.
 
 - `cargo test --workspace --no-fail-fast` exits 0: 183 result lines, 4008 passed,
   0 failed, 17 ignored. The `core_event_wire_format_matches_checked_in_contract_artifact`
