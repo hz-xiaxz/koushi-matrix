@@ -599,6 +599,59 @@ fn fitted_output_resizes_to_the_long_edge_budget_without_upscaling() {
 }
 
 #[test]
+fn fitted_output_sizes_a_heif_avatar_and_reports_the_decoder_failure_kind() {
+    // The avatar pipeline (#1396) calls the fitted entry point, not
+    // `prepare_image_output`, so the HEIC fixture has to ride this path too
+    // (#1450). The fixture is 64x64 and the avatar policy targets 120 px.
+    let avatar_policy = ImagePreparationPolicy {
+        target_long_edge: 120,
+        quality_percent: 82,
+    };
+    let output = prepare_image_output_fitted(
+        heif_fixture(),
+        "avatar.heic",
+        120,
+        ImageOutputFormat::WebP,
+        &avatar_policy,
+    )
+    .expect("HEIF decodes through the fitted avatar path");
+    assert_eq!(output.format, PreparedImageFormat::WebP);
+    assert_eq!(output.mime_type, "image/webp");
+    assert_eq!(output.dimensions, (64, 64));
+    assert_eq!(output.id, "fit-120-webp");
+    assert_eq!(
+        image::load_from_memory(&output.bytes).unwrap().dimensions(),
+        (64, 64)
+    );
+
+    // Inside the target the source keeps its size; a smaller target still
+    // resizes the HEIF pixels through the same path.
+    let resized = prepare_image_output_fitted(
+        heif_fixture(),
+        "avatar.heic",
+        32,
+        ImageOutputFormat::WebP,
+        &avatar_policy,
+    )
+    .expect("HEIF pixels resize through the fitted path");
+    assert_eq!(resized.dimensions, (32, 32));
+
+    // `heif_oxide` decodes HEIF on every platform, so a platform without a
+    // HEIF decoder is not in scope; the decoder-guard rejection is still this
+    // path's failure kind for an oversized HEIF.
+    assert_eq!(
+        prepare_image_output_fitted(
+            &oversized_heif_fixture(),
+            "avatar.heic",
+            120,
+            ImageOutputFormat::WebP,
+            &avatar_policy,
+        ),
+        Err(ImagePreparationError::Decode)
+    );
+}
+
+#[test]
 fn fitted_output_reports_non_decodable_content_instead_of_retaining_it() {
     let policy = ImagePreparationPolicy::default();
     assert_eq!(

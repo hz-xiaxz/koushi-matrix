@@ -660,6 +660,8 @@ fn renderable_thumbnail_protocol_response(
                 .as_deref()
                 .unwrap_or("application/octet-stream"),
         )
+        // Decrypted avatar/link-preview bytes stay out of the WebView HTTP
+        // cache; the residual re-decode cost is measured and accepted (#1450).
         .header(tauri::http::header::CACHE_CONTROL, "no-store")
         .header("X-Content-Type-Options", "nosniff")
         .body(content.bytes)
