@@ -10,7 +10,7 @@ import type { CoreEventPayload } from "../domain/coreEvents";
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("../backend/appRuntime", async () => {
   const { TauriDesktopApi } = await import("../backend/client");
-  return { api: new TauriDesktopApi() };
+  return { api: new TauriDesktopApi(), startSessionVerificationWindowDrag: vi.fn() };
 });
 
 afterEach(() => {

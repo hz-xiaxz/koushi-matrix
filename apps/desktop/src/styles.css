@@ -8399,6 +8399,16 @@ kbd {
   height: 44px;
 }
 
+/* Every top-layer dialog owns a macOS title-bar drag strip: `showModal()`
+   inerts the shell titlebar and the backdrop cannot take handlers. Height is
+   0 off macOS. */
+.native-modal-drag-region {
+  position: fixed;
+  inset-block-start: 0;
+  inset-inline: 0;
+  block-size: var(--native-titlebar-safe-block, 0px);
+}
+
 .session-verification-emojis {
   display: grid;
   grid-template-columns: repeat(4, minmax(0, 1fr));

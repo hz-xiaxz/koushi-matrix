@@ -1,5 +1,6 @@
 import { createContext, useEffect, useLayoutEffect, useRef, type ComponentPropsWithRef, type ReactNode, type RefObject } from "react";
 import { X } from "lucide-react";
+import { startSessionVerificationWindowDrag } from "../backend/appRuntime";
 import { t } from "../i18n/messages";
 import { Tooltip } from "./Tooltip";
 
@@ -39,12 +40,13 @@ export function useModalFocusTracking() {
 }
 
 /** Shared top-layer/focus owner for both framed modals and full-window viewers. */
-export function NativeModal({ onDismiss, dismissible = true, initialFocusRef, returnFocusRef, children, ref: forwardedRef, ...props }:
+export function NativeModal({ onDismiss, dismissible = true, initialFocusRef, returnFocusRef, onStartWindowDrag = startSessionVerificationWindowDrag, children, ref: forwardedRef, ...props }:
   Omit<ComponentPropsWithRef<"dialog">, "open"> & {
     onDismiss: () => void;
     dismissible?: boolean;
     initialFocusRef?: RefObject<HTMLElement | null>;
     returnFocusRef?: RefObject<HTMLElement | null>;
+    onStartWindowDrag?: () => void;
   }) {
   const ref = useRef<HTMLDialogElement>(null);
   const previous = useRef((modalFocusOrigin?.isConnected ? modalFocusOrigin : null)
@@ -103,21 +105,37 @@ export function NativeModal({ onDismiss, dismissible = true, initialFocusRef, re
           : (index + (event.shiftKey ? -1 : 1) + focusable.length) % focusable.length;
         event.preventDefault(); focusable[next]?.focus();
       }
-    }}>{children}</dialog></ModalPortalContext.Provider>;
+    }}>
+      {/* macOS keeps the native buttons above the WebView and `showModal()`
+          inerts the shell titlebar, so every top-layer dialog owns its own drag
+          strip. Its height collapses to 0 off macOS. */}
+      <div
+        className="native-modal-drag-region"
+        data-tauri-drag-region=""
+        aria-hidden="true"
+        onMouseDown={(event) => {
+          if (event.buttons !== 1) return;
+          event.preventDefault();
+          onStartWindowDrag();
+        }}
+      />
+      {children}
+    </dialog></ModalPortalContext.Provider>;
 }
 
 /** Browser top layer: escapes pane clipping and supplies modal focus containment. */
-export function ModalDialog({ title, className = "", dismissible = true, showCloseButton = true, headerContent, onClose, children }: {
+export function ModalDialog({ title, className = "", dismissible = true, showCloseButton = true, headerContent, onClose, onStartWindowDrag, children }: {
   title: string;
   className?: string;
   dismissible?: boolean;
   showCloseButton?: boolean;
   headerContent?: ReactNode;
   onClose: () => void;
+  onStartWindowDrag?: () => void;
   children: ReactNode;
 }) {
   return (
-    <NativeModal className={`app-modal ${className}`} aria-label={title} dismissible={dismissible} onDismiss={onClose}>
+    <NativeModal className={`app-modal ${className}`} aria-label={title} dismissible={dismissible} onDismiss={onClose} onStartWindowDrag={onStartWindowDrag}>
       <header className="app-modal-header">
         <h2>{title}</h2>
         {showCloseButton ? (
