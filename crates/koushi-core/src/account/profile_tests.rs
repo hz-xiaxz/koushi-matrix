@@ -1169,7 +1169,7 @@ async fn an_announced_avatar_losing_its_bytes_is_downgraded_not_left_stale() {
 }
 
 #[tokio::test]
-async fn a_demanded_source_whose_bytes_were_evicted_is_downgraded_before_its_refetch() {
+async fn a_capacity_evicted_demanded_source_is_terminal_until_the_demand_changes() {
     use crate::renderable_thumbnail::{
         MAX_RENDERABLE_THUMBNAIL_ENTRIES, RenderableThumbnailKind,
         clear_renderable_thumbnail_cache, lookup_renderable_thumbnail, store_renderable_thumbnail,
@@ -1178,8 +1178,9 @@ async fn a_demanded_source_whose_bytes_were_evicted_is_downgraded_before_its_ref
     let _cache_guard = crate::renderable_thumbnail::test_cache_lock_async().await;
     clear_renderable_thumbnail_cache();
     let server = MatrixMockServer::new().await;
-    // The revalidated refetch is served by the account-keyed SDK media store,
-    // so only the first demand's fetch reaches the network.
+    // #1433: the source is fetched once. A capacity-evicted demanded source must
+    // not refetch while the demand is unchanged, so no second network request
+    // may appear; the healing refetch below is served by the SDK media store.
     server
         .mock_authed_media_download()
         .ok_image()
@@ -1207,9 +1208,8 @@ async fn a_demanded_source_whose_bytes_were_evicted_is_downgraded_before_its_ref
     handle.publish_avatar_demand(Some(std::sync::Arc::new(demand.clone())));
     let source_ref = await_ready_avatar(&mut action_rx, uri).await;
 
-    // The bytes are gone while the source is still demanded: an observation
-    // must downgrade the projection, so a refetch that is cancelled with the
-    // scope cannot leave a `Ready` pointing at missing bytes.
+    // The bytes are gone while the source is still demanded: the projection must
+    // be downgraded instead of claiming bytes that no longer exist.
     for id in 0..MAX_RENDERABLE_THUMBNAIL_ENTRIES {
         store_renderable_thumbnail(
             RenderableThumbnailKind::Avatar,
@@ -1219,35 +1219,94 @@ async fn a_demanded_source_whose_bytes_were_evicted_is_downgraded_before_its_ref
         .unwrap();
     }
     assert!(lookup_renderable_thumbnail(&source_ref).is_none());
+
+    // A revision bump of the same resource set is not renewed demand: the actor
+    // downgrades at this observation and must not refetch into the same full
+    // cache, or the working set would refill-evict forever.
     demand
         .replace(&context, 1, 2, vec![Some(uri.into())], vec![])
         .unwrap();
-    handle.publish_avatar_demand(Some(std::sync::Arc::new(demand)));
-
-    let mut downgraded = false;
+    handle.publish_avatar_demand(Some(std::sync::Arc::new(demand.clone())));
     timeout(Duration::from_secs(5), async {
         loop {
             for action in action_rx.recv().await.expect("account action channel") {
-                match action {
-                    AppAction::AvatarThumbnailUpdated {
-                        mxc_uri,
-                        thumbnail: AvatarThumbnailState::NotRequested,
-                    } if mxc_uri == uri => downgraded = true,
-                    AppAction::AvatarThumbnailUpdated {
-                        mxc_uri,
-                        thumbnail: AvatarThumbnailState::Ready { .. },
-                    } if mxc_uri == uri => return,
-                    _ => {}
+                if let AppAction::AvatarThumbnailUpdated {
+                    mxc_uri,
+                    thumbnail: AvatarThumbnailState::NotRequested,
+                } = action
+                    && mxc_uri == uri
+                {
+                    return;
                 }
             }
         }
     })
     .await
-    .expect("the revalidated source is announced again");
+    .expect("the capacity-evicted projection is downgraded");
+    // Nothing may follow while the demand is unchanged: a refetch would evict
+    // another demanded source and repeat forever.
+    let refetched = timeout(Duration::from_secs(1), async {
+        loop {
+            for action in action_rx.recv().await.expect("account action channel") {
+                if let AppAction::AvatarThumbnailUpdated {
+                    mxc_uri,
+                    thumbnail: AvatarThumbnailState::Ready { .. },
+                } = action
+                    && mxc_uri == uri
+                {
+                    return;
+                }
+            }
+        }
+    })
+    .await;
     assert!(
-        downgraded,
-        "the stale projection must be downgraded before its refetch, not silently dropped"
+        refetched.is_err(),
+        "a capacity-evicted source must not refetch for the same demand"
     );
+
+    // A renderer re-request is answered with the terminal capacity failure.
+    let request_id = RequestId {
+        connection_id: RuntimeConnectionId(19),
+        sequence: 7,
+    };
+    handle
+        .send(AccountMessage::Command(
+            AccountCommand::DownloadAvatarThumbnail {
+                request_id,
+                mxc_uri: uri.to_owned(),
+            },
+        ))
+        .await;
+    timeout(Duration::from_secs(5), async {
+        loop {
+            for action in action_rx.recv().await.expect("account action channel") {
+                if let AppAction::AvatarThumbnailUpdated {
+                    mxc_uri,
+                    thumbnail: AvatarThumbnailState::Failed { kind, .. },
+                } = action
+                    && mxc_uri == uri
+                {
+                    assert_eq!(kind, koushi_state::AvatarThumbnailFailureKind::Capacity);
+                    return;
+                }
+            }
+        }
+    })
+    .await
+    .expect("a re-request of a capacity-evicted source fails with Capacity");
+
+    // Only a changed demanded resource set retries the source; the refetch is
+    // served by the account-keyed SDK media store.
+    demand.close(1);
+    handle.publish_avatar_demand(Some(std::sync::Arc::new(demand.clone())));
+    demand.open(2).unwrap();
+    demand
+        .replace(&context, 2, 1, vec![Some(uri.into())], vec![])
+        .unwrap();
+    handle.publish_avatar_demand(Some(std::sync::Arc::new(demand)));
+    let healed_ref = await_ready_avatar(&mut action_rx, uri).await;
+    assert!(lookup_renderable_thumbnail(&healed_ref).is_some());
     shutdown_and_ack(&handle).await;
 }
 

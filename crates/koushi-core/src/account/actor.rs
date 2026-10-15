@@ -1292,6 +1292,12 @@ pub struct AccountActor {
     /// The own profile's current avatar source, so a change retires the
     /// superseded bytes (#1396).
     pub(super) own_avatar_mxc_uri: Option<String>,
+    /// #1433: sources whose bytes another source's store evicted while the
+    /// scoped demand still referenced them. A working set larger than the
+    /// renderable cache cannot be satisfied by refetching, so these are
+    /// terminal for the current demand and retried once when the demanded
+    /// resource set changes.
+    pub(super) avatar_capacity_evicted: std::collections::HashSet<String>,
 }
 
 impl AccountActor {
@@ -1530,6 +1536,7 @@ impl AccountActor {
             avatar_demand_rx,
             avatar_demand: None,
             own_avatar_mxc_uri: None,
+            avatar_capacity_evicted: std::collections::HashSet::new(),
         };
         crate::executor::spawn(actor.run());
         AccountActorHandle {

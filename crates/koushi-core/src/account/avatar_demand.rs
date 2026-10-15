@@ -29,6 +29,28 @@ impl AccountActor {
             _ => true,
         };
         self.avatar_demand = next;
+        if publish_cached {
+            // #1433: a changed working set can fit the cache now, so the
+            // sources a larger working set could not hold get one more attempt.
+            self.avatar_capacity_evicted.clear();
+            let capacity_failures: Vec<String> = self
+                .avatar_cache
+                .iter()
+                .filter(|(_, thumbnail)| {
+                    matches!(
+                        thumbnail,
+                        AvatarThumbnailState::Failed {
+                            kind: koushi_state::AvatarThumbnailFailureKind::Capacity,
+                            ..
+                        }
+                    )
+                })
+                .map(|(mxc_uri, _)| mxc_uri.clone())
+                .collect();
+            for mxc_uri in capacity_failures {
+                self.avatar_cache.remove(&mxc_uri);
+            }
+        }
         self.reconcile_avatar_demand(true, publish_cached).await;
     }
 
@@ -46,21 +68,18 @@ impl AccountActor {
         // #1432: leaving the scoped demand does not prove the source is unused.
         // A DM row, header, own profile, or timeline copy demands the same MXC
         // through its own path, so the bounded cache and the session lifecycle
-        // own the release policy. A source whose bytes were removed (LRU
-        // eviction, a superseded own avatar, another account's pressure) must
-        // never stay silently `Ready`: downgrade it so its renderer re-requests
-        // it. URIs the scoped demand still references keep the revalidation and
-        // refetch path below, which is guarded against an endless
-        // eviction/refill loop.
+        // own the release policy.
+        // #1433: `Ready` never lies about bytes that are gone, whether or not
+        // the scoped demand still references the source: a demanded source's
+        // renderer must see the downgrade at the reconcile that follows its
+        // eviction, not at its next observation. What bounds re-requesting is
+        // the capacity terminal below, not a stale projection.
         let invalidated: Vec<String> = self
             .avatar_cache
             .iter()
-            .filter(|(mxc_uri, thumbnail)| {
+            .filter(|(_, thumbnail)| {
                 matches!(thumbnail, AvatarThumbnailState::Ready { source_ref, .. }
                     if !crate::renderable_thumbnail::contains_renderable_thumbnail(source_ref))
-                    && !demand
-                        .as_ref()
-                        .is_some_and(|demand| demand.contains_resource(mxc_uri))
             })
             .map(|(mxc_uri, _)| mxc_uri.clone())
             .collect();
@@ -68,6 +87,18 @@ impl AccountActor {
             let mut actions = Vec::with_capacity(invalidated.len());
             for mxc_uri in invalidated {
                 self.avatar_cache.remove(&mxc_uri);
+                // #1433: a source whose bytes disappeared while the demand
+                // persisted cannot be satisfied by refetching in a loop, so it
+                // is capacity-terminal until the demanded resource set changes.
+                // A changed set is exactly the case that must retry instead:
+                // the source is being demanded afresh, not re-requested.
+                if !publish_cached
+                    && demand
+                        .as_ref()
+                        .is_some_and(|demand| demand.contains_resource(&mxc_uri))
+                {
+                    self.avatar_capacity_evicted.insert(mxc_uri.clone());
+                }
                 actions.push(AppAction::AvatarThumbnailUpdated {
                     mxc_uri,
                     thumbnail: AvatarThumbnailState::NotRequested,
@@ -117,6 +148,13 @@ impl AccountActor {
                     }])
                     .await;
                 }
+                continue;
+            }
+            if self.avatar_capacity_evicted.contains(uri) {
+                // #1433: another source's store evicted this one while it was
+                // still demanded, so the working set does not fit the cache.
+                // The renderer's re-request is answered with a terminal
+                // Capacity failure; only a changed demand set retries it.
                 continue;
             }
             if self.avatar_inflight.contains_key(uri) || self.session.is_none() {

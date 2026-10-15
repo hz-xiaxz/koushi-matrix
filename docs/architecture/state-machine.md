@@ -3448,6 +3448,20 @@ stateDiagram-v2
   from a canceled task must not settle or remove a later replacement's waiters,
   populate its cache, or decrement its active-fetch count. The existing task
   handle supplies this identity; no second fetch-generation counter is needed.
+- A `Ready` avatar never survives its own bytes (#1433). The renderable cache is
+  bounded per kind, so storing one source can evict another. The AccountActor
+  downgrades any `Ready` entry whose retained bytes are gone at the reconcile
+  that follows, whether or not the scoped demand still references it, and
+  whether or not that reconcile was driven by a new observation: a stale
+  `Ready` would otherwise make the renderer show nothing while claiming success.
+  A source whose bytes disappeared while its demand persisted is additionally
+  capacity-terminal for that demand: the AccountActor does not refetch it, a
+  renderer re-request is answered with the terminal
+  `AvatarThumbnailFailureKind::Capacity` instead of a fetch, and only a changed
+  demanded resource set clears the terminal state and retries the source once.
+  A working set larger than the cache therefore settles into retained sources
+  plus capacity failures instead of evicting and refetching forever. This bounds
+  re-requesting; it never justifies a `Ready` that points at missing bytes.
 - The existing timeline media download contract emits byte counts only and does
   not put downloaded bytes in React state. Avatar thumbnail source references
   are opaque app-owned handles produced by Rust/platform media handling;
