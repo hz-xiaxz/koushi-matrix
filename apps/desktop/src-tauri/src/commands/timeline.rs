@@ -1937,7 +1937,7 @@ pub async fn send_thread_reply(
     let request_id = event_conn.next_request_id();
     let account_key = account_key_from_app_state(&event_conn.snapshot());
     let submission_id = SubmissionId::new(submission_id);
-    if let Some(command) = build_submit_thread_reply_command(
+    if let Some(command) = build_submit_thread_text_command(
         request_id,
         expected_account,
         submission_id.clone(),
@@ -2117,7 +2117,17 @@ pub(super) fn build_submit_reply_command(
     clippy::too_many_arguments,
     reason = "mirrors the Tauri command IPC arguments one-to-one"
 )]
-pub(super) fn build_submit_thread_reply_command(
+/// Build the thread pane's composer submission.
+///
+/// The renderer's IPC name is `send_thread_reply`, but a message typed in the
+/// thread pane is a plain thread message: `SubmitText` on a thread key makes
+/// `make_offline_thread_content` send the falling-back `m.thread` relation that
+/// Element X and Element Web send. Routing it through `SubmitReply` with the
+/// root as the reply target made every thread message a genuine in-thread
+/// reply — quoted above it, and mentioning the root's sender (#1426). Keep
+/// `SubmitReply` on a thread key for a future explicit in-thread Reply action
+/// (#303), not for the composer.
+pub(super) fn build_submit_thread_text_command(
     request_id: RequestId,
     expected_account: koushi_protocol::SessionKeyId,
     submission_id: SubmissionId,
@@ -2131,7 +2141,7 @@ pub(super) fn build_submit_thread_reply_command(
     if document.plain_body().trim().is_empty() {
         return None;
     }
-    Some(CoreCommand::Timeline(TimelineCommand::SubmitReply {
+    Some(CoreCommand::Timeline(TimelineCommand::SubmitText {
         request_id,
         expected_account,
         submission_id,
@@ -2139,11 +2149,10 @@ pub(super) fn build_submit_thread_reply_command(
             account_key,
             kind: TimelineKind::Thread {
                 room_id,
-                root_event_id: root_event_id.clone(),
+                root_event_id,
             },
         },
         transaction_id,
-        in_reply_to_event_id: root_event_id,
         document,
         draft_revision,
     }))
