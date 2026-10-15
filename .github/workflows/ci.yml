@@ -6,6 +6,12 @@ on:
   pull_request:
     branches: [main]
   workflow_dispatch:
+    inputs:
+      browser_trace:
+        description: "Record a Playwright trace in the browser-headless job (diagnostic run only; slows the WebKit specs)"
+        required: false
+        default: false
+        type: boolean
 
 # Newer runs supersede in-flight ones. Key off head_ref for PRs so that GitHub
 # recomputing refs/pull/N/merge (on mergeability changes) does not spuriously
@@ -109,6 +115,10 @@ jobs:
   browser-headless:
     name: Browser headless (Playwright DOM tier)
     runs-on: ubuntu-latest
+    # Empty in required runs, so tracing stays off there; see playwright.config.ts
+    # for the measured cost of turning it on.
+    env:
+      KOUSHI_PLAYWRIGHT_TRACE: ${{ inputs.browser_trace }}
     defaults:
       run:
         working-directory: apps/desktop
@@ -134,8 +144,8 @@ jobs:
       # A failed run must leave evidence: the engine-native WebKit wheel-scroll
       # specs failed here twice on 2026-10-15 with no artifact to read, and the
       # failure ("the wheel moved the viewport by 0 px") cannot be reproduced
-      # locally. The WebKit project records a trace on failure; keep it (and
-      # every other failing test's page snapshot) for the next occurrence.
+      # locally. Upload every failing test's page snapshot and, on a dispatched
+      # run with `browser_trace`, its Playwright trace.
       - name: Upload browser-headless artifacts on failure
         if: failure()
         uses: actions/upload-artifact@v4

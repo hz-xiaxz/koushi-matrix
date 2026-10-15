@@ -32,11 +32,18 @@ Evidence that it is not this repository's product code:
   `docs/worklogs/2026-10-15-issue1427-device-local-delivery.md`.
 
 Decision: do not touch the spec or the app. Make the next occurrence
-diagnosable instead — the WebKit project records a trace on failure
-(`trace: "retain-on-failure"`, project-scoped so the 600-spec Chromium run
-pays no tracing I/O), and the CI job uploads `apps/desktop/test-results/` on
-failure. A durable fix waits for a trace that shows whether input was never
-delivered or the offset was restored.
+diagnosable instead — CI uploads `apps/desktop/test-results/` on failure, and a
+dispatched, non-required run can record a Playwright trace for the WebKit
+project (`browser_trace` input, `KOUSHI_PLAYWRIGHT_TRACE`).
+
+**Correction (same day).** The first version of this change enabled
+`trace: "retain-on-failure"` for the WebKit project in the required run. The
+next `main` CI failed with three WebKit failures in this spec, and the durations
+show why: date dividers 18.6s -> 30.5s, threshold crossing 15.0s -> 30.2s, wheel
+6.5s -> 16.6s against the previous green run. Tracing perturbs the very
+timing-sensitive assertions it was meant to explain, so the required run is
+trace-free again and tracing is opt-in per dispatched run. See
+[docs/agents/verification.md](../agents/verification.md#browser-tier-trace-collection).
 
 ## 2. Retired real-homeserver QA — quarantine finished, tombstone deferred
 
@@ -86,8 +93,12 @@ match. Revisit only with a real mis-rendered preview.
 
 ## Files changed
 
-- `.github/workflows/ci.yml` — upload browser-headless artifacts on failure.
-- `apps/desktop/playwright.config.ts` — WebKit trace retention on failure.
+- `.github/workflows/ci.yml` — upload browser-headless artifacts on failure; a
+  `browser_trace` dispatch input opts a diagnostic run into WebKit tracing.
+- `apps/desktop/playwright.config.ts` — WebKit trace only when
+  `KOUSHI_PLAYWRIGHT_TRACE` is set.
+- `docs/agents/verification.md` — why the required browser tier stays
+  trace-free and how to collect a trace on demand.
 - `docs/agents/history.md` — retired external-homeserver QA entry points.
 - `crates/koushi-qa/src/bin/real_homeserver_qa/tests.rs` — stale script name in
   a comment, now naming the retirement and #1435.
@@ -96,8 +107,9 @@ match. Revisit only with a real mis-rendered preview.
 ## Verification
 
 - `node scripts/check-agents-docs.mjs` and `node scripts/user-help.mjs --check`.
+- `actionlint .github/workflows/ci.yml` and `git diff --check`.
 - `cargo fmt --check`, `cargo test -p koushi-qa --features qa-bin --bin real-homeserver-qa`.
-- `npx tsc --noEmit` in `apps/desktop`, plus the WebKit spec run that produces a
-  retained trace locally (a known-failing case on this machine) to prove the
-  capture path the CI upload step consumes.
-- `git diff --check`.
+- `npx tsc --noEmit` in `apps/desktop`.
+- The WebKit spec run with tracing off (the required configuration) and with
+  `KOUSHI_PLAYWRIGHT_TRACE=1` on the known-failing case, to prove both the
+  trace-free default and the retained trace the diagnostic run consumes.
