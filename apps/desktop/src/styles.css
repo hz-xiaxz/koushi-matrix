@@ -10274,6 +10274,10 @@ kbd {
   text-overflow: ellipsis;
   white-space: nowrap;
 }
+.space-add-room-context {
+  /* #1403: same-named rooms say which Space they are in. */
+  color: var(--text-muted);
+}
 .space-add-room-status { color: var(--text-muted); font-size: 12px; }
 .space-add-room-failure {
   grid-column: 1 / -1;

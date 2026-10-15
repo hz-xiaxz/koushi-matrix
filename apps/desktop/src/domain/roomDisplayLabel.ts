@@ -4,7 +4,8 @@ import type {
   RoomListItem,
   RoomNamePlaceholder,
   RoomSummary,
-  SpaceChildSummary
+  SpaceChildSummary,
+  SpaceSummary
 } from "./types";
 
 /**
@@ -74,4 +75,86 @@ export function spaceChildLabel(
   return child.display_name_placeholder
     ? roomNamePlaceholderText(child.display_name_placeholder)
     : cappedRoomLabel(child.display_name);
+}
+
+/**
+ * The Space a room is picked under, for rows that would otherwise be identical
+ * (#1403). The rule mirrors the Activity projection's
+ * (`activity_row_context_label`): a DM has no containing Space, otherwise the
+ * first parent Space the room declares, and failing that a Space that lists the
+ * room as a child.
+ */
+export type SpaceContextSource = Pick<SpaceSummary, "space_id" | "display_name" | "child_room_ids">;
+
+export function roomSpaceLabel(
+  room: Pick<RoomSummary, "room_id" | "is_dm" | "parent_space_ids">,
+  spaces: readonly SpaceContextSource[]
+): string | null {
+  if (room.is_dm) {
+    return null;
+  }
+  const parent =
+    room.parent_space_ids
+      .map((spaceId) => spaces.find((space) => space.space_id === spaceId))
+      .find((space) => space !== undefined) ??
+    spaces.find((space) => space.child_room_ids.includes(room.room_id));
+  return parent ? cappedRoomLabel(parent.display_name) : null;
+}
+
+/** `roomSpaceLabel` for every room in a list, keyed by room id. */
+export function roomSpaceLabelsByRoomId(
+  rooms: readonly Pick<RoomSummary, "room_id" | "is_dm" | "parent_space_ids">[],
+  spaces: readonly SpaceContextSource[]
+): Record<string, string> {
+  const labels: Record<string, string> = {};
+  for (const room of rooms) {
+    const label = roomSpaceLabel(room, spaces);
+    if (label !== null) {
+      labels[room.room_id] = label;
+    }
+  }
+  return labels;
+}
+
+/**
+ * The labels more than one item carries. Only a collision needs extra context;
+ * a uniqueness check over the rendered labels keeps every other row unchanged.
+ */
+export function collidingRoomLabels(labels: readonly string[]): Set<string> {
+  const seen = new Set<string>();
+  const colliding = new Set<string>();
+  for (const label of labels) {
+    if (seen.has(label)) {
+      colliding.add(label);
+    } else {
+      seen.add(label);
+    }
+  }
+  return colliding;
+}
+
+/**
+ * Forward-menu destinations. A room whose name collides with another
+ * destination's gets its Space — or its room ID when it is in none — in front,
+ * so the user can tell the rows apart before sending (#1403).
+ */
+export function forwardDestinationsFrom(
+  rooms: readonly Pick<
+    RoomSummary,
+    "room_id" | "display_label" | "display_label_placeholder" | "is_dm" | "parent_space_ids"
+  >[],
+  spaces: readonly SpaceContextSource[]
+): { room_id: string; display_name: string }[] {
+  const labels = rooms.map((room) => roomDisplayLabel(room));
+  const colliding = collidingRoomLabels(labels);
+  return rooms.map((room, index) => {
+    const label = labels[index] ?? "";
+    const context = colliding.has(label)
+      ? roomSpaceLabel(room, spaces) ?? room.room_id
+      : null;
+    return {
+      room_id: room.room_id,
+      display_name: context === null ? label : `${context} · ${label}`
+    };
+  });
 }

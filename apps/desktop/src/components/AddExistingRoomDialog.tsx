@@ -11,7 +11,7 @@ import { useEffect, useState } from "react";
 import { t } from "../i18n/messages";
 import type { SpaceAddRoomCandidate, SpaceAddRoomsModel } from "../domain/types";
 import { operationFailureLabel } from "../app/uiShared";
-import { cappedRoomLabel } from "../domain/roomDisplayLabel";
+import { cappedRoomLabel, collidingRoomLabels } from "../domain/roomDisplayLabel";
 import { ImeTextField } from "./ImeTextControl";
 import { ModalDialog } from "./ModalDialog";
 
@@ -19,6 +19,7 @@ export function AddExistingRoomDialog({
   model,
   spaceName,
   busy,
+  spaceLabelsByRoomId = {},
   onAdd,
   onClose
 }: {
@@ -26,6 +27,8 @@ export function AddExistingRoomDialog({
   spaceName: string;
   /** Another basic operation (e.g. room creation) is in flight. */
   busy: boolean;
+  /** `roomSpaceLabelsByRoomId` for the rooms on screen (#1403). */
+  spaceLabelsByRoomId?: Readonly<Record<string, string>>;
   /** Resolves at command admission; rejects when the command is refused. */
   onAdd: (roomId: string) => Promise<unknown>;
   onClose: () => void;
@@ -60,6 +63,9 @@ export function AddExistingRoomDialog({
     ? candidates.filter((candidate) => candidate.display_name.toLocaleLowerCase().includes(normalized))
     : candidates;
   const anyAdding = candidates.some((candidate) => candidate.status.kind === "adding");
+  // #1403: only same-named rows need to say which Space they are in, and the
+  // fallback is the room ID, the one value Matrix promises is unique.
+  const collidingNames = collidingRoomLabels(candidates.map((candidate) => candidate.display_name));
 
   return (
     <ModalDialog title={title} className="space-add-rooms-modal" onClose={onClose}>
@@ -82,6 +88,11 @@ export function AddExistingRoomDialog({
               key={candidate.room_id}
               candidate={candidate}
               spaceName={spaceName}
+              contextLabel={
+                collidingNames.has(candidate.display_name)
+                  ? spaceLabelsByRoomId[candidate.room_id] ?? candidate.room_id
+                  : null
+              }
               disabled={busy || anyAdding || submittedPending}
               onAdd={() => add(candidate)}
             />
@@ -100,11 +111,14 @@ export function AddExistingRoomDialog({
 function SpaceAddRoomRow({
   candidate,
   spaceName,
+  contextLabel,
   disabled,
   onAdd
 }: {
   candidate: SpaceAddRoomCandidate;
   spaceName: string;
+  /** Space or room-ID context, only when another row shares this name (#1403). */
+  contextLabel: string | null;
   disabled: boolean;
   onAdd: () => void;
 }) {
@@ -113,7 +127,12 @@ function SpaceAddRoomRow({
   const status = candidate.status;
   return (
     <li className="space-add-room" data-status={status.kind}>
-      <span className="space-add-room-name" dir="auto">{roomName}</span>
+      <span className="space-add-room-name" dir="auto">
+        {contextLabel ? (
+          <span className="space-add-room-context">{cappedRoomLabel(contextLabel)} · </span>
+        ) : null}
+        {roomName}
+      </span>
       {status.kind === "failed" ? (
         <span className="space-add-room-failure" role="alert">
           {status.reason === "forbidden"
