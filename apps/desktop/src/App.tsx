@@ -298,6 +298,7 @@ import { ContextualRightPanel } from "./components/rightPanel";
 import type { RoomInfoRevealRequest } from "./components/RoomInfoPanel";
 import { AppSettingsDialog } from "./components/UserSettingsPanel";
 import type { AccountNotificationActions } from "./components/user-settings/AccountNotificationsSections";
+import type { NotificationDeliveryActions } from "./components/user-settings/NotificationDeliverySection";
 import type { ContactSecurityActions } from "./components/ContactSecurityDetails";
 import type { HistoryExportControls } from "./components/HistoryExportDialog";
 import { historyExportLabels } from "./domain/historyExportLabels";
@@ -820,6 +821,24 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   const registerBeforeAccountSwitch = useCallback((handler: (() => Promise<boolean>) | null) => {
     beforeAccountSwitchRef.current = handler ?? (async () => true);
   }, []);
+  // #1427: the app settings dialog is shell-level, while the delivery block is app-scoped.
+  // The whole-block patch goes through the mounted account content's settings updater, which
+  // owns snapshot settlement; the three sink commands are dispatched straight through the
+  // transport like the other shell-level commands.
+  const appNotificationDeliveryActions = useMemo<NotificationDeliveryActions>(() => ({
+    update: (delivery) => {
+      void appSettingsUpdateRef.current({ delivery, scope: "app" }).catch(() => undefined);
+    },
+    setSecret: async (sinkId, secret) => {
+      await desktopApi.setNotificationDeliverySecret(sinkId, secret).catch(() => undefined);
+    },
+    clearSecret: async (sinkId) => {
+      await desktopApi.clearNotificationDeliverySecret(sinkId).catch(() => undefined);
+    },
+    test: async (sinkId) => {
+      await desktopApi.testNotificationDelivery(sinkId).catch(() => undefined);
+    }
+  }), []);
   const consumeNotificationActivation = useCallback((target: DesktopNotificationActivation) => {
     setPendingNotificationActivation((pending) => pending === target ? null : pending);
   }, []);
@@ -1024,6 +1043,7 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
         {settingsScope === "app" && selectedSnapshot ? (
           <AppSettingsDialog
             snapshot={selectedSnapshot}
+            notificationDeliveryActions={appNotificationDeliveryActions}
             onUpdateSettings={(patch) => {
               void appSettingsUpdateRef.current(patch).catch(() => undefined);
             }}
@@ -1605,9 +1625,15 @@ function AccountContent({
   useEffect(() => {
     setAddExistingRoomSpaceId((open) => (open && open !== activeSpaceIdForAddRooms ? null : open));
   }, [activeSpaceIdForAddRooms]);
+  // #1416: the default address is the create session's random default, which
+  // Rust holds on that session's draft; the room name never feeds it.
+  const createRoomAddressDraftReady =
+    snapshot?.state.domain.room_management.draft?.scope.kind === "create" &&
+    snapshot.state.domain.room_management.draft.scope.sessionId === createAccessSessionId;
   const createRoomAddressPreview = useRoomAddressPreview(
-    api, createDraftName, createRoomManualAlias,
-    snapshot?.state.domain.session.user_id ?? null, createDialog === "room"
+    api, createAccessSessionId, createRoomManualAlias,
+    snapshot?.state.domain.session.user_id ?? null, createRoomAddressDraftReady,
+    createDialog === "room" && createAccessSessionId !== 0
   );
   // #1006: the advisory check follows the shown address after a short pause
   // in typing. Rust owns the lookup, its cancellation and stale-result
@@ -1674,13 +1700,6 @@ function AccountContent({
       snapshot?.state.ui.navigation.active_space_id
     ]
   );
-  const createRoomAccessPreview = useCreateRoomAccessPreview(
-    api,
-    createRoomAccessScope,
-    createRoomAccessInput,
-    snapshot?.state_generation,
-    createDialog === "room"
-  );
   // #1177: only this open dialog's own create session may show or consume its
   // draft; a stale draft from a previous lifetime is never rendered.
   const createRoomAccessDraft = useMemo(() => {
@@ -1689,6 +1708,16 @@ function AccountContent({
       ? draft
       : null;
   }, [snapshot?.state.domain.room_management.draft, createAccessSessionId]);
+  // #1417: the draft revision is the create preview's selection key, so an
+  // unrelated snapshot advance never blanks the shown details.
+  const createRoomAccessPreview = useCreateRoomAccessPreview(
+    api,
+    createRoomAccessScope,
+    createRoomAccessInput,
+    `draft:${createRoomAccessDraft?.revision ?? "none"}`,
+    snapshot?.state_generation,
+    createDialog === "room"
+  );
   const createRoomJoinedSpaces = useMemo(
     () => (snapshot?.state.domain.spaces ?? []).map((space) => ({
       id: space.space_id,
@@ -2917,9 +2946,11 @@ function AccountContent({
 
   // #1177: the Room Info access/history editor reads the Rust-owned draft and a
   // stateless Rust preview for the current scope. The preview re-requests on
-  // every published generation (a draft mutation, a confirmed-property
-  // advance, an encryption toggle or a session reset) and drops any older
-  // response, so an out-of-order result never replaces newer details.
+  // every published generation and drops any older response, so an
+  // out-of-order result never replaces newer details. #1417: only a change of
+  // the selection key (the draft revision and the confirmed values the panel
+  // shows) hides the shown details; an unrelated snapshot advance keeps them
+  // on screen while the newer preview is fetched.
   const roomAccessScope = useMemo<RoomAccessDraftScope | null>(
     () =>
       rightPanelMode === "roomInfo" && snapshot?.state.ui.navigation.active_room_id
@@ -2927,10 +2958,29 @@ function AccountContent({
         : null,
     [rightPanelMode, snapshot?.state.ui.navigation.active_room_id]
   );
+  const roomAccessSelectionKey = useMemo(() => {
+    const roomId = roomAccessScope?.kind === "room" ? roomAccessScope.roomId : null;
+    const roomManagement = snapshot?.state.domain.room_management;
+    const draft = roomManagement?.draft;
+    const settings = roomManagement?.settings;
+    return JSON.stringify([
+      draft?.scope.kind === "room" && draft.scope.roomId === roomId ? draft.revision : null,
+      settings && settings.room_id === roomId
+        ? [settings.join_rule, settings.history_visibility]
+        : null,
+      snapshot?.state.domain.rooms.find((room) => room.room_id === roomId)?.is_encrypted ?? null
+    ]);
+  }, [
+    roomAccessScope,
+    snapshot?.state.domain.room_management.draft,
+    snapshot?.state.domain.room_management.settings,
+    snapshot?.state.domain.rooms
+  ]);
   const roomAccessPreview = useRoomAccessPreview(
     api,
     roomAccessScope,
     "access",
+    roomAccessSelectionKey,
     snapshot?.state_generation,
     true
   );
@@ -2938,6 +2988,7 @@ function AccountContent({
     api,
     roomAccessScope,
     "history",
+    roomAccessSelectionKey,
     snapshot?.state_generation,
     true
   );
@@ -3288,7 +3339,30 @@ function AccountContent({
       runInBackground(
         settleCommand(api.enableEmailNotifications(address, notificationLangRef.current))
       ),
-    disableEmail: () => runInBackground(settleCommand(api.disableEmailNotifications()))
+    disableEmail: () => runInBackground(settleCommand(api.disableEmailNotifications())),
+    // #1427: keyword rules are account state. The field text goes to Rust as
+    // typed; Rust trims, validates, and mints the rule id.
+    addKeyword: (pattern) =>
+      runInBackground(settleCommand(api.addNotificationKeyword(pattern))),
+    removeKeyword: (ruleId) =>
+      runInBackground(settleCommand(api.removeNotificationKeyword(ruleId)))
+  }), []);
+
+  // Device-local notification delivery (#1427). The delivery block always travels as a
+  // whole app-scoped patch; the three sink commands are write-only, so nothing they return
+  // carries the secret back to the renderer.
+  const notificationDeliveryActions = useMemo<NotificationDeliveryActions>(() => ({
+    update: (delivery) =>
+      runInBackground(settleCommand(api.updateSettings({ delivery, scope: "app" }))),
+    setSecret: async (sinkId, secret) => {
+      await settleCommand(api.setNotificationDeliverySecret(sinkId, secret));
+    },
+    clearSecret: async (sinkId) => {
+      await settleCommand(api.clearNotificationDeliverySecret(sinkId));
+    },
+    test: async (sinkId) => {
+      await settleCommand(api.testNotificationDelivery(sinkId));
+    }
   }), []);
 
   // Contact security details in User info (#1024): read-only load and close.
@@ -4682,7 +4756,12 @@ function AccountContent({
       (kind === "space" && !name) ||
       (kind === "room" &&
         createRoomDraftOptions.visibility === "public" &&
-        (!createRoomAddressPreview || createRoomAddressPreview.error !== null)) ||
+        (!createRoomAddressPreview ||
+          createRoomAddressPreview.error !== null ||
+          // #1416: Create waits for the advisory check of the shown address;
+          // an address in use blocks it, an incomplete check does not.
+          shownRoomAddressAvailability?.kind !== "checked" ||
+          shownRoomAddressAvailability.availability === "inUse")) ||
       isBusy ||
       (snapshot && snapshot.state.ui.basic_operation.kind !== "idle")
     ) {
@@ -7788,6 +7867,7 @@ function AccountContent({
             runInBackground(submitAccountManagementUia(flowId, password));
           }}
           accountNotificationActions={accountNotificationActions}
+          notificationDeliveryActions={notificationDeliveryActions}
           contactSecurityActions={contactSecurityActions}
           onUpdateRoomSetting={(roomId, change) => {
             runInBackground(updateRoomSetting(roomId, change));
@@ -7850,7 +7930,6 @@ function AccountContent({
       ) : null}
       {createDialog ? (
         <CreateEntityDialog
-          activeSpaceName={activeSpaceName}
           isBusy={isBusy || snapshot.state.ui.basic_operation.kind !== "idle"}
           kind={createDialog}
           roomOptions={displayedCreateRoomOptions}

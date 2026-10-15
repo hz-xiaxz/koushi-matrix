@@ -35,6 +35,7 @@ fn snapshot(email_active: bool, group: NotificationCategoryState) -> AccountNoti
             notifications_active: email_active,
         }],
         unverified_email_pusher_count: 0,
+        keywords: Vec::new(),
     }
 }
 
@@ -214,14 +215,14 @@ fn failed_email_enable_never_projects_on() {
         &mut state,
         AppAction::AccountNotificationsOperationRequested {
             request_id: 2,
-            operation: op,
+            operation: op.clone(),
         },
     );
     reduce(
         &mut state,
         AppAction::AccountNotificationsOperationFailed {
             request_id: 2,
-            operation: op,
+            operation: op.clone(),
             failure_kind: AccountNotificationsFailureKind::Unsupported,
             snapshot: Some(snapshot(false, NotificationCategoryState::On)),
         },
@@ -313,14 +314,14 @@ fn email_verification_flow_with_uia_and_resend() {
         &mut state,
         AppAction::AccountNotificationsOperationRequested {
             request_id: 2,
-            operation: request,
+            operation: request.clone(),
         },
     );
     reduce(
         &mut state,
         AppAction::AccountNotificationsEmailTokenSent {
             request_id: 2,
-            operation: request,
+            operation: request.clone(),
             address: "new@example.invalid".to_owned(),
             resend_count: 0,
         },
@@ -334,14 +335,14 @@ fn email_verification_flow_with_uia_and_resend() {
         &mut state,
         AppAction::AccountNotificationsOperationRequested {
             request_id: 3,
-            operation: resend,
+            operation: resend.clone(),
         },
     );
     reduce(
         &mut state,
         AppAction::AccountNotificationsEmailTokenSent {
             request_id: 3,
-            operation: resend,
+            operation: resend.clone(),
             address: "new@example.invalid".to_owned(),
             resend_count: 1,
         },
@@ -361,7 +362,7 @@ fn email_verification_flow_with_uia_and_resend() {
         &mut state,
         AppAction::AccountNotificationsOperationRequested {
             request_id: 4,
-            operation: confirm,
+            operation: confirm.clone(),
         },
     );
     // Link not opened yet: pending stays, failure shown.
@@ -369,7 +370,7 @@ fn email_verification_flow_with_uia_and_resend() {
         &mut state,
         AppAction::AccountNotificationsOperationFailed {
             request_id: 4,
-            operation: confirm,
+            operation: confirm.clone(),
             failure_kind: AccountNotificationsFailureKind::EmailNotVerified,
             snapshot: None,
         },
@@ -380,7 +381,7 @@ fn email_verification_flow_with_uia_and_resend() {
         &mut state,
         AppAction::AccountNotificationsOperationRequested {
             request_id: 5,
-            operation: confirm,
+            operation: confirm.clone(),
         },
     );
     reduce(
@@ -388,7 +389,7 @@ fn email_verification_flow_with_uia_and_resend() {
         AppAction::AccountNotificationsUiaRequired {
             request_id: 5,
             flow_id: 5,
-            operation: confirm,
+            operation: confirm.clone(),
         },
     );
     assert!(matches!(
@@ -417,7 +418,7 @@ fn email_verification_flow_with_uia_and_resend() {
         &mut state,
         AppAction::AccountNotificationsOperationSucceeded {
             request_id: 5,
-            operation: confirm,
+            operation: confirm.clone(),
             snapshot: Some(snapshot(false, NotificationCategoryState::On)),
         },
     );
@@ -442,14 +443,14 @@ fn cancel_pending_email_and_logout_reset_the_slice() {
         &mut state,
         AppAction::AccountNotificationsOperationRequested {
             request_id: 1,
-            operation: request,
+            operation: request.clone(),
         },
     );
     reduce(
         &mut state,
         AppAction::AccountNotificationsEmailTokenSent {
             request_id: 1,
-            operation: request,
+            operation: request.clone(),
             address: "new@example.invalid".to_owned(),
             resend_count: 0,
         },
@@ -487,14 +488,14 @@ fn verified_signal_clears_pending_even_when_the_follow_up_fails_without_a_reread
         &mut state,
         AppAction::AccountNotificationsOperationRequested {
             request_id: 1,
-            operation: request,
+            operation: request.clone(),
         },
     );
     reduce(
         &mut state,
         AppAction::AccountNotificationsEmailTokenSent {
             request_id: 1,
-            operation: request,
+            operation: request.clone(),
             address: "new@example.invalid".to_owned(),
             resend_count: 0,
         },
@@ -504,7 +505,7 @@ fn verified_signal_clears_pending_even_when_the_follow_up_fails_without_a_reread
         &mut state,
         AppAction::AccountNotificationsOperationRequested {
             request_id: 2,
-            operation: confirm,
+            operation: confirm.clone(),
         },
     );
     // The actor bound the address, then the target change and the re-read
@@ -517,7 +518,7 @@ fn verified_signal_clears_pending_even_when_the_follow_up_fails_without_a_reread
         &mut state,
         AppAction::AccountNotificationsOperationFailed {
             request_id: 2,
-            operation: confirm,
+            operation: confirm.clone(),
             failure_kind: AccountNotificationsFailureKind::Network,
             snapshot: None,
         },

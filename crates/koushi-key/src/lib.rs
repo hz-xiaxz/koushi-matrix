@@ -34,6 +34,9 @@ const SAVED_SESSIONS_ACCOUNT_NAME: &str = "koushi-desktop:saved-sessions:v1";
 const CREDENTIAL_VAULT_KEY_ACCOUNT_NAME: &str = "koushi-desktop:credential-vault-key:v1";
 const PENDING_LOGIN_JOURNAL_ACCOUNT_NAME: &str = "koushi-desktop:pending-login-journal:v1";
 const LOCAL_STORE_MIGRATION_ACCOUNT_NAME: &str = "koushi-desktop:local-store-migration:v1";
+const NOTIFICATION_SINK_SECRET_PREFIX: &str = "koushi-desktop:notification-sink-secret:v1:";
+const NOTIFICATION_SINK_SECRET_ID_MAX_BYTES: usize = 64;
+const NOTIFICATION_SINK_SECRET_MAX_BYTES: usize = 512;
 
 pub fn last_session_account_name() -> &'static str {
     LAST_SESSION_ACCOUNT_NAME
@@ -71,6 +74,10 @@ pub enum LocalSecretError {
     InvalidSecretLength { expected: usize, actual: usize },
     #[error("JSON serialization error: {0}")]
     Json(#[from] serde_json::Error),
+    #[error("invalid notification sink secret id")]
+    InvalidNotificationSinkSecretId,
+    #[error("invalid notification sink secret")]
+    InvalidNotificationSinkSecret,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -951,6 +958,67 @@ impl<B> fmt::Debug for CredentialStore<B> {
     }
 }
 
+/// Identifier of one device-local notification sink secret (#1427).
+///
+/// The sink list is user data, so a fixed credential name per sink cannot be a
+/// constant. The credential name is derived from the sink's own id, and the id is
+/// validated to a bounded lowercase charset so that no address, room id, token, or
+/// other free-form value can ever reach the credential store as a name.
+#[derive(Clone, Debug, Eq, Hash, Ord, PartialEq, PartialOrd)]
+pub struct NotificationSinkSecretId(String);
+
+impl NotificationSinkSecretId {
+    pub fn parse(value: &str) -> Result<Self, LocalSecretError> {
+        let valid_len = !value.is_empty() && value.len() <= NOTIFICATION_SINK_SECRET_ID_MAX_BYTES;
+        let valid_chars = value.bytes().all(|byte| {
+            byte.is_ascii_lowercase() || byte.is_ascii_digit() || byte == b'-' || byte == b'_'
+        });
+        if !valid_len || !valid_chars {
+            return Err(LocalSecretError::InvalidNotificationSinkSecretId);
+        }
+        Ok(Self(value.to_owned()))
+    }
+
+    pub fn as_str(&self) -> &str {
+        &self.0
+    }
+
+    /// The credential name this sink's secret is stored under.
+    pub fn account_name(&self) -> String {
+        format!("{NOTIFICATION_SINK_SECRET_PREFIX}{}", self.0)
+    }
+}
+
+/// One device-local notification sink secret (#1427): a mail provider API key, an
+/// SMTP password or authorization code, or a relay webhook key.
+///
+/// The value is zeroized on drop, printing it is redacted, and it is deliberately
+/// neither `Serialize` nor `Display`, so it cannot reach a settings snapshot, a
+/// diagnostics export, or a log line by construction.
+#[derive(Clone)]
+pub struct NotificationSinkSecret(Zeroizing<String>);
+
+impl NotificationSinkSecret {
+    pub fn new(value: impl Into<String>) -> Result<Self, LocalSecretError> {
+        let value = Zeroizing::new(value.into());
+        let valid_len = !value.is_empty() && value.len() <= NOTIFICATION_SINK_SECRET_MAX_BYTES;
+        if !valid_len || value.chars().any(char::is_control) {
+            return Err(LocalSecretError::InvalidNotificationSinkSecret);
+        }
+        Ok(Self(value))
+    }
+
+    pub fn as_str(&self) -> &str {
+        self.0.as_str()
+    }
+}
+
+impl fmt::Debug for NotificationSinkSecret {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter.write_str("NotificationSinkSecret(<redacted>)")
+    }
+}
+
 impl<B: CredentialBackend> CredentialStore<B> {
     pub fn with_backend(service_name: impl Into<String>, backend: B) -> Self {
         Self {
@@ -1135,6 +1203,34 @@ impl<B: CredentialBackend> CredentialStore<B> {
         self.save_saved_sessions(&index)
     }
 
+    /// Persist one device-local notification sink secret.
+    ///
+    /// The name comes from a validated sink id and the value goes through the same
+    /// backend as every other secret. Callers read this on configuration or actor
+    /// start only, never on a settings or dispatch hot path.
+    pub fn save_notification_sink_secret(
+        &self,
+        id: &NotificationSinkSecretId,
+        secret: &NotificationSinkSecret,
+    ) -> Result<(), LocalSecretError> {
+        self.save_raw(&id.account_name(), secret.as_str())
+    }
+
+    pub fn load_notification_sink_secret(
+        &self,
+        id: &NotificationSinkSecretId,
+    ) -> Result<NotificationSinkSecret, LocalSecretError> {
+        let stored = Zeroizing::new(self.load_raw(&id.account_name())?);
+        NotificationSinkSecret::new(stored.as_str())
+    }
+
+    pub fn delete_notification_sink_secret(
+        &self,
+        id: &NotificationSinkSecretId,
+    ) -> Result<(), LocalSecretError> {
+        self.delete_raw(&id.account_name())
+    }
+
     fn save_raw(&self, account_name: &str, value: &str) -> Result<(), LocalSecretError> {
         self.backend
             .set_password(&self.service_name, account_name, value)
@@ -1176,8 +1272,71 @@ pub fn is_locked_or_inaccessible_error(error: &LocalSecretError) -> bool {
 mod tests {
     use super::{
         CredentialStore, CredentialVaultMasterKey, InMemoryCredentialBackend, LocalUnlockSecret,
-        credential_vault_key_account_name,
+        NotificationSinkSecret, NotificationSinkSecretId, credential_vault_key_account_name,
+        is_missing_credential_error,
     };
+
+    #[test]
+    fn notification_sink_secret_id_rejects_free_form_names() {
+        let valid = NotificationSinkSecretId::parse("resend-1").expect("valid id");
+        assert_eq!(valid.as_str(), "resend-1");
+        assert_eq!(
+            valid.account_name(),
+            "koushi-desktop:notification-sink-secret:v1:resend-1"
+        );
+
+        // A Matrix id, an address, a token, an empty value, and an over-long value
+        // must never become a credential name.
+        for rejected in [
+            "@alice:example.org",
+            "alice@example.com",
+            "re_secret_KEY",
+            "",
+            &"a".repeat(65),
+        ] {
+            assert!(
+                NotificationSinkSecretId::parse(rejected).is_err(),
+                "expected {rejected:?} to be rejected"
+            );
+        }
+    }
+
+    #[test]
+    fn notification_sink_secret_round_trips_without_debug_exposure() {
+        let backend = InMemoryCredentialBackend::default();
+        let store = CredentialStore::with_backend("service", backend.clone());
+        let id = NotificationSinkSecretId::parse("qq-mail").expect("id");
+        let secret = NotificationSinkSecret::new("qm-auth-code-value").expect("secret");
+
+        assert!(!format!("{secret:?}").contains("qm-auth-code-value"));
+
+        store
+            .save_notification_sink_secret(&id, &secret)
+            .expect("save");
+        let restored = store.load_notification_sink_secret(&id).expect("load");
+        assert_eq!(restored.as_str(), "qm-auth-code-value");
+        assert!(!format!("{restored:?}").contains("qm-auth-code-value"));
+
+        store
+            .delete_notification_sink_secret(&id)
+            .expect("delete on present secret");
+        store
+            .delete_notification_sink_secret(&id)
+            .expect("delete is idempotent");
+        assert!(is_missing_credential_error(
+            &store
+                .load_notification_sink_secret(&id)
+                .expect_err("deleted secret")
+        ));
+    }
+
+    #[test]
+    fn notification_sink_secret_rejects_empty_long_and_control_values() {
+        assert!(NotificationSinkSecret::new("").is_err());
+        assert!(NotificationSinkSecret::new("a".repeat(513)).is_err());
+        assert!(NotificationSinkSecret::new("line\nbreak").is_err());
+        assert!(NotificationSinkSecret::new("k".repeat(512)).is_ok());
+    }
 
     #[test]
     fn credential_vault_master_key_round_trips_without_debug_exposure() {

@@ -20,8 +20,11 @@ import { expect, test, type Page } from "@playwright/test";
 import { t } from "../src/i18n/messages";
 
 const ROOM_ID = "!harness-room:example.invalid";
-/** Short viewport representative of the reported packaged window. */
-const SHORT_VIEWPORT = { width: 820, height: 600 };
+/**
+ * Short viewport: low enough that the full workflow still overflows the
+ * compact (#1418) dialog body, so the scroll region is exercised.
+ */
+const SHORT_VIEWPORT = { width: 820, height: 420 };
 
 interface WorkflowSeed {
   candidates: number;
@@ -209,6 +212,51 @@ test("the full invite workflow stays inside a short viewport with actions reacha
   expect(geometry!.backdrop!.right).toBeGreaterThanOrEqual(geometry!.viewportWidth - 1);
 });
 
+test("the footer sits outside the scrolling body at a short height (#1418)", async ({ page }) => {
+  await page.setViewportSize(SHORT_VIEWPORT);
+  await gotoReadyShell(page);
+  await seedInviteWorkflow(page);
+  await openInviteDialog(page);
+
+  const layout = await page.evaluate(() => {
+    const dialog = document.querySelector<HTMLElement>(".invite-target-dialog")!;
+    const body = dialog.querySelector<HTMLElement>(".invite-dialog-body")!;
+    const footer = dialog.querySelector<HTMLElement>(".invite-dialog-footer");
+    const bodyRect = body.getBoundingClientRect();
+    const footerRect = footer?.getBoundingClientRect() ?? null;
+    return {
+      footerInBody: footer ? body.contains(footer) : null,
+      footerHasActions: Boolean(footer?.querySelector(".dialog-actions")),
+      footerBorderTop: footer ? getComputedStyle(footer).borderTopWidth : null,
+      bodyBottom: bodyRect.bottom,
+      bodyOverflows: body.scrollHeight > body.clientHeight,
+      footerTop: footerRect?.top ?? null,
+      footerBottom: footerRect?.bottom ?? null,
+      viewportHeight: window.innerHeight
+    };
+  });
+  expect(layout.footerInBody).toBe(false);
+  expect(layout.footerHasActions).toBe(true);
+  expect(layout.footerBorderTop).toBe("1px");
+  expect(layout.bodyOverflows).toBe(true);
+  // The footer starts where the scroll body ends and stays inside the window.
+  expect(layout.footerTop!).toBeGreaterThanOrEqual(layout.bodyBottom - 1);
+  expect(layout.footerBottom!).toBeLessThanOrEqual(layout.viewportHeight + 1);
+
+  // Scrolling the body does not move the footer.
+  // Hover the body's side padding so the wheel is not captured by the
+  // candidate list, which has its own scroll region.
+  await page.locator(".invite-dialog-body").hover({ position: { x: 6, y: 40 } });
+  await page.mouse.wheel(0, 400);
+  await expect
+    .poll(() => page.evaluate(() => document.querySelector(".invite-dialog-body")!.scrollTop))
+    .toBeGreaterThan(0);
+  const footerTopAfter = await page.evaluate(
+    () => document.querySelector(".invite-dialog-footer")!.getBoundingClientRect().top
+  );
+  expect(footerTopAfter).toBeCloseTo(layout.footerTop!, 0);
+});
+
 test("scrolling inside the dialog moves only the dialog body, never the page", async ({
   page
 }) => {
@@ -222,7 +270,7 @@ test("scrolling inside the dialog moves only the dialog body, never the page", a
 
   // Wheel-scroll inside the dialog body a few times.
   const body = page.locator(".invite-dialog-body");
-  await body.hover();
+  await body.hover({ position: { x: 6, y: 40 } });
   for (let index = 0; index < 4; index += 1) {
     await page.mouse.wheel(0, 120);
   }

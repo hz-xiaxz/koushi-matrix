@@ -202,6 +202,20 @@ export interface DesktopApi {
   cancelNotificationEmail(): Promise<CommandAdmission>;
   enableEmailNotifications(address: string, lang: string): Promise<CommandAdmission>;
   disableEmailNotifications(): Promise<CommandAdmission>;
+  /**
+   * #1427 keyword push rules. `add` carries the raw field text; Rust trims and
+   * validates it, then owns the deterministic rule id. Both are account state
+   * writes and settle through the account notification operation state.
+   */
+  addNotificationKeyword(pattern: string): Promise<CommandAdmission>;
+  removeNotificationKeyword(ruleId: string): Promise<CommandAdmission>;
+  /**
+   * Device-local notification delivery (#1427). The secret is written straight to the OS
+   * credential store; the value is never echoed back in a snapshot, an event, or a receipt.
+   */
+  setNotificationDeliverySecret(sinkId: string, secret: string): Promise<CommandAdmission>;
+  clearNotificationDeliverySecret(sinkId: string): Promise<CommandAdmission>;
+  testNotificationDelivery(sinkId: string): Promise<CommandAdmission>;
   changePassword(newPassword: string): Promise<CommandAdmission>;
   deactivateAccount(eraseData: boolean): Promise<CommandAdmission>;
   probeLocalEncryptionHealth(): Promise<CommandAdmission>;
@@ -491,7 +505,8 @@ export interface DesktopApi {
     powerLevel: number,
     confirmed: boolean
   ): Promise<CommandSettlement>;
-  previewRoomAddress(name: string, aliasLocalpart: string | null): Promise<RoomAddressPreview>;
+  /** #1416: `aliasLocalpart === null` previews the create session's default. */
+  previewRoomAddress(createSessionId: number, aliasLocalpart: string | null): Promise<RoomAddressPreview>;
   setRoomAccessDraft(command: RoomAccessDraftCommand): Promise<CommandAdmission>;
   previewRoomAccess(
     scope: RoomAccessDraftScope,

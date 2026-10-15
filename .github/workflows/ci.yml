@@ -236,6 +236,11 @@ jobs:
         run: node --test scripts/check-rust-test-structure.test.mjs
       - name: Rust test structure checker
         run: node scripts/check-rust-test-structure.mjs
+      # This guard reads the two SNAPSHOT_SCHEMA_VERSION constants and fails when they
+      # disagree. It used to run only by hand, and a one-sided bump shipped a renderer
+      # that rejected its own backend's snapshots (#1427), so it is gated here.
+      - name: Command and snapshot contract guard
+        run: node scripts/check-command-snapshot-contract.mjs
       - name: Retained-customization reachability guard
         run: node scripts/check-retained-reachability.mjs
       - name: Rust cache report contract tests

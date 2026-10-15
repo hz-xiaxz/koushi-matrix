@@ -270,6 +270,13 @@ pub enum AppAction {
         request_id: u64,
         message: String,
     },
+    /// #1427: the core re-observed the device-local delivery channel - which sinks
+    /// hold a credential, and how each sink's last send ended - and hands the whole
+    /// app-scoped projection to the reducer. Carries no secret: the credential store
+    /// is read only inside a send, and only its presence is projected.
+    NotificationDeliveryObserved {
+        delivery: crate::state::NotificationDeliveryState,
+    },
     RoomUrlPreviewOverrideSet {
         request_id: u64,
         room_id: String,

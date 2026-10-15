@@ -842,8 +842,9 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
     name: t("dialog.inviteHistory")
   });
   await expect(inviteHistoryHeading).toBeVisible();
-  await expect(inviteHistoryPanel.getByText("Current", { exact: true })).toBeVisible();
-  await page.getByRole("button", { name: "Open Room info" }).click();
+  await expect(inviteHistoryPanel.getByText(t("dialog.inviteHistoryJoined"))).toBeVisible();
+  await expect(inviteHistoryPanel.getByRole("listitem")).toHaveCount(0);
+  await inviteHistoryPanel.getByRole("button", { name: t("dialog.inviteHistoryChange") }).click();
   await expect(page.getByRole("button", { name: "Return to invite" })).toBeVisible();
   await page.getByRole("button", { name: "Return to invite" }).click();
   const returnedInviteHistoryHeading = page

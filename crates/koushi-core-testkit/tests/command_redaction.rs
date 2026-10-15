@@ -134,8 +134,25 @@ fn secret_bearing_commands_redact_debug() {
             updated_at_ms: 1_900_000_000_000,
         },
     });
+    // #1427: the sink credential is a provider API key or mailbox password, so the command that
+    // carries it prints redacted, and the outcome that answers it carries no value at all.
+    let set_delivery_secret = CoreCommand::App(AppCommand::SetNotificationDeliverySecret {
+        request_id: fake_request_id(),
+        sink_id: "qq-mail".to_owned(),
+        secret: PASSWORD.to_owned(),
+    });
+    let delivery_outcome = CoreEvent::IntentLifecycle {
+        request_id: fake_request_id(),
+        outcome: koushi_protocol::event::IntentOutcome::Committed,
+        published_generation: 7,
+    };
+    assert!(
+        !format!("{delivery_outcome:?}").contains(PASSWORD),
+        "a delivery outcome names no credential"
+    );
     for (command, secrets) in [
         (&login, vec![PASSWORD, "alice-login-name", "Alice Laptop"]),
+        (&set_delivery_secret, vec![PASSWORD]),
         (&recovery, vec![RECOVERY]),
         (&identity_reset_auth, vec![PASSWORD]),
         (&bootstrap_cross_signing, vec![PASSWORD]),

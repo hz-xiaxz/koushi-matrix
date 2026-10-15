@@ -9,7 +9,8 @@ use koushi_protocol::failure::CoreFailure;
 use koushi_protocol::ids::RequestId;
 use koushi_state::{
     AccountNotificationsFailureKind, AccountNotificationsOperation, AppAction, AuthFailureKind,
-    normalize_notification_email,
+    normalize_notification_email, normalize_notification_keyword,
+    normalize_notification_keyword_removal,
 };
 
 use super::actor::AccountActor;
@@ -55,7 +56,7 @@ impl AccountActor {
             AccountNotificationsRequest::Load => self.load_account_notifications(request_id).await,
             AccountNotificationsRequest::SetCategory { category, enabled } => {
                 let operation = AccountNotificationsOperation::SetCategory { category, enabled };
-                let Some(session) = self.notifications_session(request_id, operation).await else {
+                let Some(session) = self.notifications_session(request_id, &operation).await else {
                     return;
                 };
                 let result =
@@ -65,7 +66,7 @@ impl AccountActor {
             }
             AccountNotificationsRequest::SetAccountPush { enabled } => {
                 let operation = AccountNotificationsOperation::SetAccountPush { enabled };
-                let Some(session) = self.notifications_session(request_id, operation).await else {
+                let Some(session) = self.notifications_session(request_id, &operation).await else {
                     return;
                 };
                 let result = koushi_sdk::set_account_push_enabled(&session, enabled).await;
@@ -124,7 +125,7 @@ impl AccountActor {
             }
             AccountNotificationsRequest::EnableEmailNotifications { address, lang } => {
                 let operation = AccountNotificationsOperation::EnableEmailNotifications;
-                let Some(session) = self.notifications_session(request_id, operation).await else {
+                let Some(session) = self.notifications_session(request_id, &operation).await else {
                     return;
                 };
                 let result = match normalize_notification_email(&address) {
@@ -138,10 +139,61 @@ impl AccountActor {
             }
             AccountNotificationsRequest::DisableEmailNotifications => {
                 let operation = AccountNotificationsOperation::DisableEmailNotifications;
-                let Some(session) = self.notifications_session(request_id, operation).await else {
+                let Some(session) = self.notifications_session(request_id, &operation).await else {
                     return;
                 };
                 let result = koushi_sdk::disable_email_notifications(&session).await;
+                self.finish_notifications_operation(request_id, operation, result)
+                    .await;
+            }
+            AccountNotificationsRequest::AddKeyword { pattern } => {
+                let operation = AccountNotificationsOperation::AddNotificationKeyword {
+                    pattern: pattern.clone(),
+                };
+                let Some(session) = self.notifications_session(request_id, &operation).await else {
+                    return;
+                };
+                // The local refusal uses the last authoritative list, so it
+                // costs no request and has nothing to re-read; the SDK repeats
+                // the pattern and duplicate checks on the write path and maps to
+                // the same kinds.
+                let pattern =
+                    match normalize_notification_keyword(&pattern, &self.notification_keywords) {
+                        Ok(pattern) => pattern,
+                        Err(failure_kind) => {
+                            self.send_notifications_failure(request_id, operation, failure_kind)
+                                .await;
+                            return;
+                        }
+                    };
+                let result = koushi_sdk::add_keyword_rule(&session, &pattern)
+                    .await
+                    .map(|_| ())
+                    .map_err(keyword_rule_failure);
+                self.finish_notifications_operation(request_id, operation, result)
+                    .await;
+            }
+            AccountNotificationsRequest::RemoveKeyword { rule_id } => {
+                let operation = AccountNotificationsOperation::RemoveNotificationKeyword {
+                    rule_id: rule_id.clone(),
+                };
+                let Some(session) = self.notifications_session(request_id, &operation).await else {
+                    return;
+                };
+                let rule_id = match normalize_notification_keyword_removal(
+                    &rule_id,
+                    &self.notification_keywords,
+                ) {
+                    Ok(rule_id) => rule_id,
+                    Err(failure_kind) => {
+                        self.send_notifications_failure(request_id, operation, failure_kind)
+                            .await;
+                        return;
+                    }
+                };
+                let result = koushi_sdk::remove_keyword_rule(&session, &rule_id)
+                    .await
+                    .map_err(keyword_rule_failure);
                 self.finish_notifications_operation(request_id, operation, result)
                     .await;
             }
@@ -160,6 +212,7 @@ impl AccountActor {
         };
         let result = koushi_sdk::load_account_notifications(&session).await;
         if let Ok(snapshot) = &result {
+            self.cache_notification_keywords(snapshot);
             self.drop_pending_email_if_verified(snapshot);
         }
         let action = match result {
@@ -179,20 +232,32 @@ impl AccountActor {
     async fn notifications_session(
         &mut self,
         request_id: RequestId,
-        operation: AccountNotificationsOperation,
+        operation: &AccountNotificationsOperation,
     ) -> Option<std::sync::Arc<koushi_sdk::MatrixClientSession>> {
         if let Some(session) = self.session.clone() {
             return Some(session);
         }
         self.send_actions(vec![AppAction::AccountNotificationsOperationFailed {
             request_id: request_id.sequence,
-            operation,
+            operation: operation.clone(),
             failure_kind: AccountNotificationsFailureKind::SessionRequired,
             snapshot: None,
         }])
         .await;
         self.emit_failure(request_id, CoreFailure::SessionRequired);
         None
+    }
+
+    /// Keep the last authoritative keyword list so an add or remove can be
+    /// refused locally (#1427). Projection only: it is replaced by every
+    /// authoritative read, never edited by an optimistic write, and it is what
+    /// makes a duplicate, an over-cap add, or an unknown removal cost no
+    /// request. The SDK's `plan_keyword_rule` stays the write-path guard.
+    fn cache_notification_keywords(
+        &mut self,
+        snapshot: &koushi_state::AccountNotificationsSnapshot,
+    ) {
+        self.notification_keywords = snapshot.keywords.clone();
     }
 
     /// Settle an operation with a fresh authoritative snapshot. A failed
@@ -210,6 +275,7 @@ impl AccountActor {
             None => None,
         };
         if let Some(snapshot) = &snapshot {
+            self.cache_notification_keywords(snapshot);
             self.drop_pending_email_if_verified(snapshot);
         }
         let action = match result {
@@ -235,7 +301,7 @@ impl AccountActor {
         lang: String,
     ) {
         let operation = AccountNotificationsOperation::RequestEmailToken;
-        let Some(session) = self.notifications_session(request_id, operation).await else {
+        let Some(session) = self.notifications_session(request_id, &operation).await else {
             return;
         };
         let Some(address) = normalize_notification_email(&address) else {
@@ -285,7 +351,7 @@ impl AccountActor {
 
     async fn resend_notification_email_token(&mut self, request_id: RequestId) {
         let operation = AccountNotificationsOperation::ResendEmailToken;
-        let Some(session) = self.notifications_session(request_id, operation).await else {
+        let Some(session) = self.notifications_session(request_id, &operation).await else {
             return;
         };
         let Some(pending) = self.pending_notification_email.as_ref() else {
@@ -337,7 +403,7 @@ impl AccountActor {
         auth: Option<koushi_state::IdentityResetAuthRequest>,
     ) {
         let operation = AccountNotificationsOperation::ConfirmEmail;
-        let Some(session) = self.notifications_session(request_id, operation).await else {
+        let Some(session) = self.notifications_session(request_id, &operation).await else {
             return;
         };
         let Some(pending) = self.pending_notification_email.as_ref() else {
@@ -467,5 +533,24 @@ impl AccountActor {
             snapshot: None,
         }])
         .await;
+    }
+}
+
+/// The one place a Matrix keyword-rule refusal becomes a product failure
+/// (#1427). `RuleIdConflict` means the account already holds something at the
+/// deterministic name, which is a duplicate from the user's point of view, and
+/// `InvalidRuleId` means the removal named a rule the account does not have.
+fn keyword_rule_failure(
+    error: koushi_sdk::MatrixKeywordRuleError,
+) -> AccountNotificationsFailureKind {
+    use koushi_sdk::MatrixKeywordRuleError as Error;
+
+    match error {
+        Error::EmptyPattern => AccountNotificationsFailureKind::EmptyPattern,
+        Error::PatternTooLong => AccountNotificationsFailureKind::PatternTooLong,
+        Error::Duplicate => AccountNotificationsFailureKind::Duplicate,
+        Error::InvalidRuleId => AccountNotificationsFailureKind::UnknownRule,
+        Error::RuleIdConflict => AccountNotificationsFailureKind::Duplicate,
+        Error::Failed(failure_kind) => failure_kind,
     }
 }

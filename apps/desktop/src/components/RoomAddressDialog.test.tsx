@@ -6,18 +6,31 @@ import { CreateEntityDialog } from "./dialogs";
 import type { RoomAddressAvailabilityState } from "../domain/types";
 
 afterEach(() => { cleanup(); setActiveLocaleProfile("en", "none"); });
+const CHECKED_AVAILABLE: RoomAddressAvailabilityState = {
+  kind: "checked", request_id: 1, full_alias: "#manual:example.invalid", availability: "available", suggestion: null
+};
+
+// #1416: the address starts read-only with a Change action; the editor shows
+// the server-scoped help and the full address.
 test.each(["en", "ja"] as const)("renders Rust address preview and preserves drafts across visibility in %s", locale => {
   setActiveLocaleProfile(locale, "none");
   const onChange = vi.fn();
   render(<CreateEntityDialog kind="room" isBusy={false} value="設計"
     roomOptions={{ aliasLocalpart: "manual", topic: "", visibility: "public", encrypted: false, invitedOnly: false }}
     addressPreview={{ localpart: "manual", full_alias: "#manual:example.invalid", error: null, server_name: "example.invalid" }}
+    addressAvailability={CHECKED_AVAILABLE}
     onCancel={vi.fn()} onValueChange={vi.fn()} onSubmit={vi.fn()} onRoomOptionsChange={onChange} />);
   expect(screen.queryByRole("alert")).toBeNull();
+  expect(screen.getByText(t("dialog.roomAddressNameVsAddress"))).toBeTruthy();
+  expect(screen.getByText("#manual:example.invalid").tagName).toBe("CODE");
+  expect(screen.queryByLabelText(t("dialog.roomAddress"))).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: t("dialog.roomAddressChangeLabel") }));
   expect(screen.getByRole("link", { name: t("dialog.roomAddressAbout") }).getAttribute("href")).toBe("https://matrix.org/docs/chat_basics/public-rooms/");
-  expect(screen.getByText(`${t("dialog.roomAddressHelp")} ${t("dialog.roomAddressScope", { server: "example.invalid" })}`)).toBeTruthy();
+  expect(screen.getByText(`${t("dialog.roomAddressHelp")} ${t("dialog.roomAddressScope", { server: "example.invalid" })}`, { exact: false })).toBeTruthy();
   expect(screen.getByText(t("dialog.roomAddressPreview", { address: "#manual:example.invalid" }))).toBeTruthy();
-  expect(screen.getByLabelText(t("dialog.roomAddress")).getAttribute("aria-describedby")).toContain("create-room-address-help");
+  const address = screen.getByLabelText(t("dialog.roomAddress"));
+  expect(document.activeElement).toBe(address);
+  expect(address.getAttribute("aria-describedby")).toContain("create-room-address-help");
   fireEvent.click(accessRadio("invite"));
   expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ visibility: "private", aliasLocalpart: "manual" }));
 });
@@ -54,7 +67,7 @@ test.each(["en", "ja"] as const)("an alias conflict is actionable at the address
   expect(address.getAttribute("aria-describedby")).toContain("create-room-address-conflict");
   // The display name draft and the target Space stay in place.
   expect((screen.getByLabelText(t("dialog.roomName")) as HTMLInputElement).value).toBe("papers");
-  expect(screen.getByText(t("dialog.publicRoomInSpace", { spaceName: "research-group" }))).toBeTruthy();
+  expect(screen.getByRole("radio", { name: t("dialog.createJoinSpaceMembers", { spaceName: "research-group" }) })).toBeTruthy();
 });
 
 test("the English and Japanese conflict copy follows the issue wording", () => {
@@ -66,14 +79,6 @@ test("the English and Japanese conflict copy follows the issue wording", () => {
   expect(t("dialog.roomAddressInUse", values)).toBe(
     "アドレス #papers:example.invalid はすでに使われています。アドレスは example.invalid 上のすべての Space で共通です。ルーム名『papers』はそのままで、ルームアドレスにプロジェクト名や数字などを追加してください。"
   );
-});
-
-test("a public room at Home shows no Space note", () => {
-  render(<CreateEntityDialog kind="room" isBusy={false} value="papers"
-    roomOptions={{ aliasLocalpart: "papers", topic: "", visibility: "public", encrypted: false, invitedOnly: false }}
-    addressPreview={{ localpart: "papers", full_alias: "#papers:example.invalid", error: null, server_name: "example.invalid" }}
-    onCancel={vi.fn()} onValueChange={vi.fn()} onSubmit={vi.fn()} onRoomOptionsChange={vi.fn()} />);
-  expect(screen.queryByText(t("dialog.publicRoomInSpace", { spaceName: "research-group" }))).toBeNull();
 });
 
 // #1006: the advisory availability note renders only Rust-owned results and
@@ -97,15 +102,22 @@ test.each(["en", "ja"] as const)("advisory results are labeled as not reserving 
   setActiveLocaleProfile(locale, "none");
   renderWithAvailability({ kind: "checking", request_id: 1, full_alias: "#papers:example.invalid" });
   expect(screen.getByText(t("dialog.roomAddressChecking", { address: "#papers:example.invalid" }))).toBeTruthy();
+  // #1416: Create waits for the check of the shown address.
+  expect(submitButton().disabled).toBe(true);
   cleanup();
   renderWithAvailability({ kind: "checked", request_id: 1, full_alias: "#papers:example.invalid", availability: "available", suggestion: null });
   expect(screen.getByText(t("dialog.roomAddressAvailable", { address: "#papers:example.invalid" }))).toBeTruthy();
+  expect(submitButton().disabled).toBe(false);
   cleanup();
   renderWithAvailability({ kind: "checked", request_id: 1, full_alias: "#papers:example.invalid", availability: "unknown", suggestion: null });
   expect(screen.getByText(t("dialog.roomAddressCheckUnknown"))).toBeTruthy();
-  // Submission is never blocked by an advisory result.
-  expect((screen.getByRole("button", { name: t("dialog.submitCreateRoom") }) as HTMLButtonElement).disabled).toBe(false);
+  // A check that could not complete leaves the server to decide.
+  expect(submitButton().disabled).toBe(false);
 });
+
+function submitButton(): HTMLButtonElement {
+  return screen.getByRole("button", { name: t("dialog.submitCreateRoom") }) as HTMLButtonElement;
+}
 
 test("an address in use offers a labeled suggestion that is used only on request", () => {
   const onUse = renderWithAvailability({
@@ -115,6 +127,9 @@ test("an address in use offers a labeled suggestion that is used only on request
   expect(screen.getByText(t("dialog.roomAddressTaken", { address: "#papers:example.invalid", server: "example.invalid" }))).toBeTruthy();
   expect(screen.getByText(t("dialog.roomAddressSuggestion", { address: "#papers-2:example.invalid" }))).toBeTruthy();
   expect(onUse).not.toHaveBeenCalled();
+  // An address in use blocks Create and opens the address editor.
+  expect(submitButton().disabled).toBe(true);
+  expect(screen.getByLabelText(t("dialog.roomAddress")).getAttribute("aria-invalid")).toBe("true");
   fireEvent.click(screen.getByRole("button", { name: t("dialog.roomAddressUseSuggestion") }));
   expect(onUse).toHaveBeenCalledWith("papers-2");
 });
@@ -147,18 +162,18 @@ test.each(["en", "ja"] as const)("an unnamed room can be created, an unnamed Spa
   expect((screen.getByRole("button", { name: t("dialog.submitCreateSpace") }) as HTMLButtonElement).disabled).toBe(true);
 });
 
-// #1023: an unnamed public room offers no address suggestion, so Rust reports
-// that it will be created without one; that is not an error.
-test.each(["en", "ja"] as const)("an unnamed public room may be created without an address in %s", locale => {
+// #1416: a public room always has an address; an emptied address is an
+// error at the address field and blocks Create.
+test.each(["en", "ja"] as const)("a public room cannot be created without an address in %s", locale => {
   setActiveLocaleProfile(locale, "none");
   render(<CreateEntityDialog kind="room" isBusy={false} value=""
     targetSpaceName="research-group"
     roomOptions={{ aliasLocalpart: "", topic: "", visibility: "public", encrypted: true, invitedOnly: false }}
-    addressPreview={{ localpart: "", full_alias: null, error: null, server_name: "example.invalid", without_address: true }}
+    addressPreview={{ localpart: "", full_alias: null, error: "empty", server_name: "example.invalid" }}
     onCancel={vi.fn()} onValueChange={vi.fn()} onSubmit={vi.fn()} onRoomOptionsChange={vi.fn()} />);
-  expect(screen.getByRole("status").textContent).toBe(t("dialog.roomAddressNone"));
-  expect(screen.getByLabelText(t("dialog.roomAddress")).getAttribute("aria-invalid")).toBe("false");
-  expect((screen.getByRole("button", { name: t("dialog.submitCreateRoom") }) as HTMLButtonElement).disabled).toBe(false);
+  expect(screen.getByRole("status").textContent).toBe(t("dialog.roomAddressEmpty"));
+  expect(screen.getByLabelText(t("dialog.roomAddress")).getAttribute("aria-invalid")).toBe("true");
+  expect(submitButton().disabled).toBe(true);
 });
 
 // #1023: switching to public no longer discards the private option's
@@ -168,7 +183,7 @@ test("switching visibility keeps the private encryption choice", () => {
   render(<CreateEntityDialog kind="room" isBusy={false} value=""
     roomOptions={{ aliasLocalpart: "", topic: "", visibility: "private", encrypted: true, invitedOnly: false }}
     onCancel={vi.fn()} onValueChange={vi.fn()} onSubmit={vi.fn()} onRoomOptionsChange={onChange} />);
-  fireEvent.click(screen.getByRole("radio", { name: /Public/ }));
+  fireEvent.click(accessRadio("public"));
   expect(onChange).toHaveBeenLastCalledWith(expect.objectContaining({ visibility: "public", encrypted: true }));
 });
 
@@ -187,10 +202,10 @@ test.each(["en", "ja"] as const)("an unnamed room's conflict does not quote an e
 test("the unnamed conflict copy in English and Japanese", () => {
   const values = { fullAddress: "#lobby:example.invalid", server: "example.invalid" };
   expect(t("dialog.roomAddressInUseUnnamed", values)).toBe(
-    "The address #lobby:example.invalid is already in use. Addresses are shared across all Spaces on example.invalid. Change the room address, for example by adding a project name or number, or clear it to create the room without an address."
+    "The address #lobby:example.invalid is already in use. Addresses are shared across all Spaces on example.invalid. Change the room address, for example by adding a project name or number."
   );
   setActiveLocaleProfile("ja", "none");
   expect(t("dialog.roomAddressInUseUnnamed", values)).toBe(
-    "アドレス #lobby:example.invalid はすでに使われています。アドレスは example.invalid 上のすべての Space で共通です。ルームアドレスにプロジェクト名や数字などを追加するか、空欄にしてアドレスなしでルームを作成してください。"
+    "アドレス #lobby:example.invalid はすでに使われています。アドレスは example.invalid 上のすべての Space で共通です。ルームアドレスにプロジェクト名や数字などを追加してください。"
   );
 });

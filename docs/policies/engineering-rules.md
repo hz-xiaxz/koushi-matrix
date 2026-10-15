@@ -30,6 +30,10 @@ Never log, print, commit, or store in fixtures:
 - OAuth refresh tokens, PKCE verifiers, authorization callback query strings,
   and delegated-auth client credentials
 - SDK store keys, search index keys, local unlock secrets
+- notification-delivery secrets (mail provider API keys and SMTP passwords today,
+  and a relay webhook or send key for a sink added later); the credential store
+  holds the value and
+  settings carry only a configured flag
 - raw request/response bodies
 - real account private data; real room names or real discussion content in
   docs, tests, or mocks
@@ -79,6 +83,15 @@ Rules:
    candidate-scoped native effects, permission-prompt limits, Space rail and
    thread badges, and sound policy are specified in state ownership "Threads
    and attention" and overview "Desktop Attention Surfaces".
+   The same minimization governs a notification this device relays, whether by
+   mail or through a relay sink added later: by default the body carries only the safe room
+   display label, the kind, and the counts, and no room, event, sender, or
+   transaction identifiers. Message text
+   may be added only through a separate default-off option whose stored consent
+   matches the configured sink, destination, and endpoint. The transport is not
+   end-to-end encrypted, and whether the service stores the text depends on its
+   own terms, which the consent copy tells the user to check; the app asserts no
+   provider-specific retention as fact.
 10. Device-local settings are non-secret product state, but they are still a
    privacy boundary. Settings files may contain only typed preferences such as
    locale, theme, font/emoji choice, keyboard behavior, and notification

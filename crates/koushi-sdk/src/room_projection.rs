@@ -104,13 +104,20 @@ impl fmt::Debug for MatrixConversationActivity {
     }
 }
 
-#[derive(Clone, Debug, Eq, PartialEq)]
+#[derive(Clone, Eq, PartialEq)]
 pub struct MatrixRoomLatestEventSummary {
     pub event_id: String,
     pub sender_id: Option<String>,
     pub sender_label: Option<String>,
     pub sender_avatar_mxc_uri: Option<String>,
     pub preview: Option<String>,
+    /// #1427: the decrypted body when the latest event is a plain text message this
+    /// device can read, and `None` for anything else. The room-list `preview` above is
+    /// a display value that may be a localized placeholder ("Unable to decrypt
+    /// message", "Message deleted") or a non-message event type, so it cannot be used
+    /// as message text; this field exists so the device-local delivery prefix has a
+    /// value that is only ever the sender's own words.
+    pub message_text: Option<String>,
     pub timestamp_ms: u64,
     pub event_type: Option<String>,
     pub relation_type: Option<String>,
@@ -123,6 +130,36 @@ pub struct MatrixRoomLatestEventSummary {
     pub has_thread_summary: bool,
     pub has_reactions: bool,
     pub is_redacted: bool,
+}
+
+impl fmt::Debug for MatrixRoomLatestEventSummary {
+    /// Redacts every text and identifier field: the preview and the message text are
+    /// the sender's words, and the ids and label name the room's people. This struct
+    /// crosses into the core projection, so no diagnostic may print it raw.
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("MatrixRoomLatestEventSummary")
+            .field("event_id", &"EventId(..)")
+            .field("sender_id", &self.sender_id.as_ref().map(|_| "UserId(..)"))
+            .field(
+                "sender_label",
+                &self.sender_label.as_ref().map(|_| "SenderLabel(..)"),
+            )
+            .field(
+                "sender_avatar_mxc_uri",
+                &self.sender_avatar_mxc_uri.as_ref().map(|_| "MxcUri(..)"),
+            )
+            .field("preview", &self.preview.as_ref().map(|_| "Preview(..)"))
+            .field(
+                "message_text",
+                &self.message_text.as_ref().map(|_| "MessageText(..)"),
+            )
+            .field("timestamp_ms", &self.timestamp_ms)
+            .field("event_type", &self.event_type)
+            .field("content_converted", &self.content_converted)
+            .field("is_redacted", &self.is_redacted)
+            .finish()
+    }
 }
 
 pub(super) struct SdkUnreadTrace<'a> {
@@ -3082,6 +3119,14 @@ async fn matrix_room_latest_remote_event_projection(
                     .and_then(matrix_latest_event_preview)
             })
             .flatten(),
+        // A redacted event has no body to read, whatever the preview says.
+        message_text: (!is_redacted)
+            .then(|| {
+                preview_content
+                    .as_ref()
+                    .and_then(matrix_latest_event_message_text)
+            })
+            .flatten(),
         timestamp_ms,
         event_type,
         relation_type,
@@ -3177,6 +3222,7 @@ fn matrix_local_latest_event_projection(
         sender_label: sender_id,
         sender_avatar_mxc_uri: None,
         preview: matrix_local_latest_event_preview(&value.content),
+        message_text: matrix_local_latest_event_message_text(&value.content),
         timestamp_ms,
         event_type: Some(event_type.to_owned()),
         relation_type,
@@ -3365,6 +3411,55 @@ fn matrix_latest_event_preview(
         | matrix_sdk_ui::timeline::TimelineItemContent::RtcNotification { .. } => {
             content.event_type_str()
         }
+    }
+}
+
+/// The decrypted body of an event that is a plain text message (#1427).
+///
+/// Only `m.text`, `m.notice` and `m.emote` count: their body is what the sender typed.
+/// A media message carries a filename or a caption in `body`, a sticker or poll has no
+/// message body, and an undecryptable or redacted event has none either, so all of them
+/// answer `None` and the delivery digest renders that room without a prefix. An unknown
+/// custom msgtype is left out for the same reason: this device does not know that its
+/// body is text a reader would call the message.
+fn matrix_latest_event_message_text(
+    content: &matrix_sdk_ui::timeline::TimelineItemContent,
+) -> Option<String> {
+    let matrix_sdk_ui::timeline::TimelineItemContent::MsgLike(msglike) = content else {
+        return None;
+    };
+    let matrix_sdk_ui::timeline::MsgLikeKind::Message(message) = &msglike.kind else {
+        return None;
+    };
+    matrix_message_text_from_msgtype(message.msgtype(), message.body())
+}
+
+/// The body of a message whose msgtype is text, and nothing otherwise.
+fn matrix_message_text_from_msgtype(
+    msgtype: &matrix_sdk::ruma::events::room::message::MessageType,
+    body: &str,
+) -> Option<String> {
+    use matrix_sdk::ruma::events::room::message::MessageType;
+    match msgtype {
+        MessageType::Text(_) | MessageType::Notice(_) | MessageType::Emote(_) => {
+            Some(body.to_owned())
+        }
+        _ => None,
+    }
+}
+
+/// The body of a local echo that is a plain text message, for the same reason as
+/// [`matrix_latest_event_message_text`].
+fn matrix_local_latest_event_message_text(
+    content: &matrix_sdk::store::SerializableEventContent,
+) -> Option<String> {
+    let content: matrix_sdk::ruma::events::AnyMessageLikeEventContent =
+        content.deserialize().ok()?;
+    match content {
+        matrix_sdk::ruma::events::AnyMessageLikeEventContent::RoomMessage(message) => {
+            matrix_message_text_from_msgtype(&message.msgtype, message.body())
+        }
+        _ => None,
     }
 }
 

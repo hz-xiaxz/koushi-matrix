@@ -605,12 +605,12 @@ describe("dialog IME submit handling", () => {
 });
 
 describe("CreateEntityDialog room access", () => {
-  it("offers public, invite-only and Space-member access and maps the choice", () => {
+  it("offers Space members, invite and Anyone in a Space and maps the choice", () => {
     const onRoomOptionsChange = vi.fn();
     const onSetRoomAccessDraft = vi.fn();
     const view = (visibility: "private" | "public") => (
       <CreateEntityDialog
-        activeSpaceName="春学"
+        targetSpaceName="春学"
         kind="room"
         isBusy={false}
         roomOptions={{
@@ -630,8 +630,8 @@ describe("CreateEntityDialog room access", () => {
     );
     const { rerender } = render(view("private"));
 
-    expect(screen.getByText(t("dialog.standardRoomInSpace", { spaceName: "春学" }))).toBeTruthy();
-    fireEvent.click(screen.getByRole("radio", { name: /Public/ }));
+    expect(screen.getByRole("group", { name: t("dialog.createWhoCanJoin") })).toBeTruthy();
+    fireEvent.click(screen.getByRole("radio", { name: t("dialog.createJoinPublic") }));
     expect(onSetRoomAccessDraft).toHaveBeenCalledWith({
       kind: "rule",
       scope: { kind: "create", sessionId: 0 },
@@ -641,7 +641,9 @@ describe("CreateEntityDialog room access", () => {
       expect.objectContaining({ visibility: "public" })
     );
 
-    fireEvent.click(screen.getByRole("radio", { name: /Members of a Space/ }));
+    fireEvent.click(
+      screen.getByRole("radio", { name: t("dialog.createJoinSpaceMembers", { spaceName: "春学" }) })
+    );
     expect(onSetRoomAccessDraft).toHaveBeenCalledWith({
       kind: "rule",
       scope: { kind: "create", sessionId: 0 },
@@ -652,12 +654,92 @@ describe("CreateEntityDialog room access", () => {
     );
 
     rerender(view("public"));
-    fireEvent.click(screen.getByRole("radio", { name: /Invite only/ }));
+    fireEvent.click(screen.getByRole("radio", { name: t("dialog.createJoinInvite") }));
     expect(onSetRoomAccessDraft).toHaveBeenCalledWith({
       kind: "rule",
       scope: { kind: "create", sessionId: 0 },
       rule: "invite"
     });
+  });
+
+  it("offers only invite and Anyone at Home (#1416)", () => {
+    render(
+      <CreateEntityDialog
+        kind="room"
+        isBusy={false}
+        value=""
+        onCancel={vi.fn()}
+        onSubmit={vi.fn()}
+        onValueChange={vi.fn()}
+      />
+    );
+    const radios = within(screen.getByRole("group", { name: t("dialog.createWhoCanJoin") }))
+      .getAllByRole("radio")
+      .map((radio) => radio.getAttribute("value"));
+    expect(radios).toEqual(["invite", "public"]);
+  });
+
+  it("chooses earlier-message access with two plain choices and summarizes above the buttons", () => {
+    const onSetRoomAccessDraft = vi.fn();
+    render(
+      <CreateEntityDialog
+        kind="room"
+        isBusy={false}
+        value=""
+        roomOptions={{
+          aliasLocalpart: "",
+          encrypted: true,
+          invitedOnly: false,
+          topic: "",
+          visibility: "private"
+        }}
+        roomAccessDraft={{
+          scope: { kind: "create", sessionId: 1 },
+          revision: 1,
+          rule: "invite",
+          history: "shared"
+        }}
+        createAccessPreview={{
+          scope: { kind: "create", sessionId: 1 },
+          confirmed: false,
+          effectiveRule: "invite",
+          effectiveHistory: "shared",
+          roomVersionPinned: false,
+          outcome: {
+            join: { messageId: "room.accessOutcomeJoinInvite" },
+            history: { messageId: "room.accessOutcomeHistoryShared" },
+            encryption: { messageId: "room.accessOutcomeEncrypted" },
+            directory: { messageId: "room.accessOutcomeDirectoryLoading" },
+            nonRetroactive: { messageId: "room.historyNonRetroactive" }
+          }
+        }}
+        createAccessSessionId={1}
+        onCancel={vi.fn()}
+        onRoomOptionsChange={vi.fn()}
+        onSubmit={vi.fn()}
+        onValueChange={vi.fn()}
+        onSetRoomAccessDraft={onSetRoomAccessDraft}
+      />
+    );
+    const history = screen.getByRole("group", { name: t("dialog.createEarlierMessages") });
+    expect(within(history).getAllByRole("radio")).toHaveLength(2);
+    // Reading without joining is offered only for a public room.
+    expect(screen.queryByRole("checkbox", { name: t("dialog.createHistoryWorldReadable") })).toBeNull();
+    fireEvent.click(screen.getByRole("radio", { name: t("dialog.createHistoryInvited") }));
+    expect(onSetRoomAccessDraft).toHaveBeenCalledWith({
+      kind: "history",
+      scope: { kind: "create", sessionId: 1 },
+      history: "invited"
+    });
+    const summary = document.querySelector(".create-dialog-footer .create-room-summary");
+    expect(summary?.textContent).toBe(
+      [
+        t("room.accessOutcomeJoinInvite"),
+        t("room.accessOutcomeHistoryShared"),
+        t("room.accessOutcomeEncrypted")
+      ].join(" · ")
+    );
+    expect(summary?.textContent).not.toContain(t("room.historyNonRetroactive"));
   });
 
   it.each([
@@ -750,7 +832,11 @@ describe("CreateEntityDialog room access", () => {
           }
         }}
         createAccessSessionId={1}
-        joinedSpaces={[{ id: "!space:example.invalid", name: "Design" }]}
+        targetSpaceName="Design"
+        joinedSpaces={[
+          { id: "!space:example.invalid", name: "Design" },
+          { id: "!other:example.invalid", name: "Physics" }
+        ]}
         onCancel={vi.fn()}
         onRoomOptionsChange={vi.fn()}
         onSubmit={vi.fn()}
@@ -759,13 +845,15 @@ describe("CreateEntityDialog room access", () => {
       />
     );
 
-    expect((screen.getByRole("radio", { name: /Public/ }) as HTMLInputElement).disabled).toBe(true);
     expect(
-      (screen.getByRole("checkbox", { name: "Design" }) as HTMLInputElement).disabled
+      (screen.getByRole("radio", { name: t("dialog.createJoinPublic") }) as HTMLInputElement).matches(":disabled")
+    ).toBe(true);
+    expect(
+      (screen.getByRole("checkbox", { name: "Design" }) as HTMLInputElement).matches(":disabled")
     ).toBe(true);
     expect(
       (screen.getByRole("checkbox", { name: t("dialog.encryptedRoom") }) as HTMLInputElement)
-        .disabled
+        .matches(":disabled")
     ).toBe(true);
   });
 });
@@ -883,18 +971,20 @@ describe("InviteTargetsDialog history policy", () => {
     };
   }
 
-  it("explains all normal history choices and exposes Room Info and Recovery", () => {
-    const onOpenRoomInfo = vi.fn();
-    const onOpenRecovery = vi.fn();
-    render(
+  function renderInvite(
+    policy: Partial<NonNullable<InviteWorkflowState["history_policy"]>>,
+    handlers: { onOpenRoomInfo?: () => void; onOpenRecovery?: () => void } = {}
+  ) {
+    const base = workflow();
+    return render(
       <InviteTargetsDialog
         isBusy={false}
         query="alice"
         title={t("dialog.invitePeopleTitle")}
-        workflow={workflow()}
+        workflow={{ ...base, history_policy: { ...base.history_policy!, ...policy } }}
         onCancel={vi.fn()}
-        onOpenRecovery={onOpenRecovery}
-        onOpenRoomInfo={onOpenRoomInfo}
+        onOpenRecovery={handlers.onOpenRecovery}
+        onOpenRoomInfo={handlers.onOpenRoomInfo}
         onQueryChange={vi.fn()}
         onRemoveTarget={vi.fn()}
         onScopeChange={vi.fn()}
@@ -902,15 +992,62 @@ describe("InviteTargetsDialog history policy", () => {
         onSubmit={vi.fn()}
       />
     );
+  }
 
-    expect(screen.getByText("Shared history")).toBeTruthy();
-    expect(screen.getByText("Since invite")).toBeTruthy();
-    expect(screen.getByText("Since join")).toBeTruthy();
-    expect(screen.getByText("Current")).toBeTruthy();
-    fireEvent.click(screen.getByRole("button", { name: "Open Room Info" }));
-    fireEvent.click(screen.getByRole("button", { name: "Open recovery" }));
+  // #1418: the invite dialog reports what the invitee can read in one
+  // sentence; it never presents the room setting as choices.
+  it.each([
+    ["shared", "dialog.inviteHistoryShared"],
+    ["worldReadable", "dialog.inviteHistoryShared"],
+    ["invited", "dialog.inviteHistoryInvited"],
+    ["joined", "dialog.inviteHistoryJoined"]
+  ] as const)("summarizes %s history in one sentence without options", (visibility, key) => {
+    renderInvite({ current_visibility: visibility, encrypted: false });
+    const region = screen.getByRole("region", { name: t("dialog.inviteHistory") });
+    expect(within(region).getByText(t(key))).toBeTruthy();
+    expect(within(region).queryAllByRole("listitem")).toHaveLength(0);
+    expect(within(region).queryAllByRole("list")).toHaveLength(0);
+    expect(within(region).queryAllByRole("radio")).toHaveLength(0);
+    expect(within(region).queryByText("Current")).toBeNull();
+  });
+
+  it("adds the encrypted caveat only when earlier messages depend on key sharing", () => {
+    renderInvite({ current_visibility: "shared", encrypted: true });
+    expect(screen.getByText(t("dialog.inviteHistoryEncryptedShared"))).toBeTruthy();
+    cleanup();
+    renderInvite({ current_visibility: "joined", encrypted: true });
+    expect(screen.queryByText(t("dialog.inviteHistoryEncryptedShared"))).toBeNull();
+    cleanup();
+    renderInvite({ current_visibility: "shared", encrypted: false });
+    expect(screen.queryByText(t("dialog.inviteHistoryEncryptedShared"))).toBeNull();
+  });
+
+  it("links to Room Info only when the user can change history visibility", () => {
+    const onOpenRoomInfo = vi.fn();
+    renderInvite({ can_edit: true }, { onOpenRoomInfo });
+    fireEvent.click(screen.getByRole("button", { name: t("dialog.inviteHistoryChange") }));
     expect(onOpenRoomInfo).toHaveBeenCalledTimes(1);
+    cleanup();
+    renderInvite({ can_edit: false }, { onOpenRoomInfo });
+    expect(screen.queryByRole("button", { name: t("dialog.inviteHistoryChange") })).toBeNull();
+  });
+
+  it("keeps the recovery alert", () => {
+    const onOpenRecovery = vi.fn();
+    renderInvite({ readiness: "recoveryRequired" }, { onOpenRecovery });
+    expect(screen.getByRole("alert").textContent).toContain(t("dialog.inviteHistoryRecovery"));
+    fireEvent.click(screen.getByRole("button", { name: "Open recovery" }));
     expect(onOpenRecovery).toHaveBeenCalledTimes(1);
+  });
+
+  it("puts the actions in a footer outside the scrolling body", () => {
+    const { container } = renderInvite({});
+    const body = container.ownerDocument.querySelector(".invite-dialog-body");
+    const footer = container.ownerDocument.querySelector(".invite-dialog-footer");
+    expect(body).not.toBeNull();
+    expect(footer).not.toBeNull();
+    expect(body!.contains(footer)).toBe(false);
+    expect(footer!.querySelector(".dialog-actions")).not.toBeNull();
   });
 
   it("offers Done after a completed invite instead of leaving only Cancel", () => {
@@ -1252,7 +1389,7 @@ describe("UploadStagingDialog send action", () => {
     render(sendableDialog([readyItem(), stagedImage("", { kind: "preparing" }, "staged-2")]));
 
     expect(
-      screen.getByRole<HTMLButtonElement>("button", { name: "Send attachments" }).disabled
+      screen.getByRole<HTMLButtonElement>("button", { name: "Send attachments" }).matches(":disabled")
     ).toBe(true);
   });
 });
@@ -1432,10 +1569,10 @@ describe("SuggestedRoomsDialog", () => {
     );
     expect(
       (screen.getByRole("button", { name: t("suggestedRooms.joining") }) as HTMLButtonElement)
-        .disabled
+        .matches(":disabled")
     ).toBe(true);
     expect(
-      (screen.getByRole("button", { name: t("suggestedRooms.skip") }) as HTMLButtonElement).disabled
+      (screen.getByRole("button", { name: t("suggestedRooms.skip") }) as HTMLButtonElement).matches(":disabled")
     ).toBe(true);
   });
 

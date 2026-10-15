@@ -23,20 +23,20 @@ the largest avatar slot is 40 CSS px.
 - **P4 — identity and invalidation.** The cache key includes the thumbnail
   identity (`source` + `fit-120-webp`), not only kind/account/source, so two
   sizes cannot collide. A superseded source retires its bytes through
-  `retire_avatar_source`, driven only by signals that mean the source is no
-  longer referenced:
-  - a scoped demand dropping it (`reconcile_avatar_demand` diffs the sources
-    seen in the demand), which covers room and member avatars; the demand
-    carries the visible plus prefetch window, so scrolling back inside the
-    window does not retire;
-  - the own profile moving to a new avatar (`note_own_avatar_source`).
+  `retire_avatar_source`, driven only when the own profile moves to a new avatar
+  (`note_own_avatar_source`). [#1432](../plans/2026-10-14-issue1432-avatar-source-retirement.md)
+  removed the scoped-demand half of this: leaving the reader window does not
+  prove the source is unused, because a DM row, header, timeline copy, or own
+  profile can demand the same MXC outside that scope. The bounded cache and the
+  session lifecycle own that release instead.
 
   A renderer cancel is deliberately **not** a retirement signal: the renderer's
   request bridge cancels as soon as an avatar becomes `Ready` (the snapshot
   planner drops a URI once it leaves `notRequested`, and the viewport effect's
   cleanup runs on the same transition), which is not the end of its display
   lifetime. Retiring there deleted the just-loaded avatar's bytes and 404'd a
-  visible image.
+  visible image. The same reasoning applies to the scoped demand: it is a
+  window, not ownership.
 - **P5 — per-kind budgets.** Avatars: 8 MiB total, 256 entries, 256 KiB
   per-entry; link previews keep 32 MiB / 32 MiB per-entry. The two no longer
   compete.

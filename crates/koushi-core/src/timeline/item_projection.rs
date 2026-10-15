@@ -1398,6 +1398,14 @@ fn reset_loading_link_previews_to_pending(item: &mut TimelineItem) -> bool {
 }
 
 pub(super) fn eligible_activity_preview(item: &TimelineItem) -> Option<String> {
+    if let Some(formatted) = item.formatted.as_ref()
+        && !item.mentioned_user_ids.is_empty()
+    {
+        let marked = mention_marked_text(&formatted.plain_text, &formatted.html, |user_id| {
+            item.mentioned_user_ids.iter().any(|id| id == user_id)
+        });
+        return collapsed_preview(&marked, REPLY_QUOTE_PREVIEW_MAX_CHARS);
+    }
     let source = item
         .formatted
         .as_ref()
@@ -1405,6 +1413,90 @@ pub(super) fn eligible_activity_preview(item: &TimelineItem) -> Option<String> {
         .or(item.body.as_deref())
         .or_else(|| item.media.as_ref().map(|media| media.filename.as_str()))?;
     collapsed_preview(source, REPLY_QUOTE_PREVIEW_MAX_CHARS)
+}
+
+/// Thread previews spell each `m.mentions` user pill as `@Label`, like the
+/// rendered pill, even when the sender's plain fallback dropped the `@`
+/// (Element sends `Label: ...`). Without mention metadata the body is kept.
+pub(crate) fn mention_marked_message_preview(
+    msgtype: &MessageType,
+    body: &str,
+    mentions: Option<&matrix_sdk::ruma::events::Mentions>,
+) -> String {
+    let Some(user_ids) = mentions
+        .map(|mentions| &mentions.user_ids)
+        .filter(|user_ids| !user_ids.is_empty())
+    else {
+        return body.to_owned();
+    };
+    let formatted = match msgtype {
+        MessageType::Text(content) => content.formatted.as_ref(),
+        MessageType::Notice(content) => content.formatted.as_ref(),
+        MessageType::Emote(content) => content.formatted.as_ref(),
+        _ => None,
+    }
+    .and_then(project_formatted_body);
+    let Some(formatted) = formatted else {
+        return body.to_owned();
+    };
+    mention_marked_text(body, &formatted.formatted.html, |user_id| {
+        user_ids.iter().any(|id| id.as_str() == user_id)
+    })
+}
+
+/// Inserts `@` before each label of a mention anchor in `html` that `text`
+/// spells without one, matching labels in document order.
+fn mention_marked_text(text: &str, html: &str, is_mentioned: impl Fn(&str) -> bool) -> String {
+    let html = Html::parse(html);
+    let mut labels = Vec::new();
+    collect_mention_labels_from_nodes(html.children(), &is_mentioned, &mut labels);
+    let mut marked = String::with_capacity(text.len() + labels.len());
+    let mut remaining = text;
+    for label in labels {
+        let Some(offset) = remaining.find(&label) else {
+            continue;
+        };
+        marked.push_str(&remaining[..offset]);
+        if !marked.ends_with('@') {
+            marked.push('@');
+        }
+        marked.push_str(&label);
+        remaining = &remaining[offset + label.len()..];
+    }
+    marked.push_str(remaining);
+    marked
+}
+
+fn collect_mention_labels_from_nodes(
+    nodes: impl Iterator<Item = matrix_sdk::ruma::html::NodeRef>,
+    is_mentioned: &impl Fn(&str) -> bool,
+    out: &mut Vec<String>,
+) {
+    for node in nodes {
+        let Some(element) = node.as_element() else {
+            continue;
+        };
+        let href =
+            element.attrs.borrow().iter().find_map(|attr| {
+                (attr.name.local.as_ref() == "href").then(|| attr.value.to_string())
+            });
+        let is_user_mention = href
+            .as_deref()
+            .and_then(matrix_to_mention_target)
+            .is_some_and(|target| {
+                matches!(target, MentionTarget::User { user_id, .. } if is_mentioned(&user_id))
+            });
+        if is_user_mention {
+            let mut label = String::new();
+            collect_plain_text_from_nodes(node.children(), &mut label);
+            let label = label.strip_prefix('@').unwrap_or(&label);
+            if !label.is_empty() {
+                out.push(label.to_owned());
+            }
+        } else {
+            collect_mention_labels_from_nodes(node.children(), is_mentioned, out);
+        }
+    }
 }
 
 pub(super) fn is_attention_eligible_event(item: &TimelineItem) -> bool {
@@ -2676,10 +2768,9 @@ pub(super) fn thread_summary_from_sdk(
         };
         dto.latest_sender = Some(latest_event.sender.to_string());
         dto.latest_sender_label = None;
-        dto.latest_body_preview = latest_event
-            .content
-            .as_message()
-            .map(|message| message.body().to_owned());
+        dto.latest_body_preview = latest_event.content.as_message().map(|message| {
+            mention_marked_message_preview(message.msgtype(), message.body(), message.mentions())
+        });
         dto.latest_timestamp_ms = Some(latest_event.timestamp.0.into());
     }
 

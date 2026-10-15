@@ -157,10 +157,11 @@ Crate responsibilities:
   Password and recovery strings remain uncontrolled DOM values and do not enter
   React state. A repository AST gate prevents feature components from bypassing
   this layer with raw composable controls or forms.
-  Room-address previews are stateless Rust projections of raw unsent name/alias
-  drafts and the current Ready account's Matrix server name. Core returns the
-  suggested or manually entered local part, a validated full alias, and a typed
-  validation error; availability remains server-owned. Renderer-local draft
+  Room-address previews are stateless Rust projections of the raw unsent alias
+  draft, the create session's Rust-held random default address, and the current
+  Ready account's Matrix server name. Core returns the default or manually
+  entered local part, a validated full alias, and a typed validation error;
+  availability remains server-owned. Renderer-local draft
   identity fences late preview responses, without deriving aliases or Matrix
   server names in React. The existing create-room command revalidates the alias
   before network submission. A server `M_ROOM_IN_USE` response becomes the closed
@@ -782,8 +783,16 @@ revision-qualified installed-resource command and a transient renderer object
 URL. A native adapter may consume bytes directly.
 The cache is an entry-and-byte-bounded LRU: access refreshes recency, eviction
 or session clear releases the owned bytes, and an item larger than the byte
-bound fails before a Ready reference is published. It must never persist
-automatic avatar/link-preview plaintext or return `file://` URLs for them. Legacy
+bound fails before a Ready reference is published. Replacing the own profile
+avatar additionally retires the superseded source's bytes; a scoped reader
+demand leaving its window does not (#1432), because the same source can still be
+shown by an independently demanded DM, header, timeline, or profile avatar. A
+removed or superseded entry never leaves a live Ready reference: the actor
+reconciles its announced avatar sources, downgrades one whose bytes are gone to
+NotRequested so the renderer's visibility demand re-requests it, and a scoped
+demand that still references the source revalidates and refetches it on the next
+observation. It must never persist automatic avatar/link-preview plaintext or
+return `file://` URLs for them. Legacy
 plaintext thumbnail directories remain cleanup-only. After Rust resolves scoped
 visibility observations into avatar resources, `AccountActor` owns single-flight deduplication, bounded
 concurrency, two network attempts, terminal Ready/Failed caching and session-
@@ -1550,7 +1559,15 @@ Account-level notification settings (#981) are server-owned and shared with
 every Matrix client on the account, so they are a separate Rust slice,
 `AppState.account_notifications`, never folded into `SettingsValues`. The
 device-local app switch (`desktop_notifications`) gates only this device's
-banners; email delivery is a `kind: email` pusher and is independent of it.
+banners; server email delivery is a `kind: email` pusher and is independent of it.
+The device-local notification delivery (#1427) is a second, app-scoped path: it
+delivers through sinks the user configures (the Resend API and a generic SMTP relay,
+including the iCloud, Gmail and QQ Mail presets), reads the same unread/mention
+projection as the badge after a configurable dwell, keeps every sink secret in the
+credential store and never in `SettingsValues`, and is the default implementation of
+email notification (state-machine.md, "Local Notification Delivery"). A non-mail sink
+such as a WeCom group-robot webhook is what the sink boundary is shaped for, but none
+is implemented yet, so no screen offers one.
 The four ON/OFF categories are projections of standard predefined push rules
 read from `GET /pushrules/`; email targets are validated email 3PIDs plus
 `GET /pushers`. The AccountActor owns every read and write through

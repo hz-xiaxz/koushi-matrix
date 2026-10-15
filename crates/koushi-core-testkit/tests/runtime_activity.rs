@@ -440,6 +440,7 @@ async fn activity_recent_includes_room_list_latest_event_for_unopened_read_dm() 
         sender_label: Some("Satoshi Terasaki".to_owned()),
         sender_avatar: None,
         preview: Some("already read but never opened".to_owned()),
+        message_text: None,
         timestamp_ms: 120,
         is_redacted: false,
     });
@@ -509,6 +510,7 @@ async fn activity_recent_row_from_room_summary_fallback_carries_the_thread_root(
         sender_label: Some("Satoshi Terasaki".to_owned()),
         sender_avatar: None,
         preview: Some("latest reply in the thread".to_owned()),
+        message_text: None,
         timestamp_ms: 120,
         is_redacted: false,
     });

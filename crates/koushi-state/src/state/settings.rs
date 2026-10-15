@@ -3,6 +3,9 @@ use std::collections::BTreeMap;
 
 use crate::composer_shortcuts::ComposerFormattingOptions;
 
+use super::notification_delivery::{
+    NotificationDeliverySettings, deserialize_notification_delivery,
+};
 use super::search_crawler::SearchCrawlerSettings;
 
 pub(crate) fn default_true() -> bool {
@@ -131,6 +134,11 @@ pub struct SettingsValues {
     pub composer: ComposerSettings,
     #[serde(default)]
     pub notifications: NotificationSettings,
+    /// Device-local notification delivery (#1427). App scope: the Matrix account is
+    /// never consulted for a destination. Boxed for the same reason the settings patch
+    /// is: the block would otherwise dominate the effect enum's largest variant.
+    #[serde(default, deserialize_with = "deserialize_notification_delivery")]
+    pub delivery: Box<NotificationDeliverySettings>,
     #[serde(default)]
     pub display: DisplaySettings,
     #[serde(default)]
@@ -162,6 +170,10 @@ pub struct AppSettingsValues {
     pub keyboard: KeyboardSettings,
     pub composer_math_mode: bool,
     pub notifications: AppNotificationSettings,
+    /// The settings file holds the app projection, so the same load-time
+    /// canonicalization the full value gets has to run here too.
+    #[serde(default, deserialize_with = "deserialize_notification_delivery")]
+    pub delivery: Box<NotificationDeliverySettings>,
     pub display: AppDisplaySettings,
     pub media: MediaSettings,
     pub timeline: TimelineSettings,
@@ -236,6 +248,7 @@ impl SettingsValues {
                 code_block_wrap: self.display.code_block_wrap,
                 hide_redacted: self.display.hide_redacted,
             },
+            delivery: self.delivery.clone(),
             media: self.media.clone(),
             timeline: self.timeline.clone(),
             thread_list_order: self.thread_list_order,
@@ -278,6 +291,9 @@ impl SettingsValues {
         self.notifications.badges = app.notifications.badges;
         self.display.code_block_wrap = app.display.code_block_wrap;
         self.display.hide_redacted = app.display.hide_redacted;
+        let mut delivery = app.delivery.clone();
+        delivery.canonicalize();
+        self.delivery = delivery;
         self.media = app.media.clone();
         self.timeline = app.timeline.clone();
         self.thread_list_order = app.thread_list_order;
@@ -370,6 +386,11 @@ impl SettingsValues {
                     display.encrypted_url_previews_enabled;
             }
         }
+        if apply_app && let Some(delivery) = patch.delivery {
+            let mut delivery = delivery;
+            delivery.canonicalize();
+            *self.delivery = delivery;
+        }
         if apply_account {
             if let Some(room_list_sort) = patch.room_list_sort {
                 self.room_list_sort = room_list_sort;
@@ -423,6 +444,11 @@ impl AppSettingsValues {
                 code_block_wrap: value.code_block_wrap,
                 hide_redacted: value.hide_redacted,
             };
+        }
+        if let Some(value) = &patch.delivery {
+            let mut delivery = value.clone();
+            delivery.canonicalize();
+            *self.delivery = delivery;
         }
         if let Some(value) = &patch.media {
             self.media = value.clone();
@@ -1096,6 +1122,10 @@ pub struct SettingsPatch {
     pub keyboard: Option<KeyboardSettings>,
     pub composer: Option<ComposerSettings>,
     pub notifications: Option<NotificationSettings>,
+    /// Device-local notification delivery (#1427), app scope. The patch carries the
+    /// whole block, as the notification block does, and the app re-canonicalizes it.
+    #[serde(default)]
+    pub delivery: Option<NotificationDeliverySettings>,
     pub display: Option<DisplaySettings>,
     pub media: Option<MediaSettings>,
     pub timeline: Option<TimelineSettings>,

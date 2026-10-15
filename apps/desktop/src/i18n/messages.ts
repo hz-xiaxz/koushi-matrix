@@ -274,16 +274,15 @@ export type MessageId =
   | "dialog.createRoomTitle"
   | "dialog.createSpaceTitle"
   | "dialog.encryptedRoom"
-  | "dialog.invitedOnlyRoom"
   | "dialog.invitedOnlyRoomInSpace"
   | "dialog.inviteCandidates"
   | "dialog.inviteHistory"
-  | "dialog.inviteHistoryCurrent"
-  | "dialog.inviteHistoryCurrentBadge"
+  | "dialog.inviteHistoryChange"
   | "dialog.inviteHistoryEncryptedShared"
-  | "dialog.inviteHistoryNonRetroactive"
+  | "dialog.inviteHistoryInvited"
+  | "dialog.inviteHistoryJoined"
   | "dialog.inviteHistoryRecovery"
-  | "dialog.inviteHistoryWorldReadableWarning"
+  | "dialog.inviteHistoryShared"
   | "dialog.inviteInvalidMatrixId"
   | "dialog.invitePeopleTitle"
   | "dialog.inviteScope"
@@ -294,7 +293,6 @@ export type MessageId =
   | "dialog.invitePerson"
   | "dialog.inviteSearchFailed"
   | "dialog.inviteSelectedTargets"
-  | "dialog.openRoomInfo"
   | "dialog.matrixUserId"
   | "dialog.newDmTitle"
   | "dialog.privateRoom"
@@ -312,14 +310,24 @@ export type MessageId =
   | "dialog.roomAddressSuggestion"
   | "dialog.roomAddressUseSuggestion"
   | "dialog.roomAddressScope"
-  | "dialog.publicRoomInSpace"
   | "dialog.roomAddressAbout"
   | "dialog.roomAddressHelp"
   | "dialog.roomAddressPreview"
   | "dialog.roomAddressEmpty"
-  | "dialog.roomAddressNone"
   | "dialog.roomAddressInvalid"
   | "dialog.roomAddressPending"
+  | "dialog.roomAddressChange"
+  | "dialog.roomAddressChangeLabel"
+  | "dialog.roomAddressNameVsAddress"
+  | "dialog.createWhoCanJoin"
+  | "dialog.createJoinSpaceMembers"
+  | "dialog.createJoinInvite"
+  | "dialog.createJoinPublic"
+  | "dialog.createJoinPublicHint"
+  | "dialog.createEarlierMessages"
+  | "dialog.createHistoryShared"
+  | "dialog.createHistoryInvited"
+  | "dialog.createHistoryWorldReadable"
   | "dialog.roomTopic"
   | "dialog.roomVisibility"
   | "dialog.sendInvite"
@@ -328,8 +336,6 @@ export type MessageId =
   | "dialog.roomNameOptional"
   | "dialog.roomNameOptionalHelp"
   | "dialog.spaceName"
-  | "dialog.standardRoomInSpace"
-  | "dialog.privateRoomDescription"
   | "dialog.startDm"
   | "dialog.reportReasonLabel"
   | "dialog.reportReasonPlaceholder"
@@ -944,6 +950,97 @@ export type MessageId =
   | "settings.notificationMessagePreviews"
   | "settings.notificationMessagePreviewsDescription"
   | "settings.notificationSound"
+  | "settings.notificationDelivery"
+  | "settings.notificationDeliveryDescription"
+  | "settings.notificationDeliveryTriggers"
+  | "settings.notificationDeliveryDirectMessages"
+  | "settings.notificationDeliveryMentions"
+  | "settings.notificationDeliveryKeywords"
+  | "settings.notificationDeliveryDwell"
+  | "settings.notificationDeliveryDwellDescription"
+  | "settings.notificationDeliveryInterval"
+  | "settings.notificationDeliveryIntervalDescription"
+  | "settings.notificationDeliveryOnlyUnfocused"
+  | "settings.notificationDeliveryWatched"
+  | "settings.notificationDeliveryWatchedDescription"
+  | "settings.notificationDeliveryWatchedAdd"
+  | "settings.notificationDeliveryWatchedEmpty"
+  | "settings.notificationDeliveryWatchedLimit"
+  | "settings.notificationDeliveryWatchedRemove"
+  | "settings.notificationDeliverySinks"
+  | "settings.notificationDeliveryAddSink"
+  | "settings.notificationDeliverySinkLimit"
+  | "settings.notificationDeliverySinkProvider"
+  | "settings.notificationDeliverySinkName"
+  | "settings.notificationDeliverySinkFrom"
+  | "settings.notificationDeliverySinkTo"
+  | "settings.notificationDeliverySinkHost"
+  | "settings.notificationDeliverySinkPort"
+  | "settings.notificationDeliverySinkUsername"
+  | "settings.notificationDeliverySinkSecret"
+  | "settings.notificationDeliverySinkSecretSet"
+  | "settings.notificationDeliverySinkSecretMissing"
+  | "settings.notificationDeliverySinkTest"
+  | "settings.notificationDeliverySinkTestSending"
+  | "settings.notificationDeliverySinkRemove"
+  | "settings.notificationDeliveryLastResult"
+  | "settings.notificationDeliveryNeverSent"
+  | "settings.notificationDeliveryResultDelivered"
+  | "settings.notificationDeliveryResultInvalidSecret"
+  | "settings.notificationDeliveryResultNotPermitted"
+  | "settings.notificationDeliveryResultRejected"
+  | "settings.notificationDeliveryResultRateLimited"
+  | "settings.notificationDeliveryResultTransport"
+  | "settings.notificationDeliveryPrefix"
+  | "settings.notificationDeliveryPrefixDescription"
+  | "settings.notificationDeliveryPrefixChars"
+  | "settings.notificationDeliveryPrefixConsentTitle"
+  | "settings.notificationDeliveryPrefixConsentBody"
+  | "settings.notificationDeliveryPrefixConsentAccept"
+  | "settings.notificationDeliveryPrefixConsentLink"
+  | "settings.notificationSource"
+  | "settings.notificationDeviceSource"
+  | "settings.notificationHomeserverSource"
+  | "settings.notificationDeliveryEnable"
+  | "settings.notificationDeliveryKeywordsHint"
+  | "settings.notificationDeliveryWatchedPick"
+  | "settings.notificationDeliveryWatchedRooms"
+  | "settings.notificationDeliveryWatchedSpaces"
+  | "settings.notificationDeliveryWatchedUnknown"
+  | "settings.notificationDeliverySinkEnabled"
+  | "settings.notificationDeliverySinkKindResend"
+  | "settings.notificationDeliverySinkKindSmtp"
+  | "settings.notificationDeliverySinkEndpoint"
+  | "settings.notificationDeliverySinkEndpointDefault"
+  | "settings.notificationDeliverySinkPreset"
+  | "settings.notificationDeliverySinkPresetCustom"
+  | "settings.notificationDeliverySinkPresetHint"
+  | "settings.notificationDeliverySinkTls"
+  | "settings.notificationDeliverySinkTlsImplicit"
+  | "settings.notificationDeliverySinkTlsStartTls"
+  | "settings.notificationDeliverySinkUsernameFullAddress"
+  | "settings.notificationDeliverySinkSaveSecret"
+  | "settings.notificationDeliverySinkClearSecret"
+  | "settings.notificationDeliverySinkSecretRetired"
+  | "settings.notificationDeliverySinkEmpty"
+  | "settings.notificationDeliverySinkFailed"
+  | "settings.notificationDeliveryResultRateLimitedAfter"
+  | "settings.notificationDeliveryPrefixConsentAcknowledge"
+  | "settings.notificationDeliveryPrefixConsentRequired"
+  | "settings.notificationDeliverySecretHint.qqMail"
+  | "settings.notificationDeliverySecretHint.gmail"
+  | "settings.notificationDeliverySecretHint.icloud"
+  | "settings.notificationKeywordHeading"
+  | "settings.notificationKeywordEmpty"
+  | "settings.notificationKeywordAdd"
+  | "settings.notificationKeywordRemove"
+  | "settings.notificationKeywordDisabled"
+  | "settings.notificationKeywordHint"
+  | "settings.notificationKeywordErrorEmpty"
+  | "settings.notificationKeywordErrorTooLong"
+  | "settings.notificationKeywordErrorDuplicate"
+  | "settings.notificationKeywordErrorLimit"
+  | "settings.notificationKeywordErrorUnknownRule"
   | "settings.sendReadReceipts"
   | "settings.sendTypingNotifications"
   | "settings.notifications"
@@ -2176,17 +2273,15 @@ const en: Catalog = {
   "dialog.createRoomTitle": "Create room",
   "dialog.createSpaceTitle": "Create space",
   "dialog.encryptedRoom": "Encrypted room",
-  "dialog.invitedOnlyRoom": "Invited only",
   "dialog.invitedOnlyRoomInSpace": "Invite-only room in {spaceName}: only explicitly invited people can join.",
   "dialog.inviteCandidates": "Invite candidates",
-  "dialog.inviteHistory": "History visibility for invitees",
-  "dialog.inviteHistoryCurrent": "Current room setting. Change it in Room Info before sending the invite.",
-  "dialog.inviteHistoryCurrentBadge": "Current",
-  "dialog.inviteHistoryEncryptedShared": "Past room keys may be shared with an invitee automatically. The share needs verification on both sides and may be skipped, so some or all earlier messages may stay unreadable.",
-  "dialog.inviteHistoryNonRetroactive": "This is not retroactive, and already shared events or keys cannot be revoked.",
+  "dialog.inviteHistory": "Earlier messages",
+  "dialog.inviteHistoryChange": "Change in Room Info",
+  "dialog.inviteHistoryEncryptedShared": "This room is encrypted, so some earlier messages may stay unreadable if their keys can't be shared.",
+  "dialog.inviteHistoryInvited": "They can read messages from when they were invited.",
+  "dialog.inviteHistoryJoined": "They can read messages from when they join.",
+  "dialog.inviteHistoryShared": "They can read earlier messages in this room.",
   "dialog.inviteHistoryRecovery": "Recovery is incomplete; the invite can still proceed, but encrypted history sharing may be limited.",
-  "dialog.inviteHistoryWorldReadableWarning":
-    "Current advanced setting: non-members may read this room's history.",
   "dialog.inviteInvalidMatrixId": "Invalid Matrix ID",
   "dialog.invitePeopleTitle": "Invite people to {name}",
   "dialog.inviteScope": "Invite scope",
@@ -2197,7 +2292,6 @@ const en: Catalog = {
   "dialog.invitePerson": "Invite {name}",
   "dialog.inviteNoResults": "No invite candidates found. Try another name or enter a full Matrix ID.",
   "dialog.inviteSelectedTargets": "Selected invite targets",
-  "dialog.openRoomInfo": "Open Room Info",
   "dialog.matrixUserId": "Matrix user ID",
   "dialog.newDmTitle": "New DM",
   "dialog.privateRoom": "Private room",
@@ -2207,7 +2301,7 @@ const en: Catalog = {
   "room.shareLinkCopyFailed": "Could not copy the link. Select and copy the URL instead.",
   "dialog.roomAddress": "Room address",
   "dialog.roomAddressInUse": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. You can keep the room name ‘{roomName}’; change only the room address, for example by adding a project name or number.",
-  "dialog.roomAddressInUseUnnamed": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. Change the room address, for example by adding a project name or number, or clear it to create the room without an address.",
+  "dialog.roomAddressInUseUnnamed": "The address {fullAddress} is already in use. Addresses are shared across all Spaces on {server}. Change the room address, for example by adding a project name or number.",
   "dialog.roomAddressChecking": "Checking whether {address} is in use…",
   "dialog.roomAddressAvailable": "{address} was not in use when checked. This does not reserve it; the server confirms the address when you create the room.",
   "dialog.roomAddressTaken": "{address} is already in use on {server}. Keep the room name and change only the address.",
@@ -2215,14 +2309,24 @@ const en: Catalog = {
   "dialog.roomAddressSuggestion": "Suggestion (not checked yet): {address}",
   "dialog.roomAddressUseSuggestion": "Use this address",
   "dialog.roomAddressScope": "The room name can repeat, but this address must be unique on {server}, across all Spaces. Starting it with the Space name makes a conflict less likely but does not reserve it.",
-  "dialog.publicRoomInSpace": "Public room in {spaceName}: it is listed in the public room directory, and anyone, including people outside the space, can find and join it. Space membership does not limit who can join.",
   "dialog.roomAddressAbout": "About room addresses ↗",
   "dialog.roomAddressHelp": "This address lets people find and share this room. Enter only the room-specific name, without # or a server name. Availability is confirmed when you create the room.",
   "dialog.roomAddressPreview": "Full address: {address}",
   "dialog.roomAddressEmpty": "Enter an address for this public room.",
-  "dialog.roomAddressNone": "This room will be created without an address. People can still find it in the room directory and join it.",
   "dialog.roomAddressInvalid": "Use a room-specific name without spaces, # at the start, or a server suffix. Shorten it if needed.",
   "dialog.roomAddressPending": "Waiting for the address preview.",
+  "dialog.roomAddressChange": "Change",
+  "dialog.roomAddressChangeLabel": "Change room address",
+  "dialog.roomAddressNameVsAddress": "The name is what people see in their room list. The address is the link that opens the room, for example in a message or on a web page.",
+  "dialog.createWhoCanJoin": "Who can join",
+  "dialog.createJoinSpaceMembers": "Members of {spaceName}",
+  "dialog.createJoinInvite": "Only people you invite",
+  "dialog.createJoinPublic": "Anyone",
+  "dialog.createJoinPublicHint": "Anyone, including people outside your Spaces, can find this room in the public room directory and join it. A public room is not encrypted.",
+  "dialog.createEarlierMessages": "Earlier messages",
+  "dialog.createHistoryShared": "New members can read earlier messages",
+  "dialog.createHistoryInvited": "New members read from when they were invited",
+  "dialog.createHistoryWorldReadable": "Let people read without joining",
   "dialog.roomTopic": "Topic",
   "dialog.roomVisibility": "Room visibility",
   "dialog.sendInvite": "Send invite",
@@ -2231,8 +2335,6 @@ const en: Catalog = {
   "dialog.roomNameOptional": "Room name (optional)",
   "dialog.roomNameOptionalHelp": "Leave the name empty to show a name based on the room's address or members. You can set a name later.",
   "dialog.spaceName": "Space name",
-  "dialog.standardRoomInSpace": "Standard room in {spaceName}: space members can join without approval.",
-  "dialog.privateRoomDescription": "Only explicitly invited people can join.",
   "dialog.startDm": "Start DM",
   "dialog.reportReasonLabel": "Reason",
   "dialog.reportReasonPlaceholder": "Why are you reporting this?",
@@ -2877,6 +2979,134 @@ const en: Catalog = {
   "settings.notificationMessagePreviewsDescription":
     "Message text will appear in banners and in your operating system's notification centre. This is a device-local setting.",
   "settings.notificationSound": "Sound",
+  "settings.notificationDelivery": "Notify me from this device",
+  "settings.notificationDeliveryDescription":
+    "Koushi sends this itself, through a service you configure, so it works on a homeserver that has no email support. A room is sent only while it is still unread.",
+  "settings.notificationDeliveryTriggers": "Send for",
+  "settings.notificationDeliveryDirectMessages": "Direct messages",
+  "settings.notificationDeliveryMentions": "Mentions and replies",
+  "settings.notificationDeliveryKeywords": "Your keywords",
+  "settings.notificationDeliveryDwell": "Wait before sending",
+  "settings.notificationDeliveryDwellDescription":
+    "A room is included only if it is still unread after this long, so a conversation you are reading is never sent.",
+  "settings.notificationDeliveryInterval": "Shortest gap between sends",
+  "settings.notificationDeliveryIntervalDescription":
+    "Further notifications wait this long, so a busy room cannot fill your mailbox.",
+  "settings.notificationDeliveryOnlyUnfocused": "Only while Koushi is not focused",
+  "settings.notificationDeliveryWatched": "Also send for these rooms and spaces",
+  "settings.notificationDeliveryWatchedDescription":
+    "A chosen room is sent even when its kind is off above. Choosing a space covers every room in it, including rooms added later. A room you read or mute is still skipped.",
+  "settings.notificationDeliveryWatchedAdd": "Add a room or space",
+  "settings.notificationDeliveryWatchedEmpty": "No rooms or spaces chosen",
+  // The watch list is capped in Rust; the form says so instead of letting a choice
+  // disappear in canonicalization.
+  "settings.notificationDeliveryWatchedLimit":
+    "The watch list holds up to {count} rooms and spaces. Remove one to add another.",
+  "settings.notificationDeliveryWatchedRemove": "Remove {room}",
+  "settings.notificationDeliverySinks": "Send through",
+  "settings.notificationDeliveryAddSink": "Add a service",
+  "settings.notificationDeliverySinkLimit":
+    "Up to {count} sending services. Remove one to add another.",
+  "settings.notificationDeliverySinkProvider": "Service",
+  "settings.notificationDeliverySinkName": "Name",
+  "settings.notificationDeliverySinkFrom": "From address",
+  "settings.notificationDeliverySinkTo": "Send to",
+  "settings.notificationDeliverySinkHost": "Server",
+  "settings.notificationDeliverySinkPort": "Port",
+  "settings.notificationDeliverySinkUsername": "Username",
+  "settings.notificationDeliverySinkSecret": "App password or API key",
+  "settings.notificationDeliverySinkSecretSet": "Saved. Enter a new value to replace it.",
+  "settings.notificationDeliverySinkSecretMissing": "Not set",
+  "settings.notificationDeliverySinkTest": "Send a test",
+  "settings.notificationDeliverySinkTestSending": "Sending…",
+  "settings.notificationDeliverySinkRemove": "Remove",
+  "settings.notificationDeliveryLastResult": "Last send",
+  "settings.notificationDeliveryNeverSent": "Not sent yet",
+  "settings.notificationDeliveryResultDelivered": "Delivered",
+  "settings.notificationDeliveryResultInvalidSecret":
+    "The service rejected the key. Enter it again.",
+  "settings.notificationDeliveryResultNotPermitted":
+    "The service refused this sender or this account. Check the from address and the account status.",
+  "settings.notificationDeliveryResultRejected": "The service refused the message.",
+  "settings.notificationDeliveryResultRateLimited":
+    "The service is limiting how often it accepts messages. Koushi will try again later.",
+  "settings.notificationDeliveryResultTransport": "Could not reach the service.",
+  "settings.notificationDeliveryPrefix": "Include the start of the message",
+  "settings.notificationDeliveryPrefixDescription":
+    "Off by default. The first characters of the message are added as plain text, so anyone who can read the message can read them.",
+  "settings.notificationDeliveryPrefixChars": "Characters",
+  "settings.notificationDeliveryPrefixConsentTitle": "Send message text unencrypted?",
+  "settings.notificationDeliveryPrefixConsentBody":
+    "The start of the message leaves this device as plain text and passes through {service} to {destination} without end-to-end encryption. Whether, and for how long, that service keeps it depends on that service's own terms, so read them before turning this on. Room names and counts are sent either way.",
+  "settings.notificationDeliveryPrefixConsentAccept": "Turn on and accept",
+  "settings.notificationDeliveryPrefixConsentLink": "Read the service's terms",
+  // The two notification sources are different owners; the tab list says which
+  // source is showing, and each body says in one line who sends it.
+  "settings.notificationSource": "Notification source",
+  "settings.notificationDeviceSource":
+    "Koushi sends these from this device, through the mailbox or relay configured here.",
+  "settings.notificationHomeserverSource":
+    "Your homeserver sends these, and they apply to every device on the account.",
+  "settings.notificationDeliveryEnable": "Send notifications from this device",
+  "settings.notificationDeliveryKeywordsHint":
+    "A message that matches one of your keywords arrives as a mention, so either this switch or Mentions and replies sends it.",
+  "settings.notificationDeliveryWatchedPick": "Choose a room or space",
+  "settings.notificationDeliveryWatchedRooms": "Rooms",
+  "settings.notificationDeliveryWatchedSpaces": "Spaces",
+  "settings.notificationDeliveryWatchedUnknown": "Not in the room list right now",
+  "settings.notificationDeliverySinkEnabled": "Send through this service",
+  "settings.notificationDeliverySinkKindResend": "Resend (email API)",
+  "settings.notificationDeliverySinkKindSmtp": "SMTP relay",
+  "settings.notificationDeliverySinkEndpoint": "Endpoint",
+  // Rust fills `DEFAULT_RESEND_ENDPOINT` when this is left empty; the form says so
+  // rather than repeating the URL, which Rust owns.
+  "settings.notificationDeliverySinkEndpointDefault":
+    "Leave this blank to use the endpoint this service documents for its email API.",
+  "settings.notificationDeliverySinkPreset": "Mailbox preset",
+  "settings.notificationDeliverySinkPresetCustom": "Other server",
+  "settings.notificationDeliverySinkPresetHint":
+    "A preset fills in the relay the provider documents. Check it against the provider's own documentation; Koushi does not keep it up to date for you.",
+  "settings.notificationDeliverySinkTls": "Connection security",
+  "settings.notificationDeliverySinkTlsImplicit": "TLS from the first byte (usually port 465)",
+  "settings.notificationDeliverySinkTlsStartTls": "STARTTLS after connecting (usually port 587)",
+  "settings.notificationDeliverySinkUsernameFullAddress":
+    "The mailbox's full address",
+  "settings.notificationDeliverySinkSaveSecret": "Save",
+  "settings.notificationDeliverySinkClearSecret": "Clear",
+  // The credential is gone because the sink is no longer the server it was entered for;
+  // saying so keeps the empty field from reading as data loss.
+  "settings.notificationDeliverySinkSecretRetired":
+    "The saved password was removed because the server or account changed. Enter it again.",
+  "settings.notificationDeliverySinkEmpty":
+    "No service is configured yet. Nothing leaves this device until one is added and turned on.",
+  "settings.notificationDeliverySinkFailed": "This service is not sending",
+  "settings.notificationDeliveryResultRateLimitedAfter":
+    "The service is limiting how often it accepts messages. The next attempt waits about {seconds} seconds.",
+  "settings.notificationDeliveryPrefixConsentAcknowledge": "I have read those terms",
+  "settings.notificationDeliveryPrefixConsentRequired":
+    "Confirm that you have read the terms to turn this on.",
+  "settings.notificationDeliverySecretHint.qqMail":
+    "QQ Mail expects the authorization code from its own settings, not the account password.",
+  "settings.notificationDeliverySecretHint.gmail":
+    "Gmail expects a Google app password, which Google only issues while 2-Step Verification is on.",
+  "settings.notificationDeliverySecretHint.icloud":
+    "iCloud Mail expects an app-specific password created for this app in your Apple Account.",
+  // #1427: the rules are the account's own push rules on the homeserver, while
+  // the switch next to them is about what this device mails.
+  "settings.notificationKeywordHeading": "Keywords on your homeserver",
+  "settings.notificationKeywordEmpty": "No keywords yet.",
+  "settings.notificationKeywordAdd": "Add a keyword",
+  "settings.notificationKeywordRemove": "Remove {keyword}",
+  "settings.notificationKeywordDisabled": "Off on your account",
+  "settings.notificationKeywordHint":
+    "Keywords are saved on your homeserver, so this app and your other devices highlight them too. The switch above decides what this device sends mail about. A keyword matches a whole word, ignoring case.",
+  "settings.notificationKeywordErrorEmpty": "Enter a keyword.",
+  "settings.notificationKeywordErrorTooLong": "That keyword is too long.",
+  "settings.notificationKeywordErrorDuplicate": "That keyword is already in the list.",
+  "settings.notificationKeywordErrorLimit":
+    "Your keyword list is full. Remove one to add another.",
+  "settings.notificationKeywordErrorUnknownRule":
+    "That keyword is no longer on the server. Reopen this page and try again.",
   "settings.sendReadReceipts": "Send read receipts",
   "settings.sendTypingNotifications": "Send typing notifications",
   "settings.notifications": "Notifications",
@@ -4007,17 +4237,15 @@ const ja: Catalog = {
   "dialog.createRoomTitle": "ルームを作成",
   "dialog.createSpaceTitle": "スペースを作成",
   "dialog.encryptedRoom": "暗号化ルーム",
-  "dialog.invitedOnlyRoom": "招待された人のみ",
   "dialog.invitedOnlyRoomInSpace": "{spaceName}内の招待専用ルーム：明示的に招待された人だけが参加できます",
   "dialog.inviteCandidates": "招待候補",
-  "dialog.inviteHistory": "招待先に見える履歴",
-  "dialog.inviteHistoryCurrent": "現在のルーム設定です。招待を送る前にRoom Infoから変更できます。",
-  "dialog.inviteHistoryCurrentBadge": "現在",
-  "dialog.inviteHistoryEncryptedShared": "過去のルーム鍵は招待者へ自動的に共有される場合があります。共有には双方の検証が必要で、共有されないこともあるため、それ以前のメッセージが読めないままになる場合があります。",
-  "dialog.inviteHistoryNonRetroactive": "この設定は過去に遡らず、すでに共有されたイベントや鍵を取り消すこともできません。",
+  "dialog.inviteHistory": "過去のメッセージ",
+  "dialog.inviteHistoryChange": "Room Infoで変更",
+  "dialog.inviteHistoryEncryptedShared": "暗号化ルームのため、鍵を共有できなかった過去のメッセージは読めない場合があります。",
+  "dialog.inviteHistoryInvited": "招待された時点以降のメッセージを読めます。",
+  "dialog.inviteHistoryJoined": "参加した時点以降のメッセージを読めます。",
+  "dialog.inviteHistoryShared": "このルームの過去のメッセージも読めます。",
   "dialog.inviteHistoryRecovery": "復旧が完了していません。招待は続行できますが、暗号化履歴の共有が制限される場合があります。",
-  "dialog.inviteHistoryWorldReadableWarning":
-    "現在の高度な設定: メンバーでない人もこのルームの履歴を閲覧できます。",
   "dialog.inviteInvalidMatrixId": "Matrix IDが正しくありません",
   "dialog.invitePeopleTitle": "{name}に招待",
   "dialog.inviteScope": "招待範囲",
@@ -4028,7 +4256,6 @@ const ja: Catalog = {
   "dialog.invitePerson": "{name}を招待",
   "dialog.inviteNoResults": "招待候補が見つかりません。別の名前か、完全なMatrix IDで検索してください。",
   "dialog.inviteSelectedTargets": "選択中の招待先",
-  "dialog.openRoomInfo": "Room Infoを開く",
   "dialog.matrixUserId": "MatrixユーザーID",
   "dialog.newDmTitle": "新しいDM",
   "dialog.privateRoom": "非公開ルーム",
@@ -4038,7 +4265,7 @@ const ja: Catalog = {
   "room.shareLinkCopyFailed": "リンクをコピーできませんでした。URLを選択してコピーしてください。",
   "dialog.roomAddress": "ルームアドレス",
   "dialog.roomAddressInUse": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルーム名『{roomName}』はそのままで、ルームアドレスにプロジェクト名や数字などを追加してください。",
-  "dialog.roomAddressInUseUnnamed": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルームアドレスにプロジェクト名や数字などを追加するか、空欄にしてアドレスなしでルームを作成してください。",
+  "dialog.roomAddressInUseUnnamed": "アドレス {fullAddress} はすでに使われています。アドレスは {server} 上のすべての Space で共通です。ルームアドレスにプロジェクト名や数字などを追加してください。",
   "dialog.roomAddressChecking": "{address} が使われているか確認しています…",
   "dialog.roomAddressAvailable": "{address} は確認時点では使われていません。予約ではありません。アドレスはルーム作成時にサーバーで確定します。",
   "dialog.roomAddressTaken": "{address} は {server} ですでに使われています。ルーム名はそのままで、アドレスだけを変更してください。",
@@ -4046,14 +4273,24 @@ const ja: Catalog = {
   "dialog.roomAddressSuggestion": "候補（未確認）: {address}",
   "dialog.roomAddressUseSuggestion": "このアドレスを使う",
   "dialog.roomAddressScope": "ルーム名は重複してもかまいませんが、このアドレスは {server} 上のすべてのスペースを通じて一意である必要があります。スペース名で始めると重複しにくくなりますが、予約されるわけではありません。",
-  "dialog.publicRoomInSpace": "{spaceName}内の公開ルーム：公開ルームディレクトリに掲載され、スペース外の人を含め誰でも見つけて参加できます。スペースのメンバーかどうかで参加できる人は制限されません。",
   "dialog.roomAddressAbout": "ルームアドレスについて ↗",
   "dialog.roomAddressHelp": "このアドレスでルームを見つけたり共有したりできます。# やサーバー名を付けず、ルーム固有の名前だけ入力してください。使用可能かどうかは作成時に確認されます。",
   "dialog.roomAddressPreview": "完全なアドレス: {address}",
   "dialog.roomAddressEmpty": "公開ルームのアドレスを入力してください。",
-  "dialog.roomAddressNone": "このルームはアドレスなしで作成されます。ルームディレクトリから見つけて参加することはできます。",
   "dialog.roomAddressInvalid": "空白、先頭の #、サーバー名を除いたルーム固有の名前を入力してください。長すぎる場合は短くしてください。",
   "dialog.roomAddressPending": "アドレスのプレビューを待っています。",
+  "dialog.roomAddressChange": "変更",
+  "dialog.roomAddressChangeLabel": "ルームアドレスを変更",
+  "dialog.roomAddressNameVsAddress": "名前はルーム一覧に表示されるものです。アドレスは、メッセージやウェブページなどからルームを開くためのリンクです。",
+  "dialog.createWhoCanJoin": "参加できる人",
+  "dialog.createJoinSpaceMembers": "{spaceName} のメンバー",
+  "dialog.createJoinInvite": "招待した人だけ",
+  "dialog.createJoinPublic": "誰でも",
+  "dialog.createJoinPublicHint": "スペース外の人も含め、誰でも公開ルームディレクトリからこのルームを見つけて参加できます。公開ルームは暗号化されません。",
+  "dialog.createEarlierMessages": "過去のメッセージ",
+  "dialog.createHistoryShared": "新しいメンバーも過去のメッセージを読める",
+  "dialog.createHistoryInvited": "新しいメンバーは招待された時点から読める",
+  "dialog.createHistoryWorldReadable": "参加しなくても読めるようにする",
   "dialog.roomTopic": "トピック",
   "dialog.roomVisibility": "ルーム公開範囲",
   "dialog.sendInvite": "招待を送信",
@@ -4062,8 +4299,6 @@ const ja: Catalog = {
   "dialog.roomNameOptional": "ルーム名（任意）",
   "dialog.roomNameOptionalHelp": "名前を空欄にすると、ルームのアドレスやメンバーに基づく名前が表示されます。名前は後から設定できます。",
   "dialog.spaceName": "スペース名",
-  "dialog.standardRoomInSpace": "{spaceName}内の標準ルーム：スペースメンバーは承認なしで参加できます",
-  "dialog.privateRoomDescription": "明示的に招待された人だけが参加できます",
   "dialog.startDm": "DMを開始",
   "dialog.reportReasonLabel": "理由",
   "dialog.reportReasonPlaceholder": "報告理由を入力してください",
@@ -4707,6 +4942,125 @@ const ja: Catalog = {
   "settings.notificationMessagePreviewsDescription":
     "バナーとOSの通知センターにメッセージ本文が表示されます。この設定はこの端末だけに保存されます。",
   "settings.notificationSound": "サウンド",
+  "settings.notificationDelivery": "この端末から通知する",
+  "settings.notificationDeliveryDescription":
+    "メール送信サービスを設定すると、Koushiがこの端末から直接送信します。メール通知に対応していないホームサーバーでも使えます。送信するのは、未読のままのルームだけです。",
+  "settings.notificationDeliveryTriggers": "送信する対象",
+  "settings.notificationDeliveryDirectMessages": "ダイレクトメッセージ",
+  "settings.notificationDeliveryMentions": "メンション・返信",
+  "settings.notificationDeliveryKeywords": "設定したキーワード",
+  "settings.notificationDeliveryDwell": "送信までの待ち時間",
+  "settings.notificationDeliveryDwellDescription":
+    "この時間が過ぎても未読のままのルームだけを送信します。読んでいる途中の会話は送信されません。",
+  "settings.notificationDeliveryInterval": "送信の最短間隔",
+  "settings.notificationDeliveryIntervalDescription":
+    "続けて通知があるときは、この間隔が過ぎるまでまとめて待ちます。にぎやかなルームでメールボックスがあふれるのを防ぎます。",
+  "settings.notificationDeliveryOnlyUnfocused": "Koushiが非アクティブのときだけ",
+  "settings.notificationDeliveryWatched": "これらのルーム・スペースも送信する",
+  "settings.notificationDeliveryWatchedDescription":
+    "選んだルームは、上の種類がオフでも送信します。スペースを選ぶと、その中のすべてのルーム（後から追加されたルームも）が対象になります。既読にしたルームやミュートしたルームは送信しません。",
+  "settings.notificationDeliveryWatchedAdd": "ルーム・スペースを追加",
+  "settings.notificationDeliveryWatchedEmpty": "選択されたルーム・スペースはありません",
+  "settings.notificationDeliveryWatchedLimit":
+    "ウォッチリストに登録できるルーム・スペースは{count}件までです。追加するには1件削除してください。",
+  "settings.notificationDeliveryWatchedRemove": "{room}を削除",
+  "settings.notificationDeliverySinks": "送信方法",
+  "settings.notificationDeliveryAddSink": "サービスを追加",
+  "settings.notificationDeliverySinkLimit":
+    "送信方法は{count}件までです。追加するには1件削除してください。",
+  "settings.notificationDeliverySinkProvider": "サービス",
+  "settings.notificationDeliverySinkName": "名前",
+  "settings.notificationDeliverySinkFrom": "差出人アドレス",
+  "settings.notificationDeliverySinkTo": "送信先",
+  "settings.notificationDeliverySinkHost": "サーバー",
+  "settings.notificationDeliverySinkPort": "ポート",
+  "settings.notificationDeliverySinkUsername": "ユーザー名",
+  "settings.notificationDeliverySinkSecret": "アプリパスワードまたはAPIキー",
+  "settings.notificationDeliverySinkSecretSet":
+    "保存済みです。変更するには新しい値を入力してください。",
+  "settings.notificationDeliverySinkSecretMissing": "未設定",
+  "settings.notificationDeliverySinkTest": "テスト送信",
+  "settings.notificationDeliverySinkTestSending": "送信中…",
+  "settings.notificationDeliverySinkRemove": "削除",
+  "settings.notificationDeliveryLastResult": "前回の送信",
+  "settings.notificationDeliveryNeverSent": "まだ送信していません",
+  "settings.notificationDeliveryResultDelivered": "送信しました",
+  "settings.notificationDeliveryResultInvalidSecret":
+    "サービスがキーを受け付けませんでした。もう一度入力してください。",
+  "settings.notificationDeliveryResultNotPermitted":
+    "サービスがこの差出人またはアカウントを受け付けませんでした。差出人アドレスとアカウントの状態を確認してください。",
+  "settings.notificationDeliveryResultRejected": "サービスがメッセージを拒否しました。",
+  "settings.notificationDeliveryResultRateLimited":
+    "送信回数が制限されています。しばらくしてから再試行します。",
+  "settings.notificationDeliveryResultTransport": "サービスに接続できませんでした。",
+  "settings.notificationDeliveryPrefix": "メッセージの冒頭を含める",
+  "settings.notificationDeliveryPrefixDescription":
+    "初期設定ではオフです。メッセージの冒頭が平文で追加されるため、メッセージを読める人には読まれます。",
+  "settings.notificationDeliveryPrefixChars": "文字数",
+  "settings.notificationDeliveryPrefixConsentTitle":
+    "メッセージ本文を暗号化せずに送信しますか？",
+  "settings.notificationDeliveryPrefixConsentBody":
+    "メッセージの冒頭は平文でこの端末を離れ、エンドツーエンド暗号化なしで{service}から{destination}へ送られます。そのサービスが本文を保持するかどうか、また保持期間は、そのサービスの規約によります。オンにする前に規約を確認してください。ルーム名と件数はどちらでも送信されます。",
+  "settings.notificationDeliveryPrefixConsentAccept": "オンにして同意する",
+  "settings.notificationDeliveryPrefixConsentLink": "サービスの規約を読む",
+  "settings.notificationSource": "通知の送信元",
+  "settings.notificationDeviceSource":
+    "これらはKoushiがこの端末から、ここで設定したメールボックスまたはリレーを通して送信します。",
+  "settings.notificationHomeserverSource":
+    "これらはホームサーバーが送信し、アカウントのすべての端末に適用されます。",
+  "settings.notificationDeliveryEnable": "この端末から通知を送信する",
+  "settings.notificationDeliveryKeywordsHint":
+    "キーワードに一致したメッセージはメンションとして届くため、「設定したキーワード」と「メンション・返信」のどちらをオンにしても送信されます。",
+  "settings.notificationDeliveryWatchedPick": "ルームまたはスペースを選択",
+  "settings.notificationDeliveryWatchedRooms": "ルーム",
+  "settings.notificationDeliveryWatchedSpaces": "スペース",
+  "settings.notificationDeliveryWatchedUnknown": "現在のルーム一覧にありません",
+  "settings.notificationDeliverySinkEnabled": "このサービスで送信する",
+  "settings.notificationDeliverySinkKindResend": "Resend（メールAPI）",
+  "settings.notificationDeliverySinkKindSmtp": "SMTPリレー",
+  "settings.notificationDeliverySinkEndpoint": "エンドポイント",
+  "settings.notificationDeliverySinkEndpointDefault":
+    "空欄のままにすると、このサービスがメールAPI用に案内しているエンドポイントを使用します。",
+  "settings.notificationDeliverySinkPreset": "メールボックスのプリセット",
+  "settings.notificationDeliverySinkPresetCustom": "その他のサーバー",
+  "settings.notificationDeliverySinkPresetHint":
+    "プリセットは、提供元が公開しているリレー情報を入力します。最新かどうかは提供元の資料で確認してください。Koushiが代わりに更新することはありません。",
+  "settings.notificationDeliverySinkTls": "接続の保護",
+  "settings.notificationDeliverySinkTlsImplicit": "最初からTLSで接続（通常はポート465）",
+  "settings.notificationDeliverySinkTlsStartTls": "接続後にSTARTTLS（通常はポート587）",
+  "settings.notificationDeliverySinkUsernameFullAddress": "メールアドレス全体",
+  "settings.notificationDeliverySinkSaveSecret": "保存",
+  "settings.notificationDeliverySinkClearSecret": "消去",
+  "settings.notificationDeliverySinkSecretRetired":
+    "サーバーまたはアカウントが変更されたため、保存されていたパスワードは削除されました。もう一度入力してください。",
+  "settings.notificationDeliverySinkEmpty":
+    "送信方法がまだ設定されていません。追加してオンにするまで、この端末から何も送信されません。",
+  "settings.notificationDeliverySinkFailed": "このサービスは送信できていません",
+  "settings.notificationDeliveryResultRateLimitedAfter":
+    "送信回数が制限されています。次は約{seconds}秒後に試します。",
+  "settings.notificationDeliveryPrefixConsentAcknowledge": "上記の規約を確認しました",
+  "settings.notificationDeliveryPrefixConsentRequired":
+    "規約を確認して同意するとオンにできます。",
+  "settings.notificationDeliverySecretHint.qqMail":
+    "QQ Mail では、アカウントのパスワードではなく、メール設定で発行する認証コードを入力します。",
+  "settings.notificationDeliverySecretHint.gmail":
+    "Gmail では Google のアプリパスワードを使用します。2段階認証を有効にしている場合のみ発行できます。",
+  "settings.notificationDeliverySecretHint.icloud":
+    "iCloud Mail では、Apple Account でこのアプリ用に発行したアプリ用パスワードを使用します。",
+  "settings.notificationKeywordHeading": "ホームサーバー上のキーワード",
+  "settings.notificationKeywordEmpty": "キーワードはまだありません。",
+  "settings.notificationKeywordAdd": "キーワードを追加",
+  "settings.notificationKeywordRemove": "{keyword}を削除",
+  "settings.notificationKeywordDisabled": "アカウントではオフ",
+  "settings.notificationKeywordHint":
+    "キーワードはホームサーバーに保存されるため、このアプリでも他の端末でも強調表示されます。上のスイッチは、この端末がメールで通知する対象を決めます。キーワードは大文字小文字を区別せず、単語単位で一致します。",
+  "settings.notificationKeywordErrorEmpty": "キーワードを入力してください。",
+  "settings.notificationKeywordErrorTooLong": "キーワードが長すぎます。",
+  "settings.notificationKeywordErrorDuplicate": "そのキーワードはすでに一覧にあります。",
+  "settings.notificationKeywordErrorLimit":
+    "キーワードの一覧がいっぱいです。追加するには1件削除してください。",
+  "settings.notificationKeywordErrorUnknownRule":
+    "そのキーワードはサーバー上にありません。このページを開き直してからお試しください。",
   "settings.sendReadReceipts": "既読を送信",
   "settings.sendTypingNotifications": "入力通知を送信",
   "settings.notifications": "通知",

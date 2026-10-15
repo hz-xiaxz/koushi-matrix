@@ -1998,3 +1998,31 @@ fn tauri_diagnostics_record_without_stderr_environment_switch() {
         record.event.source == "desktop.timeline" && record.event.stage == "done"
     }));
 }
+
+/// #1427: both keyword commands route to the account-notifications core command
+/// with the request the renderer asked for.
+#[test]
+fn account_notification_keyword_commands_route_their_request() {
+    for request in [
+        koushi_protocol::command::AccountNotificationsRequest::AddKeyword {
+            pattern: "cake".to_owned(),
+        },
+        koushi_protocol::command::AccountNotificationsRequest::RemoveKeyword {
+            rule_id: "org.matrix.desktop.notify.keyword.0123456789abcdef".to_owned(),
+        },
+    ] {
+        match super::account::build_account_notifications_command(
+            fake_request_id(4),
+            request.clone(),
+        ) {
+            CoreCommand::Account(AccountCommand::AccountNotifications {
+                request_id,
+                request: routed,
+            }) => {
+                assert_eq!(request_id, fake_request_id(4));
+                assert_eq!(routed, request);
+            }
+            other => panic!("unexpected command: {other:?}"),
+        }
+    }
+}
