@@ -1876,10 +1876,16 @@ impl TimelineManagerActor {
             return;
         }
         // #1146: a repeated subscribe while the focused SDK build is in flight
-        // adopts the newest request instead of restarting the build.
+        // reuses that build instead of restarting it. #1465: only the admitted
+        // navigation owner of the key takes over the projection correlation; a
+        // renderer recovery/replay subscribe is an observer.
+        let navigation_owner = self
+            .navigation_projection_rx
+            .as_ref()
+            .is_some_and(|demand| demand.borrow().owns_focused(&key, request_id));
         if self
             .focused_builds
-            .coalesce(&key, request_id, emit_failure_terminal)
+            .coalesce(&key, request_id, emit_failure_terminal, navigation_owner)
         {
             return;
         }
@@ -2232,8 +2238,28 @@ impl TimelineManagerActor {
         };
         record_focused_build_settled(&pending, result.as_ref().map(|_| ()).map_err(|f| *f));
         match result {
-            Ok(handle) => self.install_subscribed_actor(&key, handle).await,
+            Ok(handle) => {
+                self.install_subscribed_actor(&key, handle).await;
+                #[cfg(test)]
+                self.publish_test_actor_focused_projection(
+                    &key,
+                    pending.activation.generation,
+                    pending.request_id,
+                );
+            }
             Err(failure) => {
+                // #1465: each observer that coalesced into the failed build
+                // still receives its own failure terminal.
+                for (observer, emit_failure_terminal) in &pending.observers {
+                    if *emit_failure_terminal {
+                        self.emit_failure(
+                            *observer,
+                            CoreFailure::TimelineOperationFailed {
+                                kind: failure.timeline_failure_kind(),
+                            },
+                        );
+                    }
+                }
                 self.roll_back_failed_subscribe(
                     pending.request_id,
                     &key,

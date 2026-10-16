@@ -74,6 +74,10 @@ mod thread_projection;
 
 pub(crate) use diagnostics::record_thread_summary_reconciliation;
 
+#[cfg(test)]
+pub(crate) use focused_build::gated_manager::{
+    GatedFocusedBuildManager, spawn_gated_focused_build_manager,
+};
 pub(crate) use item_projection::mention_marked_message_preview;
 pub use item_projection::sdk_item_to_timeline_item;
 /// #1110: the single authoritative row-visibility policy, shared by the

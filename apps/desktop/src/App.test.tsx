@@ -1107,8 +1107,9 @@ describe("ContextualRightPanel", () => {
           : "$focused:example.invalid",
       is_subscribed: true
     };
+    const focusedEventId = snapshot.state.ui.focused_context.event_id;
 
-    const markup = renderToStaticMarkup(
+    const render = () => renderToStaticMarkup(
       <ContextualRightPanel
         activeRoom={snapshot.state.domain.rooms[0] ?? null}
         activeSpace={snapshot.state.domain.spaces[0] ?? null}
@@ -1165,8 +1166,33 @@ describe("ContextualRightPanel", () => {
       />
     );
 
+    // An independent focused context stays embedded in search mode.
+    snapshot.state.ui.navigation.event_navigation = { kind: "idle" };
+    snapshot.state.ui.navigation.main_timeline_anchor = null;
+    const markup = render();
     expect(markup).toContain(t("panel.focusedContext"));
     expect(markup).toContain('data-testid="timeline-view"');
+
+    // #1465: while a main-pane Search navigation owns the focused build, search
+    // mode must not mount a second focused TimelineView for the same key.
+    snapshot.state.ui.navigation.event_navigation = {
+      kind: "opening",
+      generation: 1,
+      source: "search"
+    };
+    const opening = render();
+    expect(opening).not.toContain('data-testid="timeline-view"');
+    expect(opening).toContain(t("panel.search"));
+
+    snapshot.state.ui.navigation.event_navigation = {
+      kind: "anchored",
+      generation: 1,
+      source: "search"
+    };
+    snapshot.state.ui.navigation.main_timeline_anchor = { event_id: focusedEventId };
+    const anchored = render();
+    expect(anchored).not.toContain('data-testid="timeline-view"');
+    expect(anchored).toContain(t("panel.search"));
   });
 
   test("renders focusedContext mode as a focused TimelineView without search results", async () => {

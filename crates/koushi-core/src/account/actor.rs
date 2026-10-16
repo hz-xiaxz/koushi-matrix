@@ -967,11 +967,14 @@ impl AccountActorHandle {
 
     /// Replace the desired main-pane focused timeline without waiting for
     /// any mailbox; TimelineManager retires every other focused actor (#1060).
+    /// `owner` is the navigation request owning its projection (#1465).
     pub(crate) fn admit_focused_foreground(
         &self,
         focused: Option<koushi_protocol::ids::TimelineKey>,
+        owner: Option<koushi_protocol::ids::RequestId>,
     ) {
-        self.navigation_projection.admit_focused(focused);
+        self.navigation_projection
+            .admit_focused_with_owner(focused, owner);
     }
 
     /// Hand committed navigation to RoomActor-owned enrichment without
