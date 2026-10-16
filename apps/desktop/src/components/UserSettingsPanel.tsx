@@ -14,7 +14,7 @@ import {
 
 import { settingsCategories, type SettingsCategoryId } from "../domain/settingsNavigation";
 import { HelpContent } from "./HelpDialog";
-import { t } from "../i18n/messages";
+import { t, type MessageId } from "../i18n/messages";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import { KeyboardSettingsContent } from "./KeyboardSettingsPanel";
 import { SearchHistorySection } from "./user-settings/SearchHistorySection";
@@ -68,6 +68,9 @@ import type {
   TimelineSettings,
   WindowSettings
 } from "../domain/types";
+
+/** #1468: the Notifications page's source tabs, one per owner of a notification path. */
+type NotificationTabId = "os" | "device" | "homeserver";
 
 export function UserSettingsPanel({
   initialCategory = "account",
@@ -248,6 +251,32 @@ export function UserSettingsPanel({
     ? initialCategory
     : visibleCategories[0]?.id ?? initialCategory;
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(initialVisibleCategory);
+  // #1468: the Notifications page's source tabs. The app-scoped dialog has no account, so it
+  // has no homeserver tab; a tab with nothing to show is not offered.
+  const homeserverNotificationsAvailable = settingsScope !== "app" && Boolean(currentSession);
+  const notificationTabs: { id: NotificationTabId; label: MessageId }[] = [
+    { id: "os", label: "settings.notificationsOs" },
+    { id: "device", label: "settings.notificationDelivery" },
+    ...(homeserverNotificationsAvailable
+      ? [{ id: "homeserver" as const, label: "settings.notificationsTabHomeserver" as const }]
+      : [])
+  ];
+  const [notificationTab, setNotificationTab] = useState<NotificationTabId>("os");
+  const activeNotificationTab = notificationTabs.some((tab) => tab.id === notificationTab)
+    ? notificationTab
+    : notificationTabs[0].id;
+  function notificationPanelProps(id: NotificationTabId) {
+    // With a single source there is no tablist, so the panel is a plain region.
+    return notificationTabs.length > 1
+      ? {
+          role: "tabpanel",
+          "aria-labelledby": `notifications-tab-${id}`,
+          hidden: activeNotificationTab !== id,
+          tabIndex: 0,
+          className: "settings-notifications-panel"
+        }
+      : { className: "settings-notifications-panel" };
+  }
   const contentRef = useRef<HTMLDivElement | null>(null);
   useEffect(() => {
     if (!visibleCategories.some((category) => category.id === activeCategory)) {
@@ -570,114 +599,160 @@ export function UserSettingsPanel({
             </div>
           </section>
           {/*
-            #1460: three owners, three sections, in the order a notification leaves: the OS
-            alert this device shows, what Koushi itself sends from this device, and what the
-            homeserver sends for every device on the account.
+            #1460, #1468: three owners, one tab each, in the order a notification leaves: the
+            OS alert this device shows, what Koushi itself sends from this device, and what the
+            homeserver sends for every device on the account. The app-scoped dialog has no
+            account, so it has no homeserver tab. Every panel stays mounted; only the selected
+            one is shown, and which one is selected is this panel's own ephemeral state.
           */}
-          <section
-            id="settings-notifications-os"
-            className="settings-section"
-            aria-label={t("settings.notificationsOs")}
-            data-testid="notifications-os"
+          {notificationTabs.length > 1 ? (
+            <div className="settings-subtab-list" role="tablist" aria-label={t("settings.notificationsTabList")}>
+              {notificationTabs.map((tab, index) => (
+                <button
+                  key={tab.id}
+                  id={`notifications-tab-${tab.id}`}
+                  className="settings-subtab"
+                  role="tab"
+                  type="button"
+                  aria-selected={activeNotificationTab === tab.id}
+                  aria-controls={`notifications-panel-${tab.id}`}
+                  tabIndex={activeNotificationTab === tab.id ? 0 : -1}
+                  data-testid={`notifications-tab-${tab.id}`}
+                  onClick={() => setNotificationTab(tab.id)}
+                  onKeyDown={(event) => {
+                    const count = notificationTabs.length;
+                    const next = event.key === "ArrowRight" ? (index + 1) % count
+                      : event.key === "ArrowLeft" ? (index + count - 1) % count
+                      : event.key === "Home" ? 0 : event.key === "End" ? count - 1 : null;
+                    if (next !== null) {
+                      event.preventDefault();
+                      setNotificationTab(notificationTabs[next].id);
+                      document.getElementById(`notifications-tab-${notificationTabs[next].id}`)?.focus();
+                    }
+                  }}
+                >{t(tab.label)}</button>
+              ))}
+            </div>
+          ) : null}
+          <div
+            id="notifications-panel-os"
+            {...notificationPanelProps("os")}
           >
-            <div className="settings-section-heading">
-              <div>
-                <h3>{t("settings.notificationsOs")}</h3>
-                <p>{t("settings.notificationsOsDescription")}</p>
-              </div>
-            </div>
-            <div className="settings-toggle-list">
-              {settingsScope !== "app" ? (
-                <>
-                  <NotificationSettingToggle
-                    label={t("settings.notificationDesktop")}
-                    description={t("settings.notificationDesktopDescription")}
-                    settingKey="desktop_notifications"
-                    current={selectedNotifications}
-                    onSelect={onUpdateSettings}
-                    icon={<Bell size={15} aria-hidden="true" />}
-                  />
-                  <NotificationSettingToggle
-                    label={t("settings.notificationMessagePreviews")}
-                    description={t("settings.notificationMessagePreviewsDescription")}
-                    settingKey="message_previews"
-                    current={selectedNotifications}
-                    onSelect={onUpdateSettings}
-                    icon={<Bell size={15} aria-hidden="true" />}
-                  />
-                </>
-              ) : null}
-              {settingsScope !== "account" ? (
-                <>
-                  <NotificationSettingToggle
-                    label={t("settings.notificationSound")}
-                    settingKey="sound"
-                    current={selectedNotifications}
-                    onSelect={onUpdateSettings}
-                    icon={<Bell size={15} aria-hidden="true" />}
-                  />
-                  <NotificationSettingToggle
-                    label={t("settings.notificationBadges")}
-                    settingKey="badges"
-                    current={selectedNotifications}
-                    onSelect={onUpdateSettings}
-                    icon={<Bell size={15} aria-hidden="true" />}
-                  />
-                </>
-              ) : null}
-            </div>
-          </section>
-          {/*
-            The delivery section is app-scoped and names its own scope on every patch, so it
-            reads the same from either settings scope.
-          */}
-          <NotificationDeliverySection
-            delivery={settings.values.delivery}
-            state={notificationDelivery}
-            rooms={rooms}
-            spaces={spaces}
-            actions={notificationDeliveryActions}
-            // #1427: the keyword rules are account state the page already loads, so the
-            // device section renders that projection. No account snapshot (the app-scoped
-            // dialog) means no editor.
-            keywordRules={accountNotifications.snapshot?.keywords}
-            keywordOperation={accountNotifications.operation}
-            keywordActions={{
-              add: accountNotificationActions.addKeyword,
-              remove: accountNotificationActions.removeKeyword
-            }}
-          />
-          {settingsScope !== "app" && currentSession ? (
             <section
-              id="settings-notifications-homeserver"
+              id="settings-notifications-os"
               className="settings-section"
-              aria-label={t("settings.notificationsHomeserver")}
-              data-testid="notifications-homeserver"
+              aria-label={t("settings.notificationsOs")}
+              data-testid="notifications-os"
             >
               <div className="settings-section-heading">
                 <div>
-                  <h3>{t("settings.notificationsHomeserver")}</h3>
-                  <p data-testid="notification-homeserver-source">
-                    {t("settings.notificationHomeserverSource")}
-                  </p>
+                  <h3>{t("settings.notificationsOs")}</h3>
+                  <p>{t("settings.notificationsOsDescription")}</p>
                 </div>
               </div>
-              <AccountNotificationsLoadStatus
-                state={accountNotifications}
-                onRetry={accountNotificationActions.load}
-              />
-              <EmailNotificationsSection
-                state={accountNotifications}
-                actions={accountNotificationActions}
-                syncKey={sessionKey(currentSession)}
-                accountManagementAvailable={Boolean(accountManagementUrl)}
-                onManageAccount={onManageAccount}
-              />
-              <NotificationCategoriesSection
-                state={accountNotifications}
-                actions={accountNotificationActions}
-              />
+              <div className="settings-toggle-list">
+                {settingsScope !== "app" ? (
+                  <>
+                    <NotificationSettingToggle
+                      label={t("settings.notificationDesktop")}
+                      description={t("settings.notificationDesktopDescription")}
+                      settingKey="desktop_notifications"
+                      current={selectedNotifications}
+                      onSelect={onUpdateSettings}
+                      icon={<Bell size={15} aria-hidden="true" />}
+                    />
+                    <NotificationSettingToggle
+                      label={t("settings.notificationMessagePreviews")}
+                      description={t("settings.notificationMessagePreviewsDescription")}
+                      settingKey="message_previews"
+                      current={selectedNotifications}
+                      onSelect={onUpdateSettings}
+                      icon={<Bell size={15} aria-hidden="true" />}
+                    />
+                  </>
+                ) : null}
+                {settingsScope !== "account" ? (
+                  <>
+                    <NotificationSettingToggle
+                      label={t("settings.notificationSound")}
+                      settingKey="sound"
+                      current={selectedNotifications}
+                      onSelect={onUpdateSettings}
+                      icon={<Bell size={15} aria-hidden="true" />}
+                    />
+                    <NotificationSettingToggle
+                      label={t("settings.notificationBadges")}
+                      settingKey="badges"
+                      current={selectedNotifications}
+                      onSelect={onUpdateSettings}
+                      icon={<Bell size={15} aria-hidden="true" />}
+                    />
+                  </>
+                ) : null}
+              </div>
             </section>
+          </div>
+          <div
+            id="notifications-panel-device"
+            {...notificationPanelProps("device")}
+          >
+            {/*
+              The delivery section is app-scoped and names its own scope on every patch, so it
+              reads the same from either settings scope.
+            */}
+            <NotificationDeliverySection
+              delivery={settings.values.delivery}
+              state={notificationDelivery}
+              rooms={rooms}
+              spaces={spaces}
+              actions={notificationDeliveryActions}
+              // #1427: the keyword rules are account state the page already loads, so the
+              // device section renders that projection. No account snapshot (the app-scoped
+              // dialog) means no editor.
+              keywordRules={accountNotifications.snapshot?.keywords}
+              keywordOperation={accountNotifications.operation}
+              keywordActions={{
+                add: accountNotificationActions.addKeyword,
+                remove: accountNotificationActions.removeKeyword
+              }}
+            />
+          </div>
+          {homeserverNotificationsAvailable && currentSession ? (
+            <div
+              id="notifications-panel-homeserver"
+              {...notificationPanelProps("homeserver")}
+            >
+              <section
+                id="settings-notifications-homeserver"
+                className="settings-section"
+                aria-label={t("settings.notificationsHomeserver")}
+                data-testid="notifications-homeserver"
+              >
+                <div className="settings-section-heading">
+                  <div>
+                    <h3>{t("settings.notificationsHomeserver")}</h3>
+                    <p data-testid="notification-homeserver-source">
+                      {t("settings.notificationHomeserverSource")}
+                    </p>
+                  </div>
+                </div>
+                <AccountNotificationsLoadStatus
+                  state={accountNotifications}
+                  onRetry={accountNotificationActions.load}
+                />
+                <EmailNotificationsSection
+                  state={accountNotifications}
+                  actions={accountNotificationActions}
+                  syncKey={sessionKey(currentSession)}
+                  accountManagementAvailable={Boolean(accountManagementUrl)}
+                  onManageAccount={onManageAccount}
+                />
+                <NotificationCategoriesSection
+                  state={accountNotifications}
+                  actions={accountNotificationActions}
+                />
+              </section>
+            </div>
           ) : null}
         </div>
         <div id="settings-page-preferences" role="tabpanel" aria-labelledby="settings-tab-preferences" className="settings-category" hidden={activeCategory !== "preferences"} tabIndex={0}>

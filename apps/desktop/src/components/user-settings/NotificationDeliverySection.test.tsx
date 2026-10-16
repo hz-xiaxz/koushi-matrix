@@ -94,11 +94,15 @@ function sinkState(overrides: Partial<NotificationDeliverySinkState> = {}): Noti
 function actions(): NotificationDeliveryActions {
   return {
     update: vi.fn(),
-    setSecret: vi.fn(async () => undefined),
+    save: vi.fn(async () => undefined),
     clearSecret: vi.fn(async () => undefined),
     test: vi.fn(async () => undefined)
   };
 }
+
+// Synthetic values only; none of them is a real credential.
+const SYNTHETIC_API_KEY = "synthetic-api-key-0000";
+const SYNTHETIC_SENDKEY = "SCTsynthetic123";
 
 const KEYWORD_RULES: NotificationKeywordRule[] = [
   {
@@ -174,10 +178,43 @@ function renderKeywordSection(props: SectionProps = {}) {
   return { handlers, keywordHandlers };
 }
 
+type SaveCall = { sink: NotificationSinkSettings; secret: string | null; acceptContentConsent: boolean };
+
+function saveCalls(handlers: NotificationDeliveryActions): SaveCall[] {
+  return vi
+    .mocked(handlers.save)
+    .mock.calls.map(([sink, secret, acceptContentConsent]) => ({ sink, secret, acceptContentConsent }));
+}
+
+function lastSave(handlers: NotificationDeliveryActions): SaveCall {
+  const calls = saveCalls(handlers);
+  if (calls.length === 0) {
+    throw new Error("Save was never dispatched");
+  }
+  return calls[calls.length - 1];
+}
+
 function lastUpdate(handlers: NotificationDeliveryActions): NotificationDeliverySettings {
-  const update = handlers.update as unknown as { mock: { calls: NotificationDeliverySettings[][] } };
-  const calls = update.mock.calls;
+  const calls = vi.mocked(handlers.update).mock.calls;
   return calls[calls.length - 1][0];
+}
+
+async function clickSave() {
+  await act(async () => {
+    fireEvent.click(screen.getByTestId("notification-delivery-save"));
+  });
+}
+
+function saveButton(): HTMLButtonElement {
+  return screen.getByTestId("notification-delivery-save") as HTMLButtonElement;
+}
+
+function saveStatus(): string {
+  return screen.getByTestId("notification-delivery-save-status").textContent ?? "";
+}
+
+function typeSecret(value: string) {
+  fireEvent.change(screen.getByTestId("notification-delivery-sink-secret"), { target: { value } });
 }
 
 afterEach(() => {
@@ -196,12 +233,25 @@ function openSink(sinkId: string = SINK_ID) {
   fireEvent.click(row);
 }
 
-function lastSink(handlers: NotificationDeliveryActions, sinkId: string = SINK_ID): NotificationSinkSettings {
-  const sink = lastUpdate(handlers).sinks.find((candidate) => candidate.id === sinkId);
-  if (!sink) {
-    throw new Error(`no ${sinkId} in the last patch`);
+function pickKind(kind: "resend" | "smtp" | "serverChan") {
+  fireEvent.click(screen.getByTestId("notification-delivery-add"));
+  const option = screen
+    .getAllByTestId("notification-delivery-pick-kind")
+    .find((candidate) => candidate.getAttribute("data-kind") === kind);
+  if (!option) {
+    throw new Error(`no ${kind} option`);
   }
-  return sink;
+  fireEvent.click(option);
+}
+
+function mode(name: string): HTMLInputElement {
+  const radio = screen
+    .getAllByTestId("notification-delivery-content-mode")
+    .find((candidate) => candidate.getAttribute("data-mode") === name);
+  if (!radio) {
+    throw new Error(`no ${name} mode`);
+  }
+  return radio as HTMLInputElement;
 }
 
 describe("NotificationDeliverySection list", () => {
@@ -224,6 +274,31 @@ describe("NotificationDeliverySection list", () => {
     expect(screen.getByTestId("notification-delivery-running-note").textContent).toContain("running");
   });
 
+  test("summarises targets, content and timing on each row", () => {
+    renderSection({
+      delivery: delivery({
+        sinks: [
+          {
+            ...resendSink,
+            targets: {
+              direct_messages: true,
+              mentions: false,
+              keywords: true,
+              watched: [{ kind: "room", room_id: "!alpha:example.invalid" }]
+            },
+            timing: { ...resendSink.timing, dwell_secs: 600 }
+          }
+        ]
+      })
+    });
+    const chips = within(screen.getByTestId("notification-delivery-sink-chips"));
+    const text = (key: string) =>
+      chips.getAllByText(/./).find((chip) => chip.getAttribute("data-chip") === key)?.textContent;
+    expect(text("targets")).toBe("DMs · Keywords · 1 watched");
+    expect(text("content")).toBe("Names only");
+    expect(text("timing")).toBe("After 10 min");
+  });
+
   test("marks a destination whose last send failed", () => {
     renderSection({
       runtime: state({ sinks: [sinkState({ last_outcome: { kind: "invalidSecret", at_ms: 1 } })] })
@@ -238,7 +313,7 @@ describe("NotificationDeliverySection list", () => {
     openSink();
     const detail = screen.getByTestId("notification-delivery-detail");
     expect(detail.getAttribute("data-draft")).toBe("false");
-    for (const part of ["credentials", "targets", "content", "timing", "outcome"]) {
+    for (const part of ["credentials", "targets", "content", "timing", "outcome", "footer"]) {
       expect(within(detail).getByTestId(`notification-delivery-${part}`)).toBeTruthy();
     }
     fireEvent.click(screen.getByTestId("notification-delivery-back"));
@@ -255,25 +330,94 @@ describe("NotificationDeliverySection list", () => {
 });
 
 describe("NotificationDeliverySection add flow", () => {
-  test("adds an SMTP destination through the same detail view, credential after save", () => {
+  test("picks a kind, fills the detail, and saves the destination and its key in one command", async () => {
     const handlers = renderSection({ delivery: delivery({ sinks: [] }) });
     expect(screen.getByTestId("notification-delivery-sinks-empty")).toBeTruthy();
 
     fireEvent.click(screen.getByTestId("notification-delivery-add"));
     const kinds = screen.getAllByTestId("notification-delivery-pick-kind");
     expect(kinds.map((kind) => kind.getAttribute("data-kind"))).toEqual(["resend", "smtp", "serverChan"]);
-    fireEvent.click(kinds[1]);
+    fireEvent.click(kinds[0]);
 
     const detail = screen.getByTestId("notification-delivery-detail");
     expect(detail.getAttribute("data-draft")).toBe("true");
-    // The credential store is keyed by a saved sink, so the field waits for the save.
-    expect(screen.queryByTestId("notification-delivery-sink-secret")).toBeNull();
-    expect(screen.getByTestId("notification-delivery-secret-after-save")).toBeTruthy();
-    // Content consent binds to a saved destination too.
-    expect(screen.queryByTestId("notification-delivery-content")).toBeNull();
-    const save = screen.getByTestId("notification-delivery-draft-save") as HTMLButtonElement;
-    expect(save.disabled).toBe(true);
+    // A new destination takes its key in the same screen; content waits for nothing.
+    expect(screen.getByTestId("notification-delivery-sink-secret")).toBeTruthy();
+    expect(screen.getByTestId("notification-delivery-content")).toBeTruthy();
+    // Resend's sender is optional and starts as the shared one, under Advanced.
+    const advanced = screen.getByTestId("notification-delivery-advanced");
+    const from = within(advanced).getByTestId("notification-delivery-sink-from") as HTMLInputElement;
+    expect(from.value).toBe("onboarding@resend.dev");
+    const name = within(advanced).getByTestId("notification-delivery-sink-name") as HTMLInputElement;
+    expect(name.value).toBe("Koushi");
+    expect(name.placeholder).toBe("Koushi");
+    expect(name.getAttribute("aria-required")).toBeNull();
+    expect(within(advanced).getByTestId("notification-delivery-resend-hint").textContent).toContain(
+      "resend.com/domains"
+    );
+
+    fireEvent.change(screen.getByTestId("notification-delivery-sink-to"), {
+      target: { value: " recipient@example.invalid " }
+    });
+    expect(handlers.save).not.toHaveBeenCalled();
     expect(handlers.update).not.toHaveBeenCalled();
+
+    typeSecret(SYNTHETIC_API_KEY);
+    await clickSave();
+
+    expect(handlers.save).toHaveBeenCalledTimes(1);
+    const { sink, secret, acceptContentConsent } = lastSave(handlers);
+    expect(secret).toBe(SYNTHETIC_API_KEY);
+    expect(acceptContentConsent).toBe(false);
+    expect(sink.id).toMatch(/^sink-[a-z0-9-]+$/);
+    expect(sink).toMatchObject({
+      destination: "recipient@example.invalid",
+      from_address: "onboarding@resend.dev",
+      sender_name: "Koushi",
+      secret_binding: null,
+      targets: { direct_messages: true, mentions: true, keywords: true, watched: [] },
+      content: { kind: "namesOnly" },
+      content_consent: null,
+      timing: { dwell_secs: 300, min_interval_secs: 900, only_when_unfocused: true },
+      config: { kind: "resend", endpoint: "https://api.resend.com/emails" }
+    });
+    expect(handlers.update).not.toHaveBeenCalled();
+    // The key left once; the field is empty and the page never shows it.
+    expect((screen.getByTestId("notification-delivery-sink-secret") as HTMLInputElement).value).toBe("");
+    expect(document.body.innerHTML).not.toContain(SYNTHETIC_API_KEY);
+    expect(document.body.textContent).not.toContain(SYNTHETIC_API_KEY);
+    // The view stays on the saved destination.
+    expect(screen.getByTestId("notification-delivery-detail").getAttribute("data-draft")).toBe("false");
+  });
+
+  test("a new destination needs its key before Save dispatches", async () => {
+    const handlers = renderSection({ delivery: delivery({ sinks: [] }) });
+    pickKind("resend");
+    fireEvent.change(screen.getByTestId("notification-delivery-sink-to"), {
+      target: { value: "recipient@example.invalid" }
+    });
+    await clickSave();
+    expect(handlers.save).not.toHaveBeenCalled();
+    expect(saveStatus()).toContain("Enter the Resend API key");
+  });
+
+  test("names the missing fields instead of saving an incomplete destination", async () => {
+    const handlers = renderSection({ delivery: delivery({ sinks: [] }) });
+    pickKind("smtp");
+    typeSecret(SYNTHETIC_API_KEY);
+    await clickSave();
+    expect(handlers.save).not.toHaveBeenCalled();
+    expect(saveStatus()).toContain("required fields");
+  });
+
+  test("an SMTP destination keeps From required and the sender name optional", async () => {
+    const handlers = renderSection({ delivery: delivery({ sinks: [] }) });
+    pickKind("smtp");
+    expect(screen.queryByTestId("notification-delivery-advanced")).toBeNull();
+    const name = screen.getByTestId("notification-delivery-sink-name") as HTMLInputElement;
+    expect(name.value).toBe("Koushi");
+    expect(name.getAttribute("aria-required")).toBeNull();
+    expect(screen.getByTestId("notification-delivery-sink-from").getAttribute("aria-required")).toBe("true");
 
     fireEvent.change(screen.getByTestId("notification-delivery-sink-from"), {
       target: { value: " sender@example.invalid " }
@@ -288,42 +432,30 @@ describe("NotificationDeliverySection add flow", () => {
     expect(screen.getByTestId("notification-delivery-add-secret-hint").textContent).toContain(
       "app password"
     );
-    // Drafting dispatches nothing until the explicit save.
-    expect(handlers.update).not.toHaveBeenCalled();
-    expect(save.disabled).toBe(false);
-    fireEvent.click(save);
-
-    const patch = lastUpdate(handlers);
-    expect(patch.sinks).toHaveLength(1);
-    expect(patch.sinks[0].id).toMatch(/^sink-[a-z0-9-]+$/);
-    expect(patch.sinks[0]).toMatchObject({
-      destination: "recipient@example.invalid",
+    typeSecret(SYNTHETIC_API_KEY);
+    await clickSave();
+    expect(lastSave(handlers).sink).toMatchObject({
       from_address: "sender@example.invalid",
-      secret_binding: null,
-      targets: { direct_messages: true, mentions: true, keywords: true, watched: [] },
-      content: { kind: "namesOnly" },
-      content_consent: null,
-      timing: { dwell_secs: 300, min_interval_secs: 900, only_when_unfocused: true },
       config: { kind: "smtp", preset: "gmail", host: "smtp.example.invalid", port: 587, tls: "startTls" }
     });
-    // The view stays on the saved destination, now with its credential field.
-    expect(screen.getByTestId("notification-delivery-detail").getAttribute("data-draft")).toBe("false");
-    expect(screen.getByTestId("notification-delivery-sink-secret")).toBeTruthy();
   });
 
-  test("cancelling a draft adds nothing", () => {
+  test("cancelling the picker or discarding a new destination adds nothing", () => {
     const handlers = renderSection({ delivery: delivery({ sinks: [] }) });
     fireEvent.click(screen.getByTestId("notification-delivery-add"));
-    fireEvent.click(screen.getAllByTestId("notification-delivery-pick-kind")[0]);
-    fireEvent.click(screen.getByTestId("notification-delivery-draft-cancel"));
+    fireEvent.click(screen.getByTestId("notification-delivery-pick-cancel"));
+    expect(screen.getByTestId("notification-delivery-sinks-empty")).toBeTruthy();
+
+    pickKind("resend");
+    fireEvent.click(screen.getByTestId("notification-delivery-discard"));
+    expect(handlers.save).not.toHaveBeenCalled();
     expect(handlers.update).not.toHaveBeenCalled();
     expect(screen.getByTestId("notification-delivery-sinks-empty")).toBeTruthy();
   });
 
-  test("a ServerChan destination can be saved at once and explains the setup", () => {
+  test("a ServerChan destination explains the setup and saves with its SendKey", async () => {
     const handlers = renderSection({ delivery: delivery({ sinks: [] }) });
-    fireEvent.click(screen.getByTestId("notification-delivery-add"));
-    fireEvent.click(screen.getAllByTestId("notification-delivery-pick-kind")[2]);
+    pickKind("serverChan");
 
     const steps = screen.getByTestId("notification-delivery-serverchan-steps");
     expect(steps.querySelectorAll("li")).toHaveLength(3);
@@ -334,37 +466,150 @@ describe("NotificationDeliverySection add flow", () => {
     );
     expect(screen.getByTestId("notification-delivery-serverchan-limits")).toBeTruthy();
     expect(screen.queryByTestId("notification-delivery-sink-from")).toBeNull();
+    expect(screen.queryByTestId("notification-delivery-sink-name")).toBeNull();
 
-    fireEvent.click(screen.getByTestId("notification-delivery-draft-save"));
-    expect(lastUpdate(handlers).sinks[0].config).toEqual({
+    typeSecret(` ${SYNTHETIC_SENDKEY} `);
+    await clickSave();
+    expect(lastSave(handlers).secret).toBe(SYNTHETIC_SENDKEY);
+    expect(lastSave(handlers).sink.config).toEqual({
       kind: "serverChan",
       endpoint: "https://sctapi.ftqq.com"
     });
   });
+
+  test("shows a refused save and keeps the draft", async () => {
+    const handlers = actions();
+    vi.mocked(handlers.save).mockRejectedValueOnce(new Error("refused"));
+    renderSection({ delivery: delivery({ sinks: [] }), handlers });
+    pickKind("resend");
+    fireEvent.change(screen.getByTestId("notification-delivery-sink-to"), {
+      target: { value: "recipient@example.invalid" }
+    });
+    typeSecret(SYNTHETIC_API_KEY);
+    await clickSave();
+    expect(handlers.save).toHaveBeenCalledTimes(1);
+    expect(saveStatus()).toContain("Could not save");
+    expect(screen.getByTestId("notification-delivery-detail").getAttribute("data-draft")).toBe("true");
+    expect((screen.getByTestId("notification-delivery-sink-to") as HTMLInputElement).value).toBe(
+      "recipient@example.invalid"
+    );
+    // The key was taken out of the field before the command left, so a refusal leaves none.
+    expect((screen.getByTestId("notification-delivery-sink-secret") as HTMLInputElement).value).toBe("");
+    expect(document.body.innerHTML).not.toContain(SYNTHETIC_API_KEY);
+  });
+
+  test("says it is saving while the command is in flight", async () => {
+    const handlers = actions();
+    let settle: () => void = () => undefined;
+    vi.mocked(handlers.save).mockImplementationOnce(
+      () =>
+        new Promise<void>((resolve) => {
+          settle = resolve;
+        })
+    );
+    renderSection({ runtime: state({ sinks: [sinkState()] }), handlers });
+    openSink();
+    fireEvent.click(screen.getByTestId("notification-delivery-direct-messages"));
+    await clickSave();
+    expect(saveButton().disabled).toBe(true);
+    expect(saveButton().textContent).toBe("Saving…");
+    fireEvent.click(saveButton());
+    expect(handlers.save).toHaveBeenCalledTimes(1);
+    await act(async () => settle());
+    expect(saveButton().textContent).toBe("Save");
+  });
+});
+
+describe("NotificationDeliverySection drafts", () => {
+  test("edits stay local until Save, and Save sends them once with no new key", async () => {
+    const handlers = renderSection({ runtime: state({ sinks: [sinkState()] }) });
+    openSink();
+    expect(saveButton().disabled).toBe(true);
+    fireEvent.click(screen.getByTestId("notification-delivery-direct-messages"));
+    const dwell = screen.getByTestId("notification-delivery-dwell") as HTMLInputElement;
+    fireEvent.change(dwell, { target: { value: "120" } });
+    fireEvent.blur(dwell);
+    expect(handlers.save).not.toHaveBeenCalled();
+    expect(handlers.update).not.toHaveBeenCalled();
+    expect(saveStatus()).toBe("Unsaved changes");
+
+    await clickSave();
+    expect(handlers.save).toHaveBeenCalledTimes(1);
+    const { sink, secret, acceptContentConsent } = lastSave(handlers);
+    expect(secret).toBeNull();
+    expect(acceptContentConsent).toBe(false);
+    expect(sink.targets.direct_messages).toBe(false);
+    expect(sink.timing.dwell_secs).toBe(120);
+    expect(handlers.update).not.toHaveBeenCalled();
+  });
+
+  test("Discard drops the edits and shows Rust's copy again", () => {
+    const handlers = renderSection({ runtime: state({ sinks: [sinkState()] }) });
+    openSink();
+    const to = screen.getByTestId("notification-delivery-sink-to") as HTMLInputElement;
+    fireEvent.change(to, { target: { value: "elsewhere@example.invalid" } });
+    fireEvent.click(screen.getByTestId("notification-delivery-mentions"));
+    typeSecret(SYNTHETIC_API_KEY);
+    fireEvent.click(screen.getByTestId("notification-delivery-discard"));
+
+    expect(handlers.save).not.toHaveBeenCalled();
+    expect((screen.getByTestId("notification-delivery-sink-to") as HTMLInputElement).value).toBe(
+      "recipient@example.invalid"
+    );
+    expect(screen.getByTestId("notification-delivery-mentions").getAttribute("aria-checked")).toBe("true");
+    expect((screen.getByTestId("notification-delivery-sink-secret") as HTMLInputElement).value).toBe("");
+    expect(saveButton().disabled).toBe(true);
+  });
+
+  test("Back drops the draft", () => {
+    const handlers = renderSection();
+    openSink();
+    fireEvent.click(screen.getByTestId("notification-delivery-mentions"));
+    fireEvent.click(screen.getByTestId("notification-delivery-back"));
+    openSink();
+    expect(screen.getByTestId("notification-delivery-mentions").getAttribute("aria-checked")).toBe("true");
+    expect(handlers.save).not.toHaveBeenCalled();
+  });
+
+  test("shows the value the settings hold once the save settles", async () => {
+    const handlers = actions();
+    const { rerender } = render(section({ handlers }));
+    openSink();
+    const dwell = screen.getByTestId("notification-delivery-dwell") as HTMLInputElement;
+    fireEvent.change(dwell, { target: { value: "120" } });
+    fireEvent.blur(dwell);
+    await clickSave();
+    expect(lastSave(handlers).sink.timing.dwell_secs).toBe(120);
+    // Rust kept its own value; the field shows it rather than the typed entry.
+    rerender(
+      section({
+        handlers,
+        delivery: delivery({ sinks: [{ ...resendSink, timing: { ...resendSink.timing, dwell_secs: 60 } }] })
+      })
+    );
+    expect((screen.getByTestId("notification-delivery-dwell") as HTMLInputElement).value).toBe("60");
+  });
 });
 
 describe("NotificationDeliverySection credentials", () => {
-  test("keeps a Resend API key write-only and says where From must live", async () => {
+  test("keeps a Resend API key write-only and sends it only on Save", async () => {
     const handlers = renderSection({ runtime: state({ sinks: [sinkState()] }) });
     openSink();
-    expect(screen.getByTestId("notification-delivery-resend-hint").textContent).toContain("verified");
     const secret = screen.getByTestId("notification-delivery-sink-secret") as HTMLInputElement;
     expect(secret.getAttribute("aria-label")).toBe("Resend API key");
     expect(secret.getAttribute("autocomplete")).toBe("off");
     expect(secret.value).toBe("");
     expect(screen.getByTestId("notification-delivery-sink-secret-state").textContent).toContain("Saved");
 
-    fireEvent.change(secret, { target: { value: "synthetic-api-key" } });
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("notification-delivery-sink-save-secret"));
-    });
-    expect(handlers.setSecret).toHaveBeenCalledWith(SINK_ID, "synthetic-api-key");
+    typeSecret(SYNTHETIC_API_KEY);
+    expect(handlers.save).not.toHaveBeenCalled();
+    await clickSave();
+    expect(lastSave(handlers).secret).toBe(SYNTHETIC_API_KEY);
     await waitFor(() => expect(secret.value).toBe(""));
     // The value never reaches the rendered page.
-    expect(document.body.innerHTML).not.toContain("synthetic-api-key");
-
-    fireEvent.click(screen.getByTestId("notification-delivery-sink-clear-secret"));
-    expect(handlers.clearSecret).toHaveBeenCalledWith(SINK_ID);
+    expect(document.body.innerHTML).not.toContain(SYNTHETIC_API_KEY);
+    // There is no separate clear button; removing the destination is what releases the key.
+    expect(screen.queryByTestId("notification-delivery-sink-clear-secret")).toBeNull();
   });
 
   test("refuses a ServerChan3 sctp key before it leaves and accepts an SCT SendKey", async () => {
@@ -376,44 +621,51 @@ describe("NotificationDeliverySection credentials", () => {
     const secret = screen.getByTestId("notification-delivery-sink-secret") as HTMLInputElement;
     expect(secret.getAttribute("aria-label")).toBe("SendKey");
 
-    fireEvent.change(secret, { target: { value: "sctp123tSYNTHETIC" } });
+    typeSecret("sctp123tSYNTHETIC");
     const problem = screen.getByTestId("notification-delivery-sink-secret-problem");
     expect(problem.textContent).toContain("sctp");
     expect(problem.textContent).not.toContain("SYNTHETIC");
-    expect((screen.getByTestId("notification-delivery-sink-save-secret") as HTMLButtonElement).disabled).toBe(
-      true
-    );
+    await clickSave();
+    expect(handlers.save).not.toHaveBeenCalled();
 
-    fireEvent.change(secret, { target: { value: " SCTsynthetic123 " } });
+    typeSecret(` ${SYNTHETIC_SENDKEY} `);
     expect(screen.queryByTestId("notification-delivery-sink-secret-problem")).toBeNull();
-    await act(async () => {
-      fireEvent.click(screen.getByTestId("notification-delivery-sink-save-secret"));
+    await clickSave();
+    expect(handlers.save).toHaveBeenCalledTimes(1);
+    expect(lastSave(handlers).secret).toBe(SYNTHETIC_SENDKEY);
+  });
+
+  test("asks for the password again when the server or account changes", async () => {
+    const boundSink = { ...smtpSink, secret_binding: "smtp:smtp.example.invalid:465:sender@example.invalid" };
+    const handlers = renderSection({
+      delivery: delivery({ sinks: [boundSink] }),
+      runtime: state({ sinks: [sinkState()] })
     });
-    expect(handlers.setSecret).toHaveBeenCalledWith(SC_SINK_ID, "SCTsynthetic123");
+    openSink();
+    const host = screen.getByTestId("notification-delivery-sink-host") as HTMLInputElement;
+    fireEvent.change(host, { target: { value: "relay.example.invalid" } });
+    expect(screen.getByTestId("notification-delivery-sink-secret-state").textContent).toContain(
+      "server or account changed"
+    );
+    await clickSave();
+    expect(handlers.save).not.toHaveBeenCalled();
+    expect(saveStatus()).toContain("server or account changed");
+
+    typeSecret(SYNTHETIC_API_KEY);
+    await clickSave();
+    const { sink, secret } = lastSave(handlers);
+    expect(secret).toBe(SYNTHETIC_API_KEY);
+    expect(sink.config).toMatchObject({ host: "relay.example.invalid", port: 465 });
+    // The binding goes back to Rust untouched; Rust is what decides the credential is stale.
+    expect(sink.secret_binding).toBe(boundSink.secret_binding);
   });
 
   test("says why a stored password is gone when Rust retired it", () => {
-    const boundSink = { ...smtpSink, secret_binding: "smtp:smtp.example.invalid:465:sender@example.invalid#1" };
-    const handlers = actions();
-    const { rerender } = render(
-      section({ delivery: delivery({ sinks: [boundSink] }), runtime: state({ sinks: [sinkState()] }), handlers })
-    );
+    renderSection({
+      delivery: delivery({ sinks: [smtpSink] }),
+      runtime: state({ sinks: [sinkState({ secret_configured: false, secret_retired: true })] })
+    });
     openSink();
-    expect(screen.queryByTestId("notification-delivery-sink-secret-retired")).toBeNull();
-
-    const field = screen.getByTestId("notification-delivery-sink-host") as HTMLInputElement;
-    fireEvent.change(field, { target: { value: "smtp.other.invalid" } });
-    fireEvent.blur(field);
-    // The binding goes back to Rust untouched; Rust is what decides the credential is stale.
-    expect(lastSink(handlers).secret_binding).toBe(boundSink.secret_binding);
-
-    rerender(
-      section({
-        delivery: delivery({ sinks: [{ ...lastSink(handlers), secret_binding: null }] }),
-        runtime: state({ sinks: [sinkState({ secret_configured: false, secret_retired: true })] }),
-        handlers
-      })
-    );
     const explanation = screen.getByTestId("notification-delivery-sink-secret-retired");
     expect(explanation.textContent).toContain("server or account changed");
     expect(explanation.tagName).toBe("P");
@@ -426,8 +678,8 @@ describe("NotificationDeliverySection credentials", () => {
     expect(screen.queryByTestId("notification-delivery-sink-secret-retired")).toBeNull();
   });
 
-  test("never retires the password for a destination, name or from address change", () => {
-    const boundSink = { ...resendSink, secret_binding: "resend:https://api.example.invalid/emails#1" };
+  test("keeps the stored key for a destination, name or from address change", async () => {
+    const boundSink = { ...resendSink, secret_binding: "resend:https://api.example.invalid/emails" };
     const handlers = renderSection({
       delivery: delivery({ sinks: [boundSink] }),
       runtime: state({ sinks: [sinkState()] })
@@ -438,52 +690,47 @@ describe("NotificationDeliverySection credentials", () => {
       ["notification-delivery-sink-name", "Another name"],
       ["notification-delivery-sink-to", "elsewhere@example.invalid"]
     ] as const) {
-      const field = screen.getByTestId(testId) as HTMLInputElement;
-      fireEvent.change(field, { target: { value } });
-      fireEvent.blur(field);
+      fireEvent.change(screen.getByTestId(testId), { target: { value } });
     }
+    expect(screen.getByTestId("notification-delivery-sink-secret-state").textContent).toContain("Saved");
+    await clickSave();
     expect(handlers.clearSecret).not.toHaveBeenCalled();
-    expect(handlers.setSecret).not.toHaveBeenCalled();
-    const calls = (handlers.update as unknown as { mock: { calls: NotificationDeliverySettings[][] } }).mock
-      .calls;
-    expect(calls.length).toBe(3);
-    for (const call of calls) {
-      expect(call[0].sinks[0].secret_binding).toBe(boundSink.secret_binding);
-    }
+    const { sink, secret } = lastSave(handlers);
+    expect(secret).toBeNull();
+    expect(sink.secret_binding).toBe(boundSink.secret_binding);
+    expect(sink).toMatchObject({
+      from_address: "other@example.invalid",
+      sender_name: "Another name",
+      destination: "elsewhere@example.invalid"
+    });
   });
 
-  test("keeps the endpoint override under Advanced", () => {
+  test("keeps the endpoint override, sender and name under Advanced", () => {
     renderSection();
     openSink();
     const advanced = screen.getByTestId("notification-delivery-advanced");
     expect(advanced.tagName).toBe("DETAILS");
-    expect(within(advanced).getByTestId("notification-delivery-sink-endpoint")).toBeTruthy();
-  });
-
-  test("changes an SMTP sink's own fields and its preset", () => {
-    const handlers = renderSection({
-      delivery: delivery({ sinks: [{ ...smtpSink, config: { ...smtpSink.config, preset: null } as NotificationSinkSettings["config"] }] })
-    });
-    openSink();
-    const host = screen.getByTestId("notification-delivery-sink-host") as HTMLInputElement;
-    fireEvent.change(host, { target: { value: "relay.example.invalid" } });
-    fireEvent.blur(host);
-    expect(lastSink(handlers).config).toMatchObject({ host: "relay.example.invalid", port: 465 });
+    for (const field of ["endpoint", "from", "name"]) {
+      expect(within(advanced).getByTestId(`notification-delivery-sink-${field}`)).toBeTruthy();
+    }
+    expect(within(advanced).getByTestId("notification-delivery-resend-hint").textContent).toContain(
+      "onboarding@resend.dev"
+    );
   });
 });
 
 describe("NotificationDeliverySection targets", () => {
-  test("toggles the categories for this destination only", () => {
+  test("toggles the categories for this destination only", async () => {
     const other = { ...resendSink, id: "sink-other" };
     const handlers = renderSection({ delivery: delivery({ sinks: [resendSink, other] }) });
     openSink();
     fireEvent.click(screen.getByTestId("notification-delivery-direct-messages"));
-    expect(lastSink(handlers).targets.direct_messages).toBe(false);
-    expect(lastSink(handlers, "sink-other").targets.direct_messages).toBe(true);
     expect(screen.getByTestId("notification-delivery-keywords-hint").textContent).toContain("homeserver");
+    await clickSave();
+    expect(lastSave(handlers).sink).toMatchObject({ id: SINK_ID, targets: { direct_messages: false } });
   });
 
-  test("names each watched entry from the room list, adds one and removes one", () => {
+  test("names each watched entry from the room list, adds one and removes one", async () => {
     const handlers = renderSection({
       delivery: delivery({
         sinks: [
@@ -503,13 +750,13 @@ describe("NotificationDeliverySection targets", () => {
     expect(rows[0].textContent).toContain("Alpha room");
 
     fireEvent.click(within(rows[0]).getByTestId("notification-delivery-watched-remove"));
-    expect(lastSink(handlers).targets.watched).toEqual([]);
+    expect(screen.queryByTestId("notification-delivery-watched-row")).toBeNull();
 
     fireEvent.change(screen.getByTestId("notification-delivery-watched-add"), {
       target: { value: "space:!space:example.invalid" }
     });
-    expect(lastSink(handlers).targets.watched).toEqual([
-      { kind: "room", room_id: "!alpha:example.invalid" },
+    await clickSave();
+    expect(lastSave(handlers).sink.targets.watched).toEqual([
       { kind: "space", space_id: "!space:example.invalid" }
     ]);
   });
@@ -546,21 +793,19 @@ describe("NotificationDeliverySection targets", () => {
 });
 
 describe("NotificationDeliverySection content", () => {
-  function mode(name: string): HTMLInputElement {
-    const radio = screen
-      .getAllByTestId("notification-delivery-content-mode")
-      .find((candidate) => candidate.getAttribute("data-mode") === name);
-    if (!radio) {
-      throw new Error(`no ${name} mode`);
-    }
-    return radio as HTMLInputElement;
-  }
+  const consent = {
+    sink_kind: "resend" as const,
+    endpoint: "https://api.example.invalid/emails",
+    recipient: "recipient@example.invalid",
+    accepted_at_ms: 1
+  };
 
   test("starts at names only and says the provider receives plaintext only once text is on", () => {
     renderSection();
     openSink();
     expect(mode("namesOnly").checked).toBe(true);
     expect(screen.queryByTestId("notification-delivery-content-plaintext")).toBeNull();
+    expect(screen.queryByTestId("notification-delivery-consent")).toBeNull();
     expect(screen.getByTestId("notification-delivery-content-fallback").textContent).toContain(
       "names only"
     );
@@ -569,106 +814,124 @@ describe("NotificationDeliverySection content", () => {
     expect(mode("full").parentElement?.textContent).toContain("4000");
   });
 
-  test("turns a text mode on only after the consent dialog is acknowledged", () => {
-    const now = vi.spyOn(Date, "now").mockReturnValue(1_700_000_000_000);
-    try {
-      const handlers = renderSection();
-      openSink();
-      fireEvent.click(mode("prefix"));
-      expect(handlers.update).not.toHaveBeenCalled();
-      expect(screen.getByTestId("notification-delivery-consent-body").textContent).toContain(
-        "recipient@example.invalid"
-      );
-      const accept = screen.getByTestId("notification-delivery-consent-accept") as HTMLButtonElement;
-      expect(accept.disabled).toBe(true);
-      fireEvent.click(screen.getByTestId("notification-delivery-consent-acknowledge"));
-      fireEvent.click(accept);
-      expect(lastSink(handlers).content).toEqual({ kind: "prefix", graphemes: 80 });
-      expect(lastSink(handlers).content_consent).toEqual({
-        sink_kind: "resend",
-        endpoint: "https://api.example.invalid/emails",
-        recipient: "recipient@example.invalid",
-        accepted_at_ms: 1_700_000_000_000
-      });
-    } finally {
-      now.mockRestore();
-    }
-  });
-
-  test("closing the consent dialog leaves names only", () => {
-    const handlers = renderSection();
+  test("shows the plaintext warning inline and sends the accepted answer, never a consent", async () => {
+    const handlers = renderSection({ runtime: state({ sinks: [sinkState()] }) });
     openSink();
-    fireEvent.click(mode("full"));
-    fireEvent.click(screen.getByRole("button", { name: "Cancel" }));
-    expect(handlers.update).not.toHaveBeenCalled();
-    expect(mode("namesOnly").checked).toBe(true);
+    fireEvent.click(mode("prefix"));
+    expect(mode("prefix").checked).toBe(true);
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(screen.getByTestId("notification-delivery-consent-body").textContent).toContain(
+      "recipient@example.invalid"
+    );
+    // Unchecked, Save refuses and says why.
+    await clickSave();
+    expect(handlers.save).not.toHaveBeenCalled();
+    expect(saveStatus()).toContain("Check the box");
+
+    fireEvent.click(screen.getByTestId("notification-delivery-consent-acknowledge"));
+    await clickSave();
+    const { sink, acceptContentConsent, secret } = lastSave(handlers);
+    expect(acceptContentConsent).toBe(true);
+    expect(secret).toBeNull();
+    expect(sink.content).toEqual({ kind: "prefix", graphemes: 80 });
+    // Rust mints the consent; the renderer sends none.
+    expect(sink.content_consent).toBeNull();
   });
 
-  test("reads a consent for another recipient as names only", () => {
+  test("reads a consent for another recipient as needing a new answer", () => {
     renderSection({
       delivery: delivery({
-        sinks: [
-          {
-            ...resendSink,
-            content: { kind: "full" },
-            content_consent: {
-              sink_kind: "resend",
-              endpoint: "https://api.example.invalid/emails",
-              recipient: "other@example.invalid",
-              accepted_at_ms: 1
-            }
-          }
-        ]
+        sinks: [{ ...resendSink, content: { kind: "full" }, content_consent: { ...consent, recipient: "other@example.invalid" } }]
       })
     });
     openSink();
-    expect(mode("namesOnly").checked).toBe(true);
-    expect(screen.queryByTestId("notification-delivery-content-plaintext")).toBeNull();
+    expect(screen.getByTestId("notification-delivery-consent")).toBeTruthy();
   });
 
-  test("switching back to names only forgets the consent", () => {
+  test("a matching consent covers both text modes; names only drops it", async () => {
     const consented: NotificationSinkSettings = {
       ...resendSink,
       content: { kind: "prefix", graphemes: 40 },
-      content_consent: {
-        sink_kind: "resend",
-        endpoint: "https://api.example.invalid/emails",
-        recipient: "recipient@example.invalid",
-        accepted_at_ms: 1
-      }
+      content_consent: consent
     };
     const handlers = renderSection({ delivery: delivery({ sinks: [consented] }) });
     openSink();
     expect(mode("prefix").checked).toBe(true);
     expect(screen.getByTestId("notification-delivery-content-plaintext").textContent).toContain("Resend");
+    expect(screen.queryByTestId("notification-delivery-consent")).toBeNull();
 
     const count = screen.getByTestId("notification-delivery-content-prefix-count") as HTMLInputElement;
     fireEvent.change(count, { target: { value: "9999" } });
     fireEvent.blur(count);
-    expect(lastSink(handlers).content).toEqual({ kind: "prefix", graphemes: 500 });
-
     fireEvent.click(mode("full"));
-    // Between text modes the existing consent carries over without a second dialog.
-    expect(screen.queryByTestId("notification-delivery-consent-accept")).toBeNull();
-    expect(lastSink(handlers).content).toEqual({ kind: "full" });
-    expect(lastSink(handlers).content_consent).toEqual(consented.content_consent);
+    // Between text modes the existing consent carries over without a second question.
+    expect(screen.queryByTestId("notification-delivery-consent")).toBeNull();
+    await clickSave();
+    expect(lastSave(handlers)).toMatchObject({
+      sink: { content: { kind: "full" }, content_consent: consent },
+      acceptContentConsent: false
+    });
 
     fireEvent.click(mode("namesOnly"));
-    expect(lastSink(handlers)).toMatchObject({ content: { kind: "namesOnly" }, content_consent: null });
+    await clickSave();
+    expect(lastSave(handlers).sink).toMatchObject({ content: { kind: "namesOnly" }, content_consent: null });
   });
 
-  test("offers no text mode to a ServerChan destination until a SendKey is saved", () => {
+  test("clamps the prefix length to the Rust bound", async () => {
+    const handlers = renderSection({
+      delivery: delivery({ sinks: [{ ...resendSink, content: { kind: "prefix", graphemes: 40 }, content_consent: consent }] })
+    });
+    openSink();
+    const count = screen.getByTestId("notification-delivery-content-prefix-count") as HTMLInputElement;
+    fireEvent.change(count, { target: { value: "9999" } });
+    fireEvent.blur(count);
+    await clickSave();
+    expect(lastSave(handlers).sink.content).toEqual({ kind: "prefix", graphemes: 500 });
+  });
+
+  test("offers no text mode to a ServerChan destination until a SendKey is entered", () => {
     renderSection({ delivery: delivery({ sinks: [serverChanSink] }) });
     openSink(SC_SINK_ID);
     expect(mode("prefix").disabled).toBe(true);
     expect(mode("full").disabled).toBe(true);
     expect(screen.getByTestId("notification-delivery-content-needs-key")).toBeTruthy();
     expect(mode("full").parentElement?.textContent).toContain("1000");
+
+    typeSecret(SYNTHETIC_SENDKEY);
+    expect(mode("prefix").disabled).toBe(false);
+    expect(screen.queryByTestId("notification-delivery-content-needs-key")).toBeNull();
+  });
+
+  test("a new ServerChan SendKey asks for the plaintext answer again", async () => {
+    const bound: NotificationSinkSettings = {
+      ...serverChanSink,
+      secret_binding: "serverchan:https://sctapi.ftqq.com#0a1b",
+      content: { kind: "full" },
+      content_consent: {
+        sink_kind: "serverChan",
+        endpoint: "https://sctapi.ftqq.com",
+        recipient: "sendkey#0a1b",
+        accepted_at_ms: 1
+      }
+    };
+    const handlers = renderSection({
+      delivery: delivery({ sinks: [bound] }),
+      runtime: state({ sinks: [sinkState({ sink_id: SC_SINK_ID })] })
+    });
+    openSink(SC_SINK_ID);
+    expect(screen.queryByTestId("notification-delivery-consent")).toBeNull();
+    typeSecret(SYNTHETIC_SENDKEY);
+    expect(screen.getByTestId("notification-delivery-consent")).toBeTruthy();
+    await clickSave();
+    expect(handlers.save).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("notification-delivery-consent-acknowledge"));
+    await clickSave();
+    expect(lastSave(handlers)).toMatchObject({ secret: SYNTHETIC_SENDKEY, acceptContentConsent: true });
   });
 });
 
 describe("NotificationDeliverySection timing", () => {
-  test("labels the seconds, bounds them at the Rust maximum, and offers only-when-inactive", () => {
+  test("labels the seconds, bounds them at the Rust maximum, and offers only-when-inactive", async () => {
     const handlers = renderSection();
     openSink();
     const dwell = screen.getByTestId("notification-delivery-dwell") as HTMLInputElement;
@@ -676,27 +939,14 @@ describe("NotificationDeliverySection timing", () => {
     expect(dwell.value).toBe("300");
     fireEvent.change(dwell, { target: { value: "999999" } });
     fireEvent.blur(dwell);
-    expect(lastSink(handlers).timing.dwell_secs).toBe(86_400);
 
     const interval = screen.getByTestId("notification-delivery-interval") as HTMLInputElement;
     expect(interval.getAttribute("aria-label")).toContain("seconds");
     expect(interval.value).toBe("900");
 
     fireEvent.click(screen.getByTestId("notification-delivery-only-unfocused"));
-    expect(lastSink(handlers).timing.only_when_unfocused).toBe(false);
-  });
-
-  test("shows the bound the settings now hold instead of the entry Rust rejected", () => {
-    const handlers = actions();
-    const { rerender } = render(section({ handlers }));
-    openSink();
-    const dwell = screen.getByTestId("notification-delivery-dwell") as HTMLInputElement;
-    fireEvent.change(dwell, { target: { value: "120" } });
-    fireEvent.blur(dwell);
-    expect(lastSink(handlers).timing.dwell_secs).toBe(120);
-    // Rust kept its own value; the field shows it rather than the typed entry.
-    rerender(section({ handlers, delivery: delivery({ sinks: [{ ...resendSink, timing: { ...resendSink.timing, dwell_secs: 60 } }] }) }));
-    expect((screen.getByTestId("notification-delivery-dwell") as HTMLInputElement).value).toBe("60");
+    await clickSave();
+    expect(lastSave(handlers).sink.timing).toMatchObject({ dwell_secs: 86_400, only_when_unfocused: false });
   });
 });
 
@@ -743,6 +993,13 @@ describe("NotificationDeliverySection outcome", () => {
     expect(handlers.test).toHaveBeenCalledTimes(1);
   });
 
+  test("offers no test or remove for a destination that is not saved yet", () => {
+    renderSection({ delivery: delivery({ sinks: [] }) });
+    pickKind("resend");
+    expect(screen.queryByTestId("notification-delivery-outcome")).toBeNull();
+    expect(screen.queryByTestId("notification-delivery-sink-remove")).toBeNull();
+  });
+
   test("removes a destination and releases the credential it was keyed by", async () => {
     const handlers = renderSection({ runtime: state({ sinks: [sinkState()] }) });
     openSink();
@@ -762,12 +1019,15 @@ describe("NotificationDeliverySection outcome", () => {
     expect(handlers.update).not.toHaveBeenCalled();
   });
 
-  test("ships the detail in Japanese", () => {
+  test("ships the list and the detail in Japanese", () => {
     setActiveLocaleProfile("ja", "none");
     renderSection({ runtime: state({ sinks: [sinkState({ last_outcome: { kind: "transport", at_ms: 1 } })] }) });
     expect(screen.getByRole("heading", { name: "この端末から送信" })).toBeTruthy();
+    expect(screen.getByTestId("notification-delivery-sink-status").textContent).not.toBe("Configured");
     openSink();
     expect(screen.getByTestId("notification-delivery-sink-outcome").textContent).toContain("接続できませんでした");
+    expect(saveButton().textContent).toBe("保存");
+    expect(screen.getByTestId("notification-delivery-discard").textContent).toBe("破棄");
   });
 });
 
@@ -893,11 +1153,12 @@ describe("NotificationDeliverySection keyword editor (#1427)", () => {
     expect(screen.queryByTestId("notification-keyword-list")).toBeNull();
   });
 
-  test("the delivery switch delivers for keywords but adds and removes nothing", () => {
+  test("the delivery switch delivers for keywords but adds and removes nothing", async () => {
     const { handlers, keywordHandlers } = renderKeywordSection();
     openSink();
     fireEvent.click(screen.getByTestId("notification-delivery-keywords"));
-    expect(lastSink(handlers).targets.keywords).toBe(false);
+    await clickSave();
+    expect(lastSave(handlers).sink.targets.keywords).toBe(false);
     expect(keywordHandlers.add).not.toHaveBeenCalled();
     expect(keywordHandlers.remove).not.toHaveBeenCalled();
   });

@@ -140,12 +140,14 @@ always sent as names only.
 ### The password field is empty again after changing the server or account
 
 A saved password is used only for the exact server and account it was entered
-for. Changing the **Mailbox preset**, **Server**, **Port**, or **Username**
-removes the saved value on purpose, so a password entered for one mailbox is
-never offered to another; the service says **The saved password was removed
-because the server or account changed. Enter it again.** Nothing was lost: save
-the password for the new server. Changing only the **Send to** address keeps the
-password but returns **Message content** to names only until you agree again.
+for. After you change the **Mailbox preset**, **Server**, **Port**, or
+**Username**, the page asks for the password again and **Save** waits for it, so
+a password entered for one mailbox is never offered to another. Saving the new
+server removes the old password; if it was removed that way, the page says **The
+saved password was removed because the server or account changed. Enter it
+again.** Nothing was lost: enter the password for the new server and choose
+**Save**. Changing only the **Send to** address keeps the password, but a text
+mode asks the plain-text question again before Save.
 
 ### The provider says the credential is invalid, or the account is not permitted
 

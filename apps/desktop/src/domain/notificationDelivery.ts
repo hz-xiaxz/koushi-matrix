@@ -48,6 +48,18 @@ export const MAX_NOTIFICATION_DELIVERY_SINKS = 8;
 export const MAX_NOTIFICATION_DELIVERY_WATCHED_TARGETS = 64;
 /** Mirrors `DEFAULT_RESEND_ENDPOINT`, shown so an empty override field is not a mystery. */
 export const DEFAULT_RESEND_ENDPOINT = "https://api.resend.com/emails";
+/**
+ * Mirrors `DEFAULT_RESEND_FROM_ADDRESS`: Resend's shared sender. Rust fills an empty Resend
+ * sender with it, so a new Resend destination needs no verified domain to notify yourself.
+ */
+export const DEFAULT_RESEND_FROM_ADDRESS = "onboarding@resend.dev";
+
+/**
+ * Mirrors Rust's default sender name: canonicalization fills an empty `sender_name` with this
+ * for Resend and SMTP destinations (ServerChan has no sender and clears it). The field is
+ * never required; it is prefilled for a new destination and shown as its placeholder.
+ */
+export const DEFAULT_NOTIFICATION_SENDER_NAME = "Koushi";
 /** Mirrors `DEFAULT_SERVERCHAN_ENDPOINT`. */
 export const DEFAULT_SERVERCHAN_ENDPOINT = "https://sctapi.ftqq.com";
 /** Where a ServerChan Turbo SendKey is obtained; shown in the setup steps. */
@@ -181,10 +193,29 @@ export function createNotificationSinkId(): string {
 export type NotificationSinkKind = NotificationSinkConfig["kind"];
 
 /**
+ * The fields a stored credential was entered for, mirroring
+ * `NotificationSinkSettings::credential_identity`: the Resend or ServerChan endpoint, or
+ * the SMTP host, port, and username. Rust retires the credential when they change, so the
+ * detail screen asks for a new secret before such an edit is saved.
+ */
+export function notificationCredentialIdentity(sink: NotificationSinkSettings): string {
+  switch (sink.config.kind) {
+    case "resend":
+      return `resend:${sink.config.endpoint}`;
+    case "serverChan":
+      return `serverchan:${sink.config.endpoint}`;
+    case "smtp":
+      return `smtp:${sink.config.host}:${sink.config.port}:${sink.config.username}`;
+  }
+}
+
+/**
  * A new destination of `kind` with the conservative defaults Rust gives one
  * (`NotificationDeliveryTargets::default`, `NotificationDeliveryTiming::default`): DMs,
  * mentions and keywords on, no watched targets, names only, 300 s dwell, 900 s interval,
- * only while this app is inactive. Mail fields start empty; the detail view fills them.
+ * only while this app is inactive. Mail fields start empty; the detail view fills them,
+ * except a Resend sender, which starts as Resend's shared one, and the sender name, which
+ * starts as `DEFAULT_NOTIFICATION_SENDER_NAME` for the mail kinds.
  */
 export function newNotificationSink(id: string, kind: NotificationSinkKind): NotificationSinkSettings {
   const config: NotificationSinkConfig =
@@ -196,8 +227,8 @@ export function newNotificationSink(id: string, kind: NotificationSinkKind): Not
   return {
     id,
     destination: "",
-    from_address: "",
-    sender_name: "",
+    from_address: kind === "resend" ? DEFAULT_RESEND_FROM_ADDRESS : "",
+    sender_name: kind === "serverChan" ? "" : DEFAULT_NOTIFICATION_SENDER_NAME,
     config,
     // Nothing is stored for a sink that has never had a credential: the binding Rust
     // records is the one attached to whatever the user saves next.
@@ -216,13 +247,14 @@ export function newNotificationSink(id: string, kind: NotificationSinkKind): Not
 /**
  * Whether the non-secret setup `NotificationSinkSettings::is_usable` requires is filled
  * in. Rust drops a sink that fails it, so the add flow only commits a sink that passes.
+ * A Resend sender is optional: Rust fills an empty one with `DEFAULT_RESEND_FROM_ADDRESS`.
  */
 export function notificationSinkFieldsReady(sink: NotificationSinkSettings): boolean {
   switch (sink.config.kind) {
     case "serverChan":
       return true;
     case "resend":
-      return Boolean(sink.destination.trim() && sink.from_address.trim());
+      return Boolean(sink.destination.trim());
     case "smtp":
       return Boolean(
         sink.destination.trim() &&

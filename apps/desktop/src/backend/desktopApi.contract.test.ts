@@ -82,6 +82,7 @@ describe("DesktopApi command contract", () => {
         "enableEmailNotifications",
         "disableEmailNotifications",
         "setNotificationDeliverySecret",
+        "saveNotificationSink",
         "clearNotificationDeliverySecret",
         "testNotificationDelivery",
         "addNotificationKeyword",

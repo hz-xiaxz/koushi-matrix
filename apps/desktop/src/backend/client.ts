@@ -61,6 +61,7 @@ import type {
   HistoryExportScopeInput,
   HistoryExportStart,
   FilesViewScope,
+  NotificationSinkSettings,
   ScheduledSendsScope,
   SubmissionResponse,
   ThreadOpenIntent,
@@ -441,6 +442,22 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandAdmission>("set_notification_delivery_secret", {
       sinkId,
       secret
+    });
+  }
+
+  /**
+   * #1468: one Save of a destination. `secret` is write-only, exactly like
+   * `setNotificationDeliverySecret`; the admission is the only answer.
+   */
+  async saveNotificationSink(
+    sink: NotificationSinkSettings,
+    secret: string | null,
+    acceptContentConsent: boolean
+  ): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("save_notification_sink", {
+      sink,
+      secret,
+      acceptContentConsent
     });
   }
 

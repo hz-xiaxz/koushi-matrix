@@ -957,6 +957,32 @@ export type MessageId =
   | "settings.notificationMessagePreviewsDescription"
   | "settings.notificationSound"
   | "settings.notificationDelivery"
+  | "settings.notificationsTabList"
+  | "settings.notificationsTabHomeserver"
+  | "settings.notificationDeliveryPickTitle"
+  | "settings.notificationDeliveryPickResend"
+  | "settings.notificationDeliveryPickSmtp"
+  | "settings.notificationDeliveryPickServerChan"
+  | "settings.notificationDeliveryNewDestination"
+  | "settings.notificationDeliverySave"
+  | "settings.notificationDeliveryDiscard"
+  | "settings.notificationDeliverySaving"
+  | "settings.notificationDeliverySaveFailed"
+  | "settings.notificationDeliveryUnsaved"
+  | "settings.notificationDeliveryFieldsRequired"
+  | "settings.notificationDeliverySecretRequired"
+  | "settings.notificationDeliverySecretReenter"
+  | "settings.notificationDeliveryConsentRequired"
+  | "settings.notificationDeliveryChipDirectMessages"
+  | "settings.notificationDeliveryChipMentions"
+  | "settings.notificationDeliveryChipKeywords"
+  | "settings.notificationDeliveryChipWatched"
+  | "settings.notificationDeliveryChipNoTargets"
+  | "settings.notificationDeliveryChipNamesOnly"
+  | "settings.notificationDeliveryChipPrefix"
+  | "settings.notificationDeliveryChipFull"
+  | "settings.notificationDeliveryChipDwell"
+  | "settings.notificationDeliveryChipsLabel"
   | "settings.notificationDeliveryDescription"
   | "settings.notificationDeliveryTriggers"
   | "settings.notificationDeliveryDirectMessages"
@@ -1016,12 +1042,10 @@ export type MessageId =
   | "settings.notificationDeliveryStatusNeedsTargets"
   | "settings.notificationDeliveryStatusIncomplete"
   | "settings.notificationDeliveryBack"
-  | "settings.notificationDeliveryDraftHint"
   | "settings.notificationDeliveryCredentials"
   | "settings.notificationDeliveryResendHint"
   | "settings.notificationDeliverySecretResend"
   | "settings.notificationDeliverySecretServerChan"
-  | "settings.notificationDeliverySecretAfterSave"
   | "settings.notificationDeliveryAdvanced"
   | "settings.notificationDeliveryServerChanIntro"
   | "settings.notificationDeliveryServerChanStepLogin"
@@ -1046,13 +1070,11 @@ export type MessageId =
   | "settings.notificationDeliveryConsentServerChanRecipient"
   | "settings.notificationDeliveryConsentRebind"
   | "settings.notificationDeliveryConsentAcknowledge"
-  | "settings.notificationDeliveryConsentAccept"
   | "settings.notificationDeliveryTiming"
   | "settings.notificationDeliverySecondsAsMinutes"
   | "settings.notificationDeliveryOutcome"
   | "settings.notificationDeliveryLastAttempt"
   | "settings.notificationDeliveryTestNeedsSecret"
-  | "settings.notificationDeliverySaveDestination"
   | "settings.emailNotificationsServerSupport"
   | "settings.emailNotificationsServerUnavailable"
   | "settings.notificationDeliverySinkEndpoint"
@@ -1064,8 +1086,6 @@ export type MessageId =
   | "settings.notificationDeliverySinkTlsImplicit"
   | "settings.notificationDeliverySinkTlsStartTls"
   | "settings.notificationDeliverySinkUsernameFullAddress"
-  | "settings.notificationDeliverySinkSaveSecret"
-  | "settings.notificationDeliverySinkClearSecret"
   | "settings.notificationDeliverySinkSecretRetired"
   | "settings.notificationDeliverySinkEmpty"
   | "settings.notificationDeliverySinkFailed"
@@ -3030,6 +3050,58 @@ const en: Catalog = {
   "settings.notificationSound": "Sound",
   "settings.notificationDelivery":
     "Sent from this device",
+  "settings.notificationsTabList":
+    "Notification sources",
+  "settings.notificationsTabHomeserver":
+    "Homeserver notifications",
+  "settings.notificationDeliveryPickTitle":
+    "Choose a service",
+  "settings.notificationDeliveryPickResend":
+    "Email through the Resend API. Notifying yourself needs only an API key.",
+  "settings.notificationDeliveryPickSmtp":
+    "Email through your mailbox's SMTP server, with presets for common providers.",
+  "settings.notificationDeliveryPickServerChan":
+    "Push to your WeChat with a ServerChan Turbo SendKey.",
+  "settings.notificationDeliveryNewDestination":
+    "New destination",
+  "settings.notificationDeliverySave":
+    "Save",
+  "settings.notificationDeliveryDiscard":
+    "Discard",
+  "settings.notificationDeliverySaving":
+    "Saving…",
+  "settings.notificationDeliverySaveFailed":
+    "Could not save this destination. Check the fields and try again.",
+  "settings.notificationDeliveryUnsaved":
+    "Unsaved changes",
+  "settings.notificationDeliveryFieldsRequired":
+    "Fill in the required fields to save.",
+  "settings.notificationDeliverySecretRequired":
+    "Enter the {label} to save this destination.",
+  "settings.notificationDeliverySecretReenter":
+    "The server or account changed, so enter the {label} again.",
+  "settings.notificationDeliveryConsentRequired":
+    "Check the box above, or choose names only.",
+  "settings.notificationDeliveryChipDirectMessages":
+    "DMs",
+  "settings.notificationDeliveryChipMentions":
+    "Mentions",
+  "settings.notificationDeliveryChipKeywords":
+    "Keywords",
+  "settings.notificationDeliveryChipWatched":
+    "{count} watched",
+  "settings.notificationDeliveryChipNoTargets":
+    "No targets",
+  "settings.notificationDeliveryChipNamesOnly":
+    "Names only",
+  "settings.notificationDeliveryChipPrefix":
+    "First {count} characters",
+  "settings.notificationDeliveryChipFull":
+    "Message text",
+  "settings.notificationDeliveryChipDwell":
+    "After {minutes} min",
+  "settings.notificationDeliveryChipsLabel":
+    "Summary",
   "settings.notificationDeliveryDescription":
     "Koushi sends these itself, through a service you set up, so they work even when your homeserver cannot send email. Each destination has its own targets, content and timing.",
   "settings.notificationDeliveryTriggers": "Send for",
@@ -3121,18 +3193,14 @@ const en: Catalog = {
     "Not configured: fill in the required fields.",
   "settings.notificationDeliveryBack":
     "All destinations",
-  "settings.notificationDeliveryDraftHint":
-    "Fill in the fields and save the destination. Then enter its credential and choose what the messages contain.",
   "settings.notificationDeliveryCredentials":
-    "Service and credentials",
+    "Connection",
   "settings.notificationDeliveryResendHint":
-    "The From address must be on a domain you have verified in Resend. Send to can be any inbox.",
+    "With Resend's shared sender, onboarding@resend.dev, no domain setup is needed, but Resend delivers it only to the email address registered on your Resend account. To send to other addresses, verify your own domain at resend.com/domains and use an address on it here.",
   "settings.notificationDeliverySecretResend":
     "Resend API key",
   "settings.notificationDeliverySecretServerChan":
     "SendKey",
-  "settings.notificationDeliverySecretAfterSave":
-    "Save the destination first; the {label} is entered afterwards.",
   "settings.notificationDeliveryAdvanced":
     "Advanced",
   "settings.notificationDeliveryServerChanIntro":
@@ -3140,7 +3208,7 @@ const en: Catalog = {
   "settings.notificationDeliveryServerChanStepLogin":
     "Open sct.ftqq.com and log in by scanning the QR code with WeChat.",
   "settings.notificationDeliveryServerChanStepSendKey":
-    "Open the SendKey page and copy your SendKey (it starts with SCT). Paste it here after saving the destination.",
+    "Open the SendKey page and copy your SendKey (it starts with SCT). Paste it in the SendKey field below.",
   "settings.notificationDeliveryServerChanStepChannel":
     "Nothing else to set up: messages arrive through the default 方糖 service account (方糖服务号).",
   "settings.notificationDeliveryServerChanOpen":
@@ -3162,7 +3230,7 @@ const en: Catalog = {
   "settings.notificationDeliveryContentPrefixCount":
     "Characters to include",
   "settings.notificationDeliveryContentNeedsKey":
-    "Save a SendKey before choosing a mode that includes message text.",
+    "Enter a SendKey to choose a mode that includes message text.",
   "settings.notificationDeliveryContentLimit":
     "{service} carries at most {count} characters per room; longer text is cut and marked as truncated.",
   "settings.notificationDeliveryContentFallback":
@@ -3181,8 +3249,6 @@ const en: Catalog = {
     "This agreement covers this service, endpoint and recipient only. Changing any of them, or saving a new SendKey, returns this destination to names only.",
   "settings.notificationDeliveryConsentAcknowledge":
     "I understand that the text is sent unencrypted",
-  "settings.notificationDeliveryConsentAccept":
-    "Agree and turn on",
   "settings.notificationDeliveryTiming":
     "Timing",
   "settings.notificationDeliverySecondsAsMinutes":
@@ -3193,8 +3259,6 @@ const en: Catalog = {
     "Last attempt {time}:",
   "settings.notificationDeliveryTestNeedsSecret":
     "Save the credential to send a test.",
-  "settings.notificationDeliverySaveDestination":
-    "Save destination",
   "settings.emailNotificationsServerSupport":
     "These emails are sent by your homeserver, so they arrive only if your homeserver supports email notifications.",
   "settings.emailNotificationsServerUnavailable":
@@ -3213,8 +3277,6 @@ const en: Catalog = {
   "settings.notificationDeliverySinkTlsStartTls": "STARTTLS after connecting (usually port 587)",
   "settings.notificationDeliverySinkUsernameFullAddress":
     "The mailbox's full address",
-  "settings.notificationDeliverySinkSaveSecret": "Save",
-  "settings.notificationDeliverySinkClearSecret": "Clear",
   // The credential is gone because the sink is no longer the server it was entered for;
   // saying so keeps the empty field from reading as data loss.
   "settings.notificationDeliverySinkSecretRetired":
@@ -5090,6 +5152,58 @@ const ja: Catalog = {
   "settings.notificationSound": "サウンド",
   "settings.notificationDelivery":
     "この端末から送信",
+  "settings.notificationsTabList":
+    "通知の種類",
+  "settings.notificationsTabHomeserver":
+    "ホームサーバー通知",
+  "settings.notificationDeliveryPickTitle":
+    "送信サービスを選択",
+  "settings.notificationDeliveryPickResend":
+    "Resend APIでメールを送信します。自分宛てならAPIキーだけで使えます。",
+  "settings.notificationDeliveryPickSmtp":
+    "メールボックスのSMTPサーバーでメールを送信します。主なサービスのプリセットがあります。",
+  "settings.notificationDeliveryPickServerChan":
+    "ServerChan TurboのSendKeyでWeChatに通知します。",
+  "settings.notificationDeliveryNewDestination":
+    "新しい送信先",
+  "settings.notificationDeliverySave":
+    "保存",
+  "settings.notificationDeliveryDiscard":
+    "破棄",
+  "settings.notificationDeliverySaving":
+    "保存中…",
+  "settings.notificationDeliverySaveFailed":
+    "この送信先を保存できませんでした。入力内容を確認して、もう一度お試しください。",
+  "settings.notificationDeliveryUnsaved":
+    "未保存の変更があります",
+  "settings.notificationDeliveryFieldsRequired":
+    "保存するには必須項目を入力してください。",
+  "settings.notificationDeliverySecretRequired":
+    "この送信先を保存するには{label}を入力してください。",
+  "settings.notificationDeliverySecretReenter":
+    "サーバーまたはアカウントが変わったため、{label}をもう一度入力してください。",
+  "settings.notificationDeliveryConsentRequired":
+    "上のチェックボックスをオンにするか、名前のみを選んでください。",
+  "settings.notificationDeliveryChipDirectMessages":
+    "DM",
+  "settings.notificationDeliveryChipMentions":
+    "メンション",
+  "settings.notificationDeliveryChipKeywords":
+    "キーワード",
+  "settings.notificationDeliveryChipWatched":
+    "見守り{count}件",
+  "settings.notificationDeliveryChipNoTargets":
+    "対象なし",
+  "settings.notificationDeliveryChipNamesOnly":
+    "名前のみ",
+  "settings.notificationDeliveryChipPrefix":
+    "冒頭{count}文字",
+  "settings.notificationDeliveryChipFull":
+    "本文",
+  "settings.notificationDeliveryChipDwell":
+    "{minutes}分後",
+  "settings.notificationDeliveryChipsLabel":
+    "概要",
   "settings.notificationDeliveryDescription":
     "設定したサービスを通じてKoushi自身が送信するので、ホームサーバーがメールを送れなくても使えます。送信先ごとに対象・内容・タイミングを設定できます。",
   "settings.notificationDeliveryTriggers": "送信する対象",
@@ -5178,18 +5292,14 @@ const ja: Catalog = {
     "未設定：必須項目を入力してください。",
   "settings.notificationDeliveryBack":
     "送信先一覧",
-  "settings.notificationDeliveryDraftHint":
-    "項目を入力して送信先を保存してください。その後、認証情報と送信内容を設定します。",
   "settings.notificationDeliveryCredentials":
-    "サービスと認証情報",
+    "接続",
   "settings.notificationDeliveryResendHint":
-    "差出人アドレスは、Resendで認証済みのドメインのものにしてください。送信先は任意の受信箱で構いません。",
+    "Resendの共有差出人 onboarding@resend.dev ならドメインの設定は不要ですが、Resendはそのアドレスからのメールを、Resendアカウントに登録したメールアドレスにしか届けません。ほかのアドレスに送るには、resend.com/domainsで自分のドメインを認証し、そのドメインのアドレスをここに入力してください。",
   "settings.notificationDeliverySecretResend":
     "Resend APIキー",
   "settings.notificationDeliverySecretServerChan":
     "SendKey",
-  "settings.notificationDeliverySecretAfterSave":
-    "{label}は送信先を保存した後に入力します。",
   "settings.notificationDeliveryAdvanced":
     "詳細設定",
   "settings.notificationDeliveryServerChanIntro":
@@ -5197,7 +5307,7 @@ const ja: Catalog = {
   "settings.notificationDeliveryServerChanStepLogin":
     "sct.ftqq.comを開き、WeChatでQRコードを読み取ってログインします。",
   "settings.notificationDeliveryServerChanStepSendKey":
-    "SendKeyページを開き、SendKey（SCTで始まる文字列）をコピーします。送信先を保存した後、ここに貼り付けてください。",
+    "SendKeyページを開き、SendKey（SCTで始まる文字列）をコピーして、下のSendKey欄に貼り付けます。",
   "settings.notificationDeliveryServerChanStepChannel":
     "ほかに設定は不要です。既定の方糖サービスアカウント（方糖服务号）から届きます。",
   "settings.notificationDeliveryServerChanOpen":
@@ -5219,7 +5329,7 @@ const ja: Catalog = {
   "settings.notificationDeliveryContentPrefixCount":
     "含める文字数",
   "settings.notificationDeliveryContentNeedsKey":
-    "本文を含むモードを選ぶ前に、SendKeyを保存してください。",
+    "本文を含むモードを選ぶには、SendKeyを入力してください。",
   "settings.notificationDeliveryContentLimit":
     "{service}で送れるのはルームごとに最大{count}文字です。超える部分は切り詰め、切り詰めたことを明記します。",
   "settings.notificationDeliveryContentFallback":
@@ -5238,8 +5348,6 @@ const ja: Catalog = {
     "この同意は、このサービス・エンドポイント・受信者に限って有効です。いずれかを変更するか、新しいSendKeyを保存すると、名前のみに戻ります。",
   "settings.notificationDeliveryConsentAcknowledge":
     "本文が暗号化されずに送信されることを理解しました",
-  "settings.notificationDeliveryConsentAccept":
-    "同意してオンにする",
   "settings.notificationDeliveryTiming":
     "タイミング",
   "settings.notificationDeliverySecondsAsMinutes":
@@ -5250,8 +5358,6 @@ const ja: Catalog = {
     "最終試行 {time}：",
   "settings.notificationDeliveryTestNeedsSecret":
     "テスト送信には、認証情報の保存が必要です。",
-  "settings.notificationDeliverySaveDestination":
-    "送信先を保存",
   "settings.emailNotificationsServerSupport":
     "このメールはホームサーバーが送信するため、ホームサーバーがメール通知に対応している場合だけ届きます。",
   "settings.emailNotificationsServerUnavailable":
@@ -5267,8 +5373,6 @@ const ja: Catalog = {
   "settings.notificationDeliverySinkTlsImplicit": "最初からTLSで接続（通常はポート465）",
   "settings.notificationDeliverySinkTlsStartTls": "接続後にSTARTTLS（通常はポート587）",
   "settings.notificationDeliverySinkUsernameFullAddress": "メールアドレス全体",
-  "settings.notificationDeliverySinkSaveSecret": "保存",
-  "settings.notificationDeliverySinkClearSecret": "消去",
   "settings.notificationDeliverySinkSecretRetired":
     "サーバーまたはアカウントが変更されたため、保存されていたパスワードは削除されました。もう一度入力してください。",
   "settings.notificationDeliverySinkEmpty":
