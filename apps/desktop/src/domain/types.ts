@@ -271,7 +271,9 @@ export interface LocaleDisplayProfile {
 }
 
 export type LocaleDirection = "ltr" | "rtl";
-export type CatalogLocale = "en" | "ja" | "pseudo";
+export type CatalogLocale = "en" | "ja" | "zh-Hans" | "zh-Hant" | "ko" | "pseudo";
+/** Rust `ReceiptTimestampLocale`: a catalog locale with pseudo folded to English. */
+export type ReceiptTimestampLocale = Exclude<CatalogLocale, "pseudo">;
 export type LocalePseudoMode = "none" | "accented" | "bidi";
 export type DisplayPlatform = "macos" | "windows" | "linux";
 export type PrimaryModifierLabel = "Cmd" | "Ctrl";

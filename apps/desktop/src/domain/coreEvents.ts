@@ -99,7 +99,7 @@ export interface ReaderRow {
   display_label: string;
   original_display_label: string;
   initials: string;
-  timestamp: { unix_ms: string; locale: "en" | "ja" } | null;
+  timestamp: { unix_ms: string; locale: "en" | "ja" | "zh-Hans" | "zh-Hant" | "ko" } | null;
   /** Rust wire shape carries only thumbnail state; MXC demand identity stays private. */
   avatar: AvatarThumbnailState | null;
 }

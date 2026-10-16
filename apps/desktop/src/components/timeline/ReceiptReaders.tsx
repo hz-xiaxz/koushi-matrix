@@ -1,6 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
-import { getActiveLocale, t } from "../../i18n/messages";
+import { getActiveLocale, localeLanguageTag, t } from "../../i18n/messages";
 import { avatarInitial, peopleFacingLabel } from "../../app/uiShared";
 import {
   FloatingLayer,
@@ -576,7 +576,7 @@ function compactReaderRow(receipt: LiveReadReceipt): ReaderRow {
     initials: avatarInitial(receiptDisplayName(receipt)),
     timestamp: receipt.timestamp_ms === null ? null : {
       unix_ms: String(receipt.timestamp_ms),
-      locale: getActiveLocale() === "ja" ? "ja" : "en"
+      locale: localeLanguageTag(getActiveLocale())
     },
     avatar: receipt.avatar?.thumbnail ?? null
   };
@@ -613,7 +613,10 @@ function createReaderResourceUrl(
   return { url: `data:${type};base64,${globalThis.btoa(binary)}`, revoke: null };
 }
 
-function formatReceiptTimestamp(timestampMs: number | null, locale: "en" | "ja"): string | null {
+function formatReceiptTimestamp(
+  timestampMs: number | null,
+  locale: NonNullable<ReaderRow["timestamp"]>["locale"]
+): string | null {
   if (timestampMs === null) {
     return null;
   }
