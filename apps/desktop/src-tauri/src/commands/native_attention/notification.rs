@@ -298,7 +298,7 @@ fn show_banner_and_wait_for_activation(
     target: NativeNotificationTarget,
 ) {
     {
-        let mut notification = response_notification(title, body, notification_app_identity(app));
+        let notification = response_notification(title, body, notification_app_identity(app));
         let Ok(handle) = notification.show() else {
             record_show_failed();
             return;
@@ -366,7 +366,7 @@ fn record_show_failed() {
 
 #[cfg(not(target_os = "macos"))]
 fn show_without_activation(app: &AppHandle, payload: &NativeNotificationPayload) -> bool {
-    let mut notification = response_notification(
+    let notification = response_notification(
         &payload.title,
         &payload.body,
         notification_app_identity(app),
