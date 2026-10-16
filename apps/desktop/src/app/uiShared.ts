@@ -5,6 +5,7 @@ import {
   type MouseEvent
 } from "react";
 
+import { uiDateTimeFormat } from "../domain/intlFormatCache";
 import { serverNameFromMatrixId } from "../domain/matrixPermalink";
 import type {
   ComposerMode,
@@ -386,14 +387,14 @@ export function serverNameFromRoomId(roomId: string): string | null {
 }
 
 export function formatTime(timestampMs: number): string {
-  return new Intl.DateTimeFormat("ja-JP", {
+  return uiDateTimeFormat({
     hour: "2-digit",
     minute: "2-digit"
   }).format(new Date(timestampMs));
 }
 
 export function formatScheduledSendTime(timestampMs: number): string {
-  return new Intl.DateTimeFormat(undefined, {
+  return uiDateTimeFormat({
     month: "short",
     day: "numeric",
     hour: "2-digit",

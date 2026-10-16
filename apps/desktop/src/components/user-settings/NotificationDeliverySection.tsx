@@ -12,13 +12,13 @@ import {
 } from "lucide-react";
 
 import { openExternalHttpUrl } from "../../backend/linkMediaRuntime";
-import { getActiveLocale, t, type MessageId } from "../../i18n/messages";
+import { t, type MessageId } from "../../i18n/messages";
 import { ImeSafeForm, ImeTextField, SecureImeTextField } from "../ImeTextControl";
 import {
   accountNotificationsFailureMessage,
   isKeywordOperation
 } from "./AccountNotificationsSections";
-import { cachedDateTimeFormat } from "../../domain/intlFormatCache";
+import { uiDateTimeFormat } from "../../domain/intlFormatCache";
 import { roomDisplayLabel } from "../../domain/roomDisplayLabel";
 import {
   DEFAULT_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES,
@@ -688,7 +688,7 @@ function SecondsField({
 }
 
 function formatAttemptTime(atMs: number): string {
-  return cachedDateTimeFormat(getActiveLocale(), { dateStyle: "medium", timeStyle: "short" }).format(
+  return uiDateTimeFormat({ dateStyle: "medium", timeStyle: "short" }).format(
     new Date(atMs)
   );
 }
