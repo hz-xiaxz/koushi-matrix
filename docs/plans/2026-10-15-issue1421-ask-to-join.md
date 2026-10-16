@@ -76,3 +76,26 @@ primitives: create-room join-rule content, `Client::knock`, and
   subscription; start from the stored-members query and migrate later.
 - Accept/Deny reuse the existing invite/kick commands, so no new protocol command
   is planned.
+
+## Status (2026-10-15)
+
+**A1 (headless contract) implemented and verified.**
+
+- `knock_restricted` create support with its membership allow list and a V10
+  version pin; create preview rejects public+knock_restricted and an empty allow
+  list; the create draft seeds the attachment Space for the knock_restricted
+  choice.
+- An explicit access policy no longer carries the legacy `private_chat` preset,
+  which won over the explicit `m.room.join_rules` and turned a knock create into
+  invite.
+- The `room_management` QA stage creates a knock room through Core and has a
+  second, SDK-only account knock it (`knock_room_created=ok`,
+  `knock_join_request=ok`), green on both disposable local servers.
+
+`is_submittable` is deliberately unchanged, so existing-room knock_restricted
+edits stay rejected for now.
+
+**B still to do:** room-version availability read from the server capabilities
+(the reviewer's second blocker), the create-dialog "Ask to join" choice, and the
+Room Info knock-request review surface (`RoomMemberMembership::Knocked`, accept
+via invite, deny via kick, the requester's reason).
