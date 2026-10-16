@@ -34,6 +34,12 @@ ServerChan Turbo) owns its targets, content mode, consent, and timing lane, with
 no master switch; the settings page stacks OS, this-device, and homeserver
 sections, and OS previews are a verified, default-off account setting.
 
+[#1468 notification settings tabs](../plans/2026-10-16-issue1468-notification-settings-tabs.md)
+replaces the stacked page with three tabs and a destination list. Add and edit open a
+configuration screen whose Save is one atomic `SaveNotificationSink` command: the
+non-secret sink, the secret, and a core-minted consent. A failed secret store rolls
+back an added destination.
+
 [#1396 avatar thumbnails](../plans/2026-10-13-issue1396-avatar-thumbnails.md)
 requests a homeserver thumbnail sized from the 40 px avatar slot, resizes the
 fallback locally to the same long edge, keys the cache by thumbnail identity, and

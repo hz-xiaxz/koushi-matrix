@@ -1060,3 +1060,274 @@ async fn a_new_secret_is_not_stored_while_the_old_binding_cannot_be_retired() {
     assert!(binding.is_none() || binding == Some(old_binding));
     drop(runtime);
 }
+
+// #1468: the settings screen's single Save.
+
+/// Send one `SaveNotificationSink` and return its request id.
+async fn save_sink(
+    connection: &super::CoreConnection,
+    sink: NotificationSinkSettings,
+    secret: Option<&str>,
+    accept_content_consent: bool,
+) -> koushi_protocol::RequestId {
+    let request_id = connection.next_request_id();
+    connection
+        .command(CoreCommand::App(AppCommand::SaveNotificationSink {
+            request_id,
+            sink,
+            secret: secret.map(koushi_state::AuthSecret::new),
+            accept_content_consent,
+        }))
+        .await
+        .expect("the save command is admitted");
+    request_id
+}
+
+fn fixture_sink(endpoint: &str) -> NotificationSinkSettings {
+    delivery_settings(endpoint).sinks.remove(0)
+}
+
+fn rejected(
+    kind: koushi_protocol::NotificationDeliveryFailureKind,
+) -> koushi_protocol::CoreFailure {
+    koushi_protocol::CoreFailure::NotificationDeliveryRejected { kind }
+}
+
+#[tokio::test]
+async fn one_save_adds_a_destination_with_its_secret() {
+    let (runtime, stores) = CoreRuntime::start_isolated_with_event_capacity(64);
+    let mut connection = runtime.attach();
+    save_sink(
+        &connection,
+        fixture_sink("https://relay.example.invalid/emails"),
+        Some(SECRET),
+        false,
+    )
+    .await;
+    wait_for_runtime_snapshot(&mut connection, |state| {
+        state
+            .notification_delivery
+            .sinks
+            .first()
+            .is_some_and(|sink| sink.secret_configured)
+    })
+    .await;
+    let binding = snapshot_binding(&connection).expect("the save bound the credential");
+    wait_for_settings_binding(&stores, &binding).await;
+    let stored = credential_store(&stores)
+        .load_notification_sink_secret(SINK)
+        .expect("the credential store is readable")
+        .expect("the save stored the secret");
+    assert_eq!(stored.as_str(), SECRET);
+    drop(runtime);
+}
+
+#[tokio::test]
+async fn a_save_without_a_secret_keeps_the_stored_credential() {
+    let (runtime, _stores, mut connection) =
+        runtime_with_sink("https://relay.example.invalid/emails").await;
+    set_secret(&connection).await;
+    wait_for_runtime_snapshot(&mut connection, |state| {
+        state.notification_delivery.sinks[0].secret_configured
+    })
+    .await;
+    let binding = snapshot_binding(&connection);
+    let mut sink = connection.snapshot().settings.values.delivery.sinks[0].clone();
+    sink.sender_name = "Renamed".to_owned();
+    // The renderer echoing a binding it never owned changes nothing.
+    sink.secret_binding = None;
+    save_sink(&connection, sink, None, false).await;
+    let state = wait_for_runtime_snapshot(&mut connection, |state| {
+        state.settings.values.delivery.sinks[0].sender_name == "Renamed"
+    })
+    .await;
+    assert!(state.notification_delivery.sinks[0].secret_configured);
+    assert_eq!(snapshot_binding(&connection), binding);
+    drop(runtime);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_failed_secret_store_removes_the_destination_the_save_added() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (runtime, stores) = CoreRuntime::start_isolated_with_event_capacity(64);
+    let mut connection = runtime.attach();
+    let credential_dir = stores.credential_dir().to_path_buf();
+    std::fs::create_dir_all(&credential_dir).expect("the credential directory exists");
+    let writable = std::fs::metadata(&credential_dir)
+        .expect("the credential directory exists")
+        .permissions();
+    std::fs::set_permissions(&credential_dir, std::fs::Permissions::from_mode(0o555))
+        .expect("the credential directory can be made read-only");
+
+    let request_id = save_sink(
+        &connection,
+        fixture_sink("https://relay.example.invalid/emails"),
+        Some(SECRET),
+        false,
+    )
+    .await;
+    let failure = wait_for_failure(&mut connection, request_id).await;
+    std::fs::set_permissions(&credential_dir, writable).expect("permissions are restored");
+
+    assert!(
+        !matches!(
+            failure,
+            koushi_protocol::CoreFailure::NotificationDeliveryRejected { .. }
+        ),
+        "the store's own failure is reported: {failure:?}"
+    );
+    let state = wait_for_runtime_snapshot(&mut connection, |state| {
+        state.settings.values.delivery.sinks.is_empty()
+    })
+    .await;
+    assert!(state.notification_delivery.sinks.is_empty());
+    drop(runtime);
+}
+
+#[tokio::test]
+async fn a_serverchan_consent_accepted_in_the_save_names_the_key_it_stored() {
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(64);
+    let mut connection = runtime.attach();
+    let mut sink = serverchan_settings("https://sctapi.ftqq.com")
+        .sinks
+        .remove(0);
+    sink.content = NotificationDeliveryContent::Full;
+    save_sink(&connection, sink, Some(SENDKEY), true).await;
+    let state = wait_for_runtime_snapshot(&mut connection, |state| {
+        state
+            .settings
+            .values
+            .delivery
+            .sinks
+            .first()
+            .is_some_and(|sink| sink.content_consent.is_some())
+    })
+    .await;
+    let saved = &state.settings.values.delivery.sinks[0];
+    assert_eq!(saved.effective_content(), NotificationDeliveryContent::Full);
+    let consent = saved.content_consent.as_ref().expect("consent minted");
+    assert!(consent.recipient.starts_with("sendkey#"));
+    assert!(state.notification_delivery.sinks[0].secret_configured);
+    drop(runtime);
+}
+
+#[tokio::test]
+async fn a_consent_the_renderer_built_is_not_taken() {
+    let (runtime, _stores, mut connection) =
+        runtime_with_sink("https://relay.example.invalid/emails").await;
+    let mut sink = connection.snapshot().settings.values.delivery.sinks[0].clone();
+    sink.content = NotificationDeliveryContent::Full;
+    sink.content_consent = Some(sink.consent_for_current(1));
+    sink.sender_name = "Marker".to_owned();
+    save_sink(&connection, sink, None, false).await;
+    let state = wait_for_runtime_snapshot(&mut connection, |state| {
+        state.settings.values.delivery.sinks[0].sender_name == "Marker"
+    })
+    .await;
+    let saved = &state.settings.values.delivery.sinks[0];
+    assert!(saved.content_consent.is_none());
+    assert_eq!(
+        saved.effective_content(),
+        NotificationDeliveryContent::NamesOnly
+    );
+    drop(runtime);
+}
+
+#[tokio::test]
+async fn a_malformed_sendkey_save_writes_nothing() {
+    let (runtime, stores) = CoreRuntime::start_isolated_with_event_capacity(64);
+    let mut connection = runtime.attach();
+    let sink = serverchan_settings("https://sctapi.ftqq.com")
+        .sinks
+        .remove(0);
+    let request_id = save_sink(&connection, sink, Some("sctp123tfixturekey"), false).await;
+    let failure = wait_for_failure(&mut connection, request_id).await;
+    assert_eq!(
+        failure,
+        rejected(koushi_protocol::NotificationDeliveryFailureKind::UnsupportedSendKey)
+    );
+    assert!(
+        connection
+            .snapshot()
+            .settings
+            .values
+            .delivery
+            .sinks
+            .is_empty()
+    );
+    assert!(
+        credential_store(&stores)
+            .load_notification_sink_secret(SINK)
+            .expect("the credential store is readable")
+            .is_none()
+    );
+    drop(runtime);
+}
+
+#[tokio::test]
+async fn an_incomplete_destination_is_refused_by_kind() {
+    let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(64);
+    let mut connection = runtime.attach();
+    let mut sink = fixture_sink("https://relay.example.invalid/emails");
+    sink.destination.clear();
+    let request_id = save_sink(&connection, sink, Some(SECRET), false).await;
+    let failure = wait_for_failure(&mut connection, request_id).await;
+    assert_eq!(
+        failure,
+        rejected(koushi_protocol::NotificationDeliveryFailureKind::IncompleteSink)
+    );
+    assert!(
+        connection
+            .snapshot()
+            .settings
+            .values
+            .delivery
+            .sinks
+            .is_empty()
+    );
+    drop(runtime);
+}
+
+#[tokio::test]
+async fn a_save_beyond_the_destination_limit_is_refused() {
+    let template = fixture_sink("https://relay.example.invalid/emails");
+    let sinks = (0..koushi_state::MAX_NOTIFICATION_DELIVERY_SINKS)
+        .map(|index| NotificationSinkSettings {
+            id: format!("sink-{index}"),
+            ..template.clone()
+        })
+        .collect();
+    let (runtime, _stores, mut connection) =
+        runtime_with_delivery(NotificationDeliverySettings { sinks }).await;
+    wait_for_runtime_snapshot(&mut connection, |state| {
+        state.settings.values.delivery.sinks.len() == koushi_state::MAX_NOTIFICATION_DELIVERY_SINKS
+    })
+    .await;
+    let request_id = save_sink(
+        &connection,
+        NotificationSinkSettings {
+            id: "one-too-many".to_owned(),
+            ..template
+        },
+        None,
+        false,
+    )
+    .await;
+    let failure = wait_for_failure(&mut connection, request_id).await;
+    assert_eq!(
+        failure,
+        rejected(koushi_protocol::NotificationDeliveryFailureKind::SinkLimitReached)
+    );
+    assert!(
+        connection
+            .snapshot()
+            .settings
+            .values
+            .delivery
+            .sink("one-too-many")
+            .is_none()
+    );
+    drop(runtime);
+}

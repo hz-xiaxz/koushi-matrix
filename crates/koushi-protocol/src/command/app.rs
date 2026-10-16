@@ -193,6 +193,18 @@ pub enum AppCommand {
         /// Zeroized on drop, like every other secret a command carries.
         secret: koushi_state::AuthSecret,
     },
+    /// #1468: save one whole destination - its non-secret configuration, optionally a new
+    /// secret, and optionally the user's plaintext consent - as one command. The core
+    /// validates before writing, rolls an added sink back when its secret cannot be
+    /// stored, and mints the consent itself after the final binding, so the renderer never
+    /// names a binding or builds a consent.
+    SaveNotificationSink {
+        request_id: RequestId,
+        sink: koushi_state::NotificationSinkSettings,
+        /// Zeroized on drop; `None` keeps whatever credential the sink already holds.
+        secret: Option<koushi_state::AuthSecret>,
+        accept_content_consent: bool,
+    },
     /// #1427: forget the secret stored for one sink. The sink itself stays configured;
     /// it simply stops being a sink this device can send through.
     ClearNotificationDeliverySecret {
@@ -570,6 +582,25 @@ impl fmt::Debug for AppCommand {
                 .field("request_id", request_id)
                 .field("sink_id", sink_id)
                 .field("secret", &"NotificationSinkSecret(<redacted>)")
+                .finish(),
+            // Addresses and endpoints are not printed either: the sink's own `Debug` is
+            // redacted, and only the id, whether a secret travels, and the consent flag show.
+            Self::SaveNotificationSink {
+                request_id,
+                sink,
+                secret,
+                accept_content_consent,
+            } => formatter
+                .debug_struct("SaveNotificationSink")
+                .field("request_id", request_id)
+                .field("sink_id", &sink.id)
+                .field(
+                    "secret",
+                    &secret
+                        .as_ref()
+                        .map(|_| "NotificationSinkSecret(<redacted>)"),
+                )
+                .field("accept_content_consent", accept_content_consent)
                 .finish(),
             Self::ClearNotificationDeliverySecret {
                 request_id,

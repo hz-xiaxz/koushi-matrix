@@ -74,6 +74,12 @@ pub enum NotificationDeliveryFailureKind {
     /// The secret is not a ServerChan Turbo SendKey: it is a ServerChan³ key (`sctp…`), or
     /// it does not have the `SCT…` shape. Nothing was stored (#1460).
     UnsupportedSendKey,
+    /// The destination lacks a field it needs to be attempted at all (an address, a host),
+    /// so saving it would only drop it again. Nothing was written (#1468).
+    IncompleteSink,
+    /// Adding this destination would exceed the destination limit, so nothing was
+    /// written (#1468).
+    SinkLimitReached,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

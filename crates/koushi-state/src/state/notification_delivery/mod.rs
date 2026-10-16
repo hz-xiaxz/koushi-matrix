@@ -113,6 +113,14 @@ const MAX_NOTIFICATION_SINK_ID_BYTES: usize = 64;
 /// It is repeated here because `koushi-state` is a data crate with no dependency on
 /// the senders; the core compares the two when it builds a delivery.
 pub const DEFAULT_RESEND_ENDPOINT: &str = "https://api.resend.com/emails";
+
+/// The sender Resend lets every account use without a domain of its own (#1468). Resend
+/// delivers mail from it only to the address registered on the Resend account, which is
+/// exactly the "notify myself" case, so an empty Resend sender falls back to it.
+pub const DEFAULT_RESEND_FROM_ADDRESS: &str = "onboarding@resend.dev";
+
+/// The sender name a mail destination uses when the user leaves it empty (#1468).
+pub const DEFAULT_NOTIFICATION_SENDER_NAME: &str = "Koushi";
 /// Default endpoint of the ServerChan Turbo sink, matching
 /// `koushi_notify::SERVERCHAN_ENDPOINT`. The request path appends the SendKey, so the
 /// endpoint itself never names the recipient.
@@ -564,6 +572,9 @@ impl NotificationSinkSettings {
                 if endpoint.is_empty() {
                     *endpoint = DEFAULT_RESEND_ENDPOINT.to_owned();
                 }
+                if self.from_address.is_empty() {
+                    self.from_address = DEFAULT_RESEND_FROM_ADDRESS.to_owned();
+                }
             }
             NotificationSinkConfig::ServerChan { endpoint } => {
                 *endpoint = trimmed_field(endpoint).trim_end_matches('/').to_owned();
@@ -588,6 +599,9 @@ impl NotificationSinkSettings {
                 *port = (*port).max(1);
                 *username = trimmed_field(username);
             }
+        }
+        if self.sender_name.is_empty() {
+            self.sender_name = DEFAULT_NOTIFICATION_SENDER_NAME.to_owned();
         }
         if matches!(self.config, NotificationSinkConfig::ServerChan { .. }) {
             // The recipient is the SendKey owner; an address field would be a stale copy

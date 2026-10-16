@@ -90,6 +90,27 @@ pub async fn set_notification_delivery_secret(
     Ok(admission)
 }
 
+/// #1468: the settings screen's single Save for one destination. The secret, when present,
+/// crosses this boundary once and is moved straight into the core command.
+#[tauri::command]
+pub async fn save_notification_sink(
+    account_tab_id: Option<String>,
+    sink: koushi_state::NotificationSinkSettings,
+    secret: Option<String>,
+    accept_content_consent: bool,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    let admission = submit_core_command_with_admission(
+        state.inner(),
+        build_save_notification_sink_command(request_id, sink, secret, accept_content_consent),
+    )
+    .await?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(admission)
+}
+
 #[tauri::command]
 pub async fn clear_notification_delivery_secret(
     account_tab_id: Option<String>,
@@ -167,6 +188,20 @@ pub(super) fn build_set_notification_delivery_secret_command(
         request_id,
         sink_id,
         secret: koushi_state::AuthSecret::new(secret),
+    })
+}
+
+pub(super) fn build_save_notification_sink_command(
+    request_id: koushi_protocol::RequestId,
+    sink: koushi_state::NotificationSinkSettings,
+    secret: Option<String>,
+    accept_content_consent: bool,
+) -> CoreCommand {
+    CoreCommand::App(AppCommand::SaveNotificationSink {
+        request_id,
+        sink,
+        secret: secret.map(koushi_state::AuthSecret::new),
+        accept_content_consent,
     })
 }
 

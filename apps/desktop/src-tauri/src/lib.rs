@@ -1713,6 +1713,7 @@ pub fn run() {
             commands::settings::rebuild_search_index,
             commands::settings::set_room_url_preview_override,
             commands::settings::set_notification_delivery_secret,
+            commands::settings::save_notification_sink,
             commands::settings::clear_notification_delivery_secret,
             commands::settings::test_notification_delivery,
             desktop_menu::native_menu_label_keys,

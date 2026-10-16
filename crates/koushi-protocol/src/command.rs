@@ -57,6 +57,7 @@ impl CoreCommand {
                 | AppCommand::UpdateSettings { request_id, .. }
                 | AppCommand::ImportLegacySettings { request_id, .. }
                 | AppCommand::SetNotificationDeliverySecret { request_id, .. }
+                | AppCommand::SaveNotificationSink { request_id, .. }
                 | AppCommand::ClearNotificationDeliverySecret { request_id, .. }
                 | AppCommand::TestNotificationDelivery { request_id, .. }
                 | AppCommand::UpdateNavigationPreference { request_id, .. }
