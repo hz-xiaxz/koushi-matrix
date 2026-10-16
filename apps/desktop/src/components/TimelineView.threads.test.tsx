@@ -30,6 +30,7 @@ import { TimelineStoreContext } from "./timelineStoreContext";
 import { TimelineView, clearTimelineViewportSessionMemoryForTests } from "./TimelineView";
 import type { TimelineContinuityState } from "../domain/types";
 import { resetTimelineTransportStats } from "../domain/timelineTransportStats";
+import type { TimelineScrollDiagnostics } from "../domain/timelineScrollDiagnostics";
 
 afterEach(() => {
   cleanup();
@@ -2044,6 +2045,9 @@ describe("TimelineView", () => {
 
     // The previous presentation puts Normal 300 after a date divider and the
     // root block. Its first-visible offset is +10px.
+    const latestScrollDiagnostics = () =>
+      onScrollDiagnosticsChange.mock.lastCall?.[0] as TimelineScrollDiagnostics | undefined;
+    const measurementFlushesBeforeScroll = latestScrollDiagnostics()?.measurementFlushes ?? 0;
     timeline.scrollTop = 302 * rowHeight - 10;
     fireEvent.wheel(timeline, { deltaY: -1 });
     fireEvent.scroll(timeline);
@@ -2052,6 +2056,18 @@ describe("TimelineView", () => {
       expect(
         document.querySelector('[data-content-event-id="$normal300:example.invalid"]')
       ).not.toBeNull();
+    });
+    // The scenario starts from a settled viewport: the rows mounted by the
+    // scroll above are committed to the height model by the real-timer idle
+    // flush. Wait for that flush explicitly instead of depending on how much
+    // wall time elapsed before fake timers take over; otherwise the projection
+    // transaction is still waiting for measurement and no frame may write.
+    await waitFor(() => {
+      const diagnostics = latestScrollDiagnostics();
+      expect({
+        flushedAfterScroll: (diagnostics?.measurementFlushes ?? 0) > measurementFlushesBeforeScroll,
+        pendingMeasuredRows: diagnostics?.pendingMeasuredRows
+      }).toEqual({ flushedAfterScroll: true, pendingMeasuredRows: 0 });
     });
     vi.useFakeTimers();
     const frames = new Map<number, FrameRequestCallback>();
