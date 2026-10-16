@@ -636,6 +636,11 @@ fn implemented_final_tokens_include_thread() {
             "notification_delivery_prefix_consent_cleared=ok",
             "notification_delivery_prefix_endpoint_cleared=ok",
             "notification_delivery_prefix_hygiene=ok",
+            "notification_delivery_serverchan_configured=ok",
+            "notification_delivery_serverchan_sendkey_drops_consent=ok",
+            "notification_delivery_serverchan_request=ok",
+            "notification_delivery_serverchan_no_text=ok",
+            "notification_delivery_serverchan_secret_hygiene=ok",
             "notification_delivery=ok",
         ][..]
     );
@@ -1077,6 +1082,11 @@ fn implemented_final_tokens_include_safety() {
             "notification_delivery_prefix_consent_cleared=ok",
             "notification_delivery_prefix_endpoint_cleared=ok",
             "notification_delivery_prefix_hygiene=ok",
+            "notification_delivery_serverchan_configured=ok",
+            "notification_delivery_serverchan_sendkey_drops_consent=ok",
+            "notification_delivery_serverchan_request=ok",
+            "notification_delivery_serverchan_no_text=ok",
+            "notification_delivery_serverchan_secret_hygiene=ok",
             "notification_delivery=ok",
         ][..]
     );

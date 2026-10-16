@@ -36,6 +36,7 @@ fn snapshot(email_active: bool, group: NotificationCategoryState) -> AccountNoti
         }],
         unverified_email_pusher_count: 0,
         keywords: Vec::new(),
+        server_email_delivery: koushi_state::ServerEmailDelivery::Unknown,
     }
 }
 

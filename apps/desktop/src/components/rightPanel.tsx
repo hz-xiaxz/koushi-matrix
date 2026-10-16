@@ -609,6 +609,7 @@ export function ContextualRightPanel({
             onSelect={onSelectAccountTab}
             onAdd={onAddAccountTab}
             onRemove={onRemoveSignedOutAccountTab}
+            showActivity={false}
           />
         ) : null}
         onClose={onClosePanel}

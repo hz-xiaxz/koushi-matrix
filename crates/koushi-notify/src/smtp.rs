@@ -113,7 +113,7 @@ impl SmtpSink {
         request: &NotificationDeliveryRequest,
     ) -> NotificationDeliveryOutcome {
         match tokio::time::timeout(DELIVERY_TIMEOUT, self.deliver(secret, request)).await {
-            Ok(Ok(())) => NotificationDeliveryOutcome::Delivered,
+            Ok(Ok(())) => NotificationDeliveryOutcome::Accepted,
             Ok(Err(failure)) => NotificationDeliveryOutcome::Failed(failure),
             // A relay that never answers, or a handshake that never finishes, is a
             // transport failure: no verdict was reached, and the caller owns any retry.

@@ -356,6 +356,40 @@ fn snapshot_matches_pushers_to_validated_emails_case_insensitively() {
     assert!(snapshot.email_notifications_active());
 }
 
+/// #1460: only a verified fact makes a server known not to send pusher mail.
+#[test]
+fn server_email_delivery_is_known_unavailable_only_for_matrix_org() {
+    use koushi_state::ServerEmailDelivery::{KnownUnavailable, Unknown};
+    assert_eq!(
+        server_email_delivery_for_user("@alice:matrix.org"),
+        KnownUnavailable
+    );
+    assert_eq!(
+        server_email_delivery_for_user("@alice:Matrix.Org"),
+        KnownUnavailable
+    );
+    assert_eq!(
+        server_email_delivery_for_user("@alice:example.invalid"),
+        Unknown
+    );
+    assert_eq!(
+        server_email_delivery_for_user("@alice:matrix.org.example.invalid"),
+        Unknown
+    );
+    assert_eq!(
+        server_email_delivery_for_user("@alice:sub.matrix.org"),
+        Unknown
+    );
+    assert_eq!(server_email_delivery_for_user("not-a-user-id"), Unknown);
+    let snapshot = build_account_notifications_snapshot(
+        &defaults(),
+        koushi_state::NotificationEmailManagement::Available,
+        &[],
+        &[],
+    );
+    assert_eq!(snapshot.server_email_delivery, Unknown);
+}
+
 /// #1427: the keyword editor reads the same read the category surface makes, in
 /// the server's own rule order, and `enabled` stays the server fact it is.
 #[test]

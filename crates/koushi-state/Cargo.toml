@@ -8,6 +8,7 @@ license.workspace = true
 serde = { version = "1", features = ["derive", "rc"] }
 unicode-casefold = "0.2"
 unicode-normalization = "0.1"
+unicode-segmentation = "1"
 zeroize = "1"
 
 [dev-dependencies]

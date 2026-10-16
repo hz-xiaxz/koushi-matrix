@@ -318,18 +318,8 @@ export function defaultSnapshotResponse() {
             send_read_receipts: true,
             send_typing_notifications: true
           },
-          // #1427: the device-local delivery settings block, off and unconfigured.
+          // #1460: the device-local delivery settings, with no destination configured.
           delivery: {
-            enabled: false,
-            direct_messages: true,
-            mentions: true,
-            keywords: true,
-            only_when_unfocused: true,
-            dwell_secs: 300,
-            min_interval_secs: 900,
-            prefix_chars: 0,
-            prefix_consent: null,
-            watched: [],
             sinks: []
           },
           display: {

@@ -51,6 +51,7 @@ fn debug_redacts_addresses() {
             pattern: "secret".to_owned(),
             enabled: false,
         }],
+        server_email_delivery: ServerEmailDelivery::Unknown,
     };
     let pending = PendingNotificationEmail {
         address: "secret@example.invalid".to_owned(),
@@ -170,8 +171,18 @@ fn keyword_wire_shapes_match_the_typescript_mirror() {
         emails: Vec::new(),
         unverified_email_pusher_count: 0,
         keywords: vec![rule("client.keyword.alpha", "alpha", false)],
+        server_email_delivery: ServerEmailDelivery::KnownUnavailable,
     };
     let value = serde_json::to_value(&snapshot).unwrap();
+    assert_eq!(value["server_email_delivery"], "knownUnavailable");
+    // A snapshot from before #1460 carries no verdict and reads as unknown.
+    let mut legacy = value.clone();
+    legacy
+        .as_object_mut()
+        .unwrap()
+        .remove("server_email_delivery");
+    let legacy: AccountNotificationsSnapshot = serde_json::from_value(legacy).unwrap();
+    assert_eq!(legacy.server_email_delivery, ServerEmailDelivery::Unknown);
     assert_eq!(
         value["keywords"],
         serde_json::json!([{

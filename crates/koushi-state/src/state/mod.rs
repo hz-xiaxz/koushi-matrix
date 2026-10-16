@@ -71,8 +71,8 @@ pub use account_notifications::{
     MAX_NOTIFICATION_EMAIL_LEN, MAX_NOTIFICATION_KEYWORD_CHARS, MAX_NOTIFICATION_KEYWORDS,
     NotificationCategory, NotificationCategoryState, NotificationCategoryStates,
     NotificationEmailAddress, NotificationEmailManagement, NotificationKeywordRuleState,
-    PendingNotificationEmail, normalize_notification_email, normalize_notification_keyword,
-    normalize_notification_keyword_removal,
+    PendingNotificationEmail, ServerEmailDelivery, normalize_notification_email,
+    normalize_notification_keyword, normalize_notification_keyword_removal,
 };
 
 // ── Re-exports: sync ────────────────────────────────────────────────────────
@@ -132,12 +132,16 @@ pub use settings::{
 
 // ── Re-exports: notification delivery ───────────────────────────────────────
 pub use notification_delivery::{
-    MAX_NOTIFICATION_DELIVERY_DWELL_SECS, MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
-    MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS, MAX_NOTIFICATION_DELIVERY_PREFIX_SOURCE_CHARS,
-    NotificationDeliveryOutcomeState, NotificationDeliveryPrefixConsent,
+    BoundedNotificationDeliveryText, DEFAULT_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES,
+    DEFAULT_SERVERCHAN_ENDPOINT, MAX_NOTIFICATION_DELIVERY_DWELL_SECS,
+    MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS, MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
+    MAX_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES, NOTIFICATION_DELIVERY_MAIL_TEXT_BUDGET,
+    NOTIFICATION_DELIVERY_SERVERCHAN_TEXT_BUDGET, NotificationDeliveryContent,
+    NotificationDeliveryContentConsent, NotificationDeliveryOutcomeState,
     NotificationDeliveryPresetState, NotificationDeliverySettings, NotificationDeliverySinkState,
-    NotificationDeliveryState, NotificationDeliveryTarget, NotificationSinkConfig,
-    NotificationSinkSettings, SmtpTls, bounded_notification_delivery_prefix_source,
+    NotificationDeliveryState, NotificationDeliveryTarget, NotificationDeliveryTargets,
+    NotificationDeliveryTiming, NotificationSinkConfig, NotificationSinkSettings, SmtpTls,
+    bounded_notification_delivery_message_source,
 };
 
 // ── Re-exports: profile ─────────────────────────────────────────────────────

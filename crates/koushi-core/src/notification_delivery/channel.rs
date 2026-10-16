@@ -1,17 +1,23 @@
-//! The runtime state of the device-local delivery channel.
+//! The runtime state of the device-local delivery channel: one lane per destination.
 //!
-//! Everything the channel has to remember between two observations lives here: the dwell
-//! trackers of the rooms that are still qualifying, the rooms that came due while the
-//! coalescing window was closed, which sinks hold a credential, how each sink's last send
-//! ended, and the retries of the window that is still open. Nothing here reads the network,
-//! the credential store, or the wall clock - the caller passes the current [`Instant`] and
-//! the current qualifying set, spawns the sends the channel hands back, and reports their
-//! outcomes. That keeps the whole state machine provable without a runtime, and keeps a sink
-//! secret out of this type entirely: only "configured: yes or no" is stored.
+//! Each destination is an independent lane (#1460): its dwell tracker, the room ids it
+//! holds for the next window, its last attempt, its window sequence, its attempts, its
+//! in-flight send, and its retry. A lane holds room **ids**, never a rendered payload: the
+//! message is rendered at send time from the lane's current observation, and a retry is
+//! rebuilt the same way, so neither can carry text or counts the badge no longer shows
+//! (#1454). [`NotificationDeliveryChannel::next_wake_at`] includes each lane's coalescing
+//! deadline while it holds rooms, so a batch held behind the minimum interval is released
+//! at that deadline instead of waiting for an unrelated event (#1455).
 //!
-//! Bounds: the held set is capped at [`MAX_HELD_NOTIFICATION_ROOMS`], at most
-//! [`MAX_NOTIFICATION_DELIVERY_ATTEMPTS`] attempts are made per sink per window, and a retry
-//! waits at most [`MAX_NOTIFICATION_DELIVERY_RETRY`]. Nothing is persisted, so exiting drops
+//! Nothing here reads the network, the credential store, or the wall clock - the caller
+//! passes the current [`Instant`] and the current attention candidates, spawns the sends
+//! the channel hands back, and reports their outcomes. That keeps the whole state machine
+//! provable without a runtime, and keeps a sink secret out of this type entirely: only
+//! "configured: yes or no" is stored.
+//!
+//! Bounds: each lane holds at most [`MAX_HELD_NOTIFICATION_ROOMS`] rooms, makes at most
+//! [`MAX_NOTIFICATION_DELIVERY_ATTEMPTS`] attempts per window, and waits at most
+//! [`MAX_NOTIFICATION_DELIVERY_RETRY`] for a retry. Nothing is persisted, so exiting drops
 //! the queue, exactly as the canon requires.
 
 use std::collections::{BTreeMap, BTreeSet};
@@ -22,20 +28,21 @@ use koushi_notify::{NotificationDeliveryFailure, NotificationDeliveryOutcome};
 use koushi_state::{
     NotificationDeliveryOutcomeState, NotificationDeliveryPresetState,
     NotificationDeliverySettings, NotificationDeliverySinkState, NotificationDeliveryState,
-    NotificationSinkSettings, SmtpTls,
+    NotificationSinkSettings, RoomAttentionCandidate, SmtpTls,
 };
 
-use super::digest::{NotificationDeliveryIntent, coalesce_window, digest};
+use super::digest::{NotificationDeliveryIntent, coalesce_window, idempotency_key, render_intent};
 use super::dwell::{DwellTracker, QualifyingRoom};
+use super::qualifying::qualifying_rooms;
 use crate::executor::Instant;
 
-/// How many rooms one held batch may carry into the next window.
+/// How many rooms one lane may hold for its next window.
 ///
 /// The digest names [`super::digest::MAX_NOTIFICATION_DIGEST_ROOMS`] of them and counts the
 /// rest, so this cap only bounds the memory a busy account can pin while the window is shut.
 pub(crate) const MAX_HELD_NOTIFICATION_ROOMS: usize = 128;
 
-/// How many attempts one sink gets for one window: the first send and two retries.
+/// How many attempts one lane gets for one window: the first send and two retries.
 ///
 /// Only a rate limit and a transport failure are ever retried, so this bounds a provider that
 /// keeps answering 429, or a network that keeps timing out, inside one window.
@@ -45,8 +52,8 @@ pub(crate) const MAX_NOTIFICATION_DELIVERY_ATTEMPTS: u32 = 3;
 ///
 /// A provider that rate-limits without a `Retry-After` header is still asking this device to
 /// slow down, and a transport failure deserves a moment before the same connect is tried
-/// again. This is a floor, never a ceiling: `min_interval_secs` and the provider's own delay
-/// both raise it.
+/// again. This is a floor, never a ceiling: the destination's minimum interval and the
+/// provider's own delay both raise it.
 const NOTIFICATION_DELIVERY_RETRY_FLOOR: Duration = Duration::from_secs(30);
 
 /// The longest wait before a retry, so a provider that asks for a day cannot pin the
@@ -73,10 +80,124 @@ impl fmt::Debug for NotificationDeliveryJob {
     }
 }
 
-/// A retry of the window that is still open, armed for a later instant.
-struct NotificationDeliveryRetry {
+/// One attempt a lane made: which rooms it covered and what it sent.
+///
+/// The rendered intent is kept only so a retry can tell whether its rebuilt payload is
+/// byte-identical, which is what decides whether it may reuse the idempotency key. It is
+/// never sent again as is.
+struct LaneAttempt {
+    room_ids: BTreeSet<String>,
     intent: NotificationDeliveryIntent,
+}
+
+/// A retry of the lane's last attempt, armed for a later instant.
+struct LaneRetry {
+    attempt: LaneAttempt,
     not_before: Instant,
+}
+
+/// One destination's lane.
+struct NotificationDeliveryLane {
+    dwell: Duration,
+    tracker: DwellTracker,
+    /// The lane's current qualifying set, from the last observation. Rendering reads this,
+    /// so a send always describes the state the badge shows at that moment.
+    current: Vec<QualifyingRoom>,
+    /// Room ids that came due and wait for the coalescing window.
+    held: BTreeSet<String>,
+    /// When this lane last attempted a send, which is what its minimum interval measures from.
+    last_attempt_at: Option<Instant>,
+    /// Monotonic counter: with the channel's nonce, the window half of the idempotency key. It
+    /// only ever grows, so a later window can never reuse an earlier window's key.
+    window_sequence: u64,
+    /// Attempts made in the current window.
+    attempts: u32,
+    /// The send that is in flight now, if any.
+    inflight: Option<LaneAttempt>,
+    /// The armed retry of the current window, if any.
+    retry: Option<LaneRetry>,
+}
+
+impl NotificationDeliveryLane {
+    fn new(dwell: Duration) -> Self {
+        Self {
+            dwell,
+            tracker: DwellTracker::new(dwell),
+            current: Vec::new(),
+            held: BTreeSet::new(),
+            last_attempt_at: None,
+            window_sequence: 0,
+            attempts: 0,
+            inflight: None,
+            retry: None,
+        }
+    }
+
+    fn has_pending_work(&self) -> bool {
+        !self.held.is_empty() || self.retry.is_some() || self.tracker.next_due_at().is_some()
+    }
+
+    /// Observe this lane's whole current qualifying set.
+    ///
+    /// A room that is no longer in the set - read here or on another device, muted, no longer
+    /// highlighted, or suppressed by focus - drops out of the dwell, the held ids, and the
+    /// retry coverage. A retry that covers no live room is cancelled.
+    fn observe(
+        &mut self,
+        sink: &NotificationSinkSettings,
+        now: Instant,
+        qualifying: Vec<QualifyingRoom>,
+    ) {
+        let dwell = Duration::from_secs(sink.timing.dwell_secs);
+        if dwell != self.dwell {
+            // A new dwell re-anchors every room on the next transition rather than reusing an
+            // anchor that was measured against another duration.
+            self.dwell = dwell;
+            self.tracker = DwellTracker::new(dwell);
+        }
+        let due = self.tracker.observe(now, &qualifying);
+        let live: BTreeSet<&str> = qualifying
+            .iter()
+            .map(|room| room.room_id.as_str())
+            .collect();
+        self.held.retain(|room_id| live.contains(room_id.as_str()));
+        if let Some(retry) = &mut self.retry {
+            retry
+                .attempt
+                .room_ids
+                .retain(|room_id| live.contains(room_id.as_str()));
+            if retry.attempt.room_ids.is_empty() {
+                self.retry = None;
+                self.attempts = 0;
+            }
+        }
+        for room in due {
+            if self.held.len() >= MAX_HELD_NOTIFICATION_ROOMS {
+                break;
+            }
+            self.held.insert(room.room_id);
+        }
+        self.current = qualifying;
+    }
+
+    /// The current observation of these rooms, in the lane's own order.
+    fn current_rooms(&self, room_ids: &BTreeSet<String>) -> Vec<QualifyingRoom> {
+        self.current
+            .iter()
+            .filter(|room| room_ids.contains(&room.room_id))
+            .cloned()
+            .collect()
+    }
+
+    fn coalescing_deadline(&self, sink: &NotificationSinkSettings) -> Option<Instant> {
+        self.last_attempt_at?
+            .checked_add(Duration::from_secs(sink.timing.min_interval_secs))
+    }
+
+    fn next_window_id(&mut self, nonce: &str) -> String {
+        self.window_sequence += 1;
+        format!("{nonce}-{}", self.window_sequence)
+    }
 }
 
 /// What the channel last observed about one sink's credential.
@@ -92,12 +213,18 @@ struct SinkCredential {
 }
 
 pub(crate) struct NotificationDeliveryChannel {
-    dwell: Duration,
-    tracker: DwellTracker,
-    /// Rooms that came due while the channel could not send - the coalescing window was
-    /// closed, or no sink could send - keyed by room id so a newer observation of the same
-    /// room replaces the older one.
-    held: BTreeMap<String, QualifyingRoom>,
+    /// A random token minted once per channel, which is once per account runtime. It is part of
+    /// every idempotency key, so two accounts that name a sink alike, and two runs of the app
+    /// that both start counting windows at one, never hand a provider the same key for
+    /// different messages.
+    nonce: String,
+    /// The window half of a test send's key, counted apart from every lane.
+    test_sequence: u64,
+    /// The key of the newest test send per sink. Only its outcome is recorded, so the verdict of
+    /// a test made with a replaced credential, or of an older press, never paints the current
+    /// one.
+    pending_tests: BTreeMap<String, String>,
+    lanes: BTreeMap<String, NotificationDeliveryLane>,
     /// What each sink's credential was, as of the last refresh, and whether the store held it.
     /// An absent entry reads as not configured.
     configured: BTreeMap<String, SinkCredential>,
@@ -106,42 +233,32 @@ pub(crate) struct NotificationDeliveryChannel {
     retired: BTreeSet<String>,
     /// The last observed outcome per sink, in the shape the frontend renders.
     outcomes: BTreeMap<String, NotificationDeliveryOutcomeState>,
-    /// The intent of each send that is in flight right now, so a retryable failure can be
-    /// retried with the same body and the same idempotency key.
-    inflight: BTreeMap<String, NotificationDeliveryIntent>,
-    /// Armed retries of the current window, keyed by sink.
-    retries: BTreeMap<String, NotificationDeliveryRetry>,
-    /// Attempts made for each sink in the current window, so a retry loop is bounded.
-    attempts: BTreeMap<String, u32>,
-    /// When the channel last attempted a send, which is what the coalescing window measures
-    /// from.
-    last_attempt_at: Option<Instant>,
-    /// Monotonic counter: the window half of the idempotency key. It only ever grows, so a
-    /// later window can never reuse an earlier window's key.
-    window_sequence: u64,
 }
 
 impl NotificationDeliveryChannel {
-    pub(crate) fn new(settings: &NotificationDeliverySettings) -> Self {
+    pub(crate) fn new() -> Self {
+        Self::with_nonce(random_hex_token())
+    }
+
+    /// A channel with a chosen nonce, so a test can predict its keys.
+    pub(crate) fn with_nonce(nonce: String) -> Self {
         Self {
-            dwell: Duration::from_secs(settings.dwell_secs),
-            tracker: DwellTracker::new(Duration::from_secs(settings.dwell_secs)),
-            held: BTreeMap::new(),
+            nonce,
+            test_sequence: 0,
+            pending_tests: BTreeMap::new(),
+            lanes: BTreeMap::new(),
             configured: BTreeMap::new(),
             retired: BTreeSet::new(),
             outcomes: BTreeMap::new(),
-            inflight: BTreeMap::new(),
-            retries: BTreeMap::new(),
-            attempts: BTreeMap::new(),
-            last_attempt_at: None,
-            window_sequence: 0,
         }
     }
 
-    /// Whether the channel is holding rooms for the next window, waiting on a retry, or holding
-    /// a dwell timer that has not come due. A channel with nothing to do is left alone.
+    /// Whether any lane holds rooms, waits on a retry, or holds a dwell timer that has not come
+    /// due. A channel with nothing to do is left alone.
     pub(crate) fn has_pending_work(&self) -> bool {
-        !self.held.is_empty() || !self.retries.is_empty() || self.tracker.next_due_at().is_some()
+        self.lanes
+            .values()
+            .any(NotificationDeliveryLane::has_pending_work)
     }
 
     /// Whether every sink in the settings has been observed for the binding it carries now.
@@ -159,19 +276,24 @@ impl NotificationDeliveryChannel {
             })
     }
 
-    /// Observe that nothing qualifies, which forgets the dwell, the held rooms, and the retries.
-    ///
-    /// This is what switching the channel off does: the canon re-arms a room's dwell on its next
-    /// transition, so a channel that was off anchors on the transition that follows it back on.
-    pub(crate) fn observe_empty(&mut self, settings: &NotificationDeliverySettings, now: Instant) {
-        self.observe(settings, now, &[]);
-    }
-
     /// Record what this sink's credential is, and whether the store holds it.
     ///
     /// Both halves come from the same observation of the same sink, so a verdict can never be
     /// attributed to a binding it was not reached for.
+    ///
+    /// A binding that differs from the one recorded before means the credential was replaced or
+    /// the destination it belongs to was edited, so the sink's lane is dropped: a held room, an
+    /// armed retry, or an in-flight attempt was decided for the previous credential, and a late
+    /// outcome for it must not settle anything the new credential sends.
     pub(crate) fn record_credential(&mut self, sink: &NotificationSinkSettings, configured: bool) {
+        if self
+            .configured
+            .get(&sink.id)
+            .is_some_and(|credential| credential.binding != sink.secret_binding)
+        {
+            self.lanes.remove(&sink.id);
+            self.pending_tests.remove(&sink.id);
+        }
         self.configured.insert(
             sink.id.clone(),
             SinkCredential {
@@ -183,172 +305,275 @@ impl NotificationDeliveryChannel {
 
     /// Whether this sink may be sent through: the store confirmed a credential, and confirmed it
     /// for the binding the sink carries now.
-    fn is_configured(&self, sink_id: &str) -> bool {
-        self.configured
-            .get(sink_id)
-            .is_some_and(|credential| credential.configured)
+    pub(crate) fn is_configured(&self, sink: &NotificationSinkSettings) -> bool {
+        self.configured.get(&sink.id).is_some_and(|credential| {
+            credential.configured && credential.binding == sink.secret_binding
+        })
     }
 
-    /// Observe the whole current qualifying set, and return the rooms that came due.
+    /// Observe the current attention candidates for every destination.
     ///
-    /// A room that is no longer in the set - read, muted, low priority, no longer highlighted,
-    /// or suppressed because the device is focused - drops out of both the dwell tracker and
-    /// the held batch, so it re-arms from scratch if it qualifies again. A channel whose
-    /// qualifying set is empty has nothing to tell anyone, so an armed retry of an older window
-    /// is dropped too rather than mailing a state the badge no longer shows.
+    /// Each lane builds its own qualifying set from its destination's targets, focus rule, and
+    /// content mode. A destination that is not configured observes nothing, so it holds no room
+    /// and a credential saved later anchors on a fresh transition rather than releasing a room
+    /// that came due while the destination could not send.
     pub(crate) fn observe(
         &mut self,
         settings: &NotificationDeliverySettings,
         now: Instant,
-        qualifying: &[QualifyingRoom],
-    ) -> Vec<QualifyingRoom> {
-        self.sync_dwell(settings);
-        let due = self.tracker.observe(now, qualifying);
-        let live: BTreeSet<&str> = qualifying
-            .iter()
-            .map(|room| room.room_id.as_str())
-            .collect();
-        self.held
-            .retain(|room_id, _| live.contains(room_id.as_str()));
-        if qualifying.is_empty() {
-            self.retries.clear();
-        }
-        for room in &due {
-            if self.held.len() >= MAX_HELD_NOTIFICATION_ROOMS {
-                break;
+        candidates: &[RoomAttentionCandidate],
+        focused: bool,
+    ) {
+        for sink in &settings.sinks {
+            let qualifying = if self.is_configured(sink) {
+                qualifying_rooms(sink, candidates, focused)
+            } else {
+                Vec::new()
+            };
+            if qualifying.is_empty() && !self.lanes.contains_key(&sink.id) {
+                continue;
             }
-            self.held
-                .entry(room.room_id.clone())
-                .or_insert_with(|| room.clone());
+            let dwell = Duration::from_secs(sink.timing.dwell_secs);
+            self.lanes
+                .entry(sink.id.clone())
+                .or_insert_with(|| NotificationDeliveryLane::new(dwell))
+                .observe(sink, now, qualifying);
         }
-        due
     }
 
     /// The earliest instant this channel needs to be called again, or `None` when it is idle.
     ///
-    /// This is what arms the core's one delivery timer: the first room's dwell deadline, or an
-    /// armed retry, whichever comes first. It mirrors the tracker's own deadline rather than
-    /// deciding anything, so a missed wake-up produces no delivery, never a wrong one.
-    pub(crate) fn next_wake_at(&self) -> Option<Instant> {
-        match (self.tracker.next_due_at(), self.earliest_retry()) {
-            (Some(due), Some(retry)) => Some(due.min(retry)),
-            (due, retry) => due.or(retry),
+    /// This arms the core's one delivery timer: per lane, the first room's dwell deadline, an
+    /// armed retry, and - while the lane holds rooms, has no send in flight, and its destination
+    /// is configured - the coalescing deadline (#1455). It mirrors the lanes' own deadlines rather
+    /// than deciding anything, so a missed wake-up produces no delivery, never a wrong one.
+    pub(crate) fn next_wake_at(&self, settings: &NotificationDeliverySettings) -> Option<Instant> {
+        let mut earliest: Option<Instant> = None;
+        let mut consider = |instant: Option<Instant>| {
+            if let Some(instant) = instant {
+                earliest = Some(earliest.map_or(instant, |current| current.min(instant)));
+            }
+        };
+        for sink in &settings.sinks {
+            let Some(lane) = self.lanes.get(&sink.id) else {
+                continue;
+            };
+            consider(lane.tracker.next_due_at());
+            consider(lane.retry.as_ref().map(|retry| retry.not_before));
+            if !lane.held.is_empty() && lane.inflight.is_none() && self.is_configured(sink) {
+                consider(lane.coalescing_deadline(sink));
+            }
         }
+        earliest
     }
 
-    /// Take the rooms that came due into one digest per sink that can actually send.
+    /// Start a new window for every lane whose held rooms may be sent now.
     ///
-    /// The rooms are released only when at least one sink is enabled, complete, and holding a
-    /// credential: with no sink to send through, the batch stays held for the next window
-    /// instead of being silently dropped, and the coalescing window does not advance, so a user
-    /// who configures a credential is not made to wait an interval for a delivery that never
-    /// happened.
+    /// A lane sends when it holds rooms, its coalescing window is open, no send of its own is
+    /// in flight, and its destination is configured. The payload is rendered now, from the
+    /// current observation of the held rooms and of any rooms an armed retry still covers, so
+    /// the new window supersedes that retry instead of racing it.
     pub(crate) fn take_send_jobs(
         &mut self,
         settings: &NotificationDeliverySettings,
         now: Instant,
     ) -> Vec<NotificationDeliveryJob> {
-        if self.held.is_empty() || !coalesce_window(settings, self.last_attempt_at, now) {
-            return Vec::new();
-        }
-        let window_id = (self.window_sequence + 1).to_string();
-        let rooms: Vec<QualifyingRoom> = self.held.values().cloned().collect();
         let mut jobs = Vec::new();
-        for intent in digest(settings, &rooms, &window_id) {
-            if !self.is_configured(&intent.sink_id) {
+        for sink in &settings.sinks {
+            if !self.is_configured(sink) {
                 continue;
             }
+            let Some(lane) = self.lanes.get_mut(&sink.id) else {
+                continue;
+            };
+            if lane.held.is_empty()
+                || lane.inflight.is_some()
+                || !coalesce_window(
+                    Duration::from_secs(sink.timing.min_interval_secs),
+                    lane.last_attempt_at,
+                    now,
+                )
+            {
+                continue;
+            }
+            let mut room_ids = std::mem::take(&mut lane.held);
+            if let Some(retry) = lane.retry.take() {
+                room_ids.extend(retry.attempt.room_ids);
+            }
+            let rooms = lane.current_rooms(&room_ids);
+            let window_id = lane.next_window_id(&self.nonce);
+            let Some(intent) = render_intent(sink, &rooms, &window_id) else {
+                lane.attempts = 0;
+                continue;
+            };
+            lane.last_attempt_at = Some(now);
+            lane.attempts = 1;
+            lane.inflight = Some(LaneAttempt {
+                room_ids: rooms.into_iter().map(|room| room.room_id).collect(),
+                intent: intent.clone(),
+            });
             jobs.push(NotificationDeliveryJob {
-                sink_id: intent.sink_id.clone(),
+                sink_id: sink.id.clone(),
                 intent,
             });
         }
-        if jobs.is_empty() {
-            return Vec::new();
-        }
-
-        self.window_sequence += 1;
-        self.held.clear();
-        self.last_attempt_at = Some(now);
-        for job in &jobs {
-            // A still-armed retry of an older window is superseded: this window's digest is
-            // newer, and the canon keeps no durable outbox to deliver both from.
-            self.retries.remove(&job.sink_id);
-            self.attempts.insert(job.sink_id.clone(), 1);
-            self.inflight
-                .insert(job.sink_id.clone(), job.intent.clone());
-        }
         jobs
     }
 
-    /// The retries whose wait has elapsed, to be sent again with the same intent and key.
+    /// The retries whose wait has elapsed, rebuilt from the current observation (#1454).
     ///
-    /// A taken retry is in flight again, so its own outcome can be attributed to the same sink
-    /// and can arm the next attempt until the cap is reached.
-    pub(crate) fn take_due_retries(&mut self, now: Instant) -> Vec<NotificationDeliveryJob> {
-        let due: Vec<String> = self
-            .retries
-            .iter()
-            .filter(|(_, retry)| retry.not_before <= now)
-            .map(|(sink_id, _)| sink_id.clone())
-            .collect();
+    /// A retry covers the rooms its attempt covered that still qualify; one that covers none is
+    /// cancelled. If the rebuilt payload is byte-identical to the attempt's, the retry reuses its
+    /// idempotency key, so a provider that already accepted it can deduplicate; otherwise it takes
+    /// a new window key, because a possible duplicate notice is preferred to resending obsolete
+    /// text under a key the provider may answer from its cache.
+    pub(crate) fn take_due_retries(
+        &mut self,
+        settings: &NotificationDeliverySettings,
+        now: Instant,
+    ) -> Vec<NotificationDeliveryJob> {
         let mut jobs = Vec::new();
-        for sink_id in due {
-            let Some(retry) = self.retries.remove(&sink_id) else {
+        for sink in &settings.sinks {
+            let configured = self.is_configured(sink);
+            let Some(lane) = self.lanes.get_mut(&sink.id) else {
                 continue;
             };
-            self.inflight.insert(sink_id.clone(), retry.intent.clone());
+            let due = lane
+                .retry
+                .as_ref()
+                .is_some_and(|retry| retry.not_before <= now);
+            if !due || lane.inflight.is_some() {
+                continue;
+            }
+            let Some(retry) = lane.retry.take() else {
+                continue;
+            };
+            if !configured {
+                lane.attempts = 0;
+                continue;
+            }
+            let rooms = lane.current_rooms(&retry.attempt.room_ids);
+            let previous = retry.attempt.intent;
+            let Some(mut intent) = render_intent(sink, &rooms, "retry") else {
+                lane.attempts = 0;
+                continue;
+            };
+            if intent.subject == previous.subject
+                && intent.body == previous.body
+                && intent.destination == previous.destination
+            {
+                intent.idempotency_key = previous.idempotency_key;
+            } else {
+                let window_id = lane.next_window_id(&self.nonce);
+                intent = render_intent(sink, &rooms, &window_id).unwrap_or(intent);
+            }
+            lane.last_attempt_at = Some(now);
+            lane.inflight = Some(LaneAttempt {
+                room_ids: rooms.into_iter().map(|room| room.room_id).collect(),
+                intent: intent.clone(),
+            });
             jobs.push(NotificationDeliveryJob {
-                sink_id,
-                intent: retry.intent,
+                sink_id: sink.id.clone(),
+                intent,
             });
         }
         jobs
     }
 
-    /// Record one sink's send outcome, and arm a retry when the failure is one the canon allows
-    /// to be retried and this window has attempts left.
+    /// Record one send outcome, and arm a retry when the failure is one the canon allows to be
+    /// retried and the window has attempts left.
     ///
-    /// A terminal verdict - an invalid credential, a sender the provider refuses, a rejected
-    /// request - is never retried here: the product shows it and the user fixes it. The outcome
-    /// is recorded either way, so a failed sink can never read as ON.
+    /// Only an outcome whose idempotency key names the lane's in-flight attempt is recorded, so a
+    /// test send that finishes while a real one is in flight cannot settle the real one, and a
+    /// late outcome for a credential that has since been replaced - its lane was dropped - can
+    /// neither arm a retry nor paint the new credential with the old one's verdict. A matching
+    /// outcome is always projected, so a failed destination never reads as healthy.
     pub(crate) fn record_outcome(
         &mut self,
         settings: &NotificationDeliverySettings,
         now: Instant,
         sink_id: &str,
+        idempotency_key: &str,
         outcome: &NotificationDeliveryOutcome,
         at_ms: u64,
     ) {
+        let Some(sink) = settings.sink(sink_id) else {
+            return;
+        };
+        if self.take_pending_test(sink_id, idempotency_key) {
+            self.record_test_outcome(sink_id, outcome, at_ms);
+            return;
+        }
+        let Some(lane) = self.lanes.get_mut(sink_id) else {
+            return;
+        };
+        let Some(attempt) = lane
+            .inflight
+            .take_if(|attempt| attempt.intent.idempotency_key == idempotency_key)
+        else {
+            return;
+        };
         self.outcomes
             .insert(sink_id.to_owned(), outcome_state(outcome, at_ms));
-        let Some(intent) = self.inflight.remove(sink_id) else {
-            return;
-        };
-        let attempts = self.attempts.get(sink_id).copied().unwrap_or(1);
         let Some(delay) = outcome
             .failure()
-            .and_then(|failure| bounded_retry_delay(settings, failure))
-            .filter(|_| attempts < MAX_NOTIFICATION_DELIVERY_ATTEMPTS)
+            .and_then(|failure| bounded_retry_delay(sink, failure))
+            .filter(|_| lane.attempts < MAX_NOTIFICATION_DELIVERY_ATTEMPTS)
         else {
-            self.attempts.remove(sink_id);
-            self.retries.remove(sink_id);
+            lane.attempts = 0;
             return;
         };
-        self.attempts.insert(sink_id.to_owned(), attempts + 1);
-        self.retries.insert(
-            sink_id.to_owned(),
-            NotificationDeliveryRetry {
-                intent,
-                not_before: now + delay,
-            },
-        );
+        lane.attempts += 1;
+        lane.retry = Some(LaneRetry {
+            attempt,
+            not_before: now + delay,
+        });
     }
 
-    /// Record the outcome of a test send.
+    /// Settle an in-flight attempt that never reached a sink - the credential vanished or the
+    /// store could not be read - without arming a retry: nothing left the device.
+    pub(crate) fn abandon_inflight(&mut self, sink_id: &str, idempotency_key: &str) {
+        if self.take_pending_test(sink_id, idempotency_key) {
+            return;
+        }
+        if let Some(lane) = self.lanes.get_mut(sink_id)
+            && lane
+                .inflight
+                .take_if(|attempt| attempt.intent.idempotency_key == idempotency_key)
+                .is_some()
+        {
+            lane.attempts = 0;
+        }
+    }
+
+    /// The window id for one test send through `sink_id`: unique per press and per run, so a
+    /// provider never sees two test messages under one idempotency key. It becomes the sink's
+    /// pending test, the only one whose outcome is still recorded.
+    pub(crate) fn next_test_window_id(&mut self, sink_id: &str) -> String {
+        self.test_sequence += 1;
+        let window_id = format!("test-{}-{}", self.nonce, self.test_sequence);
+        self.pending_tests
+            .insert(sink_id.to_owned(), idempotency_key(sink_id, &window_id));
+        window_id
+    }
+
+    /// Settle the sink's pending test send if `idempotency_key` is its key.
+    fn take_pending_test(&mut self, sink_id: &str, idempotency_key: &str) -> bool {
+        if self
+            .pending_tests
+            .get(sink_id)
+            .is_some_and(|key| key == idempotency_key)
+        {
+            self.pending_tests.remove(sink_id);
+            return true;
+        }
+        false
+    }
+
+    /// Record the outcome of a test send, or of a failure that is the sink's and not a lane's.
     ///
     /// A test send is deliberately not a delivery: it consumes no window, arms no retry, and
-    /// touches neither the held batch nor the dwell, so pressing "send a test" can never
+    /// touches neither the held rooms nor the dwell, so pressing "send a test" can never
     /// suppress or delay a real notification. It does record the same typed outcome, because
     /// the point of the test is to prove which verdict this sink gives.
     pub(crate) fn record_test_outcome(
@@ -362,18 +587,16 @@ impl NotificationDeliveryChannel {
     }
 
     /// Drop what was observed for sinks the settings no longer hold, so a deleted and re-added
-    /// sink never inherits an older verdict.
+    /// sink never inherits an older verdict or lane.
     pub(crate) fn retain_sinks(&mut self, settings: &NotificationDeliverySettings) {
         let known: BTreeSet<&str> = settings.sinks.iter().map(|sink| sink.id.as_str()).collect();
         self.outcomes
             .retain(|sink_id, _| known.contains(sink_id.as_str()));
         self.configured
             .retain(|sink_id, _| known.contains(sink_id.as_str()));
-        self.inflight
+        self.lanes
             .retain(|sink_id, _| known.contains(sink_id.as_str()));
-        self.retries
-            .retain(|sink_id, _| known.contains(sink_id.as_str()));
-        self.attempts
+        self.pending_tests
             .retain(|sink_id, _| known.contains(sink_id.as_str()));
         self.retired
             .retain(|sink_id| known.contains(sink_id.as_str()));
@@ -405,7 +628,7 @@ impl NotificationDeliveryChannel {
                 .iter()
                 .map(|sink| NotificationDeliverySinkState {
                     sink_id: sink.id.clone(),
-                    secret_configured: self.is_configured(&sink.id),
+                    secret_configured: self.is_configured(sink),
                     secret_retired: self.retired.contains(&sink.id),
                     last_outcome: self.outcomes.get(&sink.id).copied(),
                 })
@@ -414,19 +637,35 @@ impl NotificationDeliveryChannel {
         }
     }
 
-    fn earliest_retry(&self) -> Option<Instant> {
-        self.retries.values().map(|retry| retry.not_before).min()
+    /// Whether this lane has a send in flight. Tests read it to prove a lane is settled.
+    #[cfg(test)]
+    pub(crate) fn lane_is_inflight(&self, sink_id: &str) -> bool {
+        self.lanes
+            .get(sink_id)
+            .is_some_and(|lane| lane.inflight.is_some())
     }
 
-    /// Re-anchor the dwell when the settings change it.
-    fn sync_dwell(&mut self, settings: &NotificationDeliverySettings) {
-        let dwell = Duration::from_secs(settings.dwell_secs);
-        if dwell == self.dwell {
-            return;
-        }
-        self.dwell = dwell;
-        self.tracker = DwellTracker::new(dwell);
+    /// Whether this lane has an armed retry.
+    #[cfg(test)]
+    pub(crate) fn lane_has_retry(&self, sink_id: &str) -> bool {
+        self.lanes
+            .get(sink_id)
+            .is_some_and(|lane| lane.retry.is_some())
     }
+}
+
+/// A random lowercase hex token of 32 digits.
+///
+/// It reuses the SDK's transaction-id generator, which is a v4 UUID's hex, rather than adding a
+/// random-number dependency to the core.
+pub(crate) fn random_hex_token() -> String {
+    matrix_sdk::ruma::TransactionId::new()
+        .as_str()
+        .chars()
+        .filter(char::is_ascii_hexdigit)
+        .map(|character| character.to_ascii_lowercase())
+        .take(32)
+        .collect()
 }
 
 /// The projection's own copy of the sender crate's mailbox presets.
@@ -457,7 +696,7 @@ fn outcome_state(
     at_ms: u64,
 ) -> NotificationDeliveryOutcomeState {
     match outcome.failure() {
-        None => NotificationDeliveryOutcomeState::Delivered { at_ms },
+        None => NotificationDeliveryOutcomeState::Accepted { at_ms },
         Some(NotificationDeliveryFailure::InvalidSecret) => {
             NotificationDeliveryOutcomeState::InvalidSecret { at_ms }
         }
@@ -482,11 +721,11 @@ fn outcome_state(
 /// How long to wait before retrying this failure, or `None` when the canon says never.
 ///
 /// The canon allows exactly two automatic reactions - a rate limit and a transport failure - and
-/// this device waits at least the channel's own minimum interval, at least the provider's own
+/// this device waits at least the destination's own minimum interval, at least the provider's own
 /// delay when it gave one, and at least [`NOTIFICATION_DELIVERY_RETRY_FLOOR`], never more than
 /// [`MAX_NOTIFICATION_DELIVERY_RETRY`].
 fn bounded_retry_delay(
-    settings: &NotificationDeliverySettings,
+    sink: &NotificationSinkSettings,
     failure: NotificationDeliveryFailure,
 ) -> Option<Duration> {
     let provider = match failure {
@@ -500,7 +739,7 @@ fn bounded_retry_delay(
     };
     Some(
         provider
-            .max(Duration::from_secs(settings.min_interval_secs))
+            .max(Duration::from_secs(sink.timing.min_interval_secs))
             .max(NOTIFICATION_DELIVERY_RETRY_FLOOR)
             .min(MAX_NOTIFICATION_DELIVERY_RETRY),
     )

@@ -441,6 +441,8 @@ const japaneseIdenticalMessageAllowlist = new Set<MessageId>([
   "auth.flowToken",
   // "Matrix ID" is the protocol's product term in both locales (Element X ja).
   "auth.matrixId",
+  // #1460: "SendKey" is ServerChan's own name for the key on its Chinese site.
+  "settings.notificationDeliverySecretServerChan",
   "roomList.filterPeople",
   "space.directMessages",
   "settings.fontInter",

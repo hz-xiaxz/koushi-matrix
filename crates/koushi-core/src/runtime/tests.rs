@@ -1295,9 +1295,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
     let (_focused_projection_tx, focused_projection_rx) = mpsc::unbounded_channel();
     let (event_navigation_prepared_tx, event_navigation_prepared_rx) = mpsc::unbounded_channel();
     let notification_delivery =
-        crate::notification_delivery::channel::NotificationDeliveryChannel::new(
-            &state.settings.values.delivery,
-        );
+        crate::notification_delivery::channel::NotificationDeliveryChannel::new();
     let (notification_delivery_outcome_tx, notification_delivery_outcome_rx) = mpsc::channel(1);
     let actor = AppActor {
         view_scopes: crate::view_scope_lifecycle::ViewScopeRegistry::default(),
@@ -1352,7 +1350,6 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         notification_delivery_sends: Vec::new(),
         notification_delivery_outcome_tx,
         notification_delivery_outcome_rx,
-        notification_delivery_test_sequence: 1,
     };
     let actor_task = executor::spawn(actor.run());
 
@@ -1732,9 +1729,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
     let (_focused_projection_tx, focused_projection_rx) = mpsc::unbounded_channel();
     let (event_navigation_prepared_tx, event_navigation_prepared_rx) = mpsc::unbounded_channel();
     let notification_delivery =
-        crate::notification_delivery::channel::NotificationDeliveryChannel::new(
-            &state.settings.values.delivery,
-        );
+        crate::notification_delivery::channel::NotificationDeliveryChannel::new();
     let (notification_delivery_outcome_tx, notification_delivery_outcome_rx) = mpsc::channel(1);
     let actor = AppActor {
         view_scopes: crate::view_scope_lifecycle::ViewScopeRegistry::default(),
@@ -1789,7 +1784,6 @@ async fn same_batch_select_room_settles_only_final_selection() {
         notification_delivery_sends: Vec::new(),
         notification_delivery_outcome_tx,
         notification_delivery_outcome_rx,
-        notification_delivery_test_sequence: 1,
     };
     let actor_task = executor::spawn(actor.run());
 
@@ -3416,9 +3410,7 @@ fn app_actor_fixture_with_account_capacity(
     let (focused_projection_tx, focused_projection_rx) = mpsc::unbounded_channel();
     let (event_navigation_prepared_tx, event_navigation_prepared_rx) = mpsc::unbounded_channel();
     let notification_delivery =
-        crate::notification_delivery::channel::NotificationDeliveryChannel::new(
-            &state.settings.values.delivery,
-        );
+        crate::notification_delivery::channel::NotificationDeliveryChannel::new();
     let (notification_delivery_outcome_tx, notification_delivery_outcome_rx) = mpsc::channel(1);
     let actor = AppActor {
         view_scopes: crate::view_scope_lifecycle::ViewScopeRegistry::default(),
@@ -3473,7 +3465,6 @@ fn app_actor_fixture_with_account_capacity(
         notification_delivery_sends: Vec::new(),
         notification_delivery_outcome_tx,
         notification_delivery_outcome_rx,
-        notification_delivery_test_sequence: 1,
     };
     (
         actor,

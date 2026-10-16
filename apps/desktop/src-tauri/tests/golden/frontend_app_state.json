@@ -372,6 +372,7 @@
               "rule_id": "org.matrix.desktop.notify.keyword.fedcba9876543210"
             }
           ],
+          "server_email_delivery": "knownUnavailable",
           "unverified_email_pusher_count": 0
         }
       },
@@ -752,8 +753,44 @@
         }
       },
       "notification_delivery": {
-        "presets": [],
-        "sinks": []
+        "presets": [
+          {
+            "host": "smtp.qq.com",
+            "id": "qq-mail",
+            "label": "QQ Mail",
+            "port": 465,
+            "secret_hint": "settings.notificationDeliverySecretHint.qqMail",
+            "tls": "implicit",
+            "username_is_full_address": true
+          }
+        ],
+        "sinks": [
+          {
+            "last_outcome": {
+              "at_ms": 1700000000000,
+              "kind": "accepted"
+            },
+            "secret_configured": true,
+            "secret_retired": false,
+            "sink_id": "resend"
+          },
+          {
+            "last_outcome": null,
+            "secret_configured": false,
+            "secret_retired": true,
+            "sink_id": "smtp"
+          },
+          {
+            "last_outcome": {
+              "at_ms": 1700000000000,
+              "kind": "rateLimited",
+              "retry_after_secs": 60
+            },
+            "secret_configured": true,
+            "secret_retired": false,
+            "sink_id": "wechat"
+          }
+        ]
       },
       "profile": {
         "ignored_user_ids": [],
@@ -1060,17 +1097,105 @@
             "recent_emojis": []
           },
           "delivery": {
-            "direct_messages": true,
-            "dwell_secs": 300,
-            "enabled": false,
-            "keywords": true,
-            "mentions": true,
-            "min_interval_secs": 900,
-            "only_when_unfocused": true,
-            "prefix_chars": 80,
-            "prefix_consent": null,
-            "sinks": [],
-            "watched": []
+            "sinks": [
+              {
+                "config": {
+                  "endpoint": "https://api.resend.com/emails",
+                  "kind": "resend"
+                },
+                "content": {
+                  "graphemes": 80,
+                  "kind": "prefix"
+                },
+                "content_consent": {
+                  "accepted_at_ms": 1700000000000,
+                  "endpoint": "https://api.resend.com/emails",
+                  "recipient": "fixture@example.invalid",
+                  "sink_kind": "resend"
+                },
+                "destination": "fixture@example.invalid",
+                "from_address": "koushi@example.invalid",
+                "id": "resend",
+                "secret_binding": "resend:https://api.resend.com/emails#0123abcd",
+                "sender_name": "Koushi",
+                "targets": {
+                  "direct_messages": true,
+                  "keywords": true,
+                  "mentions": true,
+                  "watched": [
+                    {
+                      "kind": "room",
+                      "room_id": "!room:example.invalid"
+                    },
+                    {
+                      "kind": "space",
+                      "space_id": "!space:example.invalid"
+                    }
+                  ]
+                },
+                "timing": {
+                  "dwell_secs": 300,
+                  "min_interval_secs": 900,
+                  "only_when_unfocused": true
+                }
+              },
+              {
+                "config": {
+                  "host": "smtp.qq.com",
+                  "kind": "smtp",
+                  "port": 465,
+                  "preset": "qq-mail",
+                  "tls": "implicit",
+                  "username": "fixture@qq.example.invalid"
+                },
+                "content": {
+                  "kind": "namesOnly"
+                },
+                "content_consent": null,
+                "destination": "fixture@example.invalid",
+                "from_address": "fixture@qq.example.invalid",
+                "id": "smtp",
+                "secret_binding": null,
+                "sender_name": "",
+                "targets": {
+                  "direct_messages": true,
+                  "keywords": true,
+                  "mentions": true,
+                  "watched": []
+                },
+                "timing": {
+                  "dwell_secs": 300,
+                  "min_interval_secs": 900,
+                  "only_when_unfocused": true
+                }
+              },
+              {
+                "config": {
+                  "endpoint": "https://sctapi.ftqq.com",
+                  "kind": "serverChan"
+                },
+                "content": {
+                  "kind": "full"
+                },
+                "content_consent": null,
+                "destination": "",
+                "from_address": "",
+                "id": "wechat",
+                "secret_binding": null,
+                "sender_name": "",
+                "targets": {
+                  "direct_messages": true,
+                  "keywords": true,
+                  "mentions": true,
+                  "watched": []
+                },
+                "timing": {
+                  "dwell_secs": 120,
+                  "min_interval_secs": 1800,
+                  "only_when_unfocused": false
+                }
+              }
+            ]
           },
           "display": {
             "code_block_wrap": true,

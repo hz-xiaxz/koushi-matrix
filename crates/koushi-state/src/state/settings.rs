@@ -386,10 +386,9 @@ impl SettingsValues {
                     display.encrypted_url_previews_enabled;
             }
         }
-        if apply_app && let Some(delivery) = patch.delivery {
-            let mut delivery = delivery;
-            delivery.canonicalize();
-            *self.delivery = delivery;
+        if apply_app && let Some(delivery) = &patch.delivery {
+            self.delivery
+                .apply_patch(delivery, patch.delivery_bindings_from_core);
         }
         if apply_account {
             if let Some(room_list_sort) = patch.room_list_sort {
@@ -446,9 +445,8 @@ impl AppSettingsValues {
             };
         }
         if let Some(value) = &patch.delivery {
-            let mut delivery = value.clone();
-            delivery.canonicalize();
-            *self.delivery = delivery;
+            self.delivery
+                .apply_patch(value, patch.delivery_bindings_from_core);
         }
         if let Some(value) = &patch.media {
             self.media = value.clone();
@@ -1126,6 +1124,10 @@ pub struct SettingsPatch {
     /// whole block, as the notification block does, and the app re-canonicalizes it.
     #[serde(default)]
     pub delivery: Option<NotificationDeliverySettings>,
+    /// Whether `delivery` carries credential bindings the core itself just wrote. It never
+    /// crosses IPC, so every patch from the renderer keeps the bindings Rust holds.
+    #[serde(skip)]
+    pub delivery_bindings_from_core: bool,
     pub display: Option<DisplaySettings>,
     pub media: Option<MediaSettings>,
     pub timeline: Option<TimelineSettings>,

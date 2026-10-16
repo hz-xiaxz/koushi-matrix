@@ -3539,6 +3539,7 @@ dependencies = [
  "serde_json",
  "unicode-casefold",
  "unicode-normalization",
+ "unicode-segmentation",
  "zeroize",
 ]
 

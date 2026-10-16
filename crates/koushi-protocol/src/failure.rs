@@ -71,6 +71,9 @@ pub enum NotificationDeliveryFailureKind {
     UnknownSink,
     /// A test send was asked for a sink whose secret this device does not hold.
     SecretMissing,
+    /// The secret is not a ServerChan Turbo SendKey: it is a ServerChan³ key (`sctp…`), or
+    /// it does not have the `SCT…` shape. Nothing was stored (#1460).
+    UnsupportedSendKey,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

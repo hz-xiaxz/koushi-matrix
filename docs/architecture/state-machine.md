@@ -5383,7 +5383,15 @@ stateDiagram-v2
   may produce a transient candidate only for the room whose SDK-local main
   unread count increased. The alert states that verified room count and opens
   the room; it never uses an unverified latest-event preview, event target, or
-  server-derived mention count. Missing room history or a server-only count
+  server-derived mention count. With `message_previews` ON (#994, OFF by
+  default) the banner body is the triggering event's text only when it is
+  verified: the observation is live and not a self event, the room is the one
+  whose main unread count rose in this observation, its latest event is not
+  redacted and not an `m.replace` edit, and it carries decrypted plain text.
+  Thread replies qualify; an edit, a redaction, an undecrypted or non-text
+  event, or any other room falls back to the count body. The text is flattened
+  to one line, bounded at 120 characters, never logged, and lives only in the
+  `serde(skip)` payload. Missing room history or a server-only count
   cannot produce a banner or sound. Thread-cache observations update persistent
   badges without raising transient alerts. Native settings/capabilities and the
   invitation scope distinction described under Accounts remain output gates;
@@ -6167,48 +6175,83 @@ Email notifications:
 - OAuth/MAS sessions project `DelegatedToAccountManagement` and link to the
   account-management destination; `m.3pid_changes: false` projects
   `Unsupported`. Neither offers the add flow.
+- A pusher only asks the homeserver to send mail; whether mail arrives depends
+  on the homeserver's own mail sending, which Matrix exposes no capability for.
+  The snapshot carries `server_email_delivery`: `KnownUnavailable` when a
+  verified fact says the server does not send pusher mail (today only
+  `matrix.org`, matched on the account's server name), otherwise `Unknown`. The
+  UI always explains the dependency and adds a warning for `KnownUnavailable`;
+  it never claims mail will arrive.
 
 ## Local Notification Delivery
 
-Delivering a notification from this device (#1427) is a separate channel from the
-server-owned pusher above. It is device-local product state, and it is the default
-implementation of email notification in Koushi. Delivery goes through sinks that all
-consume the same selected candidate, so the channel is not tied to one transport or to
-one country's infrastructure:
+Delivering a notification from this device (#1427, reshaped by #1460) is a separate
+route from the server-owned pusher above and from this device's OS banners. It is
+device-local product state. Each **destination** is one configured sink with its own
+targets, content mode, timing, and outcome, so the channel is not tied to one
+transport or to one country's infrastructure. The app must be running to send.
 
-- **Sinks.** Two are implemented. A mail provider API, Resend, and a generic SMTP
-  relay, which covers the cheap relays (Amazon SES, Brevo, Mailjet, Elastic Email) and
-  the Chinese providers (Aliyun DirectMail, Tencent Cloud SES). A mailbox preset is the
-  practical route inside China: QQ Mail is the same SMTP sink with its host, port and
-  authorization-code field filled in, and because the mailbox's own new-mail reminder
-  can surface the message in WeChat, that one sink reaches both destinations. A WeChat
-  relay is the other kind of sink the boundary is shaped for - a WeCom group-robot
-  webhook, with a WeCom self-built app or a third-party relay (ServerChan, PushPlus,
-  WxPusher) behind the same boundary - but it is **not implemented** and no screen
-  offers one: adding it is a new arm of `NotificationSink` and a new configuration
-  variant, with no change to the settings, the digest, or the decision engine. Every
-  sink is individually enabled and carries its own non-secret configuration plus a
-  `configured` secret flag.
-- **Settings.** The enabled sinks, their addresses and endpoints, the dwell, the
-  minimum interval, the focus suppression, the optional plaintext prefix and its
-  consent live in `SettingsValues.delivery` at app scope, which is a different group
-  from `SettingsValues.notifications` (this device's banners). The Matrix account is
-  never consulted for a destination, so the channel works on a homeserver that supports
-  neither email 3PIDs nor pushers.
-- **Secrets.** Every sink secret - a provider API key or an SMTP password today, and a
-  webhook key or a relay send key for a sink added later - is held only by the
-  credential store. Settings and diagnostics carry a
-  `configured` flag and never a value, and a secret is read when the sink is configured
-  or by the send itself, never on the settings or dispatch hot path.
-- **One authority.** The channel reads the same Rust-owned attention projection that
+- **Sinks.** Three are implemented. A mail provider API, Resend; a generic SMTP
+  relay, which covers the cheap relays (Amazon SES, Brevo, Mailjet, Elastic Email),
+  the Chinese providers (Aliyun DirectMail, Tencent Cloud SES), and the mailbox
+  presets (QQ Mail, whose own new-mail reminder can surface the message in WeChat);
+  and **ServerChan Turbo** (Server酱·Turbo), which relays to the owner's WeChat
+  through its service account. The ServerChan sink posts
+  `application/x-www-form-urlencoded` `title` and `desp` to
+  `{endpoint}/{SendKey}.send`, default endpoint `https://sctapi.ftqq.com`, which is
+  overridable only under Advanced for a local stub. The SendKey must start with
+  `SCT`; a ServerChan³ key (`sctp…`) uses a different API and is refused before it is
+  stored. A JSON `code` of 0 means the service **accepted** the request, never that
+  the message reached WeChat. The request URL contains the SendKey and is therefore
+  never logged, traced, or projected. A WeCom group robot is not a personal inbox and
+  WxPusher is not offered; either would be a new `NotificationSink` arm and a new
+  configuration variant with no change to the decision engine.
+- **No enable switches.** There is no channel-wide and no per-destination on/off
+  switch. A destination is *eligible* when its setup is complete - canonical
+  non-secret fields present and a credential stored for the current binding - and at
+  least one of its targets is set. The UI shows that setup state as **Configured** or
+  **Not configured**; neither word claims a delivery. Removing a destination is the
+  way to stop it.
+- **Settings.** `SettingsValues.delivery` holds the destination list at app scope, a
+  different group from `SettingsValues.notifications` (this device's banners). Each
+  destination owns its non-secret configuration, its targets, its content mode and
+  consent, and its timing. The Matrix account is never consulted for a destination,
+  so the route works on a homeserver that supports neither email 3PIDs nor pushers.
+  Delivery is app-scoped, while each account runtime evaluates its own rooms against
+  the same destination list; a digest never mixes accounts.
+- **Migration.** A pre-#1460 settings file has one global switch, trigger set,
+  timing, and prefix consent. A legacy destination is rebuilt on load: if the global
+  switch or the destination's own switch was off, all its targets are off (it stays
+  configured and sends nothing); otherwise it copies the legacy triggers, watch
+  list, and timing. Only the one destination the legacy consent named, with its
+  destination and endpoint still matching, keeps a start-of-message mode; every
+  other destination is names only, and nothing migrates to the entire-message mode.
+  The legacy fields are read once and never written back.
+- **Secrets.** Every sink secret - a provider API key, an SMTP password, or a
+  ServerChan SendKey - is held only by the credential store. Settings, React state,
+  snapshots, diagnostics, and QA artifacts carry a `configured` flag and never a
+  value; a secret input is write-only and is cleared from the UI on submit. A secret
+  is read when the sink is configured or by the send itself, never on the settings or
+  dispatch hot path. A binding names the identity the secret was stored for
+  (`resend:{endpoint}`, `smtp:{host}:{port}:{username}`, `serverchan:{endpoint}`)
+  plus a revision minted per save; a changed identity deletes the stored value. Only
+  the core writes a binding: a settings patch from the renderer keeps the binding the
+  core holds, so it can neither restore a replaced revision nor the consent tied to
+  it. A save unbinds on disk before the store receives the new value, and binds only
+  once that is persisted; a failed write reports `StoreUnavailable` and leaves the
+  sink unconfigured rather than pairing a new value with an old binding. Removing a
+  sink clears its credential first and keeps the sink when that clear fails.
+- **One authority.** The route reads the same Rust-owned attention projection that
   drives the badge and the unread/mention marks; the transient candidate feeds the
-  toast. Both derive from one `RoomAttentionKind` and count authority, so a mail can
-  never describe a state the badge does not show.
-- **Triggers.** Direct messages, mentions, and the user's own keywords, each
-  individually enabled. Keywords are Matrix `kind: content` push rules written
-  only on explicit user action; the SDK evaluates them into the highlight
-  counter, so a hit ranks as a mention-kind candidate and raises the badge exactly
-  as it does in Element. Opening the settings screen writes nothing.
+  toast. Both derive from one `RoomAttentionKind` and count authority, so a message
+  can never describe a state the badge does not show.
+- **Targets.** Each destination has one list: direct messages, mentions and replies,
+  keywords, and watched rooms and spaces. Keywords are Matrix `kind: content` push
+  rules on the homeserver, shared with every client of the account; the SDK
+  evaluates them into the highlight counter, so a hit ranks as a mention-kind
+  candidate exactly as it does in Element. A watched target overrides the categories
+  but never the read, mute, or focus suppression. Opening the settings screen writes
+  nothing.
 - **Keyword rules.** The keyword list is the account's own `content` rules, read back
   from the homeserver as the authority rather than mirrored into local settings, so a
   rule another client wrote shows up here too. Adding a keyword writes one `content`
@@ -6226,54 +6269,70 @@ one country's infrastructure:
   refused instead of overwriting a rule this client did not write. A rule another client
   turned off is listed as off and not hidden, because it is still on the account, still
   refuses a same-pattern add, and still has to be removable.
-- **Watch list.** The user can name rooms and spaces that are delivered regardless
-  of the three categories, so a busy space can be watched without turning on every
-  group message. A watched space covers every joined room that is a child of it,
-  resolved from the room list when the candidate set is built, so a room added to
-  the space later is covered without editing the list. The list holds ids only, never
-  a label: the label is the same safe room label the badge uses, read at send time.
-  Reading the room, muting it, or the dwell still win, and an unfocused device is
-  still required under the focus option.
-- **Dwell.** A room becomes deliverable only when its qualifying attention state
-  persists for the configured dwell. The timer is anchored on the transition into
-  that state, so a room that keeps receiving messages still comes due, while a room
-  that is read, muted, or (under the focus option) focused before the dwell expires
-  is cancelled and re-armed on the next transition. Rust owns the timer, it uses the
-  core executor's clock, and it restarts after a restart rather than being persisted.
-- **Delivery.** At send time the body is recomputed from the current projection, so
-  the message matches the badge at that moment: a digest of the rooms that came due,
-  with each room's safe display label, kind, and counts. The plaintext prefix below is
-  the only other text a body can carry, and only under its consent. The subject
-  and body are notification payload text and follow the OS notification wording that
-  Core already owns, not the React message catalog: they never render inside the app,
-  they are counts-only, and localizing them is a separate decision that has not been
-  made. A
-  channel-level minimum interval coalesces further mail, the queue is in-memory and
-  bounded and is discarded on exit, and there is no durable outbox. A failed delivery
-  never leaves a sink reading as ON: the last outcome
-  is projected to React per sink, an invalid key, a suspended account, or a rejected
-  webhook is its own typed state, and only a rate limit or a transport failure is
-  retried.
-- **Plaintext prefix.** OFF by default, added only when a stored consent names the
-  sink, the destination, and the endpoint it was given for and all three still
-  match. The text is the newest message this device already holds for the room - the
-  room list's latest event, which may be newer than the event that made the room
-  qualify - and a room whose latest event is redacted, undecryptable, or not a text
-  message is delivered without a prefix rather than failing. The consent is held for
-  one sink at a time: consenting for another
-  replaces it, which the replaced sink's own row shows as the option being off,
-  and that sink then sends without text. A settings load drops a consent that no
-  longer matches a configured sink, so a hand-edited or older settings file cannot
-  widen what leaves the device. It is independent of the OS notification preview
-  switch, is bounded and trimmed at a grapheme boundary, and adds no room, event,
-  sender, or transaction identifiers. The consent copy is provider-agnostic: it
-  states that the text leaves the device unencrypted, that whether and how long the
-  configured service stores it depends on that service's own terms, and that the
-  user must check those terms before enabling the option. The app asserts no
-  provider-specific retention as fact.
-- **Server surface unchanged.** The pusher surface above keeps its own meaning and
-  is only labelled as the server's, so two controls for one channel are not read
-  as one.
+- **Watch list.** A watched space covers every joined room that is a child of it,
+  resolved from the room list when the candidate set is built, so a room added to the
+  space later is covered without editing the list. The list holds ids only, never a
+  label: the label is the same safe room label the badge uses, read at send time.
+- **Timing.** Each destination has a dwell (default 300 s), a minimum interval
+  (default 900 s), and an *only when inactive* rule (default on). Labels and
+  accessible names carry the unit. A room becomes deliverable for a destination only
+  when its qualifying state for that destination persists for the dwell; the timer
+  is anchored on the transition into that state, so a room that keeps receiving
+  messages still comes due, while a room that is read, muted, or (under the focus
+  rule) focused first is cancelled and re-armed on the next transition. Rust owns the
+  timers, they use the core executor's clock, and they restart after a restart rather
+  than being persisted.
+- **Lanes.** Each destination is an independent lane: its dwell tracker, the room ids
+  it holds, its last attempt, its window sequence, its attempts, its in-flight send,
+  and its retry. A lane holds room **ids**, never a rendered payload. The core wakes
+  at the earliest of every lane's dwell deadline, retry deadline, and - while a lane
+  holds rooms and has a credential - coalescing deadline (last attempt plus minimum
+  interval), and re-checks the current projection then (#1455).
+- **Delivery.** At send time the payload is rendered from the current observation of
+  the held rooms, so it matches the badge at that moment (#1454). A room that no
+  longer qualifies is dropped from the batch. A retry is rebuilt the same way from
+  the rooms it covered: if none still qualify it is cancelled; if the rebuilt payload
+  is byte-identical it reuses its idempotency key; otherwise it takes a new window
+  key, preferring a possible duplicate notice to resending obsolete text. Subject,
+  title, and body are notification payload text owned by Core, not the React message
+  catalog: they never render inside the app and are English until localization is
+  decided. The queue is in-memory and bounded and is discarded on exit; there is no
+  durable outbox. The last outcome is projected per destination: accepted by the
+  service, invalid credential, not permitted, rejected, rate limited, or transport
+  failure. Only a rate limit or a transport failure is retried, at most three
+  attempts, never sooner than 30 s or the minimum interval and never later than 1 h.
+- **Read elsewhere.** A read receipt from another device clears the room's unread
+  state in the room list, so the candidate disappears and every lane drops the
+  room's dwell, held id, and retry coverage. Limits: a send already handed to the
+  provider cannot be recalled, and while this device is offline or has not yet
+  synced the receipt it cannot know the room was read.
+- **Content.** Each destination has one of three modes: **names only** (room name,
+  kind, parent space name, and counts), **start of the message** (the first N
+  grapheme clusters), or **entire message** (the latest eligible text message, up to
+  the provider budget). The text is the newest message this device holds for the
+  room - the room list's latest event - read up to 4000 characters with a
+  truncated-at-source flag. Provider budgets per room are 4000 grapheme clusters for
+  Resend and SMTP and 1000 for ServerChan; text cut by either limit carries a
+  `[truncated]` marker and is never described as the full message. A room whose
+  latest event is non-text, undecrypted, redacted, or unavailable falls back to
+  names only for that room and is still delivered. Text is flattened to safe lines,
+  carries no room, event, sender, or transaction identifiers, and in a ServerChan
+  `desp` has Markdown punctuation escaped so it cannot inject links or images. The
+  ServerChan `title` is always a single-line, names-only summary because the WeChat
+  card may show only the title.
+- **Plaintext consent.** Any mode other than names only requires a consent stored on
+  the destination and bound to its sink kind, endpoint, and recipient (the **Send to**
+  address, or for ServerChan the SendKey owner, so saving or clearing the SendKey
+  counts as a recipient change). Any change to one of them drops the consent and
+  returns the destination to names only, on load and on every patch. The copy states
+  that the provider receives plaintext and that whether and how long it stores it
+  depends on that provider. The setting is independent of the OS notification
+  preview.
+- **Outcome.** Each destination shows setup completeness, the last attempt and its
+  result, and a test action. The words are "accepted by the service" or a typed
+  failure; the app never states that a message was received.
+- **Server surface unchanged.** The pusher surface above keeps its own meaning and is
+  labelled as the server's, so two controls for one channel are not read as one.
 
 ## Contact Security Details
 

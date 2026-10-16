@@ -19,6 +19,7 @@ use koushi_state::{
     AccountNotificationsFailureKind, AccountNotificationsSnapshot, IdentityResetAuthRequest,
     NotificationCategory, NotificationCategoryState, NotificationCategoryStates,
     NotificationEmailAddress, NotificationEmailManagement, NotificationKeywordRuleState,
+    ServerEmailDelivery,
 };
 use matrix_sdk::ruma::{
     api::client::push::{
@@ -386,6 +387,25 @@ pub fn plan_account_push_writes(ruleset: &Ruleset, enabled: bool) -> Vec<RuleWri
     }]
 }
 
+/// Servers a verified fact says do not send the mail an email pusher asks for (#1460).
+///
+/// matrix.org accepts email pushers but does not send notification mail. Matched on the
+/// account's server name, case-insensitively; every other server stays `Unknown`.
+const SERVERS_WITHOUT_PUSHER_MAIL: &[&str] = &["matrix.org"];
+
+/// Whether the account's homeserver is known to send pusher mail, from its Matrix user id.
+pub fn server_email_delivery_for_user(user_id: &str) -> ServerEmailDelivery {
+    let server_name = user_id.split_once(':').map_or("", |(_, server)| server);
+    if SERVERS_WITHOUT_PUSHER_MAIL
+        .iter()
+        .any(|known| known.eq_ignore_ascii_case(server_name))
+    {
+        ServerEmailDelivery::KnownUnavailable
+    } else {
+        ServerEmailDelivery::Unknown
+    }
+}
+
 /// Build a snapshot from authoritative server reads.
 pub fn build_account_notifications_snapshot(
     ruleset: &Ruleset,
@@ -430,6 +450,7 @@ pub fn build_account_notifications_snapshot(
                 enabled: rule.enabled,
             })
             .collect(),
+        server_email_delivery: ServerEmailDelivery::Unknown,
     }
 }
 
@@ -581,9 +602,10 @@ pub async fn load_account_notifications(
     let emails = fetch_validated_emails(session).await?;
     let pushers = fetch_email_pusher_ids(session).await?;
     let pushkeys: Vec<String> = pushers.into_iter().map(|ids| ids.pushkey).collect();
-    Ok(build_account_notifications_snapshot(
-        &ruleset, management, &emails, &pushkeys,
-    ))
+    let mut snapshot =
+        build_account_notifications_snapshot(&ruleset, management, &emails, &pushkeys);
+    snapshot.server_email_delivery = server_email_delivery_for_user(&session.info.user_id);
+    Ok(snapshot)
 }
 
 async fn apply_rule_writes(

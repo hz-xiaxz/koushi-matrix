@@ -378,26 +378,13 @@ export interface DisplaySettings {
 }
 
 /**
- * #1427: this device's own notification delivery. App scope, so the Matrix account is
- * never asked for a destination, and a sink's credential never crosses this boundary:
- * the settings carry the id the credential store is keyed by and nothing else.
+ * #1427/#1460: this device's own notification delivery. App scope, so the Matrix account
+ * is never asked for a destination, and a sink's credential never crosses this boundary:
+ * the settings carry the id the credential store is keyed by and nothing else. Every
+ * route decision - targets, content, timing - belongs to one destination; there is no
+ * channel-wide switch.
  */
 export interface NotificationDeliverySettings {
-  enabled: boolean;
-  direct_messages: boolean;
-  mentions: boolean;
-  keywords: boolean;
-  only_when_unfocused: boolean;
-  dwell_secs: number;
-  min_interval_secs: number;
-  prefix_chars: number;
-  prefix_consent?: NotificationDeliveryPrefixConsent | null;
-  /**
-   * Rooms and spaces delivered whatever the triggers say. A watched space covers every
-   * joined room that is a child of it, resolved from the room list, so a room added
-   * later is covered. Only ids are stored; the room list supplies the label.
-   */
-  watched: NotificationDeliveryTarget[];
   sinks: NotificationSinkSettings[];
 }
 
@@ -406,9 +393,46 @@ export type NotificationDeliveryTarget =
   | { kind: "room"; room_id: string }
   | { kind: "space"; space_id: string };
 
+/**
+ * What one destination is sent. A watched room or space is delivered whatever the
+ * categories say, but never past read, mute, or focus suppression. A watched space covers
+ * every joined child, resolved from the room list, so a room added later is covered.
+ */
+export interface NotificationDeliveryTargets {
+  direct_messages: boolean;
+  mentions: boolean;
+  keywords: boolean;
+  watched: NotificationDeliveryTarget[];
+}
+
+// Rust NotificationDeliveryContent is #[serde(tag = "kind", rename_all = "camelCase")].
+export type NotificationDeliveryContent =
+  | { kind: "namesOnly" }
+  | { kind: "prefix"; graphemes: number }
+  | { kind: "full" };
+
+/**
+ * The user's acceptance that one destination receives message text in plaintext. Rust
+ * drops it, and returns the destination to names only, when the sink kind, its endpoint,
+ * or its recipient changes; for ServerChan saving or clearing the SendKey is a recipient
+ * change.
+ */
+export interface NotificationDeliveryContentConsent {
+  sink_kind: NotificationSinkConfig["kind"];
+  endpoint: string;
+  recipient: string;
+  accepted_at_ms: number;
+}
+
+export interface NotificationDeliveryTiming {
+  dwell_secs: number;
+  min_interval_secs: number;
+  only_when_unfocused: boolean;
+}
+
 export interface NotificationSinkSettings {
   id: string;
-  enabled: boolean;
+  /** The mailbox for a mail sink; empty for ServerChan, whose SendKey names the recipient. */
   destination: string;
   from_address: string;
   sender_name: string;
@@ -420,6 +444,10 @@ export interface NotificationSinkSettings {
    * because the sink stopped being the server or account it was given for.
    */
   secret_binding: string | null;
+  targets: NotificationDeliveryTargets;
+  content: NotificationDeliveryContent;
+  content_consent: NotificationDeliveryContentConsent | null;
+  timing: NotificationDeliveryTiming;
 }
 
 /**
@@ -449,7 +477,8 @@ export interface NotificationDeliverySinkState {
 }
 
 export type NotificationDeliveryOutcomeState =
-  | { kind: "delivered"; at_ms: number }
+  /** The provider accepted the request; never a claim that it was received. */
+  | { kind: "accepted"; at_ms: number }
   | { kind: "invalidSecret"; at_ms: number }
   | { kind: "notPermitted"; at_ms: number }
   | { kind: "rejected"; at_ms: number }
@@ -478,21 +507,11 @@ export type NotificationSinkConfig =
       port: number;
       tls: SmtpTls;
       username: string;
-    };
+    }
+  /** WeChat through ServerChan Turbo; the SendKey is the credential and names the recipient. */
+  | { kind: "serverChan"; endpoint: string };
 
 export type SmtpTls = "implicit" | "startTls";
-
-/**
- * The user's acceptance of sending message text off the device unencrypted, for one
- * sink and one destination. Rust drops it when the sink, its endpoint, or the
- * destination changes, so the option turns itself off rather than following the text.
- */
-export interface NotificationDeliveryPrefixConsent {
-  sink_id: string;
-  destination: string;
-  endpoint: string;
-  accepted_at_ms: number;
-}
 
 export interface WindowSettings {
   close_to_tray: boolean;
@@ -756,7 +775,14 @@ export interface AccountNotificationsSnapshot {
   unverified_email_pusher_count: number;
   /** The account's own `kind: content` rules, in the server's rule order. */
   keywords: NotificationKeywordRule[];
+  /**
+   * #1460: whether the homeserver is known not to send mail for an email pusher. Only
+   * `knownUnavailable` is a claim; `unknown` is every other server.
+   */
+  server_email_delivery: ServerEmailDelivery;
 }
+
+export type ServerEmailDelivery = "unknown" | "knownUnavailable";
 
 export type AccountNotificationsFailureKind =
   | "unsupported"

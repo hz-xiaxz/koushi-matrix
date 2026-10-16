@@ -18,16 +18,6 @@ describe("UserSettingsPanel", () => {
   // Mirrors the Rust default for the required `SettingsValues.delivery` field. Declared
   // separately so the readonly `as const` fixture below does not freeze `sinks`.
   const defaultDelivery: NotificationDeliverySettings = {
-    enabled: false,
-    direct_messages: true,
-    mentions: true,
-    keywords: true,
-    only_when_unfocused: true,
-    dwell_secs: 300,
-    min_interval_secs: 900,
-    prefix_chars: 80,
-    prefix_consent: null,
-    watched: [],
     sinks: []
   };
   const settings = {
@@ -255,7 +245,7 @@ describe("UserSettingsPanel", () => {
     expect(markup).toContain("Send read receipts");
     expect(markup).toContain("Send typing notifications");
     const notificationsSection = markup.match(
-      /<section id="settings-notifications"[\s\S]*?<\/section>/
+      /<section id="settings-notifications-os"[\s\S]*?<\/section>/
     )?.[0];
     const messagingPrivacySection = markup.match(
       /<section id="settings-messaging-privacy"[\s\S]*?<\/section>/
@@ -263,7 +253,8 @@ describe("UserSettingsPanel", () => {
     expect(notificationsSection).toContain("Desktop notifications");
     expect(notificationsSection).not.toContain("Sound");
     expect(notificationsSection).not.toContain("Badges");
-    expect(notificationsSection).not.toContain("Show message content in notifications");
+    // #1460: the verified preview switch (#994) sits beside the desktop switch.
+    expect(notificationsSection).toContain("Show message content in notifications");
     expect(notificationsSection).not.toContain("Send read receipts");
     expect(notificationsSection).not.toContain("Send typing notifications");
     expect(messagingPrivacySection).toContain("Send read receipts");
@@ -323,7 +314,7 @@ describe("UserSettingsPanel", () => {
       "Help & About"
     ]);
     const notificationsSection = markup.match(
-      /<section id="settings-notifications"[\s\S]*?<\/section>/
+      /<section id="settings-notifications-os"[\s\S]*?<\/section>/
     )?.[0];
     expect(notificationsSection).toContain("Sound");
     expect(notificationsSection).toContain("Badges");
@@ -1690,7 +1681,7 @@ describe("UserSettingsPanel", () => {
     expect(onSubmitAccountManagementUia).toHaveBeenCalledWith(9, "synthetic-secret");
     expect(password.value).toBe("");
   });
-  test("does not offer message previews before notification events can be verified", () => {
+  test("starts the message preview switch off for an account that never chose it", () => {
     const onUpdateSettings = vi.fn();
     render(
       <UserSettingsPanel
@@ -1706,14 +1697,21 @@ describe("UserSettingsPanel", () => {
         accountManagementCapabilities={idleAccountManagementCapabilities}
         savedSessions={[]}
         profile={profile}
-        settings={settings}
+        settings={{
+          ...settings,
+          values: {
+            ...settings.values,
+            notifications: { ...settings.values.notifications, message_previews: false }
+          }
+        }}
         {...handlers}
         onUpdateSettings={onUpdateSettings}
       />
     );
     fireEvent.click(screen.getByRole("tab", { name: "Notifications" }));
 
-    expect(screen.queryByRole("switch", { name: "Show message content in notifications" })).toBeNull();
+    const previews = screen.getByRole("switch", { name: "Show message content in notifications" });
+    expect(previews.getAttribute("aria-checked")).toBe("false");
     expect(onUpdateSettings).not.toHaveBeenCalled();
   });
   test("opening the Notifications page performs one read-only account notifications load", () => {
@@ -1812,106 +1810,48 @@ describe("UserSettingsPanel", () => {
     return { accountNotificationActions, onUpdateSettings };
   };
 
-  test("offers this device and the homeserver as tabs, each showing only its own panel", () => {
+  test("stacks OS, this-device, and homeserver sections in that order with no source tabs", () => {
     renderNotificationsPage();
 
-    const tabs = screen.getAllByRole("tab", { name: /^(This device|Homeserver)$/ });
-    expect(tabs.map((tab) => tab.textContent)).toEqual(["This device", "Homeserver"]);
-    expect(tabs[0].getAttribute("aria-selected")).toBe("true");
-    expect(tabs[0].getAttribute("tabIndex")).toBe("0");
-    expect(tabs[1].getAttribute("aria-selected")).toBe("false");
-    expect(tabs[1].getAttribute("tabIndex")).toBe("-1");
-    // The ids cannot collide with the category nav's `settings-tab-*`.
-    expect(tabs[0].id).toBe("settings-notifications-source-tab-device");
-    expect(tabs[0].getAttribute("aria-controls")).toBe(
-      "settings-notifications-source-panel-device"
+    expect(screen.queryByRole("tablist", { name: /source/i })).toBeNull();
+    const os = screen.getByTestId("notifications-os");
+    const device = screen.getByTestId("notification-delivery");
+    const homeserver = screen.getByTestId("notifications-homeserver");
+    expect(os.compareDocumentPosition(device) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(device.compareDocumentPosition(homeserver) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
+    expect(within(os).getByRole("heading", { name: "OS notifications" })).toBeTruthy();
+    expect(within(homeserver).getByRole("heading", { name: "Homeserver notifications" })).toBeTruthy();
+    expect(within(homeserver).getByText("Loading notification settings…")).toBeTruthy();
+  });
+
+  test("offers the message preview switch in the OS section, mirroring the account setting", () => {
+    const { onUpdateSettings } = renderNotificationsPage();
+    const os = screen.getByTestId("notifications-os");
+    const previews = within(os).getByRole("switch", { name: /Show message content in notifications/ });
+    expect(previews.getAttribute("aria-checked")).toBe("true");
+    expect(os.textContent).toContain("Off by default");
+    expect(os.textContent).toContain("notification history");
+
+    fireEvent.click(previews);
+    expect(onUpdateSettings).toHaveBeenCalledWith(
+      expect.objectContaining({ notifications: expect.objectContaining({ message_previews: false }) })
     );
-    const tablist = screen.getByRole("tablist", { name: "Notification source" });
-    expect(tablist.getAttribute("aria-orientation")).toBe("horizontal");
-
-    // Only the selected panel is rendered as a panel; the other is out of the tab order and
-    // out of the accessibility tree, so its controls cannot be reached by role.
-    expect(screen.getAllByRole("tabpanel", { name: "This device" })).toHaveLength(1);
-    expect(screen.queryByRole("tabpanel", { name: "Homeserver" })).toBeNull();
-    const devicePanel = screen.getByTestId("notification-source-panel-device");
-    const homeserverPanel = screen.getByTestId("notification-source-panel-homeserver");
-    expect(devicePanel.hidden).toBe(false);
-    expect(homeserverPanel.hidden).toBe(true);
-    expect(within(devicePanel).getByRole("switch", { name: "Send notifications from this device" })).toBeTruthy();
-    expect(within(homeserverPanel).queryByRole("switch", { name: "Send notifications from this device" })).toBeNull();
-
-    fireEvent.click(tabs[1]);
-    expect(screen.getAllByRole("tabpanel", { name: "Homeserver" })).toHaveLength(1);
-    expect(screen.queryByRole("tabpanel", { name: "This device" })).toBeNull();
-    expect(devicePanel.hidden).toBe(true);
-    expect(homeserverPanel.hidden).toBe(false);
-    expect(within(devicePanel).queryByRole("switch", { name: "Send notifications from this device" })).toBeNull();
-    expect(within(homeserverPanel).getByText("Loading notification settings…")).toBeTruthy();
   });
 
-  test("moves between the two source tabs with the arrow, Home and End keys", () => {
-    renderNotificationsPage();
-    const [deviceTab, homeserverTab] = screen.getAllByRole("tab", {
-      name: /^(This device|Homeserver)$/
-    });
-
-    deviceTab.focus();
-    fireEvent.keyDown(deviceTab, { key: "ArrowRight" });
-    expect(homeserverTab.getAttribute("aria-selected")).toBe("true");
-    expect(document.activeElement).toBe(homeserverTab);
-
-    // Wrapping in both directions.
-    fireEvent.keyDown(homeserverTab, { key: "ArrowRight" });
-    expect(deviceTab.getAttribute("aria-selected")).toBe("true");
-    expect(document.activeElement).toBe(deviceTab);
-    fireEvent.keyDown(deviceTab, { key: "ArrowLeft" });
-    expect(homeserverTab.getAttribute("aria-selected")).toBe("true");
-
-    fireEvent.keyDown(homeserverTab, { key: "Home" });
-    expect(deviceTab.getAttribute("aria-selected")).toBe("true");
-    expect(document.activeElement).toBe(deviceTab);
-    fireEvent.keyDown(deviceTab, { key: "End" });
-    expect(homeserverTab.getAttribute("aria-selected")).toBe("true");
-    expect(document.activeElement).toBe(homeserverTab);
-  });
-
-  test("choosing a source tab changes the panel and dispatches nothing", () => {
-    const { accountNotificationActions, onUpdateSettings } = renderNotificationsPage();
-    const loadCalls = accountNotificationActions.load.mock.calls.length;
-    fireEvent.click(screen.getByRole("tab", { name: "Homeserver" }));
-    fireEvent.click(screen.getByRole("tab", { name: "This device" }));
-    fireEvent.click(screen.getByRole("tab", { name: "Homeserver" }));
-    expect(onUpdateSettings).not.toHaveBeenCalled();
-    expect(accountNotificationActions.load).toHaveBeenCalledTimes(loadCalls);
-    expect(accountNotificationActions.setCategory).not.toHaveBeenCalled();
-    expect(accountNotificationActions.setAccountPush).not.toHaveBeenCalled();
-    expect(accountNotificationActions.enableEmail).not.toHaveBeenCalled();
-    // The tab is local UI state: it is not a setting, so nothing about it can be persisted.
-    expect(settings.values.delivery.enabled).toBe(false);
-  });
-
-  test("renders no source tab list in the app settings scope", () => {
+  test("renders no homeserver section and no preview switch in the app settings scope", () => {
     renderNotificationsPage({ settingsScope: "app", session: false });
-    expect(screen.queryByRole("tablist", { name: "Notification source" })).toBeNull();
-    expect(screen.queryByRole("tab", { name: "Homeserver" })).toBeNull();
-    expect(screen.getByTestId("notification-source-panel-device").hidden).toBe(false);
-    expect(screen.queryByTestId("notification-source-panel-homeserver")).toBeNull();
-    // The device body still says who sends it, and it is the only source here.
-    expect(screen.getByTestId("notification-device-source").textContent).toContain(
-      "Koushi sends these from this device"
-    );
+    expect(screen.queryByTestId("notifications-homeserver")).toBeNull();
+    expect(screen.queryByRole("switch", { name: /Show message content/ })).toBeNull();
+    expect(screen.getByTestId("notification-delivery")).toBeTruthy();
   });
 
-  test("ships both source tabs and both source lines in Japanese", () => {
+  test("ships the section headings in Japanese", () => {
     setActiveLocaleProfile("ja", "none");
     try {
       renderNotificationsPage();
-      expect(screen.getByRole("tab", { name: "この端末" })).toBeTruthy();
-      expect(screen.getByRole("tab", { name: "ホームサーバー" })).toBeTruthy();
-      expect(screen.getByTestId("notification-device-source").textContent).toContain(
-        "Koushiがこの端末から"
-      );
-      fireEvent.click(screen.getByRole("tab", { name: "ホームサーバー" }));
+      expect(screen.getByRole("heading", { name: "OS通知" })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "この端末から送信" })).toBeTruthy();
+      expect(screen.getByRole("heading", { name: "ホームサーバーの通知" })).toBeTruthy();
       expect(screen.getByTestId("notification-homeserver-source").textContent).toContain(
         "アカウントのすべての端末に適用されます"
       );

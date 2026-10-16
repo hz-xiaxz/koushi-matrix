@@ -82,6 +82,7 @@ fn projected_native_attention_from_rooms(
     state: &AppState,
     observation: NativeAttentionObservationKind,
     live_room_id: Option<&str>,
+    preview_room_id: Option<&str>,
 ) -> crate::state::NativeAttentionProjection {
     let room_notification_modes = crate::state::attention_room_notification_modes(state);
     let previous_candidate = state.native_attention.summary.candidate.as_ref();
@@ -99,6 +100,7 @@ fn projected_native_attention_from_rooms(
             capabilities: state.native_attention.summary.capabilities,
         },
         live_room_id,
+        preview_room_id,
         true,
     );
     if !state.settings.values.notifications.badges {
@@ -111,15 +113,17 @@ pub(crate) fn recompute_native_attention_from_rooms(
     state: &mut AppState,
     observation: NativeAttentionObservationKind,
 ) -> (bool, AppEffect) {
-    recompute_native_attention_from_rooms_for_live_room(state, observation, None)
+    recompute_native_attention_from_rooms_for_live_room(state, observation, None, None)
 }
 
 pub(crate) fn recompute_native_attention_from_rooms_for_live_room(
     state: &mut AppState,
     observation: NativeAttentionObservationKind,
     live_room_id: Option<&str>,
+    preview_room_id: Option<&str>,
 ) -> (bool, AppEffect) {
-    let projection = projected_native_attention_from_rooms(state, observation, live_room_id);
+    let projection =
+        projected_native_attention_from_rooms(state, observation, live_room_id, preview_room_id);
     let suppression = match projection.state.dispatch {
         crate::state::NativeAttentionDispatchState::Suppressed { reason } => Some(reason),
         _ => None,
@@ -172,6 +176,7 @@ pub(crate) fn handle_native_window_focus_changed(
         state,
         NativeAttentionObservationKind::InitialSync,
         None,
+        None,
     );
     next.state.summary.candidate = None;
     next.state.dispatch = crate::state::NativeAttentionDispatchState::Idle;
@@ -187,6 +192,7 @@ pub(crate) fn apply_badge_setting(state: &mut AppState) -> bool {
     let next = projected_native_attention_from_rooms(
         state,
         NativeAttentionObservationKind::InitialSync,
+        None,
         None,
     )
     .state

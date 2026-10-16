@@ -366,6 +366,12 @@ fn handle_room_list_updated_with_crawler(
         own_user_id.as_deref(),
     );
     let newly_unread_room_id = newly_unread_room_id(&state.rooms, &rooms);
+    let preview_room_id = newly_unread_room_id
+        .as_deref()
+        .filter(|room_id| {
+            latest_event_is_new_and_foreign(&state.rooms, &rooms, room_id, own_user_id.as_deref())
+        })
+        .map(str::to_owned);
     let had_active_room_before_update = state.navigation.active_room_id.is_some();
     merge_new_spaces_into_preference(&mut state.navigation.space_order, &spaces);
     apply_space_order_preference(&mut spaces, &state.navigation.space_order);
@@ -427,6 +433,7 @@ fn handle_room_list_updated_with_crawler(
             state,
             observation,
             newly_unread_room_id.as_deref(),
+            preview_room_id.as_deref(),
         );
     effects.push(native_attention_diagnostic);
     if native_attention_changed {
@@ -759,6 +766,35 @@ fn newly_unread_room_id(previous_rooms: &[RoomSummary], rooms: &[RoomSummary]) -
         })
         .max_by_key(|(increase, room)| (*increase, room.recency_stamp.unwrap_or_default()))
         .map(|(_, room)| room.room_id.clone())
+}
+
+/// Whether `room_id`'s latest event changed in this observation and another user sent
+/// it: the only case in which the OS preview may show that event's text (#994). A
+/// latest event that stayed the same is not what raised the unread count, and an
+/// event of the user's own is never shown back to them.
+fn latest_event_is_new_and_foreign(
+    previous_rooms: &[RoomSummary],
+    rooms: &[RoomSummary],
+    room_id: &str,
+    own_user_id: Option<&str>,
+) -> bool {
+    let latest_event_id = |list: &[RoomSummary]| {
+        list.iter()
+            .find(|room| room.room_id == room_id)
+            .and_then(|room| room.latest_event.as_ref())
+            .map(|event| (event.event_id.clone(), event.sender_id.clone()))
+    };
+    let Some((event_id, sender_id)) = latest_event_id(rooms) else {
+        return false;
+    };
+    let changed = latest_event_id(previous_rooms)
+        .is_none_or(|(previous_event_id, _)| previous_event_id != event_id);
+    let foreign = match (sender_id.as_deref(), own_user_id) {
+        (Some(sender), Some(own)) => sender != own,
+        // Without both ids nothing proves the sender is someone else.
+        _ => false,
+    };
+    changed && !event_id.is_empty() && foreign
 }
 
 fn suppress_stale_unread_after_local_read(state: &AppState, rooms: &mut [RoomSummary]) {

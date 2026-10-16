@@ -1,26 +1,27 @@
-//! The message body and the per-sink delivery intents built from the rooms that
-//! came due.
+//! The message one destination receives for the rooms it holds (#1427, #1460).
 //!
-//! Everything here is pure: no clock is read, nothing is sent, and nothing is
-//! stored. [`digest`] turns the rooms that came due into the plain text of one
-//! message per enabled sink, and [`coalesce_window`] answers whether the
-//! channel's minimum interval has elapsed.
+//! Everything here is pure: no clock is read, nothing is sent, and nothing is stored.
+//! [`render_intent`] turns the rooms one lane holds into one message for that lane's
+//! destination, and [`coalesce_window`] answers whether the destination's minimum
+//! interval has elapsed. The caller renders at send time, from the current observation,
+//! so a held or retried message never carries a state the badge no longer shows (#1454).
 //!
-//! The body is a counts-only digest by default. It names each room by the safe
-//! display label the attention projection produced, with the kind and the counts,
-//! and carries no room id, sender id, event id, or message text. Message text
-//! appears only as the prefix of a room, only for a sink and destination whose
-//! stored consent matches, and only flattened to one line and capped at a
-//! grapheme-cluster boundary, so one message cannot forge another room's line and
-//! a long message cannot smuggle a page of text through a consent given for a
-//! glance (`docs/architecture/state-machine.md`, "Local Notification Delivery").
+//! A room is named by the safe display label the attention projection produced, its
+//! first parent space, its kind, and its counts, and never by a room, event, sender, or
+//! transaction id. Message text appears only when the destination's effective content
+//! mode carries it (the caller leaves [`QualifyingRoom::message_text`] empty otherwise),
+//! bounded by the mode and by the provider's per-room budget; text cut by either limit is
+//! marked `[truncated]` and is never called the entire message. Text is rendered as
+//! quoted lines so it cannot forge another room's line, and a ServerChan body has its
+//! Markdown punctuation escaped so it cannot inject a link or an image
+//! (`docs/architecture/state-machine.md`, "Local Notification Delivery").
 
 use std::collections::BTreeSet;
 use std::fmt;
 use std::time::Duration;
 
 use koushi_state::{
-    MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS, NotificationDeliverySettings, NotificationSinkSettings,
+    NotificationDeliveryContent, NotificationSinkConfig, NotificationSinkSettings,
     RoomAttentionKind,
 };
 use unicode_segmentation::UnicodeSegmentation;
@@ -36,11 +37,21 @@ use super::dwell::QualifyingRoom;
 /// is dropped silently.
 pub const MAX_NOTIFICATION_DIGEST_ROOMS: usize = 5;
 
+/// The longest subject a mail digest carries, in grapheme clusters.
+pub const MAX_NOTIFICATION_SUBJECT_GRAPHEMES: usize = 200;
+
+/// The longest ServerChan `title`, in grapheme clusters. The service caps the title at
+/// 32 characters, and the WeChat card may show nothing else.
+pub const MAX_SERVERCHAN_TITLE_GRAPHEMES: usize = 32;
+
+/// The marker appended to text that a mode or a provider budget cut.
+pub const NOTIFICATION_TEXT_TRUNCATED_MARKER: &str = "[truncated]";
+
 /// Everything one sender needs to deliver one message, except the credential.
 ///
 /// The credential stays in the credential store and is read by the caller when it
 /// sends; it never enters this type or this module. Every field is non-secret, but
-/// the body may carry message text when a prefix consent covers the sink, so the
+/// the body may carry message text when the destination's consent covers it, so the
 /// `Debug` implementation redacts the addresses and the message text rather than
 /// copying them into a log or a diagnostics export.
 #[derive(Clone, Eq, PartialEq)]
@@ -48,17 +59,18 @@ pub struct NotificationDeliveryIntent {
     /// The sink this intent is for, naming the credential to read and the
     /// destination it belongs to.
     pub sink_id: String,
-    /// Where the message goes: the mailbox for a mail sink.
+    /// Where the message goes: the mailbox for a mail sink, empty for ServerChan,
+    /// whose SendKey names the recipient.
     pub destination: String,
     /// The address the recipient sees as the sender.
     pub from_address: String,
     /// The name the recipient sees next to the address. Empty means the bare
     /// address, which is the sender's decision, not this module's.
     pub sender_name: String,
-    /// The plain-text subject: the number of rooms that came due.
+    /// The plain-text subject, or the ServerChan `title`: always one line and names
+    /// only.
     pub subject: String,
-    /// The plain-text body: one block per delivered room, plus an `and N more`
-    /// tail when more rooms came due than the body names.
+    /// The body: plain text for mail, Markdown for ServerChan's `desp`.
     pub body: String,
     /// The key that makes a retry of one window idempotent. It is derived from the
     /// sink id and the caller's window id, so a retry of the same window repeats
@@ -85,106 +97,91 @@ impl fmt::Debug for NotificationDeliveryIntent {
     }
 }
 
-/// Build one delivery intent per enabled, usable sink, for the rooms that came
-/// due in one window.
-///
-/// `due` is the set the dwell tracker released for this window, and `window_id`
-/// names that window - a timestamp, a counter, or whatever the caller's coalescing
-/// uses. An empty `due` returns no intents at all, so does a disabled channel, and
-/// so does a settings value with no enabled, complete sink. This function does not
-/// send, does not read a clock, and does not touch a credential.
-///
-/// [`NotificationDeliverySettings::enabled`] is the channel's own off switch, not a
-/// filter: an app the user has not turned on produces nothing here, whatever the
-/// caller passes as due.
-///
-/// The subject is the number of rooms that came due. The body names each room by
-/// its safe display label, its kind, and its counts, in a deterministic order, and
-/// carries no room id, sender id, event id, or message text. A room's
-/// `plaintext_prefix` is prepended to that room's own block only when
-/// [`NotificationDeliverySettings::prefix_is_allowed_for`] holds for this sink, its
-/// destination, and its endpoint; it is flattened to a single line and capped at
-/// `prefix_chars` grapheme clusters, never more than
-/// [`MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS`]. Everything the caller receives is
-/// plain text.
-///
-/// The idempotency key is the sink id and the window id, joined by `/` after a
-/// `koushi-notification` prefix. A canonical sink id cannot contain `/`, so the
-/// key is unambiguous, a retry inside one window repeats it, and a later window
-/// never collides with it.
-///
-/// Which rooms qualify is the caller's decision, and this function must not
-/// second-guess it: the enabled trigger kinds, the watched rooms and spaces (which
-/// deliver even when their category is off), the window focus, and the dwell all
-/// shape the qualifying set before it reaches here. A plain `Message` room has no
-/// trigger flag of its own and a keyword hit is indistinguishable from a mention in
-/// the attention projection, so the filtering belongs where the set is built, not
-/// in the body.
-pub fn digest(
-    settings: &NotificationDeliverySettings,
-    due: &[QualifyingRoom],
-    window_id: &str,
-) -> Vec<NotificationDeliveryIntent> {
-    if !settings.enabled {
-        return Vec::new();
-    }
-    let rooms = ordered_rooms(due);
-    if rooms.is_empty() {
-        return Vec::new();
-    }
-    let subject = digest_subject(rooms.len());
-
-    let mut intents = Vec::new();
-    for sink in &settings.sinks {
-        if !sink_is_deliverable(sink) {
-            continue;
-        }
-        // A consent is bound to one sink, destination, and endpoint, and it also
-        // carries the option being on: `prefix_is_allowed_for` is false when
-        // `prefix_chars` is zero.
-        let prefix_chars =
-            if settings.prefix_is_allowed_for(&sink.id, &sink.destination, &sink.endpoint()) {
-                settings.prefix_chars
-            } else {
-                0
-            };
-        intents.push(NotificationDeliveryIntent {
-            sink_id: sink.id.clone(),
-            destination: sink.destination.clone(),
-            from_address: sink.from_address.clone(),
-            sender_name: sink.sender_name.clone(),
-            subject: subject.clone(),
-            body: digest_body(&rooms, prefix_chars),
-            idempotency_key: idempotency_key(&sink.id, window_id),
-        });
-    }
-
-    intents
+/// How the body is written for one destination.
+#[derive(Clone, Copy, Eq, PartialEq)]
+enum BodyFormat {
+    /// Plain text, for a mail provider or an SMTP relay.
+    PlainText,
+    /// ServerChan `desp`: Markdown, with every piece of user text escaped.
+    Markdown,
 }
 
-/// Whether the channel's minimum interval between two deliveries has elapsed, so a
+/// Render the one message a destination receives for `rooms`, in window `window_id`.
+///
+/// `rooms` is the lane's current observation of the rooms it is about to send, already
+/// filtered by the destination's targets and focus rule; this function does not
+/// second-guess that set. It returns `None` when no room is left or when the destination
+/// lacks a field a send needs, so a hand-built settings value cannot produce an intent
+/// with no recipient. It does not send, read a clock, or touch a credential.
+///
+/// The idempotency key is the sink id and the window id, joined by `/` after a
+/// `koushi-notification` prefix. A canonical sink id cannot contain `/`, so the key is
+/// unambiguous, a retry inside one window repeats it, and a later window never collides
+/// with it.
+pub fn render_intent(
+    sink: &NotificationSinkSettings,
+    rooms: &[QualifyingRoom],
+    window_id: &str,
+) -> Option<NotificationDeliveryIntent> {
+    if !sink_is_deliverable(sink) {
+        return None;
+    }
+    let rooms = ordered_rooms(rooms);
+    let first = rooms.first()?;
+    let format = match sink.config {
+        NotificationSinkConfig::ServerChan { .. } => BodyFormat::Markdown,
+        NotificationSinkConfig::Resend { .. } | NotificationSinkConfig::Smtp { .. } => {
+            BodyFormat::PlainText
+        }
+    };
+    let subject_cap = match format {
+        BodyFormat::Markdown => MAX_SERVERCHAN_TITLE_GRAPHEMES,
+        BodyFormat::PlainText => MAX_NOTIFICATION_SUBJECT_GRAPHEMES,
+    };
+    let text_cap = text_cap_graphemes(sink);
+    Some(NotificationDeliveryIntent {
+        sink_id: sink.id.clone(),
+        destination: sink.destination.clone(),
+        from_address: sink.from_address.clone(),
+        sender_name: sink.sender_name.clone(),
+        subject: digest_subject(first, rooms.len(), subject_cap),
+        body: digest_body(&rooms, text_cap, format),
+        idempotency_key: idempotency_key(&sink.id, window_id),
+    })
+}
+
+/// Whether the destination's minimum interval between two attempts has elapsed, so a
 /// send may happen now.
 ///
-/// This is the coalescing gate, not the dwell: the dwell holds one room until its
-/// own attention state persists, while this interval keeps a busy account from
-/// filling a mailbox with one message per room that comes due, and it is what a
-/// retry of a transport or rate-limit failure honors. `last_delivery_at` is when the
-/// channel last sent or last attempted a send, `None` when it never has.
+/// This is the coalescing gate, not the dwell: the dwell holds one room until its own
+/// attention state persists, while this interval keeps a busy account from filling an
+/// inbox with one message per room that comes due. `last_attempt_at` is when the lane
+/// last attempted a send, `None` when it never has.
 ///
-/// A `None` timestamp, an interval of zero, and an interval that has elapsed all
-/// return true. A timestamp in the future returns false, which fails closed on a
-/// clock that moved backwards.
+/// A `None` timestamp, an interval of zero, and an interval that has elapsed all return
+/// true. A timestamp in the future returns false, which fails closed on a clock that
+/// moved backwards.
 pub fn coalesce_window(
-    settings: &NotificationDeliverySettings,
-    last_delivery_at: Option<Instant>,
+    min_interval: Duration,
+    last_attempt_at: Option<Instant>,
     now: Instant,
 ) -> bool {
-    let Some(last_delivery_at) = last_delivery_at else {
+    let Some(last_attempt_at) = last_attempt_at else {
         return true;
     };
-    let interval = Duration::from_secs(settings.min_interval_secs);
-    now.checked_duration_since(last_delivery_at)
-        .is_some_and(|elapsed| elapsed >= interval)
+    now.checked_duration_since(last_attempt_at)
+        .is_some_and(|elapsed| elapsed >= min_interval)
+}
+
+/// The per-room text cap for this destination: the content mode's own cap, never more
+/// than the provider budget. Zero means no text is rendered.
+fn text_cap_graphemes(sink: &NotificationSinkSettings) -> usize {
+    let budget = sink.text_budget_graphemes();
+    match sink.effective_content() {
+        NotificationDeliveryContent::NamesOnly => 0,
+        NotificationDeliveryContent::Prefix { graphemes } => (graphemes as usize).min(budget),
+        NotificationDeliveryContent::Full => budget,
+    }
 }
 
 /// Whether one sink carries everything a send needs. The settings loader already
@@ -192,11 +189,15 @@ pub fn coalesce_window(
 /// invariants that are observable from outside, so a hand-built settings value
 /// cannot produce an intent with no recipient or no endpoint.
 fn sink_is_deliverable(sink: &NotificationSinkSettings) -> bool {
-    sink.enabled
-        && !sink.id.trim().is_empty()
-        && !sink.destination.trim().is_empty()
-        && !sink.from_address.trim().is_empty()
-        && !sink.endpoint().trim().is_empty()
+    if sink.id.trim().is_empty() || sink.endpoint().trim().is_empty() {
+        return false;
+    }
+    match sink.config {
+        NotificationSinkConfig::ServerChan { .. } => true,
+        NotificationSinkConfig::Resend { .. } | NotificationSinkConfig::Smtp { .. } => {
+            !sink.destination.trim().is_empty() && !sink.from_address.trim().is_empty()
+        }
+    }
 }
 
 /// Put the due rooms in the order the body renders them.
@@ -230,33 +231,31 @@ fn attention_kind_priority(kind: RoomAttentionKind) -> u8 {
     }
 }
 
-/// The plain-text subject of one digest: how many rooms came due, and never which
-/// rooms they are.
-fn digest_subject(room_count: usize) -> String {
-    match room_count {
-        1 => "1 room needs attention".to_owned(),
-        count => format!("{count} rooms need attention"),
-    }
+/// The one-line, names-only subject (or ServerChan title): the first room's headline
+/// and how many more rooms the message covers.
+fn digest_subject(first: &QualifyingRoom, room_count: usize, cap: usize) -> String {
+    let headline = room_headline(first);
+    let subject = match room_count.saturating_sub(1) {
+        0 => headline,
+        1 => format!("{headline} and 1 more room"),
+        more => format!("{headline} and {more} more rooms"),
+    };
+    ellipsize(&subject, cap)
 }
 
-/// Render the body of one digest, naming at most
-/// [`MAX_NOTIFICATION_DIGEST_ROOMS`] rooms and keeping the rest as a counted tail.
-///
-/// `prefix_chars` is the grapheme cap for each room's plaintext prefix, and zero
-/// means no prefix is rendered at all.
-fn digest_body(rooms: &[&QualifyingRoom], prefix_chars: u32) -> String {
+/// Render the body of one digest, naming at most [`MAX_NOTIFICATION_DIGEST_ROOMS`]
+/// rooms and keeping the rest as a counted tail.
+fn digest_body(rooms: &[&QualifyingRoom], text_cap: usize, format: BodyFormat) -> String {
     let mut blocks: Vec<String> = Vec::new();
     for room in rooms.iter().take(MAX_NOTIFICATION_DIGEST_ROOMS) {
-        let mut block = String::new();
-        if let Some(prefix) = room
-            .plaintext_prefix
-            .as_deref()
-            .and_then(|text| bounded_prefix(text, prefix_chars))
-        {
-            block.push_str(&prefix);
+        let mut block = match format {
+            BodyFormat::PlainText => room_line(room),
+            BodyFormat::Markdown => escape_markdown(&room_line(room)),
+        };
+        if let Some(text) = room_text(room, text_cap, format) {
             block.push('\n');
+            block.push_str(&text);
         }
-        block.push_str(&room_line(room));
         blocks.push(block);
     }
 
@@ -268,14 +267,23 @@ fn digest_body(rooms: &[&QualifyingRoom], prefix_chars: u32) -> String {
     blocks.join("\n\n")
 }
 
-/// One room's digest line: the kind, the safe display label, and the counts.
-fn room_line(room: &QualifyingRoom) -> String {
-    let label = safe_label(room);
-    let headline = match room.kind {
-        RoomAttentionKind::Mention => format!("Mention in {label}"),
-        RoomAttentionKind::Dm => format!("Direct message in {label}"),
-        RoomAttentionKind::Message => format!("Message in {label}"),
+/// One room's headline: the kind, the safe display label, and the first parent space.
+fn room_headline(room: &QualifyingRoom) -> String {
+    let label = safe_label(&room.display_label).unwrap_or_else(|| "Room".to_owned());
+    let place = match room.space_labels.iter().find_map(|space| safe_label(space)) {
+        Some(space) => format!("{label} · {space}"),
+        None => label,
     };
+    match room.kind {
+        RoomAttentionKind::Mention => format!("Mention in {place}"),
+        RoomAttentionKind::Dm => format!("Direct message in {place}"),
+        RoomAttentionKind::Message => format!("Message in {place}"),
+    }
+}
+
+/// One room's digest line: the headline and the counts.
+fn room_line(room: &QualifyingRoom) -> String {
+    let headline = room_headline(room);
     let counts = room_counts(room.mentions, room.unread);
     if counts.is_empty() {
         headline
@@ -307,39 +315,80 @@ fn format_count(count: u32, singular: &str, plural: &str) -> String {
     }
 }
 
-/// The room's display label as the body renders it: one line, trimmed, and never
-/// empty.
-///
-/// The attention projection already substitutes `Room` for an empty label; that
-/// fallback is repeated here so a hand-built observation cannot render a nameless
-/// line.
-fn safe_label(room: &QualifyingRoom) -> String {
-    let label = single_line(&room.display_label);
+/// A label as a digest renders it: one line, trimmed, `None` when nothing is left.
+fn safe_label(label: &str) -> Option<String> {
+    let label = single_line(label);
     let label = label.trim();
-    if label.is_empty() {
-        "Room".to_owned()
-    } else {
-        label.to_owned()
-    }
+    (!label.is_empty()).then(|| label.to_owned())
 }
 
-/// The plaintext prefix as the body renders it: one line, trimmed, capped at
-/// `prefix_chars` grapheme clusters, and `None` when nothing is left or no prefix
-/// is allowed.
+/// The room's message text as a quoted block, cut at `cap` grapheme clusters and marked
+/// `[truncated]` when the cap or the source bound cut it. `None` when the room carries
+/// no text, the cap is zero, or nothing printable is left.
 ///
-/// Newlines and other control characters are replaced by spaces before the cap, so
-/// message text cannot start a line that reads as another room's.
-fn bounded_prefix(text: &str, prefix_chars: u32) -> Option<String> {
-    let cap = prefix_chars.min(MAX_NOTIFICATION_DELIVERY_PREFIX_CHARS);
+/// Every line of the text starts with `> `, so message text can never start a line that
+/// reads as another room's headline.
+fn room_text(room: &QualifyingRoom, cap: usize, format: BodyFormat) -> Option<String> {
     if cap == 0 {
         return None;
     }
-    let flattened = single_line(text);
-    let trimmed = capped_graphemes(&flattened, cap).trim();
+    let source = room.message_text.as_ref()?;
+    let normalized = safe_lines(&source.text);
+    let trimmed = normalized.trim();
     if trimmed.is_empty() {
-        None
+        return None;
+    }
+    let capped = capped_graphemes(trimmed, cap as u32);
+    let truncated = source.truncated_at_source || capped.len() < trimmed.len();
+    let mut lines: Vec<String> = capped
+        .trim_end()
+        .lines()
+        .map(|line| match format {
+            BodyFormat::PlainText => format!("> {line}"),
+            BodyFormat::Markdown => format!("> {}  ", escape_markdown(line)),
+        })
+        .collect();
+    if truncated {
+        lines.push(format!("> {NOTIFICATION_TEXT_TRUNCATED_MARKER}"));
+    }
+    Some(lines.join("\n"))
+}
+
+/// Text as a sequence of safe lines: a line break stays a line break, every other control
+/// character and both Unicode separators become a space or a break, so nothing renders
+/// as a hidden control.
+fn safe_lines(text: &str) -> String {
+    text.chars()
+        .map(|character| match character {
+            '\n' | '\u{2028}' | '\u{2029}' => '\n',
+            character if character.is_control() => ' ',
+            character => character,
+        })
+        .collect()
+}
+
+/// Escape every ASCII Markdown punctuation character, so user text in a ServerChan
+/// `desp` is rendered literally and cannot open a link, an image, or raw HTML.
+fn escape_markdown(text: &str) -> String {
+    let mut escaped = String::with_capacity(text.len());
+    for character in text.chars() {
+        if character.is_ascii_punctuation() {
+            escaped.push('\\');
+        }
+        escaped.push(character);
+    }
+    escaped
+}
+
+/// One line of at most `cap` grapheme clusters, ending in `…` when it was cut.
+fn ellipsize(text: &str, cap: usize) -> String {
+    let line = single_line(text);
+    let line = line.trim();
+    let capped = capped_graphemes(line, cap.saturating_sub(1) as u32);
+    if line.graphemes(true).count() <= cap {
+        line.to_owned()
     } else {
-        Some(trimmed.to_owned())
+        format!("{}…", capped.trim_end())
     }
 }
 
@@ -373,7 +422,7 @@ fn single_line(text: &str) -> String {
 ///
 /// A canonical sink id is lowercase ASCII letters, digits, `-`, and `_`, so it
 /// never contains `/` and the two parts cannot be read as a different pair.
-fn idempotency_key(sink_id: &str, window_id: &str) -> String {
+pub(crate) fn idempotency_key(sink_id: &str, window_id: &str) -> String {
     format!("koushi-notification/{sink_id}/{window_id}")
 }
 
@@ -400,11 +449,11 @@ pub const TEST_DELIVERY_BODY: &str = "This is a test notification from Koushi.\n
 /// deliberately kept out of the dispatch window: the caller records its outcome without touching
 /// the coalescing window, so testing a sink can neither suppress nor delay a real notification.
 ///
-/// Neither the channel's own switch nor the sink's is required. A test send happens while the
-/// user is still setting the sink up, and asking them to turn the channel on before they can
-/// find out whether it works would be asking them to trust it first. The sink itself is always
-/// complete - the settings loader drops one that is not - so the request it builds is always a
-/// request a real send would have built.
+/// No target is required. A test send happens while the user is still setting the destination
+/// up, and asking them to choose what to send before they can find out whether it works would
+/// be asking them to trust it first. The sink itself is always complete - the settings loader
+/// drops one that is not - so the request it builds is always a request a real send would
+/// have built.
 pub fn test_delivery_intent(
     sink: &NotificationSinkSettings,
     window_id: &str,

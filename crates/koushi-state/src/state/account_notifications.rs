@@ -76,6 +76,19 @@ pub enum NotificationEmailManagement {
     DelegatedToAccountManagement,
 }
 
+/// Whether the homeserver is known to send the mail an email pusher asks for (#1460).
+///
+/// Matrix exposes no capability for this, so the only facts are verified ones about named
+/// servers; every other server is `Unknown` and the UI never claims mail will arrive.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum ServerEmailDelivery {
+    #[default]
+    Unknown,
+    /// A verified fact says this server does not send pusher mail (today only `matrix.org`).
+    KnownUnavailable,
+}
+
 /// A validated email 3PID and whether an email pusher currently targets it.
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub struct NotificationEmailAddress {
@@ -137,6 +150,9 @@ pub struct AccountNotificationsSnapshot {
     /// user asked for it. Loading or opening the screen still writes nothing.
     #[serde(default)]
     pub keywords: Vec<NotificationKeywordRuleState>,
+    /// Whether the homeserver is known to send pusher mail; see [`ServerEmailDelivery`].
+    #[serde(default)]
+    pub server_email_delivery: ServerEmailDelivery,
 }
 
 impl AccountNotificationsSnapshot {
@@ -168,6 +184,7 @@ impl std::fmt::Debug for AccountNotificationsSnapshot {
                 "unverified_email_pusher_count",
                 &self.unverified_email_pusher_count,
             )
+            .field("server_email_delivery", &self.server_email_delivery)
             .finish()
     }
 }
