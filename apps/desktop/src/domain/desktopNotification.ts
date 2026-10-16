@@ -22,6 +22,8 @@ export interface DesktopNotificationTransport {
    * Rust-owned: the webview never composes or reads them.
    */
   show(): Promise<void>;
+  /** Ask on explicit settings enablement; passive notification dispatch never prompts. */
+  requestPermission?(): Promise<boolean>;
   clear(): Promise<void>;
   /** Subscribe to completed notification clicks. */
   onActivated(handler: (activation: DesktopNotificationActivation) => void): () => void;

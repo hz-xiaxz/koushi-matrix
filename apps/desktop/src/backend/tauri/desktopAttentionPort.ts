@@ -1,7 +1,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { cancelAll, removeAllActive } from "@tauri-apps/plugin-notification";
 
 import type { DesktopAttentionPort } from "../desktopAttentionPort";
 import { isRendererSelectedAccountTabId } from "../client";
@@ -25,15 +24,9 @@ export function createTauriDesktopAttentionPort(accountTabId?: string): DesktopA
       async show() {
         await invokeAccount("show_native_attention_notification");
       },
+      requestPermission: () => invoke<boolean>("request_native_attention_notification_permission"),
       async clear() {
-        // The plugin's desktop backend registers only notify/request_permission;
-        // its cancel APIs are mobile-only, so this resolves as a rejection on
-        // desktop and is reported as such. Replacing it needs a native
-        // clear path (see the notification compatibility work in #67).
-        const outcomes = await Promise.allSettled([cancelAll(), removeAllActive()]);
-        if (outcomes.some((outcome) => outcome.status === "rejected")) {
-          throw new Error("native_notification_clear_failed");
-        }
+        await invoke("clear_native_attention_notifications");
       },
       onActivated(handler) {
         let disposed = false;

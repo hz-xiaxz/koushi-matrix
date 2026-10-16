@@ -8,6 +8,28 @@ them.
 preserved as artifacts. For anything you intend to execute, use
 [qa-lanes.md](qa-lanes.md).
 
+## Desktop notification activation (2026-10-16, #1128)
+
+The macOS diagnostic showed four occupied click waiters: a banner click raised
+the app but never produced an activation event. The legacy notification backend
+could settle on delivery without a reliable body-click callback. The desktop
+adapter now uses `UNUserNotificationCenter` with an asynchronous delegate and
+bounded pending activations. Windows handles its typed default-click response;
+Linux registers and handles the freedesktop default action. The renderer opens
+the target room when the notification has no event ID.
+
+The change followed the desktop attention contract in
+[overview.md](../architecture/overview.md), the session and account guards in
+[state-machine.md](../architecture/state-machine.md), and the repository review
+rules. It changed the native notification adapter and Tauri command wiring,
+the desktop attention port and settings permission request, plus Rust, port,
+and browser-headless tests. Read-only design review identified permission and
+clear races; the integrated code handles both. Focused Rust tests, desktop
+attention port tests, the multi-account shell E2E suite, type checking, and
+the Tauri boundary and command-registration checks passed. A packaged macOS
+click and Windows/Linux desktop clicks still need attended platform QA; see
+[qa-lanes.md](qa-lanes.md#macos-notification-activation-smoke).
+
 ## Retired QA vocabulary
 
 Issue #412 settled the runtime on one Element X-compatible Simplified Sliding

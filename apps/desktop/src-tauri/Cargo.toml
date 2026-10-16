@@ -35,7 +35,7 @@ url = "2"
 # `tauri-plugin-notification` can show a banner on desktop but has no activation
 # path, and this is the same backend it uses underneath. macOS does not use it:
 # its macOS backend never attaches a click waiter (#1128) and the macOS path
-# sends through `mac-notification-sys` directly instead.
+# sends through `mac-usernotifications` directly instead.
 notify-rust = "4.18"
 tauri-plugin-single-instance = { version = "2", features = ["deep-link"] }
 
@@ -52,10 +52,8 @@ libc = "0.2"
 webkit2gtk = "2.0.2"
 
 [target.'cfg(target_os = "macos")'.dependencies]
-# macOS banner display with a click waiter. `notify-rust`'s macOS backend never
-# sets `wait_for_click(true)`, so its banner is fire-and-forget and a click can
-# never activate it (#1128); this is the same backend it uses underneath.
-mac-notification-sys = "0.6.15"
+# UNUserNotificationCenter delegate delivers body clicks asynchronously.
+mac-usernotifications = "0.3.1"
 # Mach `proc_pid_rusage` and libmalloc `malloc_zone_statistics` for the #1344
 # diagnostic memory audit.
 libc = "0.2"

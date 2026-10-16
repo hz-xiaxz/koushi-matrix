@@ -341,3 +341,45 @@ test("notification activation navigates and settles in the target account contex
     settlementsAfterActivation.every((call) => call.args.accountTabId === bobId)
   ).toBe(true);
 });
+
+test("a room-only notification click selects its room while the app is open", async ({ page }) => {
+  await gotoReadyShell(page);
+  await page.evaluate((tabs) => window.__harness.pushAccountTabs(tabs), accountTabs(false));
+  await expect(page.getByRole("button", { name: "Harness: Ready", exact: true })).toBeVisible();
+  const updateGeneration = await page.evaluate(() => {
+    const snapshot = window.__harness.currentSnapshot();
+    window.__harness.setSnapshot({
+      ...snapshot,
+      account_tab_id: "harness-account-tab",
+      state: {
+        ...snapshot.state,
+        ui: {
+          ...snapshot.state.ui,
+          navigation: { ...snapshot.state.ui.navigation, active_room_id: null },
+          timeline: { ...snapshot.state.ui.timeline, room_id: null, is_subscribed: false }
+        }
+      }
+    });
+    window.__harness.pushStateUpdate();
+    return window.__harness.currentSnapshot().state_generation;
+  });
+  await expect.poll(() => page.evaluate(() => window.__harness.appStoreGeneration()))
+    .toBeGreaterThanOrEqual(updateGeneration);
+  await page.evaluate(async () => {
+    window.__harness.clearInvocations();
+    await window.__harness.pushNotificationActivation({
+      account_tab_id: "harness-account-tab",
+      room_id: "!harness-room:example.invalid",
+      event_id: null,
+      thread_root_event_id: null
+    });
+  });
+
+  await expect
+    .poll(() => page.evaluate(() => window.__harness.invocationsOf("select_room").length))
+    .toBe(1);
+  const selection = await page.evaluate(() => window.__harness.invocationsOf("select_room")[0]);
+  expect(selection.args.roomId).toBe("!harness-room:example.invalid");
+  await expect.poll(() => page.evaluate(() => window.__harness.currentSnapshot().state.ui.navigation.active_room_id))
+    .toBe("!harness-room:example.invalid");
+});
