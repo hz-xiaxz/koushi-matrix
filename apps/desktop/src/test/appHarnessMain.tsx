@@ -847,6 +847,7 @@ function harnessAccountTabsSnapshot() {
 // harness. Individual dialog behavior belongs in focused unit tests; existing
 // end-to-end flows should continue past an explicit destructive confirmation.
 mock.setCommandResponse("plugin:dialog|message", "Ok");
+mock.setCommandResponse("request_native_attention_notification_permission", true);
 let currentSnapshot = withSectionBounds(readySnapshot());
 let lastStateUpdateGeneration = currentSnapshot.state_generation ?? 0;
 

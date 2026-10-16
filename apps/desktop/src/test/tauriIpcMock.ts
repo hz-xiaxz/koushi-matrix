@@ -47,6 +47,7 @@ const RESOURCE_COMMANDS = new Set([
 ]);
 const REQUEST_COMMANDS = new Set(["download_avatar_thumbnail"]);
 const VOID_COMMANDS = new Set([
+  "clear_native_attention_notifications",
   "download_avatar_thumbnail",
   "cancel_avatar_thumbnail",
   "download_media",
