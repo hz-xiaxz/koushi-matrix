@@ -4,8 +4,9 @@
 //! Koushi has no knock-to-join product path yet, so the second account knocks
 //! through the SDK directly; the creator side only has to prove that Core
 //! creates a room the homeserver accepts with the knock rule and that the
-//! resulting membership is a knock.
+//! resulting request is accepted.
 
+use super::super::scenario_identity::cleanup_qa_auditor_device;
 use super::*;
 use koushi_core::{CreateRoomOptions, CreateRoomVisibility};
 use koushi_state::{AuthSecret, LoginRequest, RoomAccessPolicy, RoomJoinRule};
@@ -34,6 +35,27 @@ pub(super) async fn verify(config: &QaConfig, conn_a: &mut CoreConnection) -> Re
     let room_id = wait_for_room_created(conn_a, request_id, LABEL).await?;
     println!("knock_room_created=ok");
 
+    let knock = knock_with_second_account(config, &room_id).await;
+
+    // A's room is disposable, but leave it explicitly even when the knock check
+    // failed, so the lane does not accumulate memberships.
+    let leave_id = conn_a.next_request_id();
+    let leave = match conn_a
+        .command(CoreCommand::Room(RoomCommand::LeaveRoom {
+            request_id: leave_id,
+            room_id: room_id.clone(),
+        }))
+        .await
+    {
+        Ok(()) => wait_for_room_left(conn_a, leave_id, &room_id, LABEL).await,
+        Err(error) => Err(format!("{LABEL}: submit cleanup leave failed: {error}")),
+    };
+    knock?;
+    println!("knock_join_request=ok");
+    leave
+}
+
+async fn knock_with_second_account(config: &QaConfig, room_id: &str) -> Result<(), String> {
     let knocker = koushi_sdk::login_with_password(&LoginRequest {
         homeserver: config.homeserver.clone(),
         username: config.user_b.clone(),
@@ -42,22 +64,12 @@ pub(super) async fn verify(config: &QaConfig, conn_a: &mut CoreConnection) -> Re
     })
     .await
     .map_err(|_| format!("{LABEL}: second-account login failed"))?;
-    let result = knock_and_assert(&knocker, config, &room_id).await;
+    let result = knock_and_assert(&knocker, config, room_id).await;
+    let cleanup = cleanup_qa_auditor_device(&knocker, &config.password_b).await;
     let _ = koushi_sdk::close_session_stores(&knocker).await;
     drop(knocker);
     result?;
-    println!("knock_join_request=ok");
-
-    let leave_id = conn_a.next_request_id();
-    conn_a
-        .command(CoreCommand::Room(RoomCommand::LeaveRoom {
-            request_id: leave_id,
-            room_id: room_id.clone(),
-        }))
-        .await
-        .map_err(|error| format!("{LABEL}: submit cleanup leave failed: {error}"))?;
-    wait_for_room_left(conn_a, leave_id, &room_id, LABEL).await?;
-    Ok(())
+    cleanup.map_err(|error| format!("{LABEL}: {error}"))
 }
 
 async fn knock_and_assert(
@@ -72,8 +84,8 @@ async fn knock_and_assert(
             .map_err(|_| format!("{LABEL}: server name is invalid"))?,
     ];
     // The knock request only succeeds when the server's join rule admits
-    // knocking, and the SDK marks the returned room as knocked from that
-    // accepted response; the local member event is not fetched yet.
+    // knocking, so the accepted request is the proof that Core created a knock
+    // room; the SDK then marks the returned room as knocked.
     let knocked = session
         .client()
         .knock(room_or_alias, None, via)

@@ -1014,8 +1014,9 @@ pub(super) fn create_room_request(
         // homeserver infers private_chat from visibility, but an explicit
         // preset keeps the result consistent across homeservers and makes the
         // access policy visible in the request itself. An explicit access policy
-        // (#1177/#1421) writes its own join rule, and the private_chat preset
-        // would otherwise win over it on the server.
+        // (#1177/#1421) writes its own join rule; the QA `knock_room_created`
+        // check observed the private_chat preset winning over that event on the
+        // disposable local servers, so it is omitted here.
         request.preset =
             Some(matrix_sdk::ruma::api::client::room::create_room::v3::RoomPreset::PrivateChat);
     }
