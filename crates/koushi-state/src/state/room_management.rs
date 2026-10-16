@@ -307,10 +307,13 @@ impl RoomAccessDraft {
                 self.allow_targets.clear();
             }
             if self.scope.room_id().is_none() {
-                // #1416: the create dialog labels the membership choice with
-                // the attachment Space, so choosing it selects that Space.
-                if rule == Some(RoomJoinRule::Restricted)
-                    && self.allow_targets.is_empty()
+                // #1416/#1421: the create dialog labels the membership choice
+                // with the attachment Space, so choosing it selects that Space.
+                // The knock_restricted choice carries the same allow list.
+                if matches!(
+                    rule,
+                    Some(RoomJoinRule::Restricted | RoomJoinRule::KnockRestricted)
+                ) && self.allow_targets.is_empty()
                     && let Some(parent) = self.create_parent_space_id.clone()
                 {
                     self.allow_targets = vec![parent];
@@ -836,9 +839,18 @@ pub fn preview_create_room_access(
     let rejection = if draft_rule.is_some() {
         if input.invited_only {
             Some(CreateRoomAccessRejection::ExplicitPolicyWithInvitedOnly)
-        } else if public && draft_rule == Some(RoomJoinRule::Restricted) {
+        } else if public
+            && matches!(
+                draft_rule,
+                Some(RoomJoinRule::Restricted | RoomJoinRule::KnockRestricted)
+            )
+        {
             Some(CreateRoomAccessRejection::PublicWithRestrictedAccess)
-        } else if draft_rule == Some(RoomJoinRule::Restricted) && target_ids.is_empty() {
+        } else if matches!(
+            draft_rule,
+            Some(RoomJoinRule::Restricted | RoomJoinRule::KnockRestricted)
+        ) && target_ids.is_empty()
+        {
             Some(CreateRoomAccessRejection::EmptyAccessTargets)
         } else {
             None

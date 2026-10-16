@@ -104,6 +104,10 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
     "history_export_attachments=ok",
     "history_export_resume=ok",
     "room_history_export=ok"
+  ]),
+  room_management: Object.freeze([
+    "knock_room_created=ok",
+    "knock_join_request=ok"
   ])
 });
 
