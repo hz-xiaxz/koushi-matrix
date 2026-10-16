@@ -31,7 +31,7 @@ translated app.
 
 | Scope and category | Settings and actions |
 | --- | --- |
-| App Settings → Appearance (外観) | Language (English or 日本語); theme; display density; UI font and emoji style. |
+| App Settings → Appearance (外観) | Language (English, 日本語, 简体中文, 繁體中文, or 한국어); theme; display density; UI font and emoji style. |
 | App Settings → Notifications (通知) | Two tabs: **OS notifications** (notification sounds and badge counts) and **Sent from this device** (the destinations described under [Notifications from this device](#notifications-from-this-device)). Operating-system permissions also apply. |
 | App Settings → Preferences (環境設定) | Code-block wrapping; hiding removed messages; close to tray where configurable; automatic loading of older messages; placement of threaded conversations at their latest reply. |
 | App Settings → Keyboard (キーボード) | Send-message shortcut (Enter or the platform modifier+Enter); reference list of keyboard shortcuts and their availability. |
@@ -50,6 +50,10 @@ Use **Ctrl + -** / **Ctrl + +** (on macOS
 the interface on keyboards with an unshifted equals key.
 The **View** menu also offers **Zoom In**, **Zoom Out**, and **Actual Size**.
 Koushi's native menu labels follow the app language; in Japanese, **View** is **表示**.
+The language list shows each language in its own script. **简体中文** is Simplified
+Chinese, **繁體中文** is Traditional Chinese with Taiwan vocabulary, and **한국어** is
+Korean. Desktop notification titles and bodies are currently English in every
+language.
 On macOS, **Cmd + Ctrl + F** toggles fullscreen. These window shortcuts
 remain available while an in-app dialog is open.
 
