@@ -3,6 +3,8 @@ import { afterEach, describe, expect, test } from "vitest";
 import {
   DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS,
   DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
+  DEFAULT_NOTIFICATION_SENDER_NAME,
+  DEFAULT_RESEND_FROM_ADDRESS,
   MAX_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES,
   MAX_NOTIFICATION_DELIVERY_SECONDS,
   clampNotificationDeliveryPrefixGraphemes,
@@ -282,6 +284,12 @@ describe("new sinks", () => {
     expect(sink.content).toEqual({ kind: "namesOnly" });
     expect(sink.content_consent).toBeNull();
     expect(sink.secret_binding).toBeNull();
+    // The mail kinds start with the defaults Rust would fill in; ServerChan has no sender.
+    expect(sink.from_address).toBe(DEFAULT_RESEND_FROM_ADDRESS);
+    expect(sink.sender_name).toBe(DEFAULT_NOTIFICATION_SENDER_NAME);
+    expect(newNotificationSink("sink-smtp", "smtp").from_address).toBe("");
+    expect(newNotificationSink("sink-smtp", "smtp").sender_name).toBe(DEFAULT_NOTIFICATION_SENDER_NAME);
+    expect(newNotificationSink("sink-sc", "serverChan").sender_name).toBe("");
     expect(sink.timing).toEqual({
       dwell_secs: DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS,
       min_interval_secs: DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
@@ -298,7 +306,9 @@ describe("new sinks", () => {
   test("only commits a sink Rust would keep", () => {
     expect(notificationSinkFieldsReady(resendSink)).toBe(true);
     expect(notificationSinkFieldsReady({ ...resendSink, destination: "  " })).toBe(false);
-    expect(notificationSinkFieldsReady({ ...resendSink, from_address: "" })).toBe(false);
+    // A Resend sender is optional (Rust fills in DEFAULT_RESEND_FROM_ADDRESS); SMTP's is not.
+    expect(notificationSinkFieldsReady({ ...resendSink, from_address: "" })).toBe(true);
+    expect(notificationSinkFieldsReady({ ...smtpSink, from_address: " " })).toBe(false);
     expect(notificationSinkFieldsReady(smtpSink)).toBe(true);
     expect(
       notificationSinkFieldsReady({ ...smtpSink, config: { ...smtpSink.config, host: "" } as NotificationSinkConfig })
@@ -308,7 +318,7 @@ describe("new sinks", () => {
   });
 
   test("reports setup completeness, never delivery", () => {
-    expect(notificationSinkSetup({ ...resendSink, from_address: "" }, sinkState())).toBe("incomplete");
+    expect(notificationSinkSetup({ ...resendSink, destination: "" }, sinkState())).toBe("incomplete");
     expect(notificationSinkSetup(resendSink, null)).toBe("needsCredential");
     expect(notificationSinkSetup(resendSink, sinkState({ secret_configured: false }))).toBe(
       "needsCredential"

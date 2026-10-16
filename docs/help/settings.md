@@ -32,14 +32,14 @@ translated app.
 | Scope and category | Settings and actions |
 | --- | --- |
 | App Settings → Appearance (外観) | Language (English or 日本語); theme; display density; UI font and emoji style. |
-| App Settings → Notifications (通知) | Notification sounds and badge counts, and the destinations described under [Notifications from this device](#notifications-from-this-device). Operating-system permissions also apply. |
+| App Settings → Notifications (通知) | Two tabs: **OS notifications** (notification sounds and badge counts) and **Sent from this device** (the destinations described under [Notifications from this device](#notifications-from-this-device)). Operating-system permissions also apply. |
 | App Settings → Preferences (環境設定) | Code-block wrapping; hiding removed messages; close to tray where configurable; automatic loading of older messages; placement of threaded conversations at their latest reply. |
 | App Settings → Keyboard (キーボード) | Send-message shortcut (Enter or the platform modifier+Enter); reference list of keyboard shortcuts and their availability. |
 | App Settings → Search history (検索履歴) | Shared background-work speed and pause/resume control. Search crawling and media prefetch use this budget across all accounts. **Off** pauses both. |
 | App Settings → Help & About (ヘルプと情報) | Public GitHub repository URL, copy button, and instructions for asking ChatGPT or another AI assistant. |
 | Account Settings → Account (アカウント) | Profile display name and avatar; account management page when provided by the server; change password and deactivate account when supported. |
 | Account Settings → Sessions (セッション) | Homeserver, user ID, device ID/name, verification, cross-signing, backup and local-store information; Sign out. This is current-session information, not a list of all remote devices. The status shown is the last checked result; Koushi re-checks it automatically when the app or account starts and after a connection outage, and the refresh action checks again immediately. |
-| Account Settings → Notifications (通知) | Three sections, top to bottom. **OS notifications**: desktop notifications and **Show message content in notifications**. **Sent from this device**: destinations Koushi sends to from this computer (email or WeChat). **Homeserver notifications**: account-wide notification rules and **Email notifications**, which apply to every device. See [OS notifications](#os-notifications), [Notifications from this device](#notifications-from-this-device), and [Email notifications](#email-notifications). |
+| Account Settings → Notifications (通知) | Three tabs, **OS notifications** first. **OS notifications** (OS通知): desktop notifications and **Show message content in notifications**. **Sent from this device** (この端末から送信): destinations Koushi sends to from this computer (email or WeChat). **Homeserver notifications** (ホームサーバー通知): account-wide notification rules and **Email notifications**, which apply to every device. See [OS notifications](#os-notifications), [Notifications from this device](#notifications-from-this-device), and [Email notifications](#email-notifications). |
 | Account Settings → Security & Privacy (セキュリティとプライバシー) | URL previews in unencrypted/encrypted rooms; sending read receipts and typing notifications. |
 | Account Settings → Encryption (暗号化) | Identity/session verification and trust; secure backup setup and passphrase changes; recovery; encrypted room-key import/export; local-encryption diagnostics and local-data reset. Actions appear according to the current encryption state. |
 | Account Settings → Search history (検索履歴) | Indexing of media captions and file names; crawler activity, per-room progress and start/stop actions; rebuild search database. |
@@ -111,7 +111,7 @@ For consequences and prerequisites, see [Search](search.md),
 
 ## OS notifications
 
-The **OS notifications** section holds the alerts your operating system shows on
+The **OS notifications** tab holds the alerts your operating system shows on
 this computer. **Desktop notifications** turns them on or off.
 
 **Show message content in notifications** is **off** by default, so a banner
@@ -126,11 +126,12 @@ receives.
 ## Email notifications
 
 **Homeserver notifications** sends mail only if your homeserver supports email
-notifications, which the section says next to the switch. matrix.org does not
+notifications, which the tab says next to the switch. matrix.org does not
 send notification emails; to be emailed there, add a destination under
 [Sent from this device](#notifications-from-this-device) instead.
 
-**Account Settings → Notifications → Email notifications** has two separate parts:
+**Account Settings → Notifications → Homeserver notifications → Email
+notifications** has two separate parts:
 
 - The **Email notifications** switch controls delivery. **Off** means your
   homeserver does not email you summaries, even when an address is listed.
@@ -160,44 +161,66 @@ What you can do with addresses depends on the server:
 
 ## Notifications from this device
 
-**Sent from this device**, the middle section of **Account Settings →
+**Sent from this device**, the middle tab of **Account Settings →
 Notifications**, lists the destinations Koushi sends to itself, from this
 computer, through a service you set up. Because Koushi sends them, they work even
-when your homeserver cannot send email. **Homeserver notifications** below it are
+when your homeserver cannot send email. The **Homeserver notifications** tab is
 your server's own and independent of these. The destinations are app-wide, so
-**App Settings → Notifications** shows the same list.
+the **Sent from this device** tab of **App Settings → Notifications** shows the
+same list. The app settings have no homeserver tab, because they belong to no
+account.
 
 There is no switch to turn a destination on: a destination sends once its fields,
 its credential, and at least one target are set, and its row then reads
-**Configured**; otherwise it reads **Not configured**. With no destination, nothing
+**Configured**; otherwise it reads **Not configured**. Each row also summarises
+what the destination sends for, how much message content it includes, and how
+long it waits. With no destination, nothing
 leaves this device. Koushi sends only while it is running (keeping it in the tray
 is enough): a notification still waiting is held in memory and closing Koushi
 discards it.
 
 Choose a destination to open its page, and **All destinations** to go back.
-**Add a destination** asks for the kind (**Resend (email API)**, **SMTP relay**,
-or **WeChat (ServerChan Turbo)**) and opens the same page for the new one; **Save
-destination** adds it. You can configure up to eight destinations. Each page has
-five parts, described below.
+**Add a destination** asks for the service (**Resend (email API)**, **SMTP
+relay**, or **WeChat (ServerChan Turbo)**) and opens the same page for the new
+one. You can configure up to eight destinations. Each page has five parts,
+described below.
+
+Nothing on the page is saved as you type. The bar at the bottom of the page says
+**Unsaved changes** once you edit something, and its single **Save** stores the
+whole destination at once: its fields, its targets, its content and timing, a
+credential you typed, and your answer to the plain-text question below. If Save
+cannot go ahead, the bar says what is missing, such as a required field, the
+credential of a new destination, or the plain-text checkbox; if the save is
+refused, it says **Could not save this destination** and your edits stay on the
+page. **Discard**, or going back to **All destinations**, drops the edits and
+shows the saved destination again. A new destination is added only when Save
+succeeds.
 
 ### Service and credentials
 
-The destination's service fields (**From address**, **Name**, and **Send to** for
-mail; **Mailbox preset**, **Server**, **Port**, **Connection security**, and
-**Username** for an SMTP relay) and its credential: the **Resend API key**, the
-mailbox's **App password**, or the ServerChan **SendKey**. The credential field
-appears once the destination is saved.
+The destination's service fields (**Send to** for mail; **From address** and
+**Name**, the sender name, for an SMTP relay, with **Mailbox preset**,
+**Server**, **Port**, **Connection security**, and **Username**) and its
+credential: the **Resend API key**, the mailbox's **App password**, or the
+ServerChan **SendKey**. A new destination takes its credential on the same page,
+and Save sends it together with the rest.
 
-The credential field is write-only: Koushi never shows the saved value again. It
-reports **Saved. Enter a new value to replace it.** or **Not set**. The value is
-kept in your operating system's credential store, not in Koushi's settings, and a
-diagnostics report never carries it. **Clear** deletes it, and removing the
-destination deletes it too. Changing an SMTP relay's server, port, or username,
-or a service's endpoint, removes the saved password, because it was entered for
-the previous server; the page then says so.
+The credential field is write-only: Koushi never shows the saved value again, and
+the field is empty again once Save has taken it. It reports **Saved. Enter a new
+value to replace it.** or **Not set**; to replace the credential, type the new
+one and save. The value is kept in your operating system's credential store, not
+in Koushi's settings, and a diagnostics report never carries it. **Remove**
+deletes the destination together with its credential. Changing an SMTP relay's
+server, port, or username, or a service's endpoint, needs the password again,
+because it was entered for the previous server; the page then says so and Save
+waits for the new one.
 
-For Resend, the **From address** must be on a domain you have verified in Resend.
-**Advanced** holds the service **Endpoint**; leave it alone unless you are testing
+The sender name is optional and starts as **Koushi**; left blank, Koushi uses
+**Koushi**. For an SMTP relay the **From address** is required and must be an
+address the relay lets you send as. For Resend, **Advanced** holds the **From
+address**, the sender **Name**, and the service **Endpoint**. The From address is
+optional there and starts as Resend's shared sender, `onboarding@resend.dev`;
+see [Use Resend](#use-resend). Leave the endpoint alone unless you are testing
 against a local stub.
 
 ### Targets
@@ -258,14 +281,15 @@ message text leaves this device. Two modes add text:
 Images, files, messages that could not be decrypted, and deleted messages are
 sent as names only whatever the mode.
 
-Choosing a text mode opens a consent. It states that the text leaves this device
-as plain text and passes through the service to the recipient without end-to-end
-encryption, and that whether and for how long the service keeps it depends on
-that service's own terms. Check **I understand that the text is sent
-unencrypted**, then **Agree and turn on**. The consent covers this service, its
-endpoint, and its recipient (the **Send to** address, or for WeChat the saved
-SendKey). Changing any of them, or saving a new SendKey, returns the destination
-to names only until you agree again. Switching between the two text modes keeps
+Choosing a text mode shows a warning under the modes. It states that the text
+leaves this device as plain text and passes through the service to the recipient
+without end-to-end encryption, and that whether and for how long the service
+keeps it depends on that service's own terms. Check **I understand that the text
+is sent unencrypted**, then **Save**; Save refuses a text mode while the box is
+unchecked. The agreement covers this service, its endpoint, and its recipient
+(the **Send to** address, or for WeChat the saved SendKey). Changing any of them,
+or saving a new SendKey, asks the question again, and a destination whose
+agreement no longer matches sends names only until you agree again. Switching between the two text modes keeps
 the consent; choosing names only clears it.
 
 This setting is separate from **Show message content in notifications** under
@@ -332,17 +356,23 @@ relay or the name of its credential.
 
 ### Use Resend
 
-1. Create a Resend account, then create an API key on the
+To notify yourself, Resend needs no domain of your own:
+
+1. Create a Resend account with the email address you want notified, then create
+   an API key on the
    [API keys page](https://resend.com/docs/dashboard/api-keys/introduction).
    Resend does not show the key again after it is created.
-2. In Koushi, add a destination of kind **Resend (email API)**, set **From
-   address** and **Send to**, and save the destination, then paste the API key into **Resend API key**.
-3. Send a test.
+2. In Koushi, choose **Add a destination**, then **Resend (email API)**.
+3. Set **Send to** to the email address of your Resend account, and paste the
+   API key into **Resend API key**.
+4. Choose **Save**, then **Send a test**.
 
-Resend's testing sender `onboarding@resend.dev` can send only to the email
-address on your Resend account; to send anywhere else you must verify a domain
-and use an address at that domain. The restriction and the resolution steps are
-in Resend's
+Under **Advanced**, the **From address** starts as Resend's shared sender
+`onboarding@resend.dev`, which needs no domain setup. That sender can send only
+to the email address on your Resend account; to send anywhere else, verify a
+domain at [resend.com/domains](https://resend.com/domains) and set the **From
+address** to an address at that domain. The restriction and the resolution steps
+are in Resend's
 [403 Error Using resend.dev Domain](https://resend.com/docs/knowledge-base/403-error-resend-dev-domain).
 Left blank, **Endpoint** uses the email API endpoint Resend documents.
 
@@ -355,7 +385,8 @@ Left blank, **Endpoint** uses the email API endpoint Resend documents.
    address** first, then choose the **iCloud Mail** mailbox preset, which fills in
    the server Apple documents
    ([iCloud Mail server settings](https://support.apple.com/en-us/102525)).
-3. Save the app-specific password, then send a test.
+3. Paste the app-specific password into **App password**, choose **Save**, then
+   send a test.
 
 Apple issues app-specific passwords for accounts that use two-factor
 authentication, and the password is only for this kind of app, not your Apple
@@ -372,7 +403,8 @@ Account password.
    address** first, then choose the **Gmail** mailbox preset, which fills in the
    server Google documents
    ([Gmail IMAP, POP, and SMTP](https://developers.google.com/workspace/gmail/imap/imap-smtp)).
-4. Save the app password, then send a test.
+4. Paste the app password into **App password**, choose **Save**, then send a
+   test.
 
 Google may not offer app passwords for every account, for example a managed
 account whose administrator has turned them off, so the setting may be missing or
@@ -392,8 +424,8 @@ the password may be refused even with 2-Step Verification on.
 5. In Koushi, add a destination of kind **SMTP relay**. Fill in **From
    address** first, then choose the **QQ Mail** mailbox preset, which fills in the
    relay QQ Mail documents
-   ([Mac mail client settings](https://help.mail.qq.com/detail/108/1089/)), and
-   save the authorization code.
+   ([Mac mail client settings](https://help.mail.qq.com/detail/108/1089/)).
+   Paste the authorization code into the password field and choose **Save**.
 
 QQ Mail can also send its own new-mail reminder to WeChat, so the same mailbox
 can reach WeChat without a second service. That reminder is part of QQ Mail's own
@@ -412,8 +444,8 @@ steps with a link to the site:
 2. Open the **SendKey** page and copy your SendKey. It starts with `SCT`.
 3. Nothing else needs setting up: messages arrive through the default 方糖
    service account (方糖服务号).
-4. In Koushi, add a destination of kind **WeChat (ServerChan Turbo)**, save it,
-   paste the SendKey into **SendKey**, and send a test.
+4. In Koushi, add a destination of kind **WeChat (ServerChan Turbo)**, paste the
+   SendKey into **SendKey**, choose **Save**, and send a test.
 
 The SendKey names your WeChat account, so it is the recipient as well as the
 credential; it is kept only in the operating system's credential store. A key
@@ -427,7 +459,7 @@ message text, if you turn it on, is on the page the card opens.
 
 Any SMTP relay can be entered by hand: for an **SMTP relay** destination, choose
 **Other server** and fill in **Server**, **Port**, **Connection security**, and
-**Username**, then save the password the relay documents. This covers a company
+**Username**, then enter the password the relay documents and choose **Save**. This covers a company
 relay or a server you run yourself. A self-hosted server or a provider account
 needs its host, its port, and its TLS mode; your provider or administrator has
 those, and Koushi does not probe a server to guess them. Choose **TLS from the

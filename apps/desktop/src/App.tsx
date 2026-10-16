@@ -828,14 +828,15 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
   }, []);
   // #1427: the app settings dialog is shell-level, while the delivery block is app-scoped.
   // The whole-block patch goes through the mounted account content's settings updater, which
-  // owns snapshot settlement; the three sink commands are dispatched straight through the
+  // owns snapshot settlement; the sink commands are dispatched straight through the
   // transport like the other shell-level commands.
   const appNotificationDeliveryActions = useMemo<NotificationDeliveryActions>(() => ({
     update: (delivery) => {
       void appSettingsUpdateRef.current({ delivery, scope: "app" }).catch(() => undefined);
     },
-    setSecret: async (sinkId, secret) => {
-      await desktopApi.setNotificationDeliverySecret(sinkId, secret).catch(() => undefined);
+    // Save is the one sink command whose refusal the detail screen shows, so it rejects.
+    save: async (sink, secret, acceptContentConsent) => {
+      await desktopApi.saveNotificationSink(sink, secret, acceptContentConsent);
     },
     // A refused clear keeps the destination, so the section can only remove it once the
     // credential is gone; the failure has to reach it.
@@ -3356,13 +3357,13 @@ function AccountContent({
   }), []);
 
   // Device-local notification delivery (#1427). The delivery block always travels as a
-  // whole app-scoped patch; the three sink commands are write-only, so nothing they return
+  // whole app-scoped patch; the sink commands are write-only, so nothing they return
   // carries the secret back to the renderer.
   const notificationDeliveryActions = useMemo<NotificationDeliveryActions>(() => ({
     update: (delivery) =>
       runInBackground(settleCommand(api.updateSettings({ delivery, scope: "app" }))),
-    setSecret: async (sinkId, secret) => {
-      await settleCommand(api.setNotificationDeliverySecret(sinkId, secret));
+    save: async (sink, secret, acceptContentConsent) => {
+      await settleCommand(api.saveNotificationSink(sink, secret, acceptContentConsent));
     },
     clearSecret: async (sinkId) => {
       await settleCommand(api.clearNotificationDeliverySecret(sinkId));

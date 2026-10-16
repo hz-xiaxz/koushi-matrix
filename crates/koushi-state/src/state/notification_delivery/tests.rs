@@ -535,3 +535,42 @@ fn settings_debug_shows_no_address_endpoint_or_matrix_id() {
     }
     assert!(printed.contains("watched: 2"));
 }
+
+#[test]
+fn a_resend_destination_without_a_sender_uses_resends_shared_sender() {
+    // #1468: notifying yourself through Resend needs no domain of your own.
+    let mut resend = sink("resend", "me@example.com");
+    resend.from_address = "  ".to_owned();
+    let mut smtp = smtp_sink("smtp.example.com", 465, "me");
+    smtp.id = "smtp".to_owned();
+    smtp.from_address.clear();
+    let mut settings = NotificationDeliverySettings {
+        sinks: vec![resend, smtp],
+    };
+    settings.canonicalize();
+    assert_eq!(settings.sinks.len(), 1, "an SMTP sender is still required");
+    assert_eq!(settings.sinks[0].from_address, DEFAULT_RESEND_FROM_ADDRESS);
+}
+
+#[test]
+fn a_mail_destination_without_a_sender_name_is_named_koushi() {
+    let mut resend = sink("resend", "me@example.com");
+    resend.sender_name.clear();
+    let mut serverchan = sink("wechat", "");
+    serverchan.config = NotificationSinkConfig::ServerChan {
+        endpoint: DEFAULT_SERVERCHAN_ENDPOINT.to_owned(),
+    };
+    serverchan.sender_name.clear();
+    let mut settings = NotificationDeliverySettings {
+        sinks: vec![resend, serverchan],
+    };
+    settings.canonicalize();
+    assert_eq!(
+        settings.sinks[0].sender_name,
+        DEFAULT_NOTIFICATION_SENDER_NAME
+    );
+    assert_eq!(
+        settings.sinks[1].sender_name, "",
+        "ServerChan has no sender"
+    );
+}

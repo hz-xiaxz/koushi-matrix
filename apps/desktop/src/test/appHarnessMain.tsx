@@ -67,6 +67,10 @@ import {
 } from "../domain/types";
 import { TauriIpcMock, type IpcInvocation } from "./tauriIpcMock";
 import { withSectionBounds } from "./withSectionBounds";
+import {
+  notificationConsentForCurrent,
+  notificationContentConsented
+} from "../domain/notificationDelivery";
 import { documentFromText, plainBodyFromDocument } from "../domain/composerDocument";
 import { avatarInitial } from "../app/uiShared";
 import {
@@ -1310,6 +1314,18 @@ function notificationSinkBinding(sink: NotificationSinkSettings): string {
   }
 }
 
+/** A binding that names another server or account than the sink's own; `#rev` is ignored. */
+function notificationSinkBindingStale(sink: NotificationSinkSettings): boolean {
+  if (sink.secret_binding === null) {
+    return false;
+  }
+  const hash = sink.secret_binding.lastIndexOf("#");
+  const identity = hash >= 0 ? sink.secret_binding.slice(0, hash) : sink.secret_binding;
+  return identity !== notificationSinkBinding(sink);
+}
+
+let notificationSinkSecretRevision = 0;
+
 function withNotificationSinkBinding(
   settings: SettingsState,
   sinkId: string,
@@ -1944,7 +1960,7 @@ mock.setCommandResponse("update_settings", ({ patch }: { patch: SettingsPatch })
   // Rust drops a binding that no longer names the sink's own server and account, and with it
   // the credential the store held; the harness applies the same rule to what it hands back.
   const droppedSinkIds = values.delivery.sinks
-    .filter((sink: NotificationSinkSettings) => sink.secret_binding !== null && sink.secret_binding !== notificationSinkBinding(sink))
+    .filter((sink: NotificationSinkSettings) => notificationSinkBindingStale(sink))
     .map((sink: NotificationSinkSettings) => sink.id);
   values.delivery = {
     ...values.delivery,
@@ -2328,6 +2344,87 @@ mock.setCommandResponse(
       secret_retired: false,
       secret_binding: sink ? notificationSinkBinding(sink) : null
     });
+  }
+);
+/**
+ * #1468: the detail screen's single Save, answered the way Rust answers it. The non-secret
+ * sink is upserted (a binding that stopped naming its server or account is dropped, and the
+ * credential with it); a given secret is reported as stored and then dropped on the floor,
+ * stamping a fresh binding (ServerChan gets a new SendKey revision); and the consent is minted
+ * here, never by the renderer, when the plaintext warning was accepted.
+ */
+mock.setCommandResponse(
+  "save_notification_sink",
+  ({
+    sink,
+    secret,
+    acceptContentConsent
+  }: {
+    sink: NotificationSinkSettings;
+    secret: string | null;
+    acceptContentConsent: boolean;
+  }) => {
+    const hasSecret = secret !== null && secret !== "";
+    void secret;
+    const settings = currentSnapshot.state.domain.settings;
+    const sinks = settings.values.delivery.sinks;
+    const existing = sinks.find((candidate) => candidate.id === sink.id);
+    const bindingStale = notificationSinkBindingStale(sink);
+    let next: NotificationSinkSettings = bindingStale ? { ...sink, secret_binding: null } : sink;
+    if (hasSecret) {
+      notificationSinkSecretRevision += 1;
+      const identity = notificationSinkBinding(next);
+      next = {
+        ...next,
+        secret_binding:
+          next.config.kind === "serverChan"
+            ? `${identity}#${notificationSinkSecretRevision.toString(16)}`
+            : identity
+      };
+    }
+    next = acceptContentConsent
+      ? { ...next, content_consent: notificationConsentForCurrent(next, Date.now()) }
+      : notificationContentConsented(next)
+        ? next
+        : { ...next, content_consent: null };
+    setCurrentSnapshot({
+      ...currentSnapshot,
+      state: {
+        ...currentSnapshot.state,
+        domain: {
+          ...currentSnapshot.state.domain,
+          settings: {
+            ...settings,
+            values: {
+              ...settings.values,
+              delivery: {
+                ...settings.values.delivery,
+                sinks: existing
+                  ? sinks.map((candidate) => (candidate.id === sink.id ? next : candidate))
+                  : [...sinks, next]
+              }
+            },
+            persistence: { kind: "idle" }
+          }
+        }
+      }
+    });
+    if (hasSecret) {
+      return setNotificationDeliverySinkState(sink.id, {
+        secret_configured: true,
+        secret_retired: false
+      });
+    }
+    if (bindingStale) {
+      const previous = currentSnapshot.state.domain.notification_delivery.sinks.find(
+        (candidate) => candidate.sink_id === sink.id
+      );
+      return setNotificationDeliverySinkState(sink.id, {
+        secret_configured: false,
+        secret_retired: Boolean(previous?.secret_configured)
+      });
+    }
+    return currentSnapshot;
   }
 );
 mock.setCommandResponse(

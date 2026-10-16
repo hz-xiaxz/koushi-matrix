@@ -19,7 +19,8 @@ use koushi_notify::{
 };
 use koushi_protocol::{CoreFailure, NotificationDeliveryFailureKind};
 use koushi_state::{
-    AppAction, NotificationDeliverySettings, NotificationSinkConfig, NotificationSinkSettings,
+    AppAction, MAX_NOTIFICATION_DELIVERY_SINKS, NotificationDeliverySettings,
+    NotificationSinkConfig, NotificationSinkSettings,
 };
 
 use super::AppActor;
@@ -435,6 +436,131 @@ impl AppActor {
         // land leaves the sink unconfigured instead of ON behind a credential nothing can use.
         self.refresh_notification_delivery_configured().await;
         Ok(())
+    }
+
+    /// Save one whole destination as the settings screen's single Save (#1468).
+    ///
+    /// Everything that can refuse the command is checked before anything is written, so a
+    /// refusal leaves the settings and the credential store untouched. The non-secret sink
+    /// is then upserted the way any renderer patch is - it can never name a binding - and a
+    /// secret, when one travels, is stored through the same unbind, store, bind sequence as
+    /// [`Self::set_notification_delivery_secret`]. An added destination whose secret cannot
+    /// be stored is removed again rather than left behind half-configured. An accepted
+    /// consent is minted here, last, from the destination exactly as it was saved, so a
+    /// ServerChan consent names the SendKey revision this very command stored.
+    pub(super) async fn save_notification_sink(
+        &mut self,
+        request_id: koushi_protocol::RequestId,
+        sink: NotificationSinkSettings,
+        secret: Option<koushi_state::AuthSecret>,
+        accept_content_consent: bool,
+    ) -> Result<(), CoreFailure> {
+        // The mode the user chose, taken before canonicalization: a ServerChan sink that has no
+        // key yet reads as names only until the consent below names the key this save stores.
+        let requested_content = sink.content;
+        // The same canonicalization the reducer applies, run on a copy first: a sink it would
+        // drop is refused by kind instead of reported as saved and silently missing.
+        let mut probe = NotificationDeliverySettings { sinks: vec![sink] };
+        probe.canonicalize();
+        let Some(mut sink) = probe.sinks.pop() else {
+            return Err(CoreFailure::NotificationDeliveryRejected {
+                kind: NotificationDeliveryFailureKind::IncompleteSink,
+            });
+        };
+        if let Some(secret) = &secret
+            && matches!(sink.config, NotificationSinkConfig::ServerChan { .. })
+            && validate_serverchan_sendkey(secret.expose_secret()).is_err()
+        {
+            return Err(CoreFailure::NotificationDeliveryRejected {
+                kind: NotificationDeliveryFailureKind::UnsupportedSendKey,
+            });
+        }
+        let current = self.state.settings.values.delivery.clone();
+        let existing = current.sink(&sink.id).cloned();
+        if existing.is_none() && current.sinks.len() >= MAX_NOTIFICATION_DELIVERY_SINKS {
+            return Err(CoreFailure::NotificationDeliveryRejected {
+                kind: NotificationDeliveryFailureKind::SinkLimitReached,
+            });
+        }
+        // The renderer never builds a consent. The stored one is kept and survives only while
+        // it still covers the saved destination; an accepted one is minted below.
+        sink.content_consent = existing
+            .as_ref()
+            .and_then(|existing| existing.content_consent.clone());
+        let sink_id = sink.id.clone();
+        let mut delivery = (*current).clone();
+        match delivery.sink_mut(&sink_id) {
+            Some(slot) => *slot = sink,
+            None => delivery.sinks.push(sink),
+        }
+        if !self.write_notification_delivery(request_id, delivery).await {
+            self.refresh_notification_delivery_configured().await;
+            return Err(CoreFailure::StoreUnavailable);
+        }
+        if let Some(secret) = secret
+            && let Err(failure) = self
+                .set_notification_delivery_secret(request_id, &sink_id, secret)
+                .await
+        {
+            if existing.is_none() {
+                self.roll_back_added_notification_sink(request_id, &sink_id)
+                    .await;
+            }
+            return Err(failure);
+        }
+        if accept_content_consent && requested_content.carries_text() {
+            let mut delivery = (*self.state.settings.values.delivery).clone();
+            let Some(saved) = delivery.sink_mut(&sink_id) else {
+                return Err(CoreFailure::StoreUnavailable);
+            };
+            saved.content = requested_content;
+            let accepted_at_ms = i64::try_from(crate::time::current_epoch_ms()).unwrap_or(i64::MAX);
+            saved.content_consent = Some(saved.consent_for_current(accepted_at_ms));
+            if !self.write_notification_delivery(request_id, delivery).await {
+                return Err(CoreFailure::StoreUnavailable);
+            }
+        }
+        Ok(())
+    }
+
+    /// Remove a destination this command added, after its credential could not be stored.
+    ///
+    /// The store may hold part of a write or nothing at all, so the credential is cleared as
+    /// well; the clear runs for an id the settings no longer hold. The failure the user sees
+    /// is the store's, so neither step reports its own.
+    async fn roll_back_added_notification_sink(
+        &mut self,
+        request_id: koushi_protocol::RequestId,
+        sink_id: &str,
+    ) {
+        let mut delivery = (*self.state.settings.values.delivery).clone();
+        delivery.sinks.retain(|sink| sink.id != sink_id);
+        self.write_notification_delivery(request_id, delivery).await;
+        let _ = self
+            .clear_notification_delivery_secret(request_id, sink_id)
+            .await;
+    }
+
+    /// Write a whole delivery block through the reducer, as a renderer patch so the bindings
+    /// the core holds are kept, and report whether the settings file now holds it.
+    async fn write_notification_delivery(
+        &mut self,
+        request_id: koushi_protocol::RequestId,
+        delivery: NotificationDeliverySettings,
+    ) -> bool {
+        let patch = koushi_state::SettingsPatch {
+            delivery: Some(delivery),
+            ..koushi_state::SettingsPatch::default()
+        };
+        let effects = self
+            .reduce_app_action(AppAction::SettingsUpdateRequested {
+                request_id: request_id.sequence,
+                patch,
+            })
+            .await;
+        self.handle_app_effects(request_id, effects).await;
+        let expected = &self.state.settings.values.delivery;
+        *expected == self.settings_store.subscribe().borrow().delivery
     }
 
     /// Forget one sink's secret and the binding that named its configuration.

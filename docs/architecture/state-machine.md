@@ -6210,6 +6210,12 @@ transport or to one country's infrastructure. The app must be running to send.
   never logged, traced, or projected. A WeCom group robot is not a personal inbox and
   WxPusher is not offered; either would be a new `NotificationSink` arm and a new
   configuration variant with no change to the decision engine.
+- **Resend sender.** A Resend destination with no sender address uses Resend's
+  shared `onboarding@resend.dev`, so notifying yourself needs no domain. Resend
+  delivers from that sender only to the address registered on the Resend account; any
+  other recipient needs a domain verified in Resend and a sender on it. The UI keeps the
+  sender under Advanced, prefilled with that default (#1468).
+  A mail destination (Resend or SMTP) with no sender name is named `Koushi`.
 - **No enable switches.** There is no channel-wide and no per-destination on/off
   switch. A destination is *eligible* when its setup is complete - canonical
   non-secret fields present and a credential stored for the current binding - and at
@@ -6245,6 +6251,25 @@ transport or to one country's infrastructure. The app must be running to send.
   once that is persisted; a failed write reports `StoreUnavailable` and leaves the
   sink unconfigured rather than pairing a new value with an old binding. Removing a
   sink clears its credential first and keeps the sink when that clear fails.
+- **Saving a destination (#1468).** The settings screen saves a destination as one
+  command, `SaveNotificationSink`. It carries the non-secret sink, an optional secret,
+  and whether the user accepted plaintext content. Validation runs before anything is
+  written:
+  - a malformed ServerChan SendKey is refused as `UnsupportedSendKey`;
+  - an add beyond the destination limit is refused as `SinkLimitReached`;
+  - a destination the settings canonicalization would drop for a missing field is
+    refused as `IncompleteSink`.
+
+  The non-secret configuration is upserted through the settings reducer under the same
+  rule as any renderer patch: the renderer never names a binding. A secret is then
+  stored with the unbind, store, bind sequence above. If that store fails for a
+  destination the command added, the destination is removed again, so a failed add
+  leaves nothing half-configured. If it fails for a destination that already existed,
+  the non-secret edits stay, the destination reads as not configured, and the failure
+  is reported. An accepted consent is minted by the core, after the final binding, from
+  the destination exactly as saved. A ServerChan consent therefore names the SendKey
+  revision stored by the same command, and the renderer never builds a consent. Edits
+  in the UI stay an ephemeral draft until Save. Nothing is written field by field.
 - **One authority.** The route reads the same Rust-owned attention projection that
   drives the badge and the unread/mention marks; the transient candidate feeds the
   toast. Both derive from one `RoomAttentionKind` and count authority, so a message

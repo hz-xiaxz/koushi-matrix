@@ -3674,6 +3674,26 @@ impl AppActor {
                                 .await;
                             false
                         }
+                        AppCommand::SaveNotificationSink {
+                            request_id,
+                            sink,
+                            secret,
+                            accept_content_consent,
+                        } => {
+                            // #1468: one Save on the settings screen. The secret, when one
+                            // travels, is moved into the store call exactly as above.
+                            let result = self
+                                .save_notification_sink(
+                                    request_id,
+                                    sink,
+                                    secret,
+                                    accept_content_consent,
+                                )
+                                .await;
+                            self.settle_notification_delivery_command(request_id, result)
+                                .await;
+                            false
+                        }
                         AppCommand::ClearNotificationDeliverySecret {
                             request_id,
                             sink_id,

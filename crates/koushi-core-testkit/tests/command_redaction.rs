@@ -141,6 +141,18 @@ fn secret_bearing_commands_redact_debug() {
         sink_id: "qq-mail".to_owned(),
         secret: koushi_state::AuthSecret::new(PASSWORD),
     });
+    // #1468: the whole-destination save carries the same credential and the sink's addresses.
+    let save_delivery_sink = CoreCommand::App(AppCommand::SaveNotificationSink {
+        request_id: fake_request_id(),
+        sink: koushi_state::NotificationSinkSettings {
+            id: "qq-mail".to_owned(),
+            destination: "owner-inbox@example.test".to_owned(),
+            from_address: "sender-box@example.test".to_owned(),
+            ..koushi_state::NotificationSinkSettings::default()
+        },
+        secret: Some(koushi_state::AuthSecret::new(PASSWORD)),
+        accept_content_consent: true,
+    });
     let delivery_outcome = CoreEvent::IntentLifecycle {
         request_id: fake_request_id(),
         outcome: koushi_protocol::event::IntentOutcome::Committed,
@@ -153,6 +165,14 @@ fn secret_bearing_commands_redact_debug() {
     for (command, secrets) in [
         (&login, vec![PASSWORD, "alice-login-name", "Alice Laptop"]),
         (&set_delivery_secret, vec![PASSWORD]),
+        (
+            &save_delivery_sink,
+            vec![
+                PASSWORD,
+                "owner-inbox@example.test",
+                "sender-box@example.test",
+            ],
+        ),
         (&recovery, vec![RECOVERY]),
         (&identity_reset_auth, vec![PASSWORD]),
         (&bootstrap_cross_signing, vec![PASSWORD]),

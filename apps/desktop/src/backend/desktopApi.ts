@@ -52,6 +52,7 @@ import type {
   CreateRoomAccessPreviewInput,
   CreateRoomAccessPreview,
   RoomTagKind,
+  NotificationSinkSettings,
   SavedSessionInfo,
   SearchScopeKind,
   SecureBackupSetupIntent,
@@ -214,6 +215,16 @@ export interface DesktopApi {
    * credential store; the value is never echoed back in a snapshot, an event, or a receipt.
    */
   setNotificationDeliverySecret(sinkId: string, secret: string): Promise<CommandAdmission>;
+  /**
+   * #1468: the detail screen's single Save. Rust validates the destination, upserts its
+   * non-secret fields, stores `secret` when one is given (`null` keeps the stored one), and
+   * mints the content consent when `acceptContentConsent` is true. A refusal rejects.
+   */
+  saveNotificationSink(
+    sink: NotificationSinkSettings,
+    secret: string | null,
+    acceptContentConsent: boolean
+  ): Promise<CommandAdmission>;
   clearNotificationDeliverySecret(sinkId: string): Promise<CommandAdmission>;
   testNotificationDelivery(sinkId: string): Promise<CommandAdmission>;
   changePassword(newPassword: string): Promise<CommandAdmission>;
