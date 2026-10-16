@@ -79,31 +79,32 @@ impl std::fmt::Debug for BoundedNotificationDeliveryText {
 
 /// Bound message text before a delivery candidate holds it.
 ///
-/// A character count on a character boundary is all this needs: what renders is
-/// decided by `digest`, which flattens the text and cuts it at a grapheme boundary. An
-/// empty body is `None` because there is nothing to render; a body of only whitespace
-/// is kept, and `digest` is the one that drops it.
+/// The cut keeps at most [`MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS`] characters
+/// and falls on a grapheme boundary, so a base letter never loses the combining mark past
+/// the bound and an emoji sequence is never split. An empty body is `None` because there
+/// is nothing to render; a body of only whitespace is kept, and `digest` is the one that
+/// drops it.
 pub fn bounded_notification_delivery_message_source(
     text: &str,
 ) -> Option<BoundedNotificationDeliveryText> {
     if text.is_empty() {
         return None;
     }
-    Some(
-        match text
-            .char_indices()
-            .nth(MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS)
-        {
-            Some((index, _)) => BoundedNotificationDeliveryText {
-                text: text[..index].to_owned(),
+    use unicode_segmentation::UnicodeSegmentation;
+    let mut kept_chars = 0;
+    for (start, grapheme) in text.grapheme_indices(true) {
+        kept_chars += grapheme.chars().count();
+        if kept_chars > MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS {
+            return Some(BoundedNotificationDeliveryText {
+                text: text[..start].to_owned(),
                 truncated_at_source: true,
-            },
-            None => BoundedNotificationDeliveryText {
-                text: text.to_owned(),
-                truncated_at_source: false,
-            },
-        },
-    )
+            });
+        }
+    }
+    Some(BoundedNotificationDeliveryText {
+        text: text.to_owned(),
+        truncated_at_source: false,
+    })
 }
 
 const MAX_NOTIFICATION_SINK_ID_BYTES: usize = 64;
@@ -144,6 +145,32 @@ impl NotificationDeliverySettings {
 
     pub fn sink_mut(&mut self, id: &str) -> Option<&mut NotificationSinkSettings> {
         self.sinks.iter_mut().find(|sink| sink.id == id)
+    }
+
+    /// Replace this block with a patched one.
+    ///
+    /// Only the core may name a credential: it writes a binding after it stored that
+    /// credential, so a patch from the renderer keeps, for each sink id, the binding the
+    /// core last wrote. A renderer echoing a binding it saw before a SendKey was replaced
+    /// would otherwise restore the old revision and the consent given for its owner.
+    pub fn apply_patch(
+        &mut self,
+        incoming: &NotificationDeliverySettings,
+        bindings_from_core: bool,
+    ) {
+        let mut patched = incoming.clone();
+        patched.canonicalize();
+        if !bindings_from_core {
+            for sink in &mut patched.sinks {
+                sink.secret_binding = self
+                    .sink(&sink.id)
+                    .and_then(|current| current.secret_binding.clone());
+            }
+            // The kept binding may not name this configuration any more, and a consent the
+            // renderer sent may name a revision the kept binding does not: both fail closed.
+            patched.canonicalize();
+        }
+        *self = patched;
     }
 
     /// Apply what this device must never depend on a well-formed settings file for:

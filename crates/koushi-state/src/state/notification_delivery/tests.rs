@@ -289,6 +289,59 @@ fn a_serverchan_destination_has_no_address_and_its_consent_needs_a_bound_key() {
     assert_eq!(wechat.content, NotificationDeliveryContent::NamesOnly);
 }
 
+/// #1460 review: the renderer cannot name a credential. A patch built from a snapshot taken
+/// before a SendKey was replaced carries the old revision and the consent given for that
+/// key's owner; the core's binding for the new key stands, and the stale consent fails closed.
+#[test]
+fn a_renderer_patch_cannot_restore_a_replaced_sendkey_binding_or_its_consent() {
+    let mut wechat = NotificationSinkSettings {
+        id: "wechat".to_owned(),
+        config: NotificationSinkConfig::ServerChan {
+            endpoint: DEFAULT_SERVERCHAN_ENDPOINT.to_owned(),
+        },
+        ..NotificationSinkSettings::default()
+    };
+    wechat.secret_binding = Some(wechat.credential_binding("a1"));
+    wechat.content = NotificationDeliveryContent::Full;
+    wechat.content_consent = Some(wechat.consent_for_current(1));
+    let stale_patch = NotificationDeliverySettings {
+        sinks: vec![wechat.clone()],
+    };
+
+    // The core stores key B and records its binding; B's owner has not consented.
+    let mut current = NotificationDeliverySettings::default();
+    let mut replaced = wechat.clone();
+    replaced.secret_binding = Some(replaced.credential_binding("b2"));
+    replaced.revoke_content_consent();
+    current.apply_patch(
+        &NotificationDeliverySettings {
+            sinks: vec![replaced],
+        },
+        true,
+    );
+
+    // A later target edit from the renderer echoes A's binding and consent.
+    let mut edited = stale_patch;
+    edited.sinks[0].targets.direct_messages = false;
+    current.apply_patch(&edited, false);
+    let sink = current.sink("wechat").expect("sink");
+    assert_eq!(sink.secret_binding, Some(sink.credential_binding("b2")));
+    assert_eq!(sink.content_consent, None);
+    assert_eq!(
+        sink.effective_content(),
+        NotificationDeliveryContent::NamesOnly
+    );
+    assert!(
+        !sink.targets.direct_messages,
+        "the edit itself still applies"
+    );
+
+    // Nor can the renderer invent a binding for a sink the core never bound.
+    let mut fresh = NotificationDeliverySettings::default();
+    fresh.apply_patch(&edited, false);
+    assert_eq!(fresh.sink("wechat").expect("sink").secret_binding, None);
+}
+
 #[test]
 fn the_watch_list_keeps_unique_targets_and_drops_what_is_not_an_id() {
     let mut targets = NotificationDeliveryTargets {
@@ -387,9 +440,9 @@ fn an_smtp_sink_binds_its_consent_to_host_and_port() {
 }
 
 /// #1460: what a candidate holds is bounded before the dwell can carry it, the bound
-/// never splits a character, and a cut source says so.
+/// never splits a grapheme, and a cut source says so.
 #[test]
-fn message_source_is_bounded_on_a_character_boundary_and_flags_a_cut() {
+fn message_source_is_bounded_on_a_grapheme_boundary_and_flags_a_cut() {
     assert_eq!(bounded_notification_delivery_message_source(""), None);
     let short = bounded_notification_delivery_message_source("short").expect("text");
     assert_eq!(short.text, "short");
@@ -411,6 +464,30 @@ fn message_source_is_bounded_on_a_character_boundary_and_flags_a_cut() {
     );
     assert!(bounded.truncated_at_source);
     assert!(!format!("{bounded:?}").contains('日'));
+
+    // A cut never splits a grapheme: the base letter whose combining mark falls past the
+    // bound goes with it, and so does an emoji whose ZWJ sequence would cross it.
+    let combining = format!(
+        "{}e\u{301}tail",
+        "a".repeat(MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS - 1)
+    );
+    let bounded = bounded_notification_delivery_message_source(&combining).expect("text");
+    assert_eq!(
+        bounded.text,
+        "a".repeat(MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS - 1)
+    );
+    assert!(bounded.truncated_at_source);
+    let family = "\u{1F468}\u{200D}\u{1F469}\u{200D}\u{1F467}";
+    let zwj = format!(
+        "{}{family}",
+        "a".repeat(MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS - 2)
+    );
+    let bounded = bounded_notification_delivery_message_source(&zwj).expect("text");
+    assert_eq!(
+        bounded.text,
+        "a".repeat(MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS - 2)
+    );
+    assert!(bounded.truncated_at_source);
 }
 
 #[test]

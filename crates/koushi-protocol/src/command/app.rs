@@ -190,7 +190,8 @@ pub enum AppCommand {
     SetNotificationDeliverySecret {
         request_id: RequestId,
         sink_id: String,
-        secret: String,
+        /// Zeroized on drop, like every other secret a command carries.
+        secret: koushi_state::AuthSecret,
     },
     /// #1427: forget the secret stored for one sink. The sink itself stays configured;
     /// it simply stops being a sink this device can send through.

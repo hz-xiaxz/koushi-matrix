@@ -372,7 +372,7 @@ impl AppActor {
         &mut self,
         request_id: koushi_protocol::RequestId,
         sink_id: &str,
-        secret: String,
+        secret: koushi_state::AuthSecret,
     ) -> Result<(), CoreFailure> {
         let Some(sink) = self.state.settings.values.delivery.sink(sink_id) else {
             return Err(CoreFailure::NotificationDeliveryRejected {
@@ -380,7 +380,7 @@ impl AppActor {
             });
         };
         if matches!(sink.config, NotificationSinkConfig::ServerChan { .. })
-            && validate_serverchan_sendkey(&secret).is_err()
+            && validate_serverchan_sendkey(secret.expose_secret()).is_err()
         {
             // A ServerChan³ key or a value that is not a Turbo SendKey would only ever be
             // refused by the service, so it is refused here instead of being stored.
@@ -393,10 +393,23 @@ impl AppActor {
         // late outcome of a send made with the previous credential settles nothing.
         let binding = sink.credential_binding(&random_hex_token());
         self.abort_notification_delivery_sends(sink_id);
+        // Unbind before the store holds the new credential. A file that still named the old
+        // revision next to a new SendKey would restore the consent given for the old key's
+        // owner after a restart, so the new credential is stored only once no binding - and
+        // for ServerChan no consent - is left on disk.
+        if !self
+            .write_notification_delivery_binding(request_id, sink_id, None)
+            .await
+        {
+            // The unbound sink the reducer held until the write failed can have swept the old
+            // credential as an orphan, so the projection is read again instead of trusted.
+            self.refresh_notification_delivery_configured().await;
+            return Err(CoreFailure::StoreUnavailable);
+        }
         let store = self.composer_draft_store_actor.clone();
         let save_sink_id = sink_id.to_owned();
         let saved = executor::spawn_blocking(move || {
-            store.save_notification_sink_secret(&save_sink_id, &secret)
+            store.save_notification_sink_secret(&save_sink_id, secret.expose_secret())
         })
         .await;
         match saved {
@@ -404,8 +417,17 @@ impl AppActor {
             Ok(Err(error)) => return Err(error.to_core_failure()),
             Err(_) => return Err(CoreFailure::StoreUnavailable),
         }
-        self.write_notification_delivery_binding(request_id, sink_id, Some(binding))
-            .await;
+        if !self
+            .write_notification_delivery_binding(request_id, sink_id, Some(binding))
+            .await
+        {
+            // The file keeps the unbound sink written above, so it reads as unconfigured after
+            // a restart; this run must agree with it rather than send with an unsaved binding.
+            self.write_notification_delivery_binding(request_id, sink_id, None)
+                .await;
+            self.refresh_notification_delivery_configured().await;
+            return Err(CoreFailure::StoreUnavailable);
+        }
         // A new password is not a removed one, so the line the frontend draws for a retired
         // credential goes away as soon as the user saves a replacement.
         self.notification_delivery.clear_credential_retired(sink_id);
@@ -421,7 +443,10 @@ impl AppActor {
         request_id: koushi_protocol::RequestId,
         sink_id: &str,
     ) -> Result<(), CoreFailure> {
-        self.require_notification_delivery_sink(sink_id)?;
+        // A sink the settings no longer hold may still own a credential - its removal and this
+        // clear race, or an earlier clear failed - so the delete runs for it too. The store
+        // refuses an id that is not a sink id.
+        let known = self.state.settings.values.delivery.sink(sink_id).is_some();
         self.abort_notification_delivery_sends(sink_id);
         let store = self.composer_draft_store_actor.clone();
         let delete_sink_id = sink_id.to_owned();
@@ -434,12 +459,20 @@ impl AppActor {
             Ok(Err(error)) => return Err(error.to_core_failure()),
             Err(_) => return Err(CoreFailure::StoreUnavailable),
         }
-        self.write_notification_delivery_binding(request_id, sink_id, None)
-            .await;
+        let unbound = !known
+            || self
+                .write_notification_delivery_binding(request_id, sink_id, None)
+                .await;
         // The user asked for this removal, so it is not something to explain back to them.
         self.notification_delivery.clear_credential_retired(sink_id);
         self.refresh_notification_delivery_configured().await;
-        Ok(())
+        // The credential is gone either way, so the sink cannot send; the file still naming
+        // it only has to be reported.
+        if unbound {
+            Ok(())
+        } else {
+            Err(CoreFailure::StoreUnavailable)
+        }
     }
 
     /// Abort every send in flight for one sink, before its credential is replaced or removed.
@@ -463,17 +496,20 @@ impl AppActor {
         request_id: koushi_protocol::RequestId,
         sink_id: &str,
         binding: Option<String>,
-    ) {
+    ) -> bool {
         let mut delivery = self.state.settings.values.delivery.clone();
         let Some(sink) = delivery.sinks.iter_mut().find(|sink| sink.id == sink_id) else {
-            return;
+            return false;
         };
-        if sink.secret_binding == binding {
-            return;
+        if sink.secret_binding == binding
+            && self.notification_delivery_binding_saved(sink_id, &binding)
+        {
+            return true;
         }
-        sink.secret_binding = binding;
+        sink.secret_binding = binding.clone();
         let patch = koushi_state::SettingsPatch {
             delivery: Some(*delivery),
+            delivery_bindings_from_core: true,
             ..koushi_state::SettingsPatch::default()
         };
         let effects = self
@@ -483,17 +519,18 @@ impl AppActor {
             })
             .await;
         self.handle_app_effects(request_id, effects).await;
+        self.notification_delivery_binding_saved(sink_id, &binding)
     }
 
-    /// Refuse a sink the settings do not hold, because a secret written for it would have no
-    /// owner and no sink to configure.
-    fn require_notification_delivery_sink(&self, sink_id: &str) -> Result<(), CoreFailure> {
-        if self.state.settings.values.delivery.sink(sink_id).is_some() {
-            return Ok(());
-        }
-        Err(CoreFailure::NotificationDeliveryRejected {
-            kind: NotificationDeliveryFailureKind::UnknownSink,
-        })
+    /// Whether the settings file holds `binding` for `sink_id`. The store publishes only what
+    /// it wrote, so a failed write reads back as the previous binding.
+    fn notification_delivery_binding_saved(&self, sink_id: &str, binding: &Option<String>) -> bool {
+        self.settings_store
+            .subscribe()
+            .borrow()
+            .delivery
+            .sink(sink_id)
+            .is_some_and(|sink| &sink.secret_binding == binding)
     }
 
     /// Settle a delivery command: a success commits, and every outcome already went through the
@@ -517,10 +554,17 @@ impl AppActor {
                     published_generation,
                 });
             }
-            Err(failure) => self.emit(CoreEvent::OperationFailed {
-                request_id,
-                failure,
-            }),
+            Err(failure) => {
+                // A failed save or clear can still have moved the state - a binding written
+                // before a later step failed, or a credential swept with it - so what the
+                // frontend renders is republished before the failure is reported.
+                let before_state = self.snapshot_tx.borrow().state.clone();
+                self.publish_state_change(&before_state);
+                self.emit(CoreEvent::OperationFailed {
+                    request_id,
+                    failure,
+                });
+            }
         }
     }
 

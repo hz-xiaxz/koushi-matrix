@@ -833,8 +833,10 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     setSecret: async (sinkId, secret) => {
       await desktopApi.setNotificationDeliverySecret(sinkId, secret).catch(() => undefined);
     },
+    // A refused clear keeps the destination, so the section can only remove it once the
+    // credential is gone; the failure has to reach it.
     clearSecret: async (sinkId) => {
-      await desktopApi.clearNotificationDeliverySecret(sinkId).catch(() => undefined);
+      await desktopApi.clearNotificationDeliverySecret(sinkId);
     },
     test: async (sinkId) => {
       await desktopApi.testNotificationDelivery(sinkId).catch(() => undefined);

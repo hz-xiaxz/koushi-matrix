@@ -166,7 +166,7 @@ pub(super) fn build_set_notification_delivery_secret_command(
     CoreCommand::App(AppCommand::SetNotificationDeliverySecret {
         request_id,
         sink_id,
-        secret,
+        secret: koushi_state::AuthSecret::new(secret),
     })
 }
 

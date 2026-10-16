@@ -6223,8 +6223,14 @@ transport or to one country's infrastructure. The app must be running to send.
   value; a secret input is write-only and is cleared from the UI on submit. A secret
   is read when the sink is configured or by the send itself, never on the settings or
   dispatch hot path. A binding names the identity the secret was stored for
-  (`resend:{endpoint}`, `smtp:{host}:{port}:{username}`, `serverchan:{endpoint}`); a
-  changed identity deletes the stored value.
+  (`resend:{endpoint}`, `smtp:{host}:{port}:{username}`, `serverchan:{endpoint}`)
+  plus a revision minted per save; a changed identity deletes the stored value. Only
+  the core writes a binding: a settings patch from the renderer keeps the binding the
+  core holds, so it can neither restore a replaced revision nor the consent tied to
+  it. A save unbinds on disk before the store receives the new value, and binds only
+  once that is persisted; a failed write reports `StoreUnavailable` and leaves the
+  sink unconfigured rather than pairing a new value with an old binding. Removing a
+  sink clears its credential first and keeps the sink when that clear fails.
 - **One authority.** The route reads the same Rust-owned attention projection that
   drives the badge and the unread/mention marks; the transient candidate feeds the
   toast. Both derive from one `RoomAttentionKind` and count authority, so a message

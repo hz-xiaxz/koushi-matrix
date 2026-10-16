@@ -743,12 +743,23 @@ describe("NotificationDeliverySection outcome", () => {
     expect(handlers.test).toHaveBeenCalledTimes(1);
   });
 
-  test("removes a destination and releases the credential it was keyed by", () => {
+  test("removes a destination and releases the credential it was keyed by", async () => {
     const handlers = renderSection({ runtime: state({ sinks: [sinkState()] }) });
     openSink();
     fireEvent.click(screen.getByTestId("notification-delivery-sink-remove"));
-    expect(lastUpdate(handlers).sinks).toEqual([]);
     expect(handlers.clearSecret).toHaveBeenCalledWith(SINK_ID);
+    await waitFor(() => expect(lastUpdate(handlers).sinks).toEqual([]));
+  });
+
+  test("keeps a destination whose credential could not be cleared", async () => {
+    const handlers = renderSection({ runtime: state({ sinks: [sinkState()] }) });
+    vi.mocked(handlers.clearSecret).mockRejectedValueOnce(new Error("store unavailable"));
+    openSink();
+    fireEvent.click(screen.getByTestId("notification-delivery-sink-remove"));
+    await waitFor(() => expect(handlers.clearSecret).toHaveBeenCalledWith(SINK_ID));
+    await act(async () => {});
+    // Removing the sink now would orphan a credential no settings name any more.
+    expect(handlers.update).not.toHaveBeenCalled();
   });
 
   test("ships the detail in Japanese", () => {

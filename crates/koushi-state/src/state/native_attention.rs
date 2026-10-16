@@ -688,16 +688,19 @@ fn verified_native_preview(entry: &NativeAttentionCandidateEntry<'_>) -> Option<
         return None;
     }
     use unicode_segmentation::UnicodeSegmentation;
-    let mut graphemes = flattened.graphemes(true);
-    let bounded: String = graphemes
-        .by_ref()
-        .take(MAX_NATIVE_NOTIFICATION_PREVIEW_GRAPHEMES)
+    // The ellipsis counts toward the bound, so a cut preview is exactly the maximum.
+    if flattened
+        .graphemes(true)
+        .nth(MAX_NATIVE_NOTIFICATION_PREVIEW_GRAPHEMES)
+        .is_none()
+    {
+        return Some(flattened);
+    }
+    let bounded: String = flattened
+        .graphemes(true)
+        .take(MAX_NATIVE_NOTIFICATION_PREVIEW_GRAPHEMES - 1)
         .collect();
-    Some(if graphemes.next().is_some() {
-        format!("{bounded}…")
-    } else {
-        bounded
-    })
+    Some(format!("{bounded}…"))
 }
 
 fn native_notification_title(room_display_name: &str, kind: RoomAttentionKind) -> String {

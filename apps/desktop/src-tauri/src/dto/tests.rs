@@ -1812,8 +1812,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
         use koushi_state::{
             NotificationDeliveryContent, NotificationDeliveryOutcomeState,
             NotificationDeliveryPresetState, NotificationDeliverySinkState,
-            NotificationDeliveryTarget, NotificationSinkConfig, NotificationSinkSettings,
-            SmtpTls,
+            NotificationDeliveryTarget, NotificationSinkConfig, NotificationSinkSettings, SmtpTls,
         };
         let mut resend = NotificationSinkSettings {
             id: "resend".to_owned(),

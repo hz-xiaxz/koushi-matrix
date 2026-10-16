@@ -179,9 +179,15 @@ fn the_preview_is_one_bounded_line_and_never_printed() {
     assert!(body.starts_with("first second "));
     assert!(!body.contains('\n'));
     assert!(body.ends_with('…'));
+    // The ellipsis is inside the bound, so a platform cut at the same length keeps it.
     assert_eq!(
         body.chars().count(),
-        MAX_NATIVE_NOTIFICATION_PREVIEW_GRAPHEMES + 1
+        MAX_NATIVE_NOTIFICATION_PREVIEW_GRAPHEMES
+    );
+    let exact = "a".repeat(MAX_NATIVE_NOTIFICATION_PREVIEW_GRAPHEMES);
+    assert_eq!(
+        live_body(&room(Some(&exact)), true).as_deref(),
+        Some(exact.as_str())
     );
 
     let rooms = [room(Some("private banner text"))];

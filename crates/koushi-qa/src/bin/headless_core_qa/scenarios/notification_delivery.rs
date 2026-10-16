@@ -392,7 +392,7 @@ impl QaDeliveryFlow<'_> {
                 AppCommand::SetNotificationDeliverySecret {
                     request_id,
                     sink_id: sink_id.to_owned(),
-                    secret,
+                    secret: koushi_state::AuthSecret::new(secret),
                 },
             ))
             .await

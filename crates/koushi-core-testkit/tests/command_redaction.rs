@@ -139,7 +139,7 @@ fn secret_bearing_commands_redact_debug() {
     let set_delivery_secret = CoreCommand::App(AppCommand::SetNotificationDeliverySecret {
         request_id: fake_request_id(),
         sink_id: "qq-mail".to_owned(),
-        secret: PASSWORD.to_owned(),
+        secret: koushi_state::AuthSecret::new(PASSWORD),
     });
     let delivery_outcome = CoreEvent::IntentLifecycle {
         request_id: fake_request_id(),

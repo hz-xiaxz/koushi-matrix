@@ -176,10 +176,15 @@ export function NotificationDeliverySection({
     });
   }
 
-  function removeSink(sinkId: string) {
+  async function removeSink(sinkId: string) {
     // Removing the sink also releases the credential it was keyed by; leaving it behind
-    // would keep an orphaned secret in the OS store.
-    void actions.clearSecret(sinkId);
+    // would keep an orphaned secret in the OS store. The credential goes first, and a
+    // failed delete keeps the sink so the user can retry instead of losing its handle.
+    try {
+      await actions.clearSecret(sinkId);
+    } catch {
+      return;
+    }
     actions.update({ ...delivery, sinks: delivery.sinks.filter((sink) => sink.id !== sinkId) });
     setView({ kind: "list" });
   }
@@ -268,7 +273,7 @@ export function NotificationDeliverySection({
           onChange={(next) => (draft ? setView({ kind: "draft", sink: next }) : replaceSink(next))}
           onSaveDraft={() => commitDraft(sink)}
           onBack={() => setView({ kind: "list" })}
-          onRemove={() => removeSink(sink.id)}
+          onRemove={() => void removeSink(sink.id)}
           onSetSecret={(secret) => runBusy(sink.id, () => actions.setSecret(sink.id, secret))}
           onClearSecret={() => {
             void actions.clearSecret(sink.id);

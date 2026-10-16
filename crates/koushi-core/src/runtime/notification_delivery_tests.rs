@@ -202,7 +202,7 @@ async fn set_secret_value(
             AppCommand::SetNotificationDeliverySecret {
                 request_id,
                 sink_id: SINK.to_owned(),
-                secret: secret.to_owned(),
+                secret: koushi_state::AuthSecret::new(secret),
             },
         ))
         .await
@@ -283,7 +283,7 @@ async fn an_unusable_sink_id_is_refused_without_touching_the_store() {
             AppCommand::SetNotificationDeliverySecret {
                 request_id,
                 sink_id: "Not A Sink Id".to_owned(),
-                secret: SECRET.to_owned(),
+                secret: koushi_state::AuthSecret::new(SECRET),
             },
         ))
         .await
@@ -324,7 +324,7 @@ async fn the_secret_reaches_no_snapshot_no_debug_and_no_settings_file() {
     let command = AppCommand::SetNotificationDeliverySecret {
         request_id: connection.next_request_id(),
         sink_id: SINK.to_owned(),
-        secret: SECRET.to_owned(),
+        secret: koushi_state::AuthSecret::new(SECRET),
     };
     let debug = format!("{command:?}");
     assert!(
@@ -1005,5 +1005,58 @@ async fn a_serverchan_test_send_posts_a_form_to_the_sendkey_path() {
             .expect("serializable")
             .contains(SENDKEY)
     );
+    drop(runtime);
+}
+
+#[cfg(unix)]
+#[tokio::test]
+async fn a_new_secret_is_not_stored_while_the_old_binding_cannot_be_retired() {
+    use std::os::unix::fs::PermissionsExt;
+
+    let (runtime, stores, mut connection) =
+        runtime_with_sink("https://relay.example.invalid/emails").await;
+    set_secret(&connection).await;
+    wait_for_runtime_snapshot(&mut connection, |state| {
+        state.notification_delivery.sinks[0].secret_configured
+    })
+    .await;
+    let old_binding = snapshot_binding(&connection).expect("the first secret is bound");
+    wait_for_settings_binding(&stores, &old_binding).await;
+
+    // The settings file can no longer be replaced, so no binding change can be persisted.
+    let settings_dir = stores.data_dir().join("settings");
+    let writable = std::fs::metadata(&settings_dir)
+        .expect("the settings directory exists")
+        .permissions();
+    std::fs::set_permissions(&settings_dir, std::fs::Permissions::from_mode(0o555))
+        .expect("the settings directory can be made read-only");
+
+    let request_id = set_secret_value(&connection, "re_replacement_fixture_key").await;
+    let failure = wait_for_failure(&mut connection, request_id).await;
+    std::fs::set_permissions(&settings_dir, writable).expect("permissions are restored");
+
+    assert_eq!(failure, koushi_protocol::CoreFailure::StoreUnavailable);
+    // The new key never reached the store behind a file that still names the old revision (and,
+    // for ServerChan, the consent given for the old key's owner). The unbound in-memory sink lets
+    // the orphan sweep drop the old credential too, which is the safe side of a failed write.
+    let stored = credential_store(&stores)
+        .load_notification_sink_secret(SINK)
+        .expect("the credential store is readable");
+    assert!(
+        stored
+            .as_ref()
+            .is_none_or(|secret| secret.as_str() != "re_replacement_fixture_key"),
+        "a replacement key is stored only after the old binding is retired on disk"
+    );
+    // No revision minted for the replacement is held anywhere, and with the old credential gone
+    // the sink reads as unconfigured rather than sending with a binding the file never received.
+    let state = wait_for_runtime_snapshot(&mut connection, |state| {
+        !state.notification_delivery.sinks[0].secret_configured
+    })
+    .await;
+    let binding = state.settings.values.delivery.sinks[0]
+        .secret_binding
+        .clone();
+    assert!(binding.is_none() || binding == Some(old_binding));
     drop(runtime);
 }
