@@ -1,4 +1,3 @@
-import { spawnSync } from "node:child_process";
 import { existsSync,readFileSync } from "node:fs";
 import { describe,expect,test } from "vitest";
 
@@ -47,15 +46,6 @@ describe("desktop release scripts", () => {
     const output = runScript("scripts/desktop-release-preflight.mjs", ["--check-config"]);
 
     expect(output).not.toContain("package.scripts.qa:real-account");
-  });
-
-  test("retired real-server runner refuses before reading credentials", () => {
-    const result = spawnSync(process.execPath, ["scripts/desktop-real-homeserver-qa.mjs", "--run"], {
-      cwd: new URL("../../../../", import.meta.url).pathname,
-      encoding: "utf8"
-    });
-    expect(result.status).toBe(1);
-    expect(result.stderr).toContain("real-homeserver QA is retired");
   });
 
   test("qa token contract helper exposes token and private-data assertions", () => {

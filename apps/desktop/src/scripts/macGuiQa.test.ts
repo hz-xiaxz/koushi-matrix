@@ -386,14 +386,12 @@ describe("desktop release scripts", () => {
       "crates/koushi-qa/src/bin/headless_core_qa/scenarios/rooms.rs",
       "crates/koushi-qa/src/bin/headless_core_qa/scenarios/timeline.rs",
       "crates/koushi-qa/src/bin/headless_core_qa/scenarios/search.rs",
-      "crates/koushi-qa/src/bin/real-homeserver-qa.rs",
       "crates/koushi-sdk/src/lib.rs",
       "crates/koushi-key/src/lib.rs",
       "scripts/desktop-build-dmg.mjs",
       "scripts/desktop-headless-local-qa.mjs",
       "scripts/desktop-linux-gui-qa.mjs",
-      "scripts/desktop-mac-gui-smoke.mjs",
-      "scripts/desktop-real-homeserver-qa.mjs"
+      "scripts/desktop-mac-gui-smoke.mjs"
     ];
 
     for (const file of activeSourceFiles) {

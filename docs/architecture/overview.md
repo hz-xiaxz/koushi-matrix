@@ -273,8 +273,8 @@ Crate responsibilities:
   Core integration fixtures and targets. It may enable Core `test-hooks`; it is
   not a production dependency, QA runtime, or reason to expose private actors.
 - `koushi-qa` — non-default, feature-gated package owning the authoritative
-  `headless-core-qa` and `real-homeserver-qa` binaries, scenario registry,
-  orchestration and private-data-free evidence production. It uses protocol
+  `headless-core-qa` binary, scenario registry, orchestration and
+  private-data-free evidence production. It uses protocol
   DTOs and narrow Core test hooks without owning product semantics.
 - `apps/desktop/src-tauri` — transport/platform adapter. Holds a `CoreRuntime`,
   constructs protocol commands, forwards events/snapshots, registers native

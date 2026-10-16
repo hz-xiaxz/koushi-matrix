@@ -172,7 +172,6 @@ test("CI gates positive invitations on exactly Tuwunel and Synapse", () => {
 test("submodule guard is wired into commit and QA entrypoints", () => {
   const preCommit = readRepoFile(".githooks/pre-commit");
   const headless = readRepoFile("scripts/desktop-headless-local-qa.mjs");
-  const real = readRepoFile("scripts/desktop-real-homeserver-qa.mjs");
   const linux = [
     "scripts/desktop-linux-gui-qa.mjs",
     "scripts/desktop-linux-gui-qa/main.mjs",
@@ -182,7 +181,7 @@ test("submodule guard is wired into commit and QA entrypoints", () => {
   const releaseGate = readRepoFile("scripts/desktop-release-gate-check.mjs");
 
   assert.match(preCommit, /check-sdk-submodule\.mjs/);
-  for (const source of [headless, real, linux, mac, releaseGate]) {
+  for (const source of [headless, linux, mac, releaseGate]) {
     assert.match(source, /sdk-submodule-status\.mjs/);
   }
 });

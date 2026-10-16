@@ -42,7 +42,7 @@ function fixture() {
   write(
     root,
     "crates/koushi-qa/Cargo.toml",
-    '[package]\nname = "koushi-qa"\n[[bin]]\nname = "headless-core-qa"\nrequired-features = ["qa-bin"]\n[[bin]]\nname = "real-homeserver-qa"\nrequired-features = ["qa-bin"]\n'
+    '[package]\nname = "koushi-qa"\n[[bin]]\nname = "headless-core-qa"\nrequired-features = ["qa-bin"]\n'
   );
   return root;
 }
