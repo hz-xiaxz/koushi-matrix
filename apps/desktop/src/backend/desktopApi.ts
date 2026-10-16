@@ -391,6 +391,7 @@ export interface DesktopApi {
     origin?: "user" | "automatic",
     timelineKey?: TimelineKey
   ): Promise<CommandAdmission>;
+  requestHistoryKeys(roomId: string, forceAll?: boolean): Promise<CommandAdmission>;
   requestLateDecryption(
     roomId: string,
     timelineKey?: TimelineKey

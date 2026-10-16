@@ -545,6 +545,7 @@ async fn subscribe_replay_path_records_subscribed_done_stage() {
     let (manager_tx, manager_rx) = mpsc::channel(1);
     let (terminal_ingress, terminal_rx) = TimelineSendTerminalIngress::channel();
     let mut manager = TimelineManagerActor {
+        history_recovery: None,
         session: None,
         room_list_service: None,
         room_subscription_checkpoint_task: None,
@@ -761,6 +762,7 @@ async fn diagnostics_producer_paths_run_without_trace_environment() {
     let (_manager_tx, manager_rx) = mpsc::channel(1);
     let (terminal_ingress, terminal_rx) = TimelineSendTerminalIngress::channel();
     let mut manager = TimelineManagerActor {
+        history_recovery: None,
         session: None,
         room_list_service: None,
         room_subscription_checkpoint_task: None,

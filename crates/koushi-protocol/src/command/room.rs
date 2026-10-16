@@ -165,6 +165,11 @@ impl fmt::Debug for CreateRoomParentSpace {
 }
 
 pub enum RoomCommand {
+    RequestHistoryKeys {
+        request_id: RequestId,
+        room_id: String,
+        force_all: bool,
+    },
     CreateRoom {
         request_id: RequestId,
         options: CreateRoomOptions,
@@ -424,6 +429,16 @@ pub enum RoomCommand {
 impl fmt::Debug for RoomCommand {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::RequestHistoryKeys {
+                request_id,
+                force_all,
+                ..
+            } => formatter
+                .debug_struct("RequestHistoryKeys")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
+                .field("force_all", force_all)
+                .finish(),
             Self::CreateRoom {
                 request_id,
                 options,

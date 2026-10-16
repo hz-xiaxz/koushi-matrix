@@ -1971,6 +1971,17 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
 
     // room_management — with settings snapshot
     state.room_management = RoomManagementState {
+        history_keys: BTreeMap::from([(
+            "!history:example.invalid".to_owned(),
+            koushi_state::HistoryKeyRecoveryState {
+                generation: 2,
+                status: koushi_state::HistoryKeyRecoveryStatus::Requested {
+                    recipients: 2,
+                    responses: 1,
+                    received_keys: 3,
+                },
+            },
+        )]),
         selected_room_id: Some("!room:example.invalid".to_owned()),
         settings: Some(RoomSettingsSnapshot {
             room_id: "!room:example.invalid".to_owned(),

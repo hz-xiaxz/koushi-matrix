@@ -13,6 +13,8 @@ use super::AppState;
 
 #[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct RoomManagementState {
+    #[serde(default, skip_serializing_if = "std::collections::BTreeMap::is_empty")]
+    pub history_keys: std::collections::BTreeMap<String, super::HistoryKeyRecoveryState>,
     pub selected_room_id: Option<String>,
     pub settings: Option<RoomSettingsSnapshot>,
     /// The Rust-owned access/history draft (#1177). React keeps only DOM/focus
@@ -39,6 +41,7 @@ impl fmt::Debug for RoomManagementState {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         formatter
             .debug_struct("RoomManagementState")
+            .field("history_key_room_count", &self.history_keys.len())
             .field(
                 "selected_room_id",
                 &self.selected_room_id.as_ref().map(|_| "RoomId(..)"),

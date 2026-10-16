@@ -2061,7 +2061,18 @@ export interface DirectoryRoomSummary {
   guest_can_join: boolean;
 }
 
+export type HistoryKeyRecoveryFailure = "network" | "verificationRequired" | "membershipChanged" | "historyNotShared" | "tooLarge" | "noRecipients" | "rateLimited" | "storage" | "invalidResponse";
+export interface HistoryKeyRecoveryState {
+  generation: number;
+  status:
+    | { kind: "idle" | "sending" }
+    | { kind: "requested"; recipients: number; responses: number; received_keys: number }
+    | { kind: "failed"; reason: HistoryKeyRecoveryFailure }
+    | { kind: "partial"; received_keys: number; reason: HistoryKeyRecoveryFailure };
+}
+
 export interface RoomManagementState {
+  history_keys?: Record<string, HistoryKeyRecoveryState>;
   selected_room_id: string | null;
   settings: RoomSettingsSnapshot | null;
   /**

@@ -258,6 +258,29 @@ impl TimelineActor {
             executor::sleep(schedule.delay),
         ));
     }
+    pub(super) async fn report_history_decryption(&self) {
+        let Some(tx) = &self.history_recovery else {
+            return;
+        };
+        if !matches!(
+            self.key.kind,
+            koushi_protocol::ids::TimelineKind::Room { .. }
+        ) {
+            return;
+        }
+        let items = self.timeline.items().await;
+        let unresolved = items
+            .iter()
+            .filter_map(|item| item.as_event())
+            .any(|event| event.content().as_unable_to_decrypt().is_some());
+        let _ = tx
+            .send(crate::room::RoomMessage::HistoryUndecryptableObserved {
+                room_id: self.key.room_id().to_owned(),
+                unresolved,
+            })
+            .await;
+    }
+
     pub(super) async fn handle_diff_batch(
         &mut self,
         diffs: Vec<eyeball_im::VectorDiff<Arc<SdkTimelineItem>>>,
@@ -267,6 +290,7 @@ impl TimelineActor {
         if diffs.is_empty() {
             return;
         }
+        self.report_history_decryption().await;
         // #478: start/join standard-only recovery for genuine missing-session
         // UTDs appearing in this batch.
         for diff in &diffs {

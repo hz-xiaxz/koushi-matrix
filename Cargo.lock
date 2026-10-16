@@ -3337,6 +3337,7 @@ dependencies = [
  "eyeball",
  "eyeball-im",
  "futures-util",
+ "getrandom 0.3.4",
  "image",
  "jiff",
  "koushi-diagnostics",
@@ -3355,6 +3356,7 @@ dependencies = [
  "regex",
  "serde",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "thiserror 2.0.20",
  "tokio",
@@ -3486,6 +3488,7 @@ dependencies = [
 name = "koushi-qa"
 version = "0.1.0"
 dependencies = [
+ "getrandom 0.3.4",
  "koushi-core",
  "koushi-diagnostics",
  "koushi-protocol",
@@ -3493,7 +3496,10 @@ dependencies = [
  "koushi-state",
  "koushi-store",
  "matrix-sdk",
+ "matrix-sdk-base",
+ "matrix-sdk-ui",
  "serde_json",
+ "tempfile",
  "tokio",
  "tracing-subscriber",
 ]

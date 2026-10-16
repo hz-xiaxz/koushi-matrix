@@ -3328,6 +3328,10 @@ function AccountContent({
     await settleCommand(api.repairRoomTimeline(roomId));
   }
 
+  function requestHistoryKeys(roomId: string, forceAll = false) {
+    runInBackground(api.requestHistoryKeys(roomId, forceAll));
+  }
+
   async function forceRotateOutboundSession(roomId: string) {
     await settleCommand(api.forceRotateOutboundSession(roomId));
   }
@@ -7450,6 +7454,7 @@ function AccountContent({
             snapshot={snapshot}
             accountTabId={accountTabId ?? undefined}
             timelineTransport={appTimelineTransport}
+            onRequestHistoryKeys={requestHistoryKeys}
             onRequestAvatarThumbnail={
               AVATAR_THUMBNAIL_DOWNLOADS_ENABLED ? requestMemberAvatarThumbnail : undefined
             }
@@ -7621,6 +7626,7 @@ function AccountContent({
           recoverySecretInputRef={recoverySecretRef}
           snapshot={snapshot}
           timelineTransport={appTimelineTransport}
+            onRequestHistoryKeys={requestHistoryKeys}
           searchIndexingPending={searchIndexingPending}
           searchPending={searchPending}
           searchTooShortMinChars={searchTooShortMinChars}

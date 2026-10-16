@@ -49,6 +49,22 @@ pub struct MissingSpaceChildLink {
 
 /// Messages sent to the RoomActor from AccountActor / SyncActor.
 pub(crate) enum RoomMessage {
+    #[cfg(any(test, feature = "test-hooks"))]
+    PauseHistoryKeyImport {
+        disclosure: bool,
+        reached: oneshot::Sender<()>,
+        resume: oneshot::Receiver<()>,
+        installed: oneshot::Sender<bool>,
+    },
+    #[cfg(any(test, feature = "test-hooks"))]
+    HistoryRecoveryBarrier {
+        room_id: Option<String>,
+        completed: oneshot::Sender<super::HistoryKeyRecoveryDiagnostics>,
+    },
+    HistoryUndecryptableObserved {
+        room_id: String,
+        unresolved: bool,
+    },
     /// Route a `RoomCommand` to the actor.
     Command(RoomCommand),
     #[cfg(any(test, feature = "test-hooks"))]
@@ -59,7 +75,9 @@ pub(crate) enum RoomMessage {
     /// A store-backed session was established (login/restore/switch).
     /// Enables room operations; does NOT start the room-list observation —
     /// that starts on `SyncStarted` when its live `RoomListService` is known.
-    SessionEstablished { session: Arc<MatrixClientSession> },
+    SessionEstablished {
+        session: Arc<MatrixClientSession>,
+    },
     /// Sync started. Sent by `SyncActor` after the backend is launched.
     /// `room_list_service` is the ONE live service owned by the running
     /// `SyncService`. Ad-hoc `RoomListService` instances are prohibited.
@@ -111,13 +129,19 @@ pub(crate) enum RoomMessage {
     /// RoomActor stays alive for future sessions. The oneshot acknowledges
     /// that the actor completed the encryption-debug cancel/join/settle
     /// sequence before clearing the session (issue #538).
-    SessionCleared { ack: oneshot::Sender<()> },
+    SessionCleared {
+        ack: oneshot::Sender<()>,
+    },
     /// Observer relay: parent-only space links discovered in a room-list
     /// snapshot. RoomActor owns dedupe, server writes, and retry policy.
-    MissingSpaceChildLinks { links: Vec<MissingSpaceChildLink> },
+    MissingSpaceChildLinks {
+        links: Vec<MissingSpaceChildLink>,
+    },
     /// Account-data aliases are identity presentation inputs, never mention
     /// eligibility inputs. Reproject only already-demanded joined members.
-    LocalUserAliasesUpdated { aliases: BTreeMap<String, String> },
+    LocalUserAliasesUpdated {
+        aliases: BTreeMap<String, String>,
+    },
     MentionMembersRefreshed {
         room_id: String,
         session_generation: u64,
@@ -127,7 +151,9 @@ pub(crate) enum RoomMessage {
     /// Base-client room updates can include membership state changes. Only
     /// demanded rooms are recomputed; `None` means the broadcast lagged and
     /// every demanded room must be self-healed.
-    MentionMembershipChanged { room_ids: Option<BTreeSet<String>> },
+    MentionMembershipChanged {
+        room_ids: Option<BTreeSet<String>>,
+    },
     /// Completion of a local-only sync-driven Space-member projection.
     SpaceMembersProjectionRefreshed {
         request_id: RequestId,
@@ -141,7 +167,9 @@ pub(crate) enum RoomMessage {
     /// A sync update changed the authoritative `m.room.pinned_events` state.
     /// The actor reloads only the affected rooms so external pin/unpin actions
     /// become visible without polling every room.
-    PinnedEventsChanged { room_ids: BTreeSet<String> },
+    PinnedEventsChanged {
+        room_ids: BTreeSet<String>,
+    },
     PinnedRefreshCompleted {
         generation: u64,
         sequence: u64,
@@ -393,6 +421,7 @@ pub enum RoomListReconcileAck {
 }
 
 pub struct RoomActor {
+    history_keys: Option<super::history_keys::HistoryKeyRecoveryHandle>,
     pub(super) session: Option<Arc<MatrixClientSession>>,
     pub(super) timeline_residency: watch::Receiver<Option<TimelineResidencyBinding>>,
     session_slot: watch::Sender<Option<Arc<MatrixClientSession>>>,
@@ -467,6 +496,7 @@ impl RoomActor {
         #[cfg(any(test, feature = "test-hooks"))]
         let room_operation_test_reached_count = Arc::new(AtomicUsize::new(0));
         let actor = RoomActor {
+            history_keys: None,
             session: None,
             timeline_residency: timeline_residency_rx,
             session_slot: session_slot.clone(),
@@ -535,7 +565,40 @@ impl RoomActor {
                 }
             };
             match msg {
+                #[cfg(any(test, feature = "test-hooks"))]
+                RoomMessage::PauseHistoryKeyImport {
+                    disclosure,
+                    reached,
+                    resume,
+                    installed,
+                } => {
+                    if let Some(history) = &self.history_keys {
+                        history
+                            .pause_import(disclosure, reached, resume, installed)
+                            .await;
+                    }
+                }
+                #[cfg(any(test, feature = "test-hooks"))]
+                RoomMessage::HistoryRecoveryBarrier { room_id, completed } => {
+                    let diagnostics = if let Some(history) = &self.history_keys {
+                        history.barrier(room_id).await
+                    } else {
+                        Default::default()
+                    };
+                    let _ = completed.send(diagnostics);
+                }
+                RoomMessage::HistoryUndecryptableObserved {
+                    room_id,
+                    unresolved,
+                } => {
+                    if let Some(history) = &self.history_keys {
+                        history.note_unresolved(room_id, unresolved).await;
+                    }
+                }
                 RoomMessage::Shutdown => {
+                    if let Some(history) = self.history_keys.take() {
+                        history.stop().await;
+                    }
                     self.stop_pinned_refreshes().await;
                     self.stop_room_address_check().await;
                     self.stop_observation().await;
@@ -550,6 +613,14 @@ impl RoomActor {
                     let _ = processed.send(());
                 }
                 RoomMessage::SessionEstablished { session } => {
+                    if let Some(history) = self.history_keys.take() {
+                        history.stop().await;
+                    }
+                    self.history_keys = Some(super::history_keys::HistoryKeyRecoveryHandle::start(
+                        session.clone(),
+                        self.action_tx.clone(),
+                        self.event_tx.clone(),
+                    ));
                     self.stop_pinned_refreshes().await;
                     // Room operations become available; observation starts
                     // later on SyncStarted (backend then known).
@@ -703,6 +774,9 @@ impl RoomActor {
                     }
                 }
                 RoomMessage::SessionCleared { ack } => {
+                    if let Some(history) = self.history_keys.take() {
+                        history.stop().await;
+                    }
                     self.stop_pinned_refreshes().await;
                     self.stop_room_address_check().await;
                     self.stop_observation().await;
@@ -811,6 +885,19 @@ impl RoomActor {
 
     async fn handle_command(&mut self, command: RoomCommand) {
         match command {
+            RoomCommand::RequestHistoryKeys {
+                request_id,
+                room_id,
+                force_all,
+            } => {
+                if let Some(history) = &self.history_keys {
+                    if !history.request(room_id, force_all, request_id).await {
+                        self.emit_failure(request_id, CoreFailure::StoreUnavailable);
+                    }
+                } else {
+                    self.emit_failure(request_id, CoreFailure::SessionRequired);
+                }
+            }
             RoomCommand::CreateRoom {
                 request_id,
                 options,

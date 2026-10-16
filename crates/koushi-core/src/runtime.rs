@@ -1089,6 +1089,70 @@ impl CoreRuntime {
     /// homeserver) into this runtime's AccountActor and RoomActor, without a
     /// login or restore flow. Not part of the public production API.
     #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn pause_next_history_key_import_for_testing(
+        &self,
+    ) -> Option<(oneshot::Receiver<()>, oneshot::Sender<()>)> {
+        self.pause_history_key_operation_for_testing(false).await
+    }
+
+    /// Pause after identity refresh, before final room-policy refresh and disclosure.
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn pause_next_history_key_disclosure_for_testing(
+        &self,
+    ) -> Option<(oneshot::Receiver<()>, oneshot::Sender<()>)> {
+        self.pause_history_key_operation_for_testing(true).await
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    async fn pause_history_key_operation_for_testing(
+        &self,
+        disclosure: bool,
+    ) -> Option<(oneshot::Receiver<()>, oneshot::Sender<()>)> {
+        let (reached, receive_reached) = oneshot::channel();
+        let (resume, receive_resume) = oneshot::channel();
+        let (installed, receive_installed) = oneshot::channel();
+        if self
+            .account_actor_test_handle
+            .send(AccountMessage::PauseHistoryKeyImport {
+                disclosure,
+                reached,
+                resume: receive_resume,
+                installed,
+            })
+            .await
+            && receive_installed.await.ok() == Some(true)
+        {
+            Some((receive_reached, resume))
+        } else {
+            None
+        }
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn history_recovery_barrier_for_testing(
+        &self,
+    ) -> Option<crate::room::HistoryKeyRecoveryDiagnostics> {
+        self.history_recovery_diagnostics_for_testing(None).await
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
+    pub async fn history_recovery_diagnostics_for_testing(
+        &self,
+        room_id: Option<String>,
+    ) -> Option<crate::room::HistoryKeyRecoveryDiagnostics> {
+        let (completed, receiver) = oneshot::channel();
+        if self
+            .account_actor_test_handle
+            .send(AccountMessage::HistoryRecoveryBarrier { room_id, completed })
+            .await
+        {
+            receiver.await.ok()
+        } else {
+            None
+        }
+    }
+
+    #[cfg(any(test, feature = "test-hooks"))]
     pub async fn install_account_session_for_testing(
         &self,
         session: Arc<koushi_sdk::MatrixClientSession>,

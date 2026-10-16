@@ -41,6 +41,10 @@ use crate::state::{SlidingSyncAdmission, SlidingSyncCapabilityResult};
 
 #[derive(Clone, Eq, PartialEq)]
 pub enum AppAction {
+    HistoryKeyRecoveryChanged {
+        room_id: String,
+        state: crate::HistoryKeyRecoveryState,
+    },
     AppStarted,
     RestoreSessionRequested,
     RestoreSessionSucceeded(SessionInfo),
@@ -1832,6 +1836,11 @@ pub enum AppAction {
 impl fmt::Debug for AppAction {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::HistoryKeyRecoveryChanged { state, .. } => formatter
+                .debug_struct("HistoryKeyRecoveryChanged")
+                .field("room_id", &"RoomId(..)")
+                .field("state", state)
+                .finish(),
             Self::LoginSubmitted {
                 attempt_id,
                 request,

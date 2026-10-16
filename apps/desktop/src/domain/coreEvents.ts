@@ -694,6 +694,7 @@ export type SyncEvent =
   | { Stopped: { request_id: RequestId | null } };
 
 export type RoomEvent =
+  | { HistoryKeysRequested: { request_id: RequestId; room_id: string; recipients: number } }
   | { RoomCreated: { request_id: RequestId; room_id: string } }
   | { SpaceCreated: { request_id: RequestId; space_id: string } }
   | {

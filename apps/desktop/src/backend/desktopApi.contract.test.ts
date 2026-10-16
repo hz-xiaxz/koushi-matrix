@@ -72,6 +72,7 @@ describe("DesktopApi command contract", () => {
         "loadContactSecurity",
         "closeContactSecurity",
         "requestContactVerification",
+        "requestHistoryKeys",
         "setNotificationCategory",
         "setAccountPushEnabled",
         "requestNotificationEmailToken",

@@ -157,6 +157,7 @@ impl CoreCommand {
                 | RoomCommand::CreateSpace { request_id, .. }
                 | RoomCommand::SetSpaceChild { request_id, .. }
                 | RoomCommand::SetSpaceChildSuggested { request_id, .. }
+                | RoomCommand::RequestHistoryKeys { request_id, .. }
                 | RoomCommand::JoinSuggestedSpaceRooms { request_id, .. }
                 | RoomCommand::DismissSuggestedSpaceRooms { request_id, .. }
                 | RoomCommand::CheckRoomAddressAvailability { request_id, .. }

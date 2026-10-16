@@ -142,6 +142,13 @@ history setting, a **Change in Room Info** link opens Room Info and brings you
 back to the invite; otherwise no link is shown. Changing the setting does not
 revoke events or keys already shared.
 
+For encrypted rooms, Koushi accepts the inviter's historical-key bundle for
+30 days after you accept that room's invitation on this client, including
+recovery after restarting the app. Imported keys do not expire after 30 days.
+This does not request a replacement bundle or restore a pending import that
+an older version already discarded. Joining a room through a space without
+an individual room invitation does not trigger this invitation-based sharing.
+
 If the action is unavailable, your role or the current room state may not allow
 it. Room history visibility and room entry rules are separate settings.
 
@@ -316,6 +323,30 @@ values:
 **Access** shows who can join the Space and, if your role allows it, the
 action that changes it; the confirmation and the result appear in the same card.
 The **Access** entry at the bottom of **Space info** moves to this section.
+
+## Request missing historical keys
+
+On a message that cannot be decrypted, choose **Request decryption keys for past
+messages**. **Requested** means the encrypted request was sent; it does not mean
+all keys have arrived. You can still choose **Retry**. A responding member's
+Koushi shares available keys when it comes online and responds. Both sides must
+have verified each other's encryption identities. Element X does not handle
+this Koushi extension; no reply can mean an offline or unsupported client.
+
+This works after joining a room through a Space or public-room link, and after
+the invitation's 30-day import window. The room must still allow shared history,
+and both accounts must still be joined. Only historical keys the responder's SDK
+marks shareable are sent; unavailable keys cannot be recovered by this action.
+
+In rooms with at most 30 joined members including yourself, the default request
+goes to the other eligible members. In larger rooms it goes to administrators.
+For a wider manual request, open **Room Info → Troubleshooting → Request keys
+from everyone**. This section is collapsed initially. Read its warning: shared
+keys cannot be revoked, and this request reaches more room members.
+
+At startup Koushi may retry administrators once for a room with recorded
+undecryptable messages. A persisted 24-hour cooldown prevents repeated restarts
+from sending more automatic requests. Manual retry remains available.
 
 ## Download room history
 

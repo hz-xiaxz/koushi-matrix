@@ -130,6 +130,7 @@ pub(super) enum QaScenario {
     ReadStateConvergence,
     HiddenStateAcl,
     ThreadLateJoiner,
+    HistoryKeyRecoveryWindow,
     IdleSyncGapInspection,
     NotificationDelivery,
 }
@@ -176,6 +177,7 @@ pub(super) enum QaStage {
     ReadStateConvergence,
     HiddenStateAcl,
     ThreadLateJoiner,
+    HistoryKeyRecoveryWindow,
     IdleSyncGapInspection,
     NotificationDelivery,
 }
@@ -258,13 +260,14 @@ impl QaScenario {
             "read_state_convergence" => Ok(Self::ReadStateConvergence),
             "hidden_state_acl" => Ok(Self::HiddenStateAcl),
             "thread_late_joiner" => Ok(Self::ThreadLateJoiner),
+            "history_key_recovery_window" => Ok(Self::HistoryKeyRecoveryWindow),
             "idle_sync_gap_inspection" => Ok(Self::IdleSyncGapInspection),
             "notification_delivery" => Ok(Self::NotificationDelivery),
             "avatar_demand" => Ok(Self::AvatarDemand),
             "account_notifications" => Ok(Self::AccountNotifications),
             "user_verification" => Ok(Self::UserVerification),
             other => Err(format!(
-                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, search_crawler_catchup, room_history_export, scheduled_send, restore_cleanup, link_preview, read_state_convergence, hidden_state_acl, thread_late_joiner, avatar_demand, account_notifications, user_verification, notification_delivery; got {other}"
+                "{ENV_QA_SCENARIO} must be one of all, safety, login_sync, session_status, credential_health, native_attention, e2ee_trust, e2ee_login_store, device_cleanup, invites_dm, room_space, directory, room_management, room_people_projection, timeline, timeline_reconnect, timeline_stress, activity, composer, reply, media, live_signals, thread, edit_redact_search, redact_edit_convergence, search_crawler, search_crawler_catchup, room_history_export, scheduled_send, restore_cleanup, link_preview, read_state_convergence, hidden_state_acl, thread_late_joiner, history_key_recovery_window, avatar_demand, account_notifications, user_verification, notification_delivery; got {other}"
             )),
         }
     }
@@ -280,6 +283,7 @@ impl QaScenario {
                     | QaStage::HiddenStateAcl
                     | QaStage::SearchCrawlerCatchup
                     | QaStage::ThreadLateJoiner
+                    | QaStage::HistoryKeyRecoveryWindow
                     | QaStage::AvatarDemand
                     | QaStage::AccountNotifications
                     | QaStage::UserVerification
@@ -489,6 +493,9 @@ impl QaScenario {
                 matches!(stage, QaStage::Safety | QaStage::ReadStateConvergence)
             }
             Self::HiddenStateAcl => matches!(stage, QaStage::Safety | QaStage::HiddenStateAcl),
+            Self::HistoryKeyRecoveryWindow => {
+                matches!(stage, QaStage::Safety | QaStage::HistoryKeyRecoveryWindow)
+            }
             Self::ThreadLateJoiner => matches!(stage, QaStage::Safety | QaStage::ThreadLateJoiner),
             Self::NotificationDelivery => {
                 matches!(stage, QaStage::Safety | QaStage::NotificationDelivery)
@@ -740,6 +747,25 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
         ],
         QaStage::ReadStateConvergence => &["read_state_convergence=ok"],
         QaStage::HiddenStateAcl => &["hidden_state_acl=ok"],
+        QaStage::HistoryKeyRecoveryWindow => &[
+            "history_window_deferred=ok",
+            "history_window_29_days=ok",
+            "history_window_30_days_expired=ok",
+            "history_recovery_offline_pending=ok",
+            "history_recovery_startup_admin_retry=ok",
+            "history_recovery_restart_cooldown=ok",
+            "history_recovery_join_without_invite=ok",
+            "history_recovery_31_members_admin=ok",
+            "history_recovery_force_all=ok",
+            "history_recovery_after_window_expiry=ok",
+            "history_recovery_visibility_guard=ok",
+            "history_recovery_membership_guard=ok",
+            "history_recovery_blocked_device_guard=ok",
+            "history_recovery_crash_replay=ok",
+            "history_recovery_policy_race_guard=ok",
+            "history_window_cleanup=ok",
+            "history_key_recovery_window=ok",
+        ],
         QaStage::ThreadLateJoiner => &[
             "thread_late_joiner_root_not_visible=ok",
             "thread_late_joiner_thread_panel=ok",
@@ -1116,6 +1142,9 @@ pub(super) fn stages_for_scenario(scenario: QaScenario) -> Vec<QaStage> {
         QaScenario::NotificationDelivery => {
             vec![QaStage::Safety, QaStage::NotificationDelivery]
         }
+        QaScenario::HistoryKeyRecoveryWindow => {
+            vec![QaStage::Safety, QaStage::HistoryKeyRecoveryWindow]
+        }
         QaScenario::ThreadLateJoiner => vec![QaStage::Safety, QaStage::ThreadLateJoiner],
         QaScenario::SearchCrawlerCatchup => vec![QaStage::Safety, QaStage::SearchCrawlerCatchup],
         QaScenario::All => vec![
@@ -1210,6 +1239,7 @@ pub(super) fn final_tokens_for_scenario(scenario: QaScenario) -> Vec<&'static st
         | QaScenario::HiddenStateAcl
         | QaScenario::SearchCrawlerCatchup
         | QaScenario::ThreadLateJoiner
+        | QaScenario::HistoryKeyRecoveryWindow
         | QaScenario::IdleSyncGapInspection
         | QaScenario::NotificationDelivery => stages_for_scenario(scenario)
             .into_iter()
@@ -1246,6 +1276,8 @@ pub(super) struct QaConfig {
     pub(super) user_b: String,
     pub(super) password_b: String,
     pub(super) user_c: Option<String>,
+    pub(super) password_c: Option<String>,
+    pub(super) history_large_room: Option<String>,
     /// Identity reset changes cross-signing identity for the account. Keep it
     /// opt-in so real-account QA cannot accidentally invalidate other devices.
     pub(super) allow_identity_reset: bool,
@@ -1262,6 +1294,8 @@ impl QaConfig {
             user_b: env_required(ENV_USER_B)?,
             password_b: env_required(ENV_PASSWORD_B)?,
             user_c: std::env::var(ENV_USER_C).ok(),
+            password_c: std::env::var("KOUSHI_LOCAL_QA_PASSWORD_C").ok(),
+            history_large_room: std::env::var("KOUSHI_QA_HISTORY_LARGE_ROOM").ok(),
             allow_identity_reset: env_flag_enabled(ENV_ALLOW_IDENTITY_RESET)?,
         })
     }
@@ -1283,6 +1317,8 @@ impl QaConfig {
             user_b: self.user_b.clone(),
             password_b: self.password_b.clone(),
             user_c: self.user_c.clone(),
+            password_c: self.password_c.clone(),
+            history_large_room: self.history_large_room.clone(),
             allow_identity_reset: self.allow_identity_reset,
         }
     }

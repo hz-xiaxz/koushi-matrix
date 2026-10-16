@@ -1669,6 +1669,23 @@ export type MessageId =
   | "timeline.keyRequestRecovered"
   | "timeline.keyRequestToast"
   | "timeline.requestRoomKey"
+  | "historyKeys.request"
+  | "historyKeys.requestAll"
+  | "historyKeys.requested"
+  | "historyKeys.sending"
+  | "historyKeys.retry"
+  | "historyKeys.explanation"
+  | "historyKeys.troubleshooting"
+  | "historyKeys.warning"
+  | "historyKeys.verify"
+  | "historyKeys.network"
+  | "historyKeys.limit"
+  | "historyKeys.membership"
+  | "historyKeys.visibility"
+  | "historyKeys.noRecipients"
+  | "historyKeys.rateLimit"
+  | "historyKeys.storage"
+  | "historyKeys.invalid"
   | "timeline.forwardMessage"
   | "timeline.messageSource"
   | "timeline.closeMessageSource"
@@ -3859,6 +3876,23 @@ const en: Catalog = {
   "timeline.viewSource": "View source",
   "timeline.removeMessage": "Remove",
   "timeline.requestRoomKey": "Request keys and retry",
+  "historyKeys.request": "Request decryption keys for past messages",
+  "historyKeys.requestAll": "Request keys from everyone",
+  "historyKeys.requested": "Requested",
+  "historyKeys.sending": "Requesting…",
+  "historyKeys.retry": "Retry",
+  "historyKeys.explanation": "Keys are shared when a responding member’s Koushi comes online. Both users must verify each other. Element X does not respond to this request.",
+  "historyKeys.troubleshooting": "Troubleshooting",
+  "historyKeys.warning": "This requests available shared-history keys from every eligible member, including in large rooms. Keys already shared cannot be revoked.",
+  "historyKeys.verify": "Verify the other user and their device before sharing keys.",
+  "historyKeys.network": "The request could not be sent. Check the connection and retry.",
+  "historyKeys.limit": "The recovery limit was reached. Some keys may still be missing.",
+  "historyKeys.membership": "Room membership changed. Join the room and retry.",
+  "historyKeys.visibility": "This room does not currently allow sharing past history.",
+  "historyKeys.noRecipients": "No eligible recipients were found.",
+  "historyKeys.rateLimit": "Wait a minute before retrying.",
+  "historyKeys.storage": "The encrypted store could not be used.",
+  "historyKeys.invalid": "The response could not be validated.",
   "timeline.keyRequestToast": "Decryption key requested",
   "timeline.keyRequestAwaiting": "Waiting for the decryption key…",
   "timeline.keyRequestStillWaiting": "No response yet. Another device may be offline; it may decrypt later.",
@@ -5955,6 +5989,23 @@ const ja: Catalog = {
   "timeline.viewSource": "ソースを表示",
   "timeline.removeMessage": "削除",
   "timeline.requestRoomKey": "鍵を要求して再試行",
+  "historyKeys.request": "過去のメッセージの復号鍵を要求",
+  "historyKeys.requestAll": "全員に鍵を要求",
+  "historyKeys.requested": "要求済みです",
+  "historyKeys.sending": "要求中…",
+  "historyKeys.retry": "再試行",
+  "historyKeys.explanation": "要求先のKoushiがオンラインになり、応答すると鍵が共有されます。相互の本人確認が必要です。Element Xはこの要求に応答しません。",
+  "historyKeys.troubleshooting": "トラブルシューティング",
+  "historyKeys.warning": "大きな部屋でも、対象となる全メンバーに共有可能な過去の鍵を要求します。一度共有された鍵は取り消せません。",
+  "historyKeys.verify": "鍵を共有するには、相手と端末の本人確認が必要です。",
+  "historyKeys.network": "要求を送れませんでした。接続を確認して再試行してください。",
+  "historyKeys.limit": "復旧の上限に達しました。取得できていない鍵がある可能性があります。",
+  "historyKeys.membership": "部屋の参加状態が変わりました。参加してから再試行してください。",
+  "historyKeys.visibility": "現在、この部屋では過去の履歴の共有が許可されていません。",
+  "historyKeys.noRecipients": "要求先となるメンバーが見つかりません。",
+  "historyKeys.rateLimit": "1分ほど待ってから再試行してください。",
+  "historyKeys.storage": "暗号化ストアを利用できませんでした。",
+  "historyKeys.invalid": "応答の安全性を確認できませんでした。",
   "timeline.keyRequestToast": "復号鍵をリクエストしました",
   "timeline.keyRequestAwaiting": "復号鍵を待っています…",
   "timeline.keyRequestStillWaiting": "まだ応答がありません。別の端末がオフラインの場合、後で復号されることがあります。",

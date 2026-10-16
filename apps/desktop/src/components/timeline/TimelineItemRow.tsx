@@ -37,6 +37,8 @@ import { MESSAGE_PLACEHOLDER_PATTERN, t, type MessageId } from "../../i18n/messa
 import { onMenuKeyDown } from "../ContextMenuSurface";
 import { LazyEmojiPicker } from "../LazyEmojiPicker";
 import { Tooltip } from "../Tooltip";
+import { HistoryKeyRecoveryControl } from "../HistoryKeyRecoveryControl";
+import type { HistoryKeyRecoveryState } from "../../domain/types";
 
 import {
   documentFromText,
@@ -318,6 +320,8 @@ export function TimelineItemRow({
   onDownloadMedia = () => undefined,
   onLoadMessageSource = () => undefined,
   onRequestRoomKey = () => undefined,
+  onRequestHistoryKeys,
+  historyKeyRecovery,
   onForwardMessage = () => undefined,
   autoLoadLinkPreviews = false,
   onLoadLinkPreviews = () => undefined,
@@ -391,6 +395,8 @@ export function TimelineItemRow({
   onDownloadMedia?: TimelineRowActionHandlers["onDownloadMedia"];
   onLoadMessageSource?: TimelineRowActionHandlers["onLoadMessageSource"];
   onRequestRoomKey?: TimelineRowActionHandlers["onRequestRoomKey"];
+  onRequestHistoryKeys?: (roomId: string, forceAll?: boolean) => void;
+  historyKeyRecovery?: HistoryKeyRecoveryState;
   onForwardMessage?: TimelineRowActionHandlers["onForwardMessage"];
   autoLoadLinkPreviews?: boolean;
   onLoadLinkPreviews?: TimelineRowActionHandlers["onLoadLinkPreviews"];
@@ -1153,6 +1159,9 @@ export function TimelineItemRow({
               <span>{t("timeline.cancelSend")}</span>
             </button>
           </div>
+        ) : null}
+        {item.unable_to_decrypt && onRequestHistoryKeys ? (
+          <HistoryKeyRecoveryControl state={historyKeyRecovery} onRequest={() => onRequestHistoryKeys(roomId, false)} />
         ) : null}
         {canRequestRoomKey ? (
           <div className="message-send-actions">

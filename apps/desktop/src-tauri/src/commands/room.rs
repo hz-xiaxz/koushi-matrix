@@ -13,6 +13,28 @@ use super::*;
 
 const INVITE_WORKFLOW_CONVERGENCE_TIMEOUT: std::time::Duration = std::time::Duration::from_secs(2);
 
+#[tauri::command]
+pub async fn request_history_keys(
+    account_tab_id: Option<String>,
+    room_id: String,
+    force_all: bool,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandAdmission, String> {
+    if room_id.trim().is_empty() {
+        return Err("room id must not be blank".to_owned());
+    }
+    let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
+    submit_core_command_with_admission(
+        state.inner(),
+        CoreCommand::Room(RoomCommand::RequestHistoryKeys {
+            request_id,
+            room_id,
+            force_all,
+        }),
+    )
+    .await
+}
+
 async fn submit_invite_workflow_command(
     state: &CoreRuntimeState,
     account_tab_id: Option<&str>,

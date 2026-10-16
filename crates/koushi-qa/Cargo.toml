@@ -11,6 +11,7 @@ path = "src/bin/headless-core-qa.rs"
 required-features = ["qa-bin"]
 
 [dependencies]
+tempfile = "3"
 koushi-core = { path = "../koushi-core" }
 koushi-diagnostics = { path = "../koushi-diagnostics" }
 koushi-protocol = { path = "../koushi-protocol" }
@@ -18,9 +19,12 @@ koushi-sdk = { path = "../koushi-sdk" }
 koushi-state = { path = "../koushi-state" }
 koushi-store = { path = "../koushi-store" }
 matrix-sdk = { workspace = true }
+matrix-sdk-base = { workspace = true }
+matrix-sdk-ui = { workspace = true }
+getrandom = "0.3"
 serde_json = "1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter"] }
 tokio = { version = "1", features = ["rt-multi-thread", "rt", "sync", "time", "macros", "test-util"] }
 
 [features]
-qa-bin = ["koushi-core/test-hooks", "koushi-sdk/test-hooks", "koushi-store/test-hooks"]
+qa-bin = ["koushi-core/test-hooks", "koushi-sdk/test-hooks", "koushi-store/test-hooks", "matrix-sdk/testing"]

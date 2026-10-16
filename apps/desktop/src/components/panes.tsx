@@ -709,6 +709,7 @@ export function TimelinePane({
   showSearchResults,
   snapshot,
   timelineTransport,
+  onRequestHistoryKeys,
   accountTabId,
   onCancelReply,
   onCancelScheduledSend,
@@ -759,6 +760,7 @@ export function TimelinePane({
   showSearchResults: boolean;
   snapshot: DesktopSnapshot;
   timelineTransport: TimelineTransport | null;
+  onRequestHistoryKeys?: (roomId: string, forceAll?: boolean) => void;
   accountTabId?: string;
   onCancelReply: () => void;
   onCancelScheduledSend: (scheduledId: string) => void;
@@ -1176,6 +1178,8 @@ export function TimelinePane({
                   : timelineRoomId
               }
               roomId={timelineRoomId}
+              onRequestHistoryKeys={onRequestHistoryKeys}
+              historyKeyRecovery={snapshot.state.domain.room_management.history_keys?.[timelineRoomId]}
               timelineKey={timelineKey!}
               accountTabId={accountTabId}
               isAnchored={Boolean(mainTimelineAnchorEventId)}

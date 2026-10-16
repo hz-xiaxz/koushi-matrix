@@ -6655,3 +6655,40 @@ stateDiagram-v2
 - Avatar MXC URIs, thumbnail state, and user-room avatar associations are
   account-scoped sensitive metadata. Debug, logs, tests, QA tokens, fixtures,
   and issue evidence must redact real values.
+
+## Historical key recovery
+
+`RoomManagementState.history_keys` projects room-scoped recovery attempts.
+`Idle -> Sending -> Requested` follows an explicit command; network, storage,
+membership, trust, visibility, limit or validation failures settle as `Failed`.
+After one or more valid imports, a later refusal/limit is `Partial`, never full
+success. Each attempt has a monotonically increasing generation; updates from
+an older attempt cannot replace a retry, and delayed Sending cannot regress a
+settled state in the same generation. A session reset removes the projection.
+Wire nonces, public device pins and chunk receipts live only in the encrypted
+SDK crypto store and Core actor. Private keys never enter this state.
+
+```mermaid
+stateDiagram-v2
+    Idle --> Sending: explicit or guarded startup request
+    Sending --> Requested: encrypted request accepted by server
+    Sending --> Failed: guarded failure
+    Requested --> Requested: validated reply chunk imported
+    Requested --> Partial: failure after some imports
+    Requested --> Failed: failure before imports
+    Failed --> Partial: late valid chunk after a refusal
+    Partial --> Partial: additional valid chunk or failure
+    Requested --> Sending: explicit retry advances presentation generation
+    Failed --> Sending: explicit retry
+    Partial --> Sending: explicit retry
+```
+
+Requested means exactly 「要求済みです」, with manual retry still available.
+Reply chunks never cause a success claim about all room history: peers may be
+offline, unsupported, unverified, or missing keys. Default peer selection and
+startup administrator-only cooldown follow the historical recovery design.
+Unanswered per-device nonces and fixed expiry survive retries and restart;
+admission and successful import are separate durable records. Completion
+tombstones re-acknowledge replayed replies even after target narrowing. Storage
+failure or operation timeout stops the worker before further writes; a new
+session reconciles durable records and can retry.

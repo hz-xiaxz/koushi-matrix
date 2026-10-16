@@ -4,6 +4,41 @@ use super::{
 };
 
 #[test]
+fn history_window_is_a_focused_scenario_with_required_oracles() {
+    let scenario = QaScenario::from_env_value("history_key_recovery_window").unwrap();
+    assert_eq!(scenario, QaScenario::HistoryKeyRecoveryWindow);
+    assert_eq!(
+        stages_for_scenario(scenario),
+        vec![QaStage::Safety, QaStage::HistoryKeyRecoveryWindow]
+    );
+    assert!(!QaScenario::All.should_run_stage(QaStage::HistoryKeyRecoveryWindow));
+    assert!(!scenario.should_run_stage(QaStage::LoginSync));
+    assert_eq!(
+        final_tokens_for_scenario(scenario),
+        vec![
+            "safety=ok",
+            "history_window_deferred=ok",
+            "history_window_29_days=ok",
+            "history_window_30_days_expired=ok",
+            "history_recovery_offline_pending=ok",
+            "history_recovery_startup_admin_retry=ok",
+            "history_recovery_restart_cooldown=ok",
+            "history_recovery_join_without_invite=ok",
+            "history_recovery_31_members_admin=ok",
+            "history_recovery_force_all=ok",
+            "history_recovery_after_window_expiry=ok",
+            "history_recovery_visibility_guard=ok",
+            "history_recovery_membership_guard=ok",
+            "history_recovery_blocked_device_guard=ok",
+            "history_recovery_crash_replay=ok",
+            "history_recovery_policy_race_guard=ok",
+            "history_window_cleanup=ok",
+            "history_key_recovery_window=ok",
+        ]
+    );
+}
+
+#[test]
 fn parses_all_scenarios_from_env_value_including_directory() {
     assert_eq!(QaScenario::from_env_value("all").unwrap(), QaScenario::All);
     assert_eq!(

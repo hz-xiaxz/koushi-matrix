@@ -25,6 +25,25 @@ const ADDRESS_TOKENS = [
 const IGNORE_RECOVERY_TOKEN = "ignored_user_history_recovery=ok";
 
 export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
+  history_key_recovery_window: Object.freeze([
+    "history_window_deferred=ok",
+    "history_window_29_days=ok",
+    "history_window_30_days_expired=ok",
+    "history_recovery_offline_pending=ok",
+    "history_recovery_startup_admin_retry=ok",
+    "history_recovery_restart_cooldown=ok",
+    "history_recovery_join_without_invite=ok",
+    "history_recovery_31_members_admin=ok",
+    "history_recovery_force_all=ok",
+    "history_recovery_after_window_expiry=ok",
+    "history_recovery_visibility_guard=ok",
+    "history_recovery_membership_guard=ok",
+    "history_recovery_blocked_device_guard=ok",
+    "history_recovery_crash_replay=ok",
+    "history_recovery_policy_race_guard=ok",
+    "history_window_cleanup=ok",
+    "history_key_recovery_window=ok"
+  ]),
   avatar_demand: Object.freeze(["avatar_window_requests=ok"]),
   directory: Object.freeze(["directory_query=ok", "directory_join=ok", ...ADDRESS_TOKENS]),
   live_signals: Object.freeze(["live_signals=ok", IGNORE_RECOVERY_TOKEN]),
