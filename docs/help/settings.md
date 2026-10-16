@@ -188,30 +188,32 @@ leaves this device. Koushi sends only while it is running (keeping it in the tra
 is enough): a notification still waiting is held in memory and closing Koushi
 discards it.
 
-Choose a destination to open its page, and **All destinations** to go back.
-**Add a destination** asks for the service (**Resend (email API)**, **SMTP
-relay**, or **WeChat (ServerChan Turbo)**) and opens the same page for the new
-one. You can configure up to eight destinations. Each page has five parts,
-described below.
+Choose a destination to open it in a window over the list. **Add a
+destination** asks for the service (**Resend (email API)**, **SMTP relay**, or
+**WeChat (ServerChan Turbo)**) in the same window and then shows the new
+destination there. You can configure up to eight destinations. Each destination
+window has five parts, described below.
 
-Nothing on the page is saved as you type. The bar at the bottom of the page says
-**Unsaved changes** once you edit something, and its single **Save** stores the
-whole destination at once: its fields, its targets, its content and timing, a
-credential you typed, and your answer to the plain-text question below. If Save
-cannot go ahead, the bar says what is missing, such as a required field, the
+Nothing in the window is saved as you type. Its bottom edge says **Unsaved
+changes** once you edit something, and its single **Save** stores the whole
+destination at once: its fields, its targets, its content and timing, a
+credential you typed, and your answer to the plain-text question below. A
+successful Save closes the window and returns to the list. If Save cannot go
+ahead, the bottom edge says what is missing, such as a required field, the
 credential of a new destination, or the plain-text checkbox; if the save is
-refused, it says **Could not save this destination** and your edits stay on the
-page. **Discard**, or going back to **All destinations**, drops the edits and
-shows the saved destination again. A new destination is added only when Save
+refused, it says **Could not save this destination** and the window stays open
+with your edits. **Cancel**, the close button, or Escape closes the window and
+drops the edits, including a credential you typed; the window cannot be closed
+while a save is in progress. A new destination is added only when Save
 succeeds.
 
 ### Service and credentials
 
-The destination's service fields (**Send to** for mail; **From address** and
+The destination's service fields (**Recipient email address** for mail; **From address** and
 **Name**, the sender name, for an SMTP relay, with **Mailbox preset**,
 **Server**, **Port**, **Connection security**, and **Username**) and its
 credential: the **Resend API key**, the mailbox's **App password**, or the
-ServerChan **SendKey**. A new destination takes its credential on the same page,
+ServerChan **SendKey**. A new destination takes its credential in the same window,
 and Save sends it together with the rest.
 
 The credential field is write-only: Koushi never shows the saved value again, and
@@ -221,7 +223,7 @@ one and save. The value is kept in your operating system's credential store, not
 in Koushi's settings, and a diagnostics report never carries it. **Remove**
 deletes the destination together with its credential. Changing an SMTP relay's
 server, port, or username, or a service's endpoint, needs the password again,
-because it was entered for the previous server; the page then says so and Save
+because it was entered for the previous server; the window then says so and Save
 waits for the new one.
 
 The sender name is optional and starts as **Koushi**; left blank, Koushi uses
@@ -296,7 +298,7 @@ without end-to-end encryption, and that whether and for how long the service
 keeps it depends on that service's own terms. Check **I understand that the text
 is sent unencrypted**, then **Save**; Save refuses a text mode while the box is
 unchecked. The agreement covers this service, its endpoint, and its recipient
-(the **Send to** address, or for WeChat the saved SendKey). Changing any of them,
+(the **Recipient email address**, or for WeChat the saved SendKey). Changing any of them,
 or saving a new SendKey, asks the question again, and a destination whose
 agreement no longer matches sends names only until you agree again. Switching between the two text modes keeps
 the consent; choosing names only clears it.
@@ -372,9 +374,10 @@ To notify yourself, Resend needs no domain of your own:
    [API keys page](https://resend.com/docs/dashboard/api-keys/introduction).
    Resend does not show the key again after it is created.
 2. In Koushi, choose **Add a destination**, then **Resend (email API)**.
-3. Set **Send to** to the email address of your Resend account, and paste the
-   API key into **Resend API key**.
-4. Choose **Save**, then **Send a test**.
+3. Set **Recipient email address** to the email address of your Resend
+   account, and paste the API key into **Resend API key**.
+4. Choose **Save**, open the destination again from the list, and choose
+   **Send a test**.
 
 Under **Advanced**, the **From address** starts as Resend's shared sender
 `onboarding@resend.dev`, which needs no domain setup. That sender can send only

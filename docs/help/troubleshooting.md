@@ -132,7 +132,7 @@ setting](#the-homeserver-still-sends-its-own-notifications).
 By default a destination's **Message content** is **Space and room names only**:
 room names, kinds, and counts, not message text. Text is added only with a text
 mode chosen for that destination and its consent accepted. If you then changed
-the service, its endpoint, the **Send to** address, or the saved SendKey, the
+the service, its endpoint, the **Recipient email address**, or the saved SendKey, the
 consent no longer applies and the destination is back to names only until you
 agree again. Images, files, undecryptable messages, and deleted messages are
 always sent as names only.
@@ -146,7 +146,7 @@ a password entered for one mailbox is never offered to another. Saving the new
 server removes the old password; if it was removed that way, the page says **The
 saved password was removed because the server or account changed. Enter it
 again.** Nothing was lost: enter the password for the new server and choose
-**Save**. Changing only the **Send to** address keeps the password, but a text
+**Save**. Changing only the **Recipient email address** keeps the password, but a text
 mode asks the plain-text question again before Save.
 
 ### The provider says the credential is invalid, or the account is not permitted
