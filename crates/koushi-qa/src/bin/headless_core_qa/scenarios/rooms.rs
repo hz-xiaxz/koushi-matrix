@@ -20,7 +20,7 @@ use super::event_wait::{
 use super::fixtures::{
     accept_invite_for_qa, assert_room_settings_contains_members, create_room_for_qa,
     create_space_for_qa, invite_user_for_qa, load_room_settings_for_qa,
-    start_direct_message_for_qa,
+    start_direct_message_for_qa, wait_for_room_settings_members,
 };
 use super::registry::{EVENT_TIMEOUT, QaConfig, ROOM_LIST_EVENT_TIMEOUT};
 use super::{
@@ -71,14 +71,13 @@ pub(super) async fn run_invites_dm_stage(
         "invites_dm room list after room accept",
     )
     .await?;
-    let accept_room_settings =
-        load_room_settings_for_qa(conn_b, &accept_room_id, "invites_dm accepted room members")
-            .await?;
-    assert_room_settings_contains_members(
-        &accept_room_settings,
+    wait_for_room_settings_members(
+        conn_b,
+        &accept_room_id,
         &[user_a_full_id.as_str(), user_b_full_id.as_str()],
         "invites_dm accepted room members",
-    )?;
+    )
+    .await?;
 
     let accept_space_id = create_space_for_qa(
         conn_a,
@@ -107,28 +106,20 @@ pub(super) async fn run_invites_dm_stage(
         "invites_dm space list after space accept",
     )
     .await?;
-    let accept_space_settings = load_room_settings_for_qa(
+    wait_for_room_settings_members(
         conn_b,
         &accept_space_id,
+        &[user_a_full_id.as_str(), user_b_full_id.as_str()],
         "invites_dm accepted space members",
     )
     .await?;
-    assert_room_settings_contains_members(
-        &accept_space_settings,
-        &[user_a_full_id.as_str(), user_b_full_id.as_str()],
-        "invites_dm accepted space members",
-    )?;
-    let accept_space_settings_a = load_room_settings_for_qa(
+    wait_for_room_settings_members(
         conn_a,
         &accept_space_id,
+        &[user_a_full_id.as_str(), user_b_full_id.as_str()],
         "invites_dm creator observes accepted space member",
     )
     .await?;
-    assert_room_settings_contains_members(
-        &accept_space_settings_a,
-        &[user_a_full_id.as_str(), user_b_full_id.as_str()],
-        "invites_dm creator observes accepted space member",
-    )?;
     println!("invite_accept=ok");
     println!("member_list=ok");
 
