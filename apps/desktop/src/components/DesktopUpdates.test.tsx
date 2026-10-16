@@ -20,7 +20,7 @@ vi.mock("../backend/appRuntime", () => ({ api: {
   downloadDesktopUpdate: fixture.download,
   restartToInstallDesktopUpdate: fixture.restart,
   ignoreDesktopUpdate: fixture.ignore
-} }));
+}, startSessionVerificationWindowDrag: vi.fn() }));
 vi.mock("../domain/appStore", () => ({
   useAppStore: () => ({
     values: { updates: { auto_check: false, include_prereleases: false } },
