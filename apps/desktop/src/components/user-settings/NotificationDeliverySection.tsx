@@ -1,6 +1,5 @@
 import { useEffect, useMemo, useRef, useState, type FormEvent, type ReactNode } from "react";
 import {
-  ArrowLeft,
   Bell,
   ChevronRight,
   Mail,
@@ -14,6 +13,7 @@ import {
 import { openExternalHttpUrl } from "../../backend/linkMediaRuntime";
 import { t, type MessageId } from "../../i18n/messages";
 import { ImeSafeForm, ImeTextField, SecureImeTextField } from "../ImeTextControl";
+import { ModalDialog } from "../ModalDialog";
 import {
   accountNotificationsFailureMessage,
   isKeywordOperation
@@ -208,6 +208,8 @@ export function NotificationDeliverySection({
 }) {
   const [view, setView] = useState<DeliveryView>({ kind: "list" });
   const [testingSinkId, setTestingSinkId] = useState<string | null>(null);
+  // The editor dialog cannot be dismissed while a save is in flight.
+  const [saving, setSaving] = useState(false);
 
   const sinkStates = useMemo(() => {
     const map = new Map<string, NotificationDeliverySinkState>();
@@ -243,66 +245,72 @@ export function NotificationDeliverySection({
     }
   }
 
-  let body;
+  const closeEditor = () => setView({ kind: "list" });
+  let editor: { title: string; content: ReactNode } | null = null;
   if (view.kind === "pick") {
-    body = (
-      <SinkKindPicker
-        onPick={(kind) =>
-          setView({
-            kind: "detail",
-            sinkId: "",
-            draft: newNotificationSink(createNotificationSinkId(), kind),
-            added: null
-          })
-        }
-        onCancel={() => setView({ kind: "list" })}
-      />
-    );
+    editor = {
+      title: t("settings.notificationDeliveryPickTitle"),
+      content: (
+        <SinkKindPicker
+          onPick={(kind) =>
+            setView({
+              kind: "detail",
+              sinkId: "",
+              draft: newNotificationSink(createNotificationSinkId(), kind),
+              added: null
+            })
+          }
+          onCancel={closeEditor}
+        />
+      )
+    };
   } else if (view.kind === "detail") {
     const sinkId = view.draft?.id ?? view.sinkId;
     const saved = delivery.sinks.find((candidate) => candidate.id === sinkId) ?? view.added;
     const sink = view.draft ?? saved;
-    if (!sink) {
-      // Rust dropped the destination (another window removed it, or the patch was refused).
-      body = renderSinkList();
-    } else {
-      body = (
-        <NotificationSinkDetail
-          key={sink.id}
-          sink={sink}
-          saved={saved}
-          sinkState={saved ? sinkStates.get(sink.id) ?? null : null}
-          presets={state.presets}
-          rooms={rooms}
-          spaces={spaces}
-          testing={testingSinkId === sink.id}
-          keywordEditor={
-            keywordRules !== undefined && keywordOperation !== undefined ? (
-              <NotificationKeywordEditor
-                rules={keywordRules}
-                operation={keywordOperation}
-                actions={keywordActions}
-              />
-            ) : null
-          }
-          onChange={(next) => setView({ kind: "detail", sinkId: next.id, draft: next, added: view.added })}
-          onSave={async (next, secret, acceptContentConsent) => {
-            await actions.save(next, secret, acceptContentConsent);
-            setView({ kind: "detail", sinkId: next.id, draft: null, added: next });
-          }}
-          onDiscard={() =>
-            saved
-              ? setView({ kind: "detail", sinkId: sink.id, draft: null, added: view.added })
-              : setView({ kind: "list" })
-          }
-          onBack={() => setView({ kind: "list" })}
-          onRemove={() => void removeSink(sink.id)}
-          onTest={() => runTest(sink.id)}
-        />
-      );
+    // Without a sink Rust dropped the destination (another window removed it, or the patch
+    // was refused), so there is nothing left to edit and the dialog stays closed.
+    if (sink) {
+      const service = notificationDeliveryServiceLabel(sink, state.presets);
+      editor = {
+        title: saved ? service : t("settings.notificationDeliveryNewDestinationOf", { service }),
+        content: (
+          <NotificationSinkDetail
+            key={sink.id}
+            sink={sink}
+            saved={saved}
+            sinkState={saved ? sinkStates.get(sink.id) ?? null : null}
+            presets={state.presets}
+            rooms={rooms}
+            spaces={spaces}
+            testing={testingSinkId === sink.id}
+            keywordEditor={
+              keywordRules !== undefined && keywordOperation !== undefined ? (
+                <NotificationKeywordEditor
+                  rules={keywordRules}
+                  operation={keywordOperation}
+                  actions={keywordActions}
+                />
+              ) : null
+            }
+            onChange={(next) => setView({ kind: "detail", sinkId: next.id, draft: next, added: view.added })}
+            onSave={async (next, secret, acceptContentConsent) => {
+              setSaving(true);
+              try {
+                await actions.save(next, secret, acceptContentConsent);
+              } finally {
+                setSaving(false);
+              }
+              // A settled save is the end of the edit: the list shows the stored destination.
+              closeEditor();
+            }}
+            onCancel={closeEditor}
+            onRemove={() => void removeSink(sink.id)}
+            onTest={() => runTest(sink.id)}
+          />
+        )
+      };
     }
-  } else {
-    body = renderSinkList();
   }
 
   function renderSinkList() {
@@ -362,7 +370,17 @@ export function NotificationDeliverySection({
       <p className="profile-settings-hint" data-testid="notification-delivery-running-note">
         {t("settings.notificationDeliveryRunningNote")}
       </p>
-      {body}
+      {renderSinkList()}
+      {editor ? (
+        <ModalDialog
+          title={editor.title}
+          className="notification-delivery-modal"
+          dismissible={!saving}
+          onClose={closeEditor}
+        >
+          {editor.content}
+        </ModalDialog>
+      ) : null}
     </section>
   );
 }
@@ -486,7 +504,6 @@ function SinkKindPicker({
       aria-label={t("settings.notificationDeliveryPickTitle")}
       data-testid="notification-delivery-pick"
     >
-      <h4 className="settings-subheading">{t("settings.notificationDeliveryPickTitle")}</h4>
       <ul className="notification-delivery-picker-list">
         {SINK_KINDS.map((kind) => (
           <li key={kind}>
@@ -734,8 +751,7 @@ function NotificationSinkDetail({
   keywordEditor,
   onChange,
   onSave,
-  onDiscard,
-  onBack,
+  onCancel,
   onRemove,
   onTest
 }: {
@@ -749,8 +765,7 @@ function NotificationSinkDetail({
   keywordEditor: ReactNode;
   onChange: (sink: NotificationSinkSettings) => void;
   onSave: (sink: NotificationSinkSettings, secret: string | null, acceptContentConsent: boolean) => Promise<void>;
-  onDiscard: () => void;
-  onBack: () => void;
+  onCancel: () => void;
   onRemove: () => void;
   onTest: () => Promise<void>;
 }) {
@@ -854,13 +869,10 @@ function NotificationSinkDetail({
     setEpoch((value) => value + 1);
   }
 
-  function discard() {
+  function cancel() {
+    // The draft is ephemeral: cancelling drops it and the typed secret with the dialog.
     clearSecretField();
-    setConsentChecked(false);
-    setProblem(null);
-    setSaveState({ kind: "idle" });
-    setEpoch((value) => value + 1);
-    onDiscard();
+    onCancel();
   }
 
   const problemMessage =
@@ -883,26 +895,7 @@ function NotificationSinkDetail({
       data-draft={isNew ? "true" : "false"}
       data-dirty={dirty ? "true" : "false"}
     >
-      <nav className="notification-delivery-breadcrumb" aria-label={t("settings.notificationDelivery")}>
-        <button
-          className="profile-settings-action"
-          type="button"
-          data-testid="notification-delivery-back"
-          onClick={onBack}
-        >
-          <ArrowLeft size={14} aria-hidden="true" />
-          <span>{t("settings.notificationDeliveryBack")}</span>
-        </button>
-        <ChevronRight size={14} aria-hidden="true" />
-        <span aria-current="page" dir="auto">
-          {isNew ? t("settings.notificationDeliveryNewDestination") : service}
-        </span>
-      </nav>
-      <h4 className="notification-delivery-detail-title" dir="auto">
-        <SinkKindIcon kind={config.kind} />
-        <span>{service}</span>
-      </h4>
-
+      <div className="notification-delivery-detail-body">
       <section
         className="notification-delivery-group"
         aria-label={t("settings.notificationDeliveryCredentials")}
@@ -965,9 +958,15 @@ function NotificationSinkDetail({
             value={sink.destination}
             syncScope={syncScope}
             required
+            placeholder={t("settings.notificationDeliverySinkToPlaceholder")}
             testId="notification-delivery-sink-to"
             onChange={(destination) => change({ ...sink, destination })}
           />
+        ) : null}
+        {config.kind === "resend" ? (
+          <p className="profile-settings-hint" data-testid="notification-delivery-resend-to-hint">
+            {t("settings.notificationDeliveryResendToHint")}
+          </p>
         ) : null}
         {config.kind === "smtp" ? (
           <>
@@ -1216,6 +1215,8 @@ function NotificationSinkDetail({
         </section>
       ) : null}
 
+      </div>
+
       <div className="notification-delivery-footer" data-testid="notification-delivery-footer">
         <p
           className="notification-delivery-footer-status"
@@ -1233,11 +1234,11 @@ function NotificationSinkDetail({
           <button
             className="trust-action-button secondary"
             type="button"
-            data-testid="notification-delivery-discard"
-            disabled={saving || !dirty}
-            onClick={discard}
+            data-testid="notification-delivery-cancel"
+            disabled={saving}
+            onClick={cancel}
           >
-            {t("settings.notificationDeliveryDiscard")}
+            {t("action.cancel")}
           </button>
           <button
             className="trust-action-button"

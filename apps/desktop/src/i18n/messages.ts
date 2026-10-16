@@ -972,9 +972,8 @@ export type MessageId =
   | "settings.notificationDeliveryPickResend"
   | "settings.notificationDeliveryPickSmtp"
   | "settings.notificationDeliveryPickServerChan"
-  | "settings.notificationDeliveryNewDestination"
+  | "settings.notificationDeliveryNewDestinationOf"
   | "settings.notificationDeliverySave"
-  | "settings.notificationDeliveryDiscard"
   | "settings.notificationDeliverySaving"
   | "settings.notificationDeliverySaveFailed"
   | "settings.notificationDeliveryUnsaved"
@@ -1050,7 +1049,8 @@ export type MessageId =
   | "settings.notificationDeliveryStatusNeedsCredential"
   | "settings.notificationDeliveryStatusNeedsTargets"
   | "settings.notificationDeliveryStatusIncomplete"
-  | "settings.notificationDeliveryBack"
+  | "settings.notificationDeliverySinkToPlaceholder"
+  | "settings.notificationDeliveryResendToHint"
   | "settings.notificationDeliveryCredentials"
   | "settings.notificationDeliveryResendHint"
   | "settings.notificationDeliverySecretResend"
@@ -3075,12 +3075,10 @@ const en: Catalog = {
     "Email through your mailbox's SMTP server, with presets for common providers.",
   "settings.notificationDeliveryPickServerChan":
     "Push to your WeChat with a ServerChan Turbo SendKey.",
-  "settings.notificationDeliveryNewDestination":
-    "New destination",
+  "settings.notificationDeliveryNewDestinationOf":
+    "New destination: {service}",
   "settings.notificationDeliverySave":
     "Save",
-  "settings.notificationDeliveryDiscard":
-    "Discard",
   "settings.notificationDeliverySaving":
     "Saving…",
   "settings.notificationDeliverySaveFailed":
@@ -3149,7 +3147,7 @@ const en: Catalog = {
     "Up to {count} sending services. Remove one to add another.",
   "settings.notificationDeliverySinkName": "Name",
   "settings.notificationDeliverySinkFrom": "From address",
-  "settings.notificationDeliverySinkTo": "Send to",
+  "settings.notificationDeliverySinkTo": "Recipient email address",
   "settings.notificationDeliverySinkHost": "Server",
   "settings.notificationDeliverySinkPort": "Port",
   "settings.notificationDeliverySinkUsername": "Username",
@@ -3204,8 +3202,10 @@ const en: Catalog = {
     "Not configured: choose at least one target.",
   "settings.notificationDeliveryStatusIncomplete":
     "Not configured: fill in the required fields.",
-  "settings.notificationDeliveryBack":
-    "All destinations",
+  "settings.notificationDeliverySinkToPlaceholder":
+    "you@example.com",
+  "settings.notificationDeliveryResendToHint":
+    "Use the email address registered on your Resend account: it receives notifications without any domain setup.",
   "settings.notificationDeliveryCredentials":
     "Connection",
   "settings.notificationDeliveryResendHint":
@@ -5181,12 +5181,10 @@ const ja: Catalog = {
     "メールボックスのSMTPサーバーでメールを送信します。主なサービスのプリセットがあります。",
   "settings.notificationDeliveryPickServerChan":
     "ServerChan TurboのSendKeyでWeChatに通知します。",
-  "settings.notificationDeliveryNewDestination":
-    "新しい送信先",
+  "settings.notificationDeliveryNewDestinationOf":
+    "新しい送信先: {service}",
   "settings.notificationDeliverySave":
     "保存",
-  "settings.notificationDeliveryDiscard":
-    "破棄",
   "settings.notificationDeliverySaving":
     "保存中…",
   "settings.notificationDeliverySaveFailed":
@@ -5253,7 +5251,7 @@ const ja: Catalog = {
     "送信方法は{count}件までです。追加するには1件削除してください。",
   "settings.notificationDeliverySinkName": "名前",
   "settings.notificationDeliverySinkFrom": "差出人アドレス",
-  "settings.notificationDeliverySinkTo": "送信先",
+  "settings.notificationDeliverySinkTo": "宛先メールアドレス",
   "settings.notificationDeliverySinkHost": "サーバー",
   "settings.notificationDeliverySinkPort": "ポート",
   "settings.notificationDeliverySinkUsername": "ユーザー名",
@@ -5307,8 +5305,10 @@ const ja: Catalog = {
     "未設定：送信する対象を1つ以上選んでください。",
   "settings.notificationDeliveryStatusIncomplete":
     "未設定：必須項目を入力してください。",
-  "settings.notificationDeliveryBack":
-    "送信先一覧",
+  "settings.notificationDeliverySinkToPlaceholder":
+    "you@example.com",
+  "settings.notificationDeliveryResendToHint":
+    "Resendアカウントに登録したメールアドレスを入力してください。このアドレスならドメインの設定なしで届きます。",
   "settings.notificationDeliveryCredentials":
     "接続",
   "settings.notificationDeliveryResendHint":

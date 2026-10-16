@@ -308,16 +308,22 @@ describe("NotificationDeliverySection list", () => {
     expect(within(row).getByTestId("notification-delivery-sink-failed")).toBeTruthy();
   });
 
-  test("opens a destination's detail and returns with Back", () => {
+  test("opens a destination's detail in a dialog over the list and closes it with Cancel", () => {
     renderSection();
     openSink();
     const detail = screen.getByTestId("notification-delivery-detail");
     expect(detail.getAttribute("data-draft")).toBe("false");
+    // #1488: the destination being edited is the foreground surface, titled by its service.
+    const dialog = detail.closest("dialog");
+    expect(dialog?.getAttribute("aria-label")).toBe("Resend (email API)");
+    expect(within(dialog!).getByTestId("notification-delivery-footer")).toBeTruthy();
+    expect(screen.getByTestId("notification-delivery-sink")).toBeTruthy();
     for (const part of ["credentials", "targets", "content", "timing", "outcome", "footer"]) {
       expect(within(detail).getByTestId(`notification-delivery-${part}`)).toBeTruthy();
     }
-    fireEvent.click(screen.getByTestId("notification-delivery-back"));
+    fireEvent.click(screen.getByTestId("notification-delivery-cancel"));
     expect(screen.queryByTestId("notification-delivery-detail")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(screen.getByTestId("notification-delivery-sink")).toBeTruthy();
   });
 
@@ -341,6 +347,13 @@ describe("NotificationDeliverySection add flow", () => {
 
     const detail = screen.getByTestId("notification-delivery-detail");
     expect(detail.getAttribute("data-draft")).toBe("true");
+    expect(detail.closest("dialog")?.getAttribute("aria-label")).toBe("New destination: Resend (email API)");
+    // The recipient field says it takes an email address, and how Resend reaches it.
+    expect(screen.getByText("Recipient email address")).toBeTruthy();
+    expect((screen.getByTestId("notification-delivery-sink-to") as HTMLInputElement).placeholder).toBe(
+      "you@example.com"
+    );
+    expect(screen.getByTestId("notification-delivery-resend-to-hint").textContent).toContain("Resend account");
     // A new destination takes its key in the same screen; content waits for nothing.
     expect(screen.getByTestId("notification-delivery-sink-secret")).toBeTruthy();
     expect(screen.getByTestId("notification-delivery-content")).toBeTruthy();
@@ -382,12 +395,12 @@ describe("NotificationDeliverySection add flow", () => {
       config: { kind: "resend", endpoint: "https://api.resend.com/emails" }
     });
     expect(handlers.update).not.toHaveBeenCalled();
-    // The key left once; the field is empty and the page never shows it.
-    expect((screen.getByTestId("notification-delivery-sink-secret") as HTMLInputElement).value).toBe("");
+    // The key left once, and the page never shows it.
     expect(document.body.innerHTML).not.toContain(SYNTHETIC_API_KEY);
     expect(document.body.textContent).not.toContain(SYNTHETIC_API_KEY);
-    // The view stays on the saved destination.
-    expect(screen.getByTestId("notification-delivery-detail").getAttribute("data-draft")).toBe("false");
+    // A settled save ends the edit: the dialog closes back to the list.
+    expect(screen.queryByTestId("notification-delivery-detail")).toBeNull();
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 
   test("a new destination needs its key before Save dispatches", async () => {
@@ -446,8 +459,11 @@ describe("NotificationDeliverySection add flow", () => {
     fireEvent.click(screen.getByTestId("notification-delivery-pick-cancel"));
     expect(screen.getByTestId("notification-delivery-sinks-empty")).toBeTruthy();
 
+    expect(screen.queryByRole("dialog")).toBeNull();
+
     pickKind("resend");
-    fireEvent.click(screen.getByTestId("notification-delivery-discard"));
+    fireEvent.click(screen.getByTestId("notification-delivery-cancel"));
+    expect(screen.queryByRole("dialog")).toBeNull();
     expect(handlers.save).not.toHaveBeenCalled();
     expect(handlers.update).not.toHaveBeenCalled();
     expect(screen.getByTestId("notification-delivery-sinks-empty")).toBeTruthy();
@@ -493,6 +509,7 @@ describe("NotificationDeliverySection add flow", () => {
     expect((screen.getByTestId("notification-delivery-sink-to") as HTMLInputElement).value).toBe(
       "recipient@example.invalid"
     );
+    // A refused save keeps the dialog open on the draft.
     // The key was taken out of the field before the command left, so a refusal leaves none.
     expect((screen.getByTestId("notification-delivery-sink-secret") as HTMLInputElement).value).toBe("");
     expect(document.body.innerHTML).not.toContain(SYNTHETIC_API_KEY);
@@ -515,8 +532,12 @@ describe("NotificationDeliverySection add flow", () => {
     expect(saveButton().textContent).toBe("Saving…");
     fireEvent.click(saveButton());
     expect(handlers.save).toHaveBeenCalledTimes(1);
+    // The dialog cannot be closed or cancelled under an in-flight save.
+    const dialog = screen.getByTestId("notification-delivery-detail").closest("dialog")!;
+    expect((dialog.querySelector(".app-modal-header button") as HTMLButtonElement).disabled).toBe(true);
+    expect((screen.getByTestId("notification-delivery-cancel") as HTMLButtonElement).disabled).toBe(true);
     await act(async () => settle());
-    expect(saveButton().textContent).toBe("Save");
+    expect(screen.queryByRole("dialog")).toBeNull();
   });
 });
 
@@ -543,15 +564,18 @@ describe("NotificationDeliverySection drafts", () => {
     expect(handlers.update).not.toHaveBeenCalled();
   });
 
-  test("Discard drops the edits and shows Rust's copy again", () => {
+  test("Cancel drops the draft and its typed key; reopening shows Rust's copy", () => {
     const handlers = renderSection({ runtime: state({ sinks: [sinkState()] }) });
     openSink();
     const to = screen.getByTestId("notification-delivery-sink-to") as HTMLInputElement;
     fireEvent.change(to, { target: { value: "elsewhere@example.invalid" } });
     fireEvent.click(screen.getByTestId("notification-delivery-mentions"));
     typeSecret(SYNTHETIC_API_KEY);
-    fireEvent.click(screen.getByTestId("notification-delivery-discard"));
+    fireEvent.click(screen.getByTestId("notification-delivery-cancel"));
+    expect(screen.queryByRole("dialog")).toBeNull();
+    expect(document.body.innerHTML).not.toContain(SYNTHETIC_API_KEY);
 
+    openSink();
     expect(handlers.save).not.toHaveBeenCalled();
     expect((screen.getByTestId("notification-delivery-sink-to") as HTMLInputElement).value).toBe(
       "recipient@example.invalid"
@@ -559,16 +583,6 @@ describe("NotificationDeliverySection drafts", () => {
     expect(screen.getByTestId("notification-delivery-mentions").getAttribute("aria-checked")).toBe("true");
     expect((screen.getByTestId("notification-delivery-sink-secret") as HTMLInputElement).value).toBe("");
     expect(saveButton().disabled).toBe(true);
-  });
-
-  test("Back drops the draft", () => {
-    const handlers = renderSection();
-    openSink();
-    fireEvent.click(screen.getByTestId("notification-delivery-mentions"));
-    fireEvent.click(screen.getByTestId("notification-delivery-back"));
-    openSink();
-    expect(screen.getByTestId("notification-delivery-mentions").getAttribute("aria-checked")).toBe("true");
-    expect(handlers.save).not.toHaveBeenCalled();
   });
 
   test("shows the value the settings hold once the save settles", async () => {
@@ -580,13 +594,14 @@ describe("NotificationDeliverySection drafts", () => {
     fireEvent.blur(dwell);
     await clickSave();
     expect(lastSave(handlers).sink.timing.dwell_secs).toBe(120);
-    // Rust kept its own value; the field shows it rather than the typed entry.
+    // Rust kept its own value; reopened, the field shows it rather than the typed entry.
     rerender(
       section({
         handlers,
         delivery: delivery({ sinks: [{ ...resendSink, timing: { ...resendSink.timing, dwell_secs: 60 } }] })
       })
     );
+    openSink();
     expect((screen.getByTestId("notification-delivery-dwell") as HTMLInputElement).value).toBe("60");
   });
 });
@@ -819,7 +834,8 @@ describe("NotificationDeliverySection content", () => {
     openSink();
     fireEvent.click(mode("prefix"));
     expect(mode("prefix").checked).toBe(true);
-    expect(screen.queryByRole("dialog")).toBeNull();
+    // The warning is inline in the editor, not a second dialog on top of it.
+    expect(screen.getAllByRole("dialog")).toHaveLength(1);
     expect(screen.getByTestId("notification-delivery-consent-body").textContent).toContain(
       "recipient@example.invalid"
     );
@@ -872,6 +888,7 @@ describe("NotificationDeliverySection content", () => {
       acceptContentConsent: false
     });
 
+    openSink();
     fireEvent.click(mode("namesOnly"));
     await clickSave();
     expect(lastSave(handlers).sink).toMatchObject({ content: { kind: "namesOnly" }, content_consent: null });
@@ -1027,7 +1044,11 @@ describe("NotificationDeliverySection outcome", () => {
     openSink();
     expect(screen.getByTestId("notification-delivery-sink-outcome").textContent).toContain("接続できませんでした");
     expect(saveButton().textContent).toBe("保存");
-    expect(screen.getByTestId("notification-delivery-discard").textContent).toBe("破棄");
+    expect(screen.getByTestId("notification-delivery-cancel").textContent).toBe("キャンセル");
+    expect(screen.getByTestId("notification-delivery-detail").closest("dialog")?.getAttribute("aria-label")).toBe(
+      "Resend（メールAPI）"
+    );
+    expect(screen.getByText("宛先メールアドレス")).toBeTruthy();
   });
 });
 

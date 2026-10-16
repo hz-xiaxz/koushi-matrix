@@ -441,6 +441,8 @@ const japaneseIdenticalMessageAllowlist = new Set<MessageId>([
   "upload.formatPng",
   "auth.flowOidc",
   "auth.flowToken",
+  // #1488: an example email address, not prose.
+  "settings.notificationDeliverySinkToPlaceholder",
   // "Matrix ID" is the protocol's product term in both locales (Element X ja).
   "auth.matrixId",
   // #1460: "SendKey" is ServerChan's own name for the key on its Chinese site.
@@ -552,6 +554,7 @@ const translatedLocaleIdenticalAllowlist = new Set<MessageId>([
   "auth.matrixId",
   "auth.matrixIdPlaceholder",
   "settings.credentialStoreLinux",
+  "settings.notificationDeliverySinkToPlaceholder",
   "settings.fontInter",
   "settings.languageEnglish",
   "settings.languageJapanese",
