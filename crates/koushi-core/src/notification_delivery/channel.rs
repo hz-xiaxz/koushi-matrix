@@ -748,3 +748,7 @@ fn bounded_retry_delay(
 #[cfg(test)]
 #[path = "channel/tests.rs"]
 mod tests;
+
+#[cfg(test)]
+#[path = "channel/held_recompute_tests.rs"]
+mod held_recompute_tests;

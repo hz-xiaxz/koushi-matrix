@@ -19,11 +19,11 @@ use super::{
 };
 use crate::executor::Instant;
 
-const SINK: &str = "qq-mail";
-const ROOM: &str = "!room:example.invalid";
+pub(super) const SINK: &str = "qq-mail";
+pub(super) const ROOM: &str = "!room:example.invalid";
 const NONCE: &str = "n0";
-const DWELL: Duration = Duration::from_secs(60);
-const INTERVAL: Duration = Duration::from_secs(900);
+pub(super) const DWELL: Duration = Duration::from_secs(60);
+pub(super) const INTERVAL: Duration = Duration::from_secs(900);
 
 fn sink(id: &str) -> NotificationSinkSettings {
     let mut sink = NotificationSinkSettings {
@@ -42,14 +42,14 @@ fn sink(id: &str) -> NotificationSinkSettings {
     sink
 }
 
-fn settings() -> NotificationDeliverySettings {
+pub(super) fn settings() -> NotificationDeliverySettings {
     NotificationDeliverySettings {
         sinks: vec![sink(SINK)],
     }
 }
 
 /// An unread direct message, which the default targets carry.
-fn dm(room_id: &str, unread: u32) -> RoomAttentionCandidate {
+pub(super) fn dm(room_id: &str, unread: u32) -> RoomAttentionCandidate {
     RoomAttentionCandidate {
         room_id: room_id.to_owned(),
         display_label: "Fixture Room".to_owned(),
@@ -62,7 +62,7 @@ fn dm(room_id: &str, unread: u32) -> RoomAttentionCandidate {
     }
 }
 
-fn dm_with_text(room_id: &str, unread: u32, text: &str) -> RoomAttentionCandidate {
+pub(super) fn dm_with_text(room_id: &str, unread: u32, text: &str) -> RoomAttentionCandidate {
     RoomAttentionCandidate {
         newest_message_text: Some(BoundedNotificationDeliveryText {
             text: text.to_owned(),
@@ -74,7 +74,7 @@ fn dm_with_text(room_id: &str, unread: u32, text: &str) -> RoomAttentionCandidat
 
 /// A channel already observed as holding a credential for every sink, bound to the
 /// configuration each sink has now, which is what makes that credential usable at all.
-fn channel(settings: &NotificationDeliverySettings) -> NotificationDeliveryChannel {
+pub(super) fn channel(settings: &NotificationDeliverySettings) -> NotificationDeliveryChannel {
     let mut channel = NotificationDeliveryChannel::with_nonce(NONCE.to_owned());
     for sink in &settings.sinks {
         channel.record_credential(sink, true);
@@ -82,7 +82,7 @@ fn channel(settings: &NotificationDeliverySettings) -> NotificationDeliveryChann
     channel
 }
 
-fn observe(
+pub(super) fn observe(
     channel: &mut NotificationDeliveryChannel,
     settings: &NotificationDeliverySettings,
     now: Instant,
@@ -92,7 +92,7 @@ fn observe(
 }
 
 /// Take one room through its whole dwell, and report when the send happened.
-fn send_after_dwell(
+pub(super) fn send_after_dwell(
     channel: &mut NotificationDeliveryChannel,
     settings: &NotificationDeliverySettings,
     start: Instant,
@@ -104,11 +104,11 @@ fn send_after_dwell(
     (sent_at, jobs)
 }
 
-fn key(window: u64) -> String {
+pub(super) fn key(window: u64) -> String {
     format!("koushi-notification/{SINK}/{NONCE}-{window}")
 }
 
-fn fail(failure: NotificationDeliveryFailure) -> NotificationDeliveryOutcome {
+pub(super) fn fail(failure: NotificationDeliveryFailure) -> NotificationDeliveryOutcome {
     NotificationDeliveryOutcome::Failed(failure)
 }
 

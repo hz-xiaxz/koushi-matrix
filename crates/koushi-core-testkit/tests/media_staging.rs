@@ -568,7 +568,7 @@ async fn selection_generation_race_is_latest_wins_and_stale_is_explicit() {
 
 #[tokio::test]
 async fn settings_change_fences_blocked_preparation() {
-    let (runtime, connection, _stores) = ready_runtime().await;
+    let (runtime, mut connection, _stores) = ready_runtime().await;
     let mut barrier = runtime
         .media_staging()
         .install_preparation_barrier_for_testing();
@@ -589,9 +589,16 @@ async fn settings_change_fences_blocked_preparation() {
         .media
         .image_upload_compression_policy
         .target_long_edge += 1;
+    let changed_policy = settings.media.image_upload_compression_policy;
     runtime
         .inject_actions(vec![AppAction::SettingsLoaded { values: settings }])
         .await;
+    // Injection only enqueues the action; release the preparation after the
+    // reducer has published the new policy, or the revalidation can race it.
+    support::wait_for_state_event(&mut connection, |state| {
+        state.settings.values.media.image_upload_compression_policy == changed_policy
+    })
+    .await;
     barrier.release();
     assert!(matches!(task.await.unwrap(), Err(MediaStagingError::Stale)));
 }
