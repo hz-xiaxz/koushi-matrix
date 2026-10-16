@@ -528,14 +528,19 @@ pub(crate) struct ExportHeader {
 pub(crate) enum ExportDateLocale {
     /// `en`: `M/D/YYYY`.
     En,
-    /// `ja`: `YYYY/M/D`.
+    /// `ja`, `zh-Hans`, `zh-Hant`: `YYYY/M/D`.
     Ja,
+    /// `ko`: `YYYY. M. D.`.
+    Ko,
 }
 
 impl From<koushi_state::CatalogLocale> for ExportDateLocale {
     fn from(locale: koushi_state::CatalogLocale) -> Self {
         match locale {
-            koushi_state::CatalogLocale::Ja => Self::Ja,
+            koushi_state::CatalogLocale::Ja
+            | koushi_state::CatalogLocale::ZhHans
+            | koushi_state::CatalogLocale::ZhHant => Self::Ja,
+            koushi_state::CatalogLocale::Ko => Self::Ko,
             koushi_state::CatalogLocale::En | koushi_state::CatalogLocale::Pseudo => Self::En,
         }
     }
@@ -567,6 +572,7 @@ pub(crate) fn format_export_date(
     match locale {
         ExportDateLocale::En => format!("{month}/{day}/{year}"),
         ExportDateLocale::Ja => format!("{year}/{month}/{day}"),
+        ExportDateLocale::Ko => format!("{year}. {month}. {day}."),
     }
 }
 

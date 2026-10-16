@@ -51,6 +51,11 @@ impl<'de> Deserialize<'de> for ReceiptTimestampMillis {
 pub enum ReceiptTimestampLocale {
     En,
     Ja,
+    #[serde(rename = "zh-Hans")]
+    ZhHans,
+    #[serde(rename = "zh-Hant")]
+    ZhHant,
+    Ko,
 }
 
 impl From<koushi_state::CatalogLocale> for ReceiptTimestampLocale {
@@ -63,6 +68,9 @@ impl From<koushi_state::CatalogLocale> for ReceiptTimestampLocale {
     fn from(locale: koushi_state::CatalogLocale) -> Self {
         match locale {
             koushi_state::CatalogLocale::Ja => Self::Ja,
+            koushi_state::CatalogLocale::ZhHans => Self::ZhHans,
+            koushi_state::CatalogLocale::ZhHant => Self::ZhHant,
+            koushi_state::CatalogLocale::Ko => Self::Ko,
             koushi_state::CatalogLocale::En | koushi_state::CatalogLocale::Pseudo => Self::En,
         }
     }
@@ -302,6 +310,14 @@ mod tests {
                 serde_json::from_value::<ReceiptTimestamp>(wire).unwrap(),
                 stamp
             );
+        }
+        for (locale, wire) in [
+            (koushi_state::CatalogLocale::ZhHans, "zh-Hans"),
+            (koushi_state::CatalogLocale::ZhHant, "zh-Hant"),
+            (koushi_state::CatalogLocale::Ko, "ko"),
+        ] {
+            let stamp = ReceiptTimestamp::from_sdk(Some(0), locale).unwrap();
+            assert_eq!(serde_json::to_value(stamp).unwrap()["locale"], wire);
         }
         for locale in [
             koushi_state::CatalogLocale::En,

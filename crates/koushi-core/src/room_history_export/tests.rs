@@ -654,6 +654,16 @@ fn export_date_uses_the_local_calendar_day_and_locale_order() {
         format_export_date(now, 0, ExportDateLocale::Ja),
         "2026/9/23"
     );
+    assert_eq!(
+        format_export_date(now, 0, ExportDateLocale::Ko),
+        "2026. 9. 23."
+    );
+    for locale in [
+        koushi_state::CatalogLocale::ZhHans,
+        koushi_state::CatalogLocale::ZhHant,
+    ] {
+        assert_eq!(ExportDateLocale::from(locale), ExportDateLocale::Ja);
+    }
     // UTC+09:00 has already reached the next day.
     assert_eq!(
         format_export_date(now, 540, ExportDateLocale::Ja),
