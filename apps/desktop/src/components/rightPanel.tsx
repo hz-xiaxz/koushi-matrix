@@ -174,6 +174,7 @@ export function ContextualRightPanel({
   onResetSpaceInviteSearch = noopResetSpaceInviteSearch,
   canInviteToSpace = false,
   onModerateMember = () => undefined,
+  onResolveKnockRequest,
   onSetLocalUserAlias = () => undefined,
   onSetRoomNotificationMode = () => undefined,
   onOpenSenderProfile,
@@ -337,6 +338,12 @@ export function ContextualRightPanel({
     targetUserId: string,
     action: RoomModerationAction,
     reason: string | null
+  ) => void;
+  /** #1421: resolve a pending knock request (accept = invite, decline = kick). */
+  onResolveKnockRequest?: (
+    roomId: string,
+    targetUserId: string,
+    decision: "accept" | "decline"
   ) => void;
   onSetLocalUserAlias?: (userId: string, alias: string | null) => void;
   onRequestMemberAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
@@ -840,6 +847,7 @@ export function ContextualRightPanel({
                     )
                 : undefined
             }
+            onResolveKnockRequest={onResolveKnockRequest}
             onStartDirectMessage={onStartDirectMessage}
           />
         )}

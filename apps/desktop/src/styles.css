@@ -7043,11 +7043,46 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
 
 .people-panel {
   display: grid;
-  grid-template-rows: auto auto minmax(0, 1fr) auto;
+  grid-template-rows: auto auto auto minmax(0, 1fr) auto;
   gap: 12px;
   min-height: 0;
   padding: 18px;
   overflow: hidden;
+}
+
+/* #1421: pending knock requests keep the roster's scrollable row and scroll on
+   their own when there are many. */
+.people-knock-requests {
+  display: grid;
+  gap: 6px;
+  max-height: 160px;
+  overflow-y: auto;
+}
+.people-knock-requests-title {
+  margin: 0;
+  font-size: 13px;
+}
+.people-knock-request-list {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+.people-knock-request-row {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+.people-knock-request-id {
+  margin-inline-start: 6px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+.people-knock-request-actions {
+  display: flex;
+  gap: 6px;
 }
 
 .profile-panel {

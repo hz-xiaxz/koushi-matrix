@@ -35,6 +35,12 @@ interface PeoplePanelProps {
   onClose?: () => void;
   onInvitePeople?: () => void;
   onStartDirectMessage?: (userId: string) => void;
+  /** #1421: accept a pending knock request (invite) or decline it (kick). */
+  onResolveKnockRequest?: (
+    roomId: string,
+    targetUserId: string,
+    decision: "accept" | "decline"
+  ) => void;
 }
 
 interface ProfilePanelProps {
@@ -77,14 +83,27 @@ export function PeoplePanel(props: PeoplePanelProps) {
     onOpenProfile,
     onClose = () => undefined,
     onInvitePeople,
-    onStartDirectMessage
+    onStartDirectMessage,
+    onResolveKnockRequest
   } = props;
   const [query, setQuery] = useState("");
   const listViewportRef = useRef<HTMLDivElement>(null);
   const [listViewport, setListViewport] = useState({ scrollTop: 0, clientHeight: 0 });
   const contextId = roomOrSpaceId(roomOrSpace);
   const members = useMembers(roomOrSpace, roomManagement);
-  const filteredMembers = useFilteredMembers(members, query);
+  // #1421: a pending knock is a join request, not a member; it gets its own
+  // section with accept/decline instead of the ordinary roster row.
+  const knockRequests = useMemo(
+    () => members.filter((member) => member.membership === "knocked"),
+    [members]
+  );
+  const rosterMembers = useMemo(
+    () => members.filter((member) => member.membership !== "knocked"),
+    [members]
+  );
+  const canAcceptKnock = roomManagement.settings?.permissions.can_invite === true;
+  const canDeclineKnock = roomManagement.settings?.permissions.can_kick === true;
+  const filteredMembers = useFilteredMembers(rosterMembers, query);
   const memberWindow = useMemo(() => {
     const viewportHeight =
       listViewport.clientHeight || PEOPLE_MEMBER_FALLBACK_VIEWPORT_HEIGHT_PX;
@@ -128,7 +147,7 @@ export function PeoplePanel(props: PeoplePanelProps) {
       <header className="people-panel-header">
         <h2 id="people-title">{t("panel.people")}</h2>
         <span className="people-panel-count">
-          {t("people.memberCount", { count: String(members.length) })}
+          {t("people.memberCount", { count: String(rosterMembers.length) })}
         </span>
         <Tooltip
           label={t("action.close", { title: t("panel.people") })}
@@ -170,6 +189,42 @@ export function PeoplePanel(props: PeoplePanelProps) {
           />
         </label>
       </div>
+      {knockRequests.length > 0 && onResolveKnockRequest && contextId ? (
+        <section
+          className="people-knock-requests"
+          aria-label={t("people.knockRequests")}
+        >
+          <h3 className="people-knock-requests-title">{t("people.knockRequests")}</h3>
+          <ul className="people-knock-request-list">
+            {knockRequests.map((member) => (
+              <li key={member.user_id} className="people-knock-request-row">
+                <span className="people-knock-request-name" dir="auto">
+                  {member.display_label}
+                  <span className="people-knock-request-id" dir="auto">
+                    {member.user_id}
+                  </span>
+                </span>
+                <span className="people-knock-request-actions">
+                  <button
+                    type="button"
+                    disabled={!canAcceptKnock}
+                    onClick={() => onResolveKnockRequest(contextId, member.user_id, "accept")}
+                  >
+                    {t("people.knockAccept")}
+                  </button>
+                  <button
+                    type="button"
+                    disabled={!canDeclineKnock}
+                    onClick={() => onResolveKnockRequest(contextId, member.user_id, "decline")}
+                  >
+                    {t("people.knockDecline")}
+                  </button>
+                </span>
+              </li>
+            ))}
+          </ul>
+        </section>
+      ) : null}
       <div
         className="people-list-viewport"
         ref={listViewportRef}
@@ -623,6 +678,8 @@ function roomMemberMembershipLabel(membership: RoomMemberSummary["membership"]):
       return t("people.membershipJoined");
     case "invited":
       return t("people.membershipInvited");
+    case "knocked":
+      return t("people.membershipKnocked");
     default:
       return t("people.membershipUnknown");
   }

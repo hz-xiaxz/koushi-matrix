@@ -218,6 +218,33 @@ describe("PeoplePanel", () => {
     expect(screen.queryByText("Joined")).toBeNull();
   });
 
+  test("lists a pending knock request with accept and decline", () => {
+    const onResolveKnockRequest = vi.fn();
+    render(
+      <PeoplePanel
+        currentUserId="@current:example.invalid"
+        roomOrSpace={baseRoom}
+        roomManagement={roomManagement([{ ...members[0], membership: "knocked" }])}
+        onOpenProfile={() => undefined}
+        onResolveKnockRequest={onResolveKnockRequest}
+      />
+    );
+    expect(screen.getByRole("region", { name: "Join requests" })).toBeTruthy();
+    expect(screen.queryByText("Joined")).toBeNull();
+    fireEvent.click(screen.getByRole("button", { name: "Accept" }));
+    expect(onResolveKnockRequest).toHaveBeenCalledWith(
+      baseRoom.room_id,
+      members[0].user_id,
+      "accept"
+    );
+    fireEvent.click(screen.getByRole("button", { name: "Decline" }));
+    expect(onResolveKnockRequest).toHaveBeenCalledWith(
+      baseRoom.room_id,
+      members[0].user_id,
+      "decline"
+    );
+  });
+
   test("bounds rendered rows for large member lists", () => {
     const manyMembers: RoomMemberSummary[] = Array.from({ length: 300 }, (_, index) => {
       const suffix = String(index).padStart(3, "0");

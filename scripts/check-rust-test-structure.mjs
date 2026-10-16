@@ -1282,9 +1282,18 @@ export function checkSdkFailedSpaceMemberCountsUnavailable() {
 export function checkSdkRoomMemberSummariesUseFullMembers() {
   const rule = "sdk.room_projection.member_summaries_full_members";
   const body = rustItemBody(readRustSource("crates/koushi-sdk/src/room_projection.rs"), "async fn matrix_room_member_summaries");
-  return body?.includes("room.members(matrix_sdk::RoomMemberships::ACTIVE)")
+  // The list loads the active members and, since #1421, the pending knock
+  // requests a room admin reviews; narrowing it back to a subset is the defect.
+  return body?.includes(
+    "matrix_sdk::RoomMemberships::ACTIVE | matrix_sdk::RoomMemberships::KNOCK"
+  )
     ? []
-    : [sourceContractFailure(rule, "member summaries no longer load the full active member list")];
+    : [
+        sourceContractFailure(
+          rule,
+          "member summaries no longer load the full active member list plus pending knocks"
+        )
+      ];
 }
 
 export function checkSdkDirectAccountDataLoaderIsLocalOnly() {

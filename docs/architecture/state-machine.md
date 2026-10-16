@@ -4310,6 +4310,10 @@ stateDiagram-v2
   which would win over it) and that a second, SDK-only account's knock request is
   accepted. A create-only `knock_restricted` policy carries a membership allow
   list and pins room version V10; it is not offered to the existing-room editor.
+  A pending knock is projected as room member membership `Knocked`, and Room
+  Info resolves it with the existing commands: accept invites the requester
+  (`InviteUser`), decline kicks the pending membership (`ModerateRoomMember`,
+  kick).
 
 ## Suggested Space rooms (#1410)
 

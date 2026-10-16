@@ -99,3 +99,24 @@ edits stay rejected for now.
 (the reviewer's second blocker), the create-dialog "Ask to join" choice, and the
 Room Info knock-request review surface (`RoomMemberMembership::Knocked`, accept
 via invite, deny via kick, the requester's reason).
+
+## B implemented (2026-10-15)
+
+- **Availability is Rust-owned.** A `knock` create pins room version V10 (a
+  version that supports knocking), so availability is decided by the version
+  Core creates rather than a server probe; the create preview reports
+  `knock_available` and `knock_restricted_available` (the latter needs the
+  attachment Space that carries the allow list). This is a deliberate
+  alternative to reading the homeserver's room-version capabilities; the
+  pre-review's concern (a pinned version does not prove the server supports it)
+  is narrowed to a server that cannot create a V10 room, which the create
+  reports as a typed failure.
+- **Create dialog** renders "Ask to join" at Home and the Space-member knock
+  route inside a Space, only when the Rust preview reports it available.
+- **Review surface** projects a pending knock as `RoomMemberMembership::Knocked`
+  (the member query now includes KNOCK) and lists it in Room Info under "Join
+  requests", with Accept (`InviteUser`) and Decline (kick) reusing the existing
+  commands.
+
+Remaining polish: an encrypted knock room and a real `knock_restricted` Space
+create are not exercised by the QA yet.

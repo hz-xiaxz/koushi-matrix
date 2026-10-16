@@ -2163,6 +2163,9 @@ export interface CreateRoomAccessPreview {
   effectiveHistory: RoomHistoryVisibility;
   rejection?: CreateRoomAccessRejection;
   roomVersionPinned: boolean;
+  /** Rust-owned availability (#1421): the choice is rendered only when true. */
+  knockAvailable: boolean;
+  knockRestrictedAvailable: boolean;
 }
 
 export type RoomManagementOperationState =
@@ -2198,7 +2201,7 @@ export interface RoomSettingsSnapshot {
 }
 
 export interface RoomMemberSummary {
-  membership: "joined" | "invited" | "unknown";
+  membership: "joined" | "invited" | "knocked" | "unknown";
   user_id: string;
   display_name: string | null;
   display_label: string;

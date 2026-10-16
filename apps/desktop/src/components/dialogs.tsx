@@ -443,6 +443,21 @@ export function CreateEntityDialog({
     ...(targetSpaceName
       ? [{ value: "restricted" as const, label: t("dialog.createJoinSpaceMembers", { spaceName: targetSpaceName }) }]
       : []),
+    // #1421: Rust decides availability (from the version it will create); the
+    // dialog only renders the choice it reports.
+    ...(targetSpaceName && createAccessPreview?.knockRestrictedAvailable
+      ? [{
+          value: "knockRestricted" as const,
+          label: t("dialog.createJoinKnockRestricted", { spaceName: targetSpaceName })
+        }]
+      : []),
+    ...(!targetSpaceName && createAccessPreview?.knockAvailable
+      ? [{
+          value: "knock" as const,
+          label: t("dialog.createJoinKnock"),
+          hint: t("dialog.createJoinKnockHint")
+        }]
+      : []),
     { value: "invite", label: t("dialog.createJoinInvite") },
     { value: "public", label: t("dialog.createJoinPublic"), hint: t("dialog.createJoinPublicHint") }
   ];
@@ -581,7 +596,8 @@ export function CreateEntityDialog({
                     </span>
                   </label>
                 ))}
-                {createRule === "restricted" && joinedSpaces.length > 1 ? (
+                {(createRule === "restricted" || createRule === "knockRestricted") &&
+                joinedSpaces.length > 1 ? (
                   <div
                     className="create-room-allow-targets"
                     role="group"

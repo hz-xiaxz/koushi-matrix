@@ -7721,6 +7721,22 @@ function AccountContent({
           onModerateMember={(roomId, targetUserId, action, reason) => {
             runInBackground(moderateRoomMember(roomId, targetUserId, action, reason));
           }}
+          onResolveKnockRequest={(roomId, targetUserId, decision) => {
+            // #1421: accepting a knock invites the requester; declining kicks
+            // the pending membership. Both reuse the existing command paths.
+            // Refresh the member snapshot afterwards so a resolved request is
+            // not left behind as a stale, re-actionable row.
+            runInBackground(
+              (async () => {
+                if (decision === "accept") {
+                  await settleCommand(api.inviteUser(roomId, targetUserId));
+                } else {
+                  await moderateRoomMember(roomId, targetUserId, "kick", null);
+                }
+                await settleCommand(api.loadRoomSettings(roomId)).catch(() => undefined);
+              })()
+            );
+          }}
           onSetLocalUserAlias={(userId, alias) => {
             runInBackground(setLocalUserAlias(userId, alias));
           }}
