@@ -18,6 +18,7 @@ import {
 import { api as desktopApi } from "./backend/appRuntime";
 import { setRendererSelectedAccountTabId } from "./backend/client";
 import { desktopEventPort } from "./backend/desktopEventRuntime";
+import { desktopAttentionPortForAccount } from "./backend/desktopAttentionRuntime";
 import { openExternalHttpUrl } from "./backend/linkMediaRuntime";
 import { isTauriRuntime } from "./backend/runtimeEnvironment";
 import { windowDialogPort } from "./backend/windowDialogRuntime";
@@ -3295,6 +3296,15 @@ function AccountContent({
     // patches; the composer Math switch (app-scoped) names its scope itself, so
     // the reducer applies it even while the dialog is closed (#1244).
     const scope = patch.scope ?? (settingsScope === "app" ? "app" : "account");
+    if (
+      scope === "account" &&
+      patch.notifications?.desktop_notifications === true &&
+      snapshot?.state.domain.settings.values.notifications.desktop_notifications !== true
+    ) {
+      const permission = desktopAttentionPortForAccount(accountTabId ?? undefined)
+        ?.notifications.requestPermission;
+      if (permission && !(await permission())) return;
+    }
     await settleCommand(api.updateSettings({ ...patch, scope }));
   }
 

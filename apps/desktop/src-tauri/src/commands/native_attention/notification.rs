@@ -13,14 +13,12 @@
 //! app. Linux and Windows use `notify-rust`, which is the same backend the
 //! plugin already uses there and can wait for the response.
 //!
-//! macOS does not: `notify-rust` 4.18's macOS backend never attaches a click
-//! waiter (its `wait_for_click(true)` call is commented out inside the crate)
-//! and our banner carries no action button, so the banner is fire-and-forget
-//! and a click can never reach Koushi (#1128). The macOS path therefore sends
-//! through `mac-notification-sys` directly with `wait_for_click(true)`, which is
-//! the same backend `notify-rust` uses underneath.
+//! macOS uses `UNUserNotificationCenter` through `mac-usernotifications` so
+//! its delegate can report body clicks without a blocked OS thread (#1128).
 
-use std::sync::atomic::{AtomicUsize, Ordering};
+#[cfg(not(target_os = "macos"))]
+use std::sync::atomic::AtomicUsize;
+use std::sync::atomic::Ordering;
 
 use koushi_core::account_runtime_manager::{AccountRuntimeManager, AccountTabId};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
@@ -36,19 +34,15 @@ use crate::commands::account_key_from_app_state;
 pub(crate) const NOTIFICATION_ACTIVATED_EVENT_NAME: &str =
     "koushi-desktop://notification-activated";
 
-/// Upper bound on banners whose click is still being awaited.
+/// Upper bound on Linux/Windows banners whose click is still being awaited.
 ///
-/// Each waiter occupies one OS thread until the banner is activated, dismissed,
-/// or withdrawn. Past this bound the banner is still shown, but its click
-/// cannot navigate; the user keeps the pointer to the message in the app
-/// itself.
-const MAX_PENDING_ACTIVATION_WAITERS: usize = 4;
-
-/// Action token `notify-rust` reports when the banner went away without the
-/// user activating it. macOS does not use `notify-rust`'s handle (#1128).
+/// Each waiter occupies one OS thread until the banner is activated or
+/// dismissed. Past this bound the banner is still shown, but its click
+/// cannot navigate.
 #[cfg(not(target_os = "macos"))]
-const NOTIFICATION_CLOSED_ACTION: &str = "__closed";
+const MAX_PENDING_ACTIVATION_WAITERS: usize = 64;
 
+#[cfg(not(target_os = "macos"))]
 static PENDING_ACTIVATION_WAITERS: AtomicUsize = AtomicUsize::new(0);
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
@@ -59,11 +53,11 @@ pub(crate) enum NativeNotificationOutcome {
     /// This is dispatch acceptance, not proof that the platform displayed the
     /// banner or armed a click. An explicit backend send error is reported
     /// afterwards by the `show_failed` diagnostic and a completed click by
-    /// `activation_settled`; a banner the platform silently drops or never
-    /// confirms is reported by neither (the pinned macOS backend turns a
-    /// missing delivery confirmation into an auto-dismissal).
+    /// `activation_settled`; a banner the platform silently drops is reported
+    /// by neither.
     Delivered,
     /// Handed to the platform, but no click waiter was available.
+    #[cfg_attr(target_os = "macos", allow(dead_code))]
     DisplayOnly,
     /// Nothing to show, or the current state must not raise a banner.
     Skipped,
@@ -236,51 +230,55 @@ fn record_notification_outcome(
         ))
         .field(DiagnosticField::count(
             "pending_waiters",
-            PENDING_ACTIVATION_WAITERS.load(Ordering::Relaxed) as u64,
+            pending_activation_count() as u64,
         )),
     );
     outcome
 }
 
-/// Hand one banner to the platform and keep a click waiter on it when the
-/// bounded waiter budget allows.
+/// Hand one banner to the platform with an activation response when the
+/// platform's bounded activation budget allows.
 fn dispatch_native_notification(
     app: &AppHandle,
     payload: &NativeNotificationPayload,
     fence: ActivationFence,
 ) -> NativeNotificationOutcome {
-    set_macos_application_identity(app);
+    #[cfg(target_os = "macos")]
+    return macos::dispatch(app, payload, fence);
 
-    let Some(reservation) = ActivationWaiterReservation::acquire() else {
-        // ponytail: bounded waiter pool; past the bound the banner is shown
-        // without activation. Raise the bound, or move activation to a platform
-        // delegate, only if users actually hit it.
-        return if show_without_activation(payload) {
-            NativeNotificationOutcome::DisplayOnly
-        } else {
-            NativeNotificationOutcome::Failed
-        };
-    };
-
-    let title = payload.title.clone();
-    let body = payload.body.clone();
-    let target = payload.target.clone();
-    let app = app.clone();
-    let spawned = std::thread::Builder::new()
-        .name("koushi-notification-activation".to_owned())
-        .spawn(move || {
-            let _reservation = reservation;
-            show_banner_and_wait_for_activation(&app, &fence, &title, &body, target);
-        });
-
-    match spawned {
-        Ok(_) => NativeNotificationOutcome::Delivered,
-        // A failed spawn dropped the closure, so the reservation is released.
-        Err(_) => {
-            if show_without_activation(payload) {
+    #[cfg(not(target_os = "macos"))]
+    {
+        let Some(reservation) = ActivationWaiterReservation::acquire() else {
+            // ponytail: bounded waiter pool; past the bound the banner is shown
+            // without activation. Raise the bound, or move activation to a platform
+            // delegate, only if users actually hit it.
+            return if show_without_activation(app, payload) {
                 NativeNotificationOutcome::DisplayOnly
             } else {
                 NativeNotificationOutcome::Failed
+            };
+        };
+
+        let title = payload.title.clone();
+        let body = payload.body.clone();
+        let target = payload.target.clone();
+        let activation_app = app.clone();
+        let spawned = std::thread::Builder::new()
+            .name("koushi-notification-activation".to_owned())
+            .spawn(move || {
+                let _reservation = reservation;
+                show_banner_and_wait_for_activation(&activation_app, &fence, &title, &body, target);
+            });
+
+        match spawned {
+            Ok(_) => NativeNotificationOutcome::Delivered,
+            // A failed spawn dropped the closure, so the reservation is released.
+            Err(_) => {
+                if show_without_activation(app, payload) {
+                    NativeNotificationOutcome::DisplayOnly
+                } else {
+                    NativeNotificationOutcome::Failed
+                }
             }
         }
     }
@@ -289,10 +287,9 @@ fn dispatch_native_notification(
 /// Show one banner and block this activation thread until the user activates
 /// or dismisses it.
 ///
-/// macOS sends through `mac-notification-sys` itself: the pinned `notify-rust`
-/// macOS backend never attaches a click waiter, so a click could never activate
-/// a banner it showed (#1128). Linux and Windows keep `notify-rust`'s action
-/// waiter, which reports `__closed` when the banner goes away unactivated.
+/// Linux and Windows use `notify-rust`'s typed response. Windows maps a body
+/// click to `Default`, while its legacy action callback maps it to `__closed`.
+#[cfg(not(target_os = "macos"))]
 fn show_banner_and_wait_for_activation(
     app: &AppHandle,
     fence: &ActivationFence,
@@ -300,32 +297,60 @@ fn show_banner_and_wait_for_activation(
     body: &str,
     target: NativeNotificationTarget,
 ) {
-    #[cfg(target_os = "macos")]
     {
-        match send_macos_banner_awaiting_click(title, body) {
-            Ok(response) => {
-                if macos_banner_activates(&response) {
-                    activate_notification(app, fence, target);
-                }
-            }
-            Err(()) => record_show_failed(),
-        }
-    }
-    #[cfg(not(target_os = "macos"))]
-    {
-        let mut notification = notify_rust::Notification::new();
-        notification.summary(title).body(body);
+        let notification = response_notification(title, body, notification_app_identity(app));
         let Ok(handle) = notification.show() else {
             record_show_failed();
             return;
         };
-        handle.wait_for_action(|action| {
-            if action == NOTIFICATION_CLOSED_ACTION {
-                return;
+        let result = handle.wait_for_response(|response: &notify_rust::NotificationResponse| {
+            if notification_response_activates(response) {
+                activate_notification(app, fence, target.clone());
             }
-            activate_notification(app, fence, target);
         });
+        if result.is_err() {
+            record_show_failed();
+        }
     }
+}
+
+#[cfg(any(not(target_os = "macos"), test))]
+fn notification_response_activates(response: &notify_rust::NotificationResponse) -> bool {
+    response.is_default_action()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn response_notification(
+    title: &str,
+    body: &str,
+    app_id: Option<&str>,
+) -> notify_rust::Notification {
+    let mut notification = notify_rust::Notification::new();
+    notification.summary(title).body(body);
+    #[cfg(target_os = "linux")]
+    notification.action("default", "Open");
+    #[cfg(windows)]
+    if let Some(app_id) = app_id {
+        notification.app_id(app_id);
+    }
+    #[cfg(not(windows))]
+    let _ = app_id;
+    notification
+}
+
+#[cfg(windows)]
+fn notification_app_id(is_dev: bool, identifier: &str) -> Option<&str> {
+    (!is_dev).then_some(identifier)
+}
+
+#[cfg(windows)]
+fn notification_app_identity(app: &AppHandle) -> Option<&str> {
+    notification_app_id(tauri::is_dev(), &app.config().identifier)
+}
+
+#[cfg(target_os = "linux")]
+fn notification_app_identity(_app: &AppHandle) -> Option<&str> {
+    None
 }
 
 fn record_show_failed() {
@@ -339,71 +364,15 @@ fn record_show_failed() {
     );
 }
 
-/// Whether a macOS banner must be shown with a click waiter attached.
-///
-/// A macOS banner with no action button, no close button, and no click wait is
-/// fire-and-forget: `mac-notification-sys` returns after its delivery
-/// confirmation and no click reaches the process, which is exactly the #1128
-/// defect. This constant is the structural guard for that request; the live
-/// smoke in this module's tests is the behavioural evidence.
-#[cfg(target_os = "macos")]
-const MACOS_BANNER_WAITS_FOR_CLICK: bool = true;
-
-/// The click-wait request the macOS sender passes to `mac-notification-sys`.
-///
-/// Kept as the single decision point so the request can be asserted without
-/// showing a banner; the live smoke in this module's tests is the behavioural
-/// evidence.
-#[cfg(target_os = "macos")]
-fn macos_click_wait_requested() -> bool {
-    MACOS_BANNER_WAITS_FOR_CLICK
-}
-
-/// Show one macOS banner and block until the user activates or dismisses it.
-#[cfg(target_os = "macos")]
-fn send_macos_banner_awaiting_click(
-    title: &str,
-    body: &str,
-) -> Result<mac_notification_sys::NotificationResponse, ()> {
-    let mut notification = mac_notification_sys::Notification::new();
-    notification
-        .title(title)
-        .message(body)
-        .wait_for_click(macos_click_wait_requested());
-    notification.send().map_err(|_| ())
-}
-
-/// Whether a macOS banner response means the user activated the banner.
-///
-/// Only a direct click activates. A dismissal, a close button, an action
-/// button, or a text reply must not navigate: the target is only shown when the
-/// user opened the banner itself.
-#[cfg(target_os = "macos")]
-fn macos_banner_activates(response: &mac_notification_sys::NotificationResponse) -> bool {
-    matches!(response, mac_notification_sys::NotificationResponse::Click)
-}
-
-fn show_without_activation(payload: &NativeNotificationPayload) -> bool {
-    let mut notification = notify_rust::Notification::new();
-    notification.summary(&payload.title).body(&payload.body);
+#[cfg(not(target_os = "macos"))]
+fn show_without_activation(app: &AppHandle, payload: &NativeNotificationPayload) -> bool {
+    let notification = response_notification(
+        &payload.title,
+        &payload.body,
+        notification_app_identity(app),
+    );
     notification.show().is_ok()
 }
-
-/// macOS delivers notifications under the bundle identifier of the sending
-/// process; without this the banner belongs to the development host and a click
-/// cannot reach Koushi.
-#[cfg(target_os = "macos")]
-fn set_macos_application_identity(app: &AppHandle) {
-    let identifier = if tauri::is_dev() {
-        "com.apple.Terminal".to_owned()
-    } else {
-        app.config().identifier.clone()
-    };
-    let _ = notify_rust::set_application(&identifier);
-}
-
-#[cfg(not(target_os = "macos"))]
-fn set_macos_application_identity(_app: &AppHandle) {}
 
 async fn select_activation_tab(
     runtime: &AccountRuntimeManager,
@@ -504,8 +473,10 @@ fn record_activation(reason: &'static str) {
 }
 
 /// Bounded budget for threads blocked on a notification click.
+#[cfg(not(target_os = "macos"))]
 struct ActivationWaiterReservation;
 
+#[cfg(not(target_os = "macos"))]
 impl ActivationWaiterReservation {
     fn acquire() -> Option<Self> {
         let mut current = PENDING_ACTIVATION_WAITERS.load(Ordering::Acquire);
@@ -526,11 +497,53 @@ impl ActivationWaiterReservation {
     }
 }
 
+#[cfg(not(target_os = "macos"))]
 impl Drop for ActivationWaiterReservation {
     fn drop(&mut self) {
         PENDING_ACTIVATION_WAITERS.fetch_sub(1, Ordering::AcqRel);
     }
 }
 
+#[cfg(target_os = "macos")]
+mod macos;
+
+#[cfg(target_os = "macos")]
+fn pending_activation_count() -> usize {
+    macos::pending_count()
+}
+
+#[cfg(not(target_os = "macos"))]
+fn pending_activation_count() -> usize {
+    PENDING_ACTIVATION_WAITERS.load(Ordering::Relaxed)
+}
+
+/// Withdraw currently visible notifications when the owning attention is cleared.
+#[tauri::command]
+pub(crate) async fn clear_native_attention_notifications() -> Result<(), &'static str> {
+    #[cfg(target_os = "macos")]
+    {
+        macos::clear().await;
+        Ok(())
+    }
+    #[cfg(not(target_os = "macos"))]
+    Err("native notification clear is not implemented on this platform")
+}
+
+/// Called only from the explicit Desktop notifications switch, never from a
+/// passive banner dispatch.
+#[tauri::command]
+pub(crate) async fn request_native_attention_notification_permission() -> bool {
+    #[cfg(target_os = "macos")]
+    return mac_usernotifications::request_auth().await.unwrap_or(false);
+    #[cfg(not(target_os = "macos"))]
+    true
+}
+
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod platform_response_tests;
+
+#[cfg(all(test, target_os = "macos"))]
+mod macos_activation_tests;

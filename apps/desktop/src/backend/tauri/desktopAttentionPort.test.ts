@@ -3,7 +3,6 @@
 import { invoke } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { cancelAll, removeAllActive } from "@tauri-apps/plugin-notification";
 import { beforeEach, describe, expect, test, vi } from "vitest";
 
 import type { DesktopNotificationActivation } from "../../domain/desktopNotification";
@@ -19,18 +18,12 @@ const currentWindow = vi.hoisted(() => ({
 vi.mock("@tauri-apps/api/core", () => ({ invoke: vi.fn() }));
 vi.mock("@tauri-apps/api/event", () => ({ listen: vi.fn() }));
 vi.mock("@tauri-apps/api/window", () => ({ getCurrentWindow: vi.fn(() => currentWindow) }));
-vi.mock("@tauri-apps/plugin-notification", () => ({
-  cancelAll: vi.fn(),
-  removeAllActive: vi.fn()
-}));
 
 const unlisten = vi.fn();
 
 beforeEach(() => {
   vi.clearAllMocks();
   vi.mocked(listen).mockResolvedValue(unlisten);
-  vi.mocked(cancelAll).mockResolvedValue(undefined);
-  vi.mocked(removeAllActive).mockResolvedValue(undefined);
   vi.mocked(invoke).mockResolvedValue("delivered");
 });
 
@@ -103,15 +96,17 @@ describe("Tauri desktop attention port", () => {
     expect(handler).toHaveBeenCalledOnce();
   });
 
-  test.each([
-    ["pending cancellation", () => vi.mocked(cancelAll).mockRejectedValue(new Error("failed"))],
-    ["active removal", () => vi.mocked(removeAllActive).mockRejectedValue(new Error("failed"))]
-  ])("settles both clear operations when %s fails", async (_operation, rejectOperation) => {
-    rejectOperation();
+  test("clears native notifications through the desktop command", async () => {
     const port = createTauriDesktopAttentionPort();
 
-    await expect(port.notifications.clear()).rejects.toThrow("native_notification_clear_failed");
-    expect(cancelAll).toHaveBeenCalledOnce();
-    expect(removeAllActive).toHaveBeenCalledOnce();
+    await port.notifications.clear();
+    expect(invoke).toHaveBeenCalledWith("clear_native_attention_notifications");
+  });
+
+  test("requests macOS notification permission only when explicitly called", async () => {
+    vi.mocked(invoke).mockResolvedValueOnce(true);
+    const port = createTauriDesktopAttentionPort();
+    await expect(port.notifications.requestPermission?.()).resolves.toBe(true);
+    expect(invoke).toHaveBeenCalledWith("request_native_attention_notification_permission");
   });
 });

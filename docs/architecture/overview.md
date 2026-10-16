@@ -1447,14 +1447,15 @@ QA title tokens may expose only aggregate values such as `unread=N`, `badge=N`,
 and `notify=<kind|none>`.
 
 OS notification text and navigation targets are a separate, dedicated contract
-rather than extra fields on the aggregate candidate. When the projection selects
-a candidate it also builds `NativeAttentionState.notification`, a
-`NativeNotificationPayload` carrying the banner title, the banner body, and the
-single `room`/`event`/`thread` target that caused the candidate. The payload is
-built in the same projection run as the candidate it describes, so a later
-event can never silently replace the target of an already composed banner. It is
-never serialized: `NativeAttentionState.notification` is `serde(skip)`, and only
-the Rust desktop adapter reads it from live `AppState`.
+rather than extra fields on the aggregate candidate. The current room-list
+projection supplies a room target only: its unread count cannot identify the
+triggering event, and its `latest_event` may be a different message. The
+notification therefore leaves event and thread identifiers empty and a click
+opens the room. Exact message navigation requires an SDK notification
+observation carrying the triggering event through Rust state and the desktop
+adapter; a room-list event must not be substituted by inference. The resulting
+`NativeAttentionState.notification` is never serialized: it is `serde(skip)`,
+and only the Rust desktop adapter reads it from live `AppState`.
 
 The message-preview policy is device-local and OFF by default (#994, #1054),
 as engineering rule 9 requires for OS notifications: until the user opts in,
@@ -1464,35 +1465,30 @@ settings file without the field loads as OFF rather than failing the load.
 Settings schema version 2 resets the field to OFF once for version-0 and
 version-1 files, because those persisted the retired ON default and cannot
 distinguish it from an explicit opt-in. While it is OFF no message content
-leaves Rust. While it is ON the body
-is the triggering event's already-sanitized plain-text preview, bounded in
-length and with whitespace collapsed; an event without usable preview text
-(undecrypted, redacted, non-text, or missing history) falls back to the count
-body instead of an empty banner. The payload follows the same mute, session,
+leaves Rust. While it is ON, a live unread observation may use the latest
+event's sanitized plain-text preview only when the projection verifies that
+the event changed with that unread rise; otherwise it uses the count body.
+The preview is bounded in length with whitespace collapsed. A verified preview
+still does not identify an exact navigation target, so a click opens the room.
+The payload follows the same mute, session,
 initial-sync/backfill, self-event, focus, and dedup suppression as the candidate,
 and `NativeAttentionSummary` stays free of message bodies and identifiers.
 
 The desktop notification adapter is the only owner of the platform banner. It
 honors `SettingsValues.notifications.desktop_notifications` (app notifications
-OFF raises no banner) and uses `notify-rust` directly on Linux and Windows
-because `tauri-plugin-notification` has no desktop activation path: it shows a
-banner but never reports a click. The activation-capable macOS path
-does not use `notify-rust`'s macOS backend: that backend never attaches a click
-waiter to a banner with no action button, so its banner is fire-and-forget and a
-click can never reach Koushi (#1128). That path sends through
-`mac-notification-sys` with `wait_for_click(true)` — the same backend
-`notify-rust` uses underneath — and activates only on a direct click, never on a
-dismissal, a close button, an action button, or a text reply. When the bounded
-waiter budget is exhausted the banner is still shown through `notify-rust`
-without a waiter, as it is on Linux and Windows. The adapter keeps a bounded pool of click
-waiters, so a burst of banners cannot grow threads without bound; a banner
-beyond the bound is still shown but its click cannot navigate. `delivered`
-means the banner was handed to the platform with a click wait configured: it is
-dispatch acceptance, not proof that the platform displayed the banner or armed
-a click, and the diagnostic log records `click_waiter=configured|unattached`
-accordingly. An explicit backend send error is reported by `show_failed`; a
-banner the platform silently drops or never confirms is reported by neither
-`show_failed` nor `activation_settled`. A completed click
+OFF raises no banner). Linux uses `notify-rust` with an explicit freedesktop
+`default` action; Windows uses its typed default-click response and the
+installed application's AppUserModelID. Neither relies on the desktop
+`tauri-plugin-notification` click path. macOS uses the bundled app's
+`UNUserNotificationCenter` through `mac-usernotifications`, with asynchronous
+responses and bounded, cancellable activation lifetimes; the deprecated
+`NSUserNotificationCenter` waiter path is retired. Only the default body click
+activates; dismissal and other actions do not navigate. A notification request
+accepted for dispatch does not prove the OS displayed it; asynchronous send
+errors produce `show_failed`. The explicit Desktop notifications switch requests
+macOS authorization when enabled; passive dispatch checks existing authorization
+without prompting. Clearing attention removes delivered and pending macOS
+notifications and invalidates their activation tasks. A completed click
 restores the main window, re-checks the
 account fence captured when the banner was shown, and publishes the target.
 A click that arrives after logout, an account switch, or a session change is

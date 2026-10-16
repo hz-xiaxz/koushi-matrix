@@ -114,6 +114,11 @@ For consequences and prerequisites, see [Search](search.md),
 The **OS notifications** tab holds the alerts your operating system shows on
 this computer. **Desktop notifications** turns them on or off.
 
+On macOS, turning on Desktop notifications requests system permission. If it was
+previously denied, allow Koushi in macOS System Settings. Clicking an OS
+notification opens the room that raised it; it does not jump to an exact
+message.
+
 **Show message content in notifications** is **off** by default, so a banner
 names the room and the sender without the message. Turned on, a banner also shows
 the start of the message, and your operating system may keep that text in its
