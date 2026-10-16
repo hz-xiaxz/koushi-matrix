@@ -1,0 +1,245 @@
+<svg xmlns="http://www.w3.org/2000/svg" width="1560" height="880" viewBox="0 0 1560 880">
+  <defs>
+    <style>
+      .t { font-family: Inter, "Hiragino Sans", "Noto Sans JP", Arial, sans-serif; }
+      .panel { fill: #fafbfc; stroke: #d9e2f0; }
+      .rail { fill: #172641; }
+      .h { font-size: 26px; font-weight: 850; fill: #171b21; }
+      .sect { font-size: 18px; font-weight: 800; fill: #5f6b7a; }
+      .row { font-size: 18px; font-weight: 650; fill: #51627b; }
+      .row-active { fill: #1f59d0; }
+      .time { font-size: 13px; font-weight: 650; fill: #8a94a3; }
+      .init { font-size: 15px; font-weight: 850; fill: #ffffff; }
+      .note { font-size: 15px; font-weight: 650; fill: #51627b; }
+      .warn { font-size: 15px; font-weight: 800; fill: #c0392f; }
+      .ok { font-size: 15px; font-weight: 800; fill: #0c7d72; }
+      .caption { font-size: 19px; font-weight: 850; fill: #171b21; }
+      .cap-warn { font-size: 17px; font-weight: 850; fill: #c0392f; }
+      .cap-ok { font-size: 17px; font-weight: 850; fill: #0c7d72; }
+      .tip-text { font-size: 14px; font-weight: 700; fill: #f5f7fb; }
+      .legend { font-size: 15px; font-weight: 700; fill: #171b21; }
+      .mini { font-size: 12px; font-weight: 700; fill: #1f59d0; }
+    </style>
+  </defs>
+
+  <rect width="1560" height="880" fill="#f5f7fb"/>
+
+  <!-- ===================== left annotation ===================== -->
+  <text class="t caption" x="28" y="110">見出しの「畳む」ボタン位置（現状 → 提案）</text>
+  <text class="t note" x="28" y="142">synthetic data only / 畳む = 展開したリストを先頭 5 件に戻す</text>
+
+  <text class="t ok" x="28" y="196">A  ▾   セクション全体を隠す折りたたみ</text>
+  <text class="t ok" x="28" y="222">C  ⌄⌄  表示を減らす（畳む）</text>
+
+  <text class="t note" x="28" y="270">現状: C は右側にあり、作成（＋）と</text>
+  <text class="t note" x="28" y="292">オプション（⋯）の間に混ざっている。</text>
+
+  <text class="t note" x="28" y="340">提案: C を A のすぐ右へ動かし、</text>
+  <text class="t note" x="28" y="362">表示に関わる操作を左にまとめる。</text>
+
+  <text class="t warn" x="28" y="410">注意: 左群は見出しの余白までが</text>
+  <text class="t warn" x="28" y="432">折りたたみのクリック領域。C を</text>
+  <text class="t warn" x="28" y="454">置くと帯は C の手前で止まる。</text>
+
+  <text class="t warn" x="28" y="502">▾ と ⌄⌄ が隣り合うため、区別は</text>
+  <text class="t warn" x="28" y="524">ツールチップと aria-label で担保する。</text>
+
+  <text class="t note" x="28" y="572">C の出現条件は変えない（Rust が</text>
+  <text class="t note" x="28" y="594">shows_expand_control を立て、かつ</text>
+  <text class="t note" x="28" y="616">展開中のときだけ出る）。</text>
+
+  <rect x="28" y="644" width="24" height="18" rx="5" fill="#1f59d0" opacity="0.12"/>
+  <text class="t note" x="62" y="658">折りたたみのクリック領域</text>
+  <rect x="28" y="674" width="24" height="18" rx="5" fill="#ffffff" stroke="#c0392f" stroke-width="2" stroke-dasharray="4 3"/>
+  <text class="t note" x="62" y="688">いまの C の位置</text>
+  <rect x="28" y="704" width="24" height="18" rx="5" fill="#ffffff" stroke="#1f59d0" stroke-width="2"/>
+  <text class="t note" x="62" y="718">提案の C の位置</text>
+
+  <!-- ===================== Panel A: current ===================== -->
+  <text class="t cap-warn" x="640" y="160" text-anchor="middle">現状: C は ＋ と ⋯ の間（右側）</text>
+  <rect class="panel" x="360" y="180" width="560" height="580" rx="18"/>
+  <rect class="rail" x="360" y="180" width="92" height="580" rx="18"/>
+  <rect x="378" y="200" width="56" height="56" rx="14" fill="#0f9f8f"/>
+  <text class="t init" x="406" y="236" font-size="21" text-anchor="middle">H</text>
+  <rect x="378" y="272" width="56" height="56" rx="14" fill="#2d6fef"/>
+  <text class="t init" x="406" y="308" font-size="16" text-anchor="middle">SP</text>
+  <rect x="378" y="344" width="56" height="56" rx="14" fill="#2d6fef"/>
+  <text class="t init" x="406" y="380" font-size="16" text-anchor="middle">SG</text>
+
+  <text class="t h" x="468" y="236">Home</text>
+  <circle cx="880" cy="228" r="9" fill="none" stroke="#171b21" stroke-width="2.6"/>
+  <path d="M887 235 L896 244" stroke="#171b21" stroke-width="2.6" stroke-linecap="round"/>
+
+  <!-- Rooms header: label + collapse chevron, fold in the right cluster -->
+  <rect x="468" y="282" width="376" height="32" rx="8" fill="#1f59d0" opacity="0.10"/>
+  <text class="t sect" x="476" y="304">ルーム</text>
+  <path d="M540 291 L547 298 L554 291" fill="none" stroke="#5f6b7a" stroke-width="2.6" stroke-linecap="round"/>
+  <text class="t mini" x="476" y="278">折りたたみのクリック領域（余白まで）</text>
+  <rect x="816" y="286" width="24" height="24" rx="5" fill="#eef1f6"/>
+  <path d="M822 298 H834 M828 292 V304" stroke="#5f6b7a" stroke-width="2.6" stroke-linecap="round"/>
+  <rect x="846" y="286" width="24" height="24" rx="5" fill="#eef1f6"/>
+  <path d="M850 288 L858 295 L866 288" fill="none" stroke="#5f6b7a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M850 308 L858 301 L866 308" fill="none" stroke="#5f6b7a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="876" y="286" width="24" height="24" rx="5" fill="#eef1f6"/>
+  <circle cx="885" cy="298" r="1.8" fill="#5f6b7a"/>
+  <circle cx="891" cy="298" r="1.8" fill="#5f6b7a"/>
+  <rect x="842" y="282" width="32" height="32" rx="7" fill="none" stroke="#c0392f" stroke-width="2" stroke-dasharray="5 4"/>
+
+  <!-- Rooms rows -->
+  <rect x="468" y="314" width="432" height="44" rx="9" fill="#dce9ff"/>
+  <circle cx="494" cy="336" r="16" fill="#2d6fef"/>
+  <text class="t init" x="494" y="342" text-anchor="middle">SW</text>
+  <text class="t row row-active" x="520" y="343">Synthetic Workspace</text>
+  <circle cx="874" cy="336" r="11" fill="#2d6fef"/>
+  <text class="t init" x="874" y="341" font-size="12" text-anchor="middle">3</text>
+
+  <circle cx="494" cy="380" r="16" fill="#0c7d72"/>
+  <text class="t init" x="494" y="386" text-anchor="middle">PA</text>
+  <text class="t row" x="520" y="387">Project Alpha</text>
+  <text class="t time" x="888" y="387" text-anchor="end">09:41</text>
+
+  <circle cx="494" cy="424" r="16" fill="#c98a1b"/>
+  <text class="t init" x="494" y="430" text-anchor="middle">TS</text>
+  <text class="t row" x="520" y="431">Team Standup</text>
+  <text class="t time" x="888" y="431" text-anchor="end">昨日</text>
+
+  <circle cx="494" cy="468" r="16" fill="#8b46c9"/>
+  <text class="t init" x="494" y="474" text-anchor="middle">DR</text>
+  <text class="t row" x="520" y="475">Design Review</text>
+  <text class="t time" x="888" y="475" text-anchor="end">2日前</text>
+
+  <circle cx="494" cy="512" r="16" fill="#2d6fef"/>
+  <text class="t init" x="494" y="518" text-anchor="middle">WS</text>
+  <text class="t row" x="520" y="519">Weekly Sync</text>
+  <text class="t time" x="888" y="519" text-anchor="end">5日前</text>
+
+  <circle cx="494" cy="556" r="16" fill="#a9542b"/>
+  <text class="t init" x="494" y="562" text-anchor="middle">OP</text>
+  <text class="t row" x="520" y="563">Ops Room</text>
+  <text class="t time" x="888" y="563" text-anchor="end">10日前</text>
+
+  <!-- DMs header -->
+  <rect x="468" y="610" width="376" height="32" rx="8" fill="#1f59d0" opacity="0.10"/>
+  <text class="t sect" x="476" y="632">DM</text>
+  <path d="M528 619 L535 626 L542 619" fill="none" stroke="#5f6b7a" stroke-width="2.6" stroke-linecap="round"/>
+  <rect x="816" y="614" width="24" height="24" rx="5" fill="#eef1f6"/>
+  <path d="M822 626 H834 M828 620 V632" stroke="#5f6b7a" stroke-width="2.6" stroke-linecap="round"/>
+  <rect x="846" y="614" width="24" height="24" rx="5" fill="#eef1f6"/>
+  <path d="M850 616 L858 623 L866 616" fill="none" stroke="#5f6b7a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M850 636 L858 629 L866 636" fill="none" stroke="#5f6b7a" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="876" y="614" width="24" height="24" rx="5" fill="#eef1f6"/>
+  <circle cx="885" cy="626" r="1.8" fill="#5f6b7a"/>
+  <circle cx="891" cy="626" r="1.8" fill="#5f6b7a"/>
+  <rect x="842" y="610" width="32" height="32" rx="7" fill="none" stroke="#c0392f" stroke-width="2" stroke-dasharray="5 4"/>
+
+  <!-- DM rows -->
+  <circle cx="494" cy="664" r="16" fill="#8b46c9"/>
+  <text class="t init" x="494" y="670" text-anchor="middle">M7</text>
+  <text class="t row" x="520" y="671">Member 7</text>
+  <text class="t time" x="888" y="671" text-anchor="end">09:12</text>
+
+  <circle cx="494" cy="708" r="16" fill="#2d6fef"/>
+  <text class="t init" x="494" y="714" text-anchor="middle">M8</text>
+  <text class="t row" x="520" y="715">Member 8</text>
+  <text class="t time" x="888" y="715" text-anchor="end">08:55</text>
+
+  <!-- ===================== Panel B: proposed ===================== -->
+  <text class="t cap-ok" x="1240" y="160" text-anchor="middle">提案: C を A のすぐ右へ（左側の 2 番目）</text>
+  <rect class="panel" x="960" y="180" width="560" height="580" rx="18"/>
+  <rect class="rail" x="960" y="180" width="92" height="580" rx="18"/>
+  <rect x="978" y="200" width="56" height="56" rx="14" fill="#0f9f8f"/>
+  <text class="t init" x="1006" y="236" font-size="21" text-anchor="middle">H</text>
+  <rect x="978" y="272" width="56" height="56" rx="14" fill="#2d6fef"/>
+  <text class="t init" x="1006" y="308" font-size="16" text-anchor="middle">SP</text>
+  <rect x="978" y="344" width="56" height="56" rx="14" fill="#2d6fef"/>
+  <text class="t init" x="1006" y="380" font-size="16" text-anchor="middle">SG</text>
+
+  <text class="t h" x="1068" y="236">Home</text>
+  <circle cx="1480" cy="228" r="9" fill="none" stroke="#171b21" stroke-width="2.6"/>
+  <path d="M1487 235 L1496 244" stroke="#171b21" stroke-width="2.6" stroke-linecap="round"/>
+
+  <!-- Rooms header: label + collapse chevron + fold, right cluster keeps + and ... -->
+  <rect x="1068" y="282" width="86" height="32" rx="8" fill="#1f59d0" opacity="0.10"/>
+  <text class="t sect" x="1076" y="304">ルーム</text>
+  <path d="M1140 291 L1147 298 L1154 291" fill="none" stroke="#5f6b7a" stroke-width="2.6" stroke-linecap="round"/>
+  <text class="t mini" x="1076" y="278">ここまで押せる</text>
+  <rect x="1160" y="286" width="24" height="24" rx="5" fill="#dce9ff"/>
+  <path d="M1164 288 L1172 295 L1180 288" fill="none" stroke="#1f59d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M1164 308 L1172 301 L1180 308" fill="none" stroke="#1f59d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="1156" y="282" width="32" height="32" rx="7" fill="none" stroke="#1f59d0" stroke-width="2"/>
+
+  <text class="t mini" x="1198" y="278">表示を減らす</text>
+
+  <rect x="1446" y="286" width="24" height="24" rx="5" fill="#eef1f6"/>
+  <path d="M1452 298 H1464 M1458 292 V304" stroke="#5f6b7a" stroke-width="2.6" stroke-linecap="round"/>
+  <rect x="1476" y="286" width="24" height="24" rx="5" fill="#eef1f6"/>
+  <circle cx="1485" cy="298" r="1.8" fill="#5f6b7a"/>
+  <circle cx="1491" cy="298" r="1.8" fill="#5f6b7a"/>
+
+  <!-- Rooms rows (identical to panel A) -->
+  <rect x="1068" y="314" width="432" height="44" rx="9" fill="#dce9ff"/>
+  <circle cx="1094" cy="336" r="16" fill="#2d6fef"/>
+  <text class="t init" x="1094" y="342" text-anchor="middle">SW</text>
+  <text class="t row row-active" x="1120" y="343">Synthetic Workspace</text>
+  <circle cx="1474" cy="336" r="11" fill="#2d6fef"/>
+  <text class="t init" x="1474" y="341" font-size="12" text-anchor="middle">3</text>
+
+  <circle cx="1094" cy="380" r="16" fill="#0c7d72"/>
+  <text class="t init" x="1094" y="386" text-anchor="middle">PA</text>
+  <text class="t row" x="1120" y="387">Project Alpha</text>
+  <text class="t time" x="1488" y="387" text-anchor="end">09:41</text>
+
+  <circle cx="1094" cy="424" r="16" fill="#c98a1b"/>
+  <text class="t init" x="1094" y="430" text-anchor="middle">TS</text>
+  <text class="t row" x="1120" y="431">Team Standup</text>
+  <text class="t time" x="1488" y="431" text-anchor="end">昨日</text>
+
+  <circle cx="1094" cy="468" r="16" fill="#8b46c9"/>
+  <text class="t init" x="1094" y="474" text-anchor="middle">DR</text>
+  <text class="t row" x="1120" y="475">Design Review</text>
+  <text class="t time" x="1488" y="475" text-anchor="end">2日前</text>
+
+  <circle cx="1094" cy="512" r="16" fill="#2d6fef"/>
+  <text class="t init" x="1094" y="518" text-anchor="middle">WS</text>
+  <text class="t row" x="1120" y="519">Weekly Sync</text>
+  <text class="t time" x="1488" y="519" text-anchor="end">5日前</text>
+
+  <circle cx="1094" cy="556" r="16" fill="#a9542b"/>
+  <text class="t init" x="1094" y="562" text-anchor="middle">OP</text>
+  <text class="t row" x="1120" y="563">Ops Room</text>
+  <text class="t time" x="1488" y="563" text-anchor="end">10日前</text>
+
+  <!-- DMs header: label + collapse chevron + fold -->
+  <rect x="1068" y="610" width="76" height="32" rx="8" fill="#1f59d0" opacity="0.10"/>
+  <text class="t sect" x="1076" y="632">DM</text>
+  <path d="M1120 619 L1127 626 L1134 619" fill="none" stroke="#5f6b7a" stroke-width="2.6" stroke-linecap="round"/>
+  <rect x="1140" y="614" width="24" height="24" rx="5" fill="#dce9ff"/>
+  <path d="M1144 616 L1152 623 L1160 616" fill="none" stroke="#1f59d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <path d="M1144 636 L1152 629 L1160 636" fill="none" stroke="#1f59d0" stroke-width="2.2" stroke-linecap="round" stroke-linejoin="round"/>
+  <rect x="1136" y="610" width="32" height="32" rx="7" fill="none" stroke="#1f59d0" stroke-width="2"/>
+  <rect x="1446" y="614" width="24" height="24" rx="5" fill="#eef1f6"/>
+  <path d="M1452 626 H1464 M1458 620 V632" stroke="#5f6b7a" stroke-width="2.6" stroke-linecap="round"/>
+  <rect x="1476" y="614" width="24" height="24" rx="5" fill="#eef1f6"/>
+  <circle cx="1485" cy="626" r="1.8" fill="#5f6b7a"/>
+  <circle cx="1491" cy="626" r="1.8" fill="#5f6b7a"/>
+
+  <!-- DM rows -->
+  <circle cx="1094" cy="664" r="16" fill="#8b46c9"/>
+  <text class="t init" x="1094" y="670" text-anchor="middle">M7</text>
+  <text class="t row" x="1120" y="671">Member 7</text>
+  <text class="t time" x="1488" y="671" text-anchor="end">09:12</text>
+
+  <circle cx="1094" cy="708" r="16" fill="#2d6fef"/>
+  <text class="t init" x="1094" y="714" text-anchor="middle">M8</text>
+  <text class="t row" x="1120" y="715">Member 8</text>
+  <text class="t time" x="1488" y="715" text-anchor="end">08:55</text>
+
+  <!-- ===================== captions ===================== -->
+  <text class="t cap-warn" x="640" y="790" text-anchor="middle">C が作成とオプションの間に混ざる</text>
+  <text class="t cap-ok" x="1240" y="790" text-anchor="middle">C は折りたたみの隣。右は ＋ と ⋯ だけ</text>
+
+  <!-- ===================== bottom rule box ===================== -->
+  <rect x="28" y="812" width="1504" height="52" rx="14" fill="#ffffff" stroke="#d9e2f0"/>
+  <text class="t legend" x="48" y="834">薄い青帯 = 見出しを押すとセクションが折りたたまれる範囲。C を左群に置くと、この帯は C の手前までになる。</text>
+  <text class="t legend" x="48" y="856">C は上限に達したセクションを展開しているときだけ出る（Rust の shows_expand_control）。未読バッジは ＋ の手前。</text>
+</svg>

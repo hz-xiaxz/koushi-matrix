@@ -18,7 +18,13 @@ Mockups (open in a browser or any SVG viewer):
 
 Proposal mockups for open issues sit beside them and are not design language:
 - `docs/design/sidebar-section-fold-mock.svg` (`.png` beside it) — current vs
-  proposed sidebar section fold control for #1387. Synthetic data only.
+  proposed sidebar section fold control for #1387; #1486 later moved that control
+  from between create and options to next to the heading's collapse chevron.
+  Synthetic data only.
+- `docs/design/sidebar-section-fold-placement-mock.svg` (`.png` beside it) —
+  where that fold control sits in the heading for #1486: between create and
+  options (current) vs next to the heading's collapse chevron (proposed).
+  Synthetic data only.
 
 ## 0. Relationship to canon (binding)
 

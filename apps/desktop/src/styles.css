@@ -2096,10 +2096,23 @@ button:disabled {
   background: transparent;
 }
 
+/* #1486: the heading's left group holds the section's own view controls — the
+   collapse toggle and, while a bounded section is expanded, the fold control
+   immediately after its chevron. The group takes the row's leftover width, so
+   the toggle no longer spans it: the name and the chevron are the collapse
+   target, and the fold control sits next to the section it bounds. */
+.section-title-lead {
+  display: flex;
+  min-width: 0;
+  flex: 1 1 auto;
+  align-items: center;
+  gap: 6px;
+}
+
 .section-title-toggle {
   display: inline-flex;
   min-width: 0;
-  flex: 1 1 auto;
+  flex: 0 1 auto;
   align-items: center;
   gap: 5px;
   padding: 0;
@@ -2129,6 +2142,9 @@ button:disabled {
 
 .section-title-action {
   display: inline-flex;
+  /* #1486: the fold control shares the row with the section name, so it keeps
+     its 24x24 target instead of yielding width to a long label. */
+  flex: 0 0 auto;
   align-items: center;
   justify-content: center;
   inline-size: 24px;
