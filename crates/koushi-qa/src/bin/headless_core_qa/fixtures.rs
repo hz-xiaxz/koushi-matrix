@@ -111,6 +111,28 @@ pub(super) fn assert_room_settings_contains_members(
     Ok(())
 }
 
+/// Reloads room settings until the member list contains every expected user.
+///
+/// A join is visible in the room/space list before the joiner's member list
+/// necessarily includes the other members, so a single load can race sync.
+pub(super) async fn wait_for_room_settings_members(
+    conn: &mut CoreConnection,
+    room_id: &str,
+    expected_user_ids: &[&str],
+    label: &str,
+) -> Result<RoomSettingsSnapshot, String> {
+    const RELOAD_INTERVAL: std::time::Duration = std::time::Duration::from_millis(250);
+    let deadline = tokio::time::Instant::now() + EVENT_TIMEOUT;
+    loop {
+        let settings = load_room_settings_for_qa(conn, room_id, label).await?;
+        match assert_room_settings_contains_members(&settings, expected_user_ids, label) {
+            Ok(()) => return Ok(settings),
+            Err(error) if tokio::time::Instant::now() >= deadline => return Err(error),
+            Err(_) => tokio::time::sleep(RELOAD_INTERVAL).await,
+        }
+    }
+}
+
 pub(super) async fn accept_invite_for_qa(
     conn: &mut CoreConnection,
     room_id: &str,
