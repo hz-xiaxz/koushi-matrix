@@ -3499,6 +3499,7 @@ dependencies = [
  "matrix-sdk-base",
  "matrix-sdk-ui",
  "serde_json",
+ "sha2 0.10.9",
  "tempfile",
  "tokio",
  "tracing-subscriber",

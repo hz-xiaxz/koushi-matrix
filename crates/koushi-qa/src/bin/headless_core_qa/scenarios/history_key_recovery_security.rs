@@ -2,6 +2,7 @@
 use super::*;
 use koushi_state::HistoryKeyRecoveryFailure as Failure;
 use matrix_sdk::encryption::LocalTrust;
+use sha2::{Digest, Sha256};
 
 async fn no_keys(participant: &Participant, history: &HistoricalRoom) -> Result<bool, String> {
     let client = participant.session().client();
@@ -279,6 +280,34 @@ pub(super) async fn run(
         .ok_or("history recovery: response tombstone missing")?;
     if cached["response"] != response || cached["state"] != "Tombstone" || cached["bytes"] != 0 {
         return Err("history recovery: cached response regenerated or not retired".to_owned());
+    }
+    let pin = &cached["pin"];
+    let identity = format!(
+        "{}\n{}\n{}",
+        pin["user"]
+            .as_str()
+            .ok_or("history recovery: cache peer missing")?,
+        pin["device"]
+            .as_str()
+            .ok_or("history recovery: cache device missing")?,
+        cached["nonce"]
+            .as_str()
+            .ok_or("history recovery: cache correlation missing")?
+    );
+    let key = format!(
+        "chat.koushi.history_keys.reply.{:x}",
+        Sha256::digest(identity)
+    );
+    if sender
+        .session()
+        .client()
+        .encryption()
+        .application_crypto_data(&key)
+        .await
+        .map_err(|_| "history recovery: retired payload lookup failed")?
+        .is_some()
+    {
+        return Err("history recovery: retired payload row retained".to_owned());
     }
     println!("history_recovery_crash_replay=ok");
     Ok(())

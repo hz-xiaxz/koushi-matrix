@@ -223,3 +223,35 @@ Megolm key has no upper index/time cutoff and can decrypt later indices in the
 same session, but need not decrypt earlier indices. The implementation leaves
 normal outbound pre-share/rotation unchanged; the security assessment now states
 this limitation explicitly. No implementation scope changed.
+
+## PR follow-up checks
+
+Opened application PR #1491 and SDK companion PR #26. The first remote
+workspace/lint run caught old integration-test literals missing the new
+`RoomManagementState.history_keys` field; the earlier library-only local gate
+had not compiled those fixtures. All 13 literal fixtures now initialize the
+field, preserving their original assertions, and the full workspace gate
+replaces that incomplete local check.
+
+An additional storage audit found empty KV rows could accumulate after reply
+deletion. Independent read-only design/integrated review approved defining
+empty application-data writes as idempotent deletion of the same namespaced
+crypto-store value. Core's durable Deleting/deletion/Tombstone ordering and
+cancellation poison guard remain unchanged. The strengthened real Synapse
+oracle asserts exact payload-key absence without printing private records.
+RED against the original setter failed specifically with the fixed diagnostic
+`history recovery: retired payload row retained`.
+
+SDK fork CI baseline was inspected separately: its main run 38886932604 and
+the companion PR report the identical five crypto lint diagnostics at unchanged
+locations, and the same existing 37-file formatting drift. The failed Wasm
+job points to the unchanged verification-machine stream-boxing path. These
+remote jobs are not claimed green and were not masked by unrelated changes.
+
+Follow-up GREEN: the entire Synapse scenario passed with payload-row absence
+included in the crash-replay oracle. Full `cargo test --workspace --locked`
+passed (including the repaired integration fixtures and doc tests), and both
+workspace all-targets clippy and QA all-targets clippy passed with warnings
+denied. The final pushed SDK pin is `bb427f73a`; the parent records it exactly.
+The independent final deletion review found no blockers, subject to these now
+completed gates. Remote CI is tracked on the PRs separately from local results.

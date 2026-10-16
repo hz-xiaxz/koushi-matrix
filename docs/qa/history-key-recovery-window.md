@@ -78,7 +78,9 @@ oracle requires an empty recipient key store. A final pause occurs after a
 real chunk's durable reservation but before SDK import: both clients restart,
 only the responder cooldown clock fixture is advanced, and the exact persisted
 cached response must import. Its unchanged response ID and durable Ack/deletion
-tombstone are checked. No expected response or imported key is manufactured.
+tombstone are checked, and the exact encrypted payload row must be absent after
+Ack; an empty stored row is insufficient. No expected response or imported key
+is manufactured.
 
 Additional required tokens:
 
