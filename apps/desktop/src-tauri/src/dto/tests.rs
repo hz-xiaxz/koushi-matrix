@@ -1846,6 +1846,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
                 tls: SmtpTls::Implicit,
                 username: "fixture@qq.example.invalid".to_owned(),
             },
+            direct_partner_label: koushi_state::NotificationDeliveryPartnerLabel::MatrixId,
             ..NotificationSinkSettings::default()
         };
         let mut wechat = NotificationSinkSettings {

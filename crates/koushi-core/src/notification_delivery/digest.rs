@@ -7,8 +7,10 @@
 //! so a held or retried message never carries a state the badge no longer shows (#1454).
 //!
 //! A room is named by the safe display label the attention projection produced, its
-//! first parent space, its kind, and its counts, and never by a room, event, sender, or
-//! transaction id. Message text appears only when the destination's effective content
+//! first parent space, its kind, and its counts, and never by a room, event, or
+//! transaction id. A one-to-one direct message is named by its partner instead - the
+//! local alias the user set, or the partner's full Matrix user id - because a display
+//! name alone often does not say who is writing (#1492). Message text appears only when the destination's effective content
 //! mode carries it (the caller leaves [`QualifyingRoom::message_text`] empty otherwise),
 //! bounded by the mode and by the provider's per-room budget; text cut by either limit is
 //! marked `[truncated]` and is never called the entire message. Text is rendered as
@@ -21,8 +23,9 @@ use std::fmt;
 use std::time::Duration;
 
 use koushi_state::{
-    NotificationDeliveryContent, NotificationSinkConfig, NotificationSinkSettings,
-    RoomAttentionKind,
+    DEFAULT_NOTIFICATION_SENDER_NAME, DirectPartner, NotificationDeliveryContent,
+    NotificationDeliveryPartnerLabel, NotificationSinkConfig, NotificationSinkSettings,
+    RoomAttentionKind, bounded_notification_delivery_message_source,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -126,6 +129,28 @@ pub fn render_intent(
     if !sink_is_deliverable(sink) {
         return None;
     }
+    let (subject, body) = render_digest(sink, sink.effective_content(), rooms)?;
+    Some(NotificationDeliveryIntent {
+        sink_id: sink.id.clone(),
+        destination: sink.destination.clone(),
+        from_address: sink.from_address.clone(),
+        sender_name: sink.sender_name.clone(),
+        subject,
+        body,
+        idempotency_key: idempotency_key(&sink.id, window_id),
+    })
+}
+
+/// The subject and body of one digest under `content`, or `None` when no room is left.
+///
+/// This is the one renderer: [`render_intent`] calls it with the consent-gated effective
+/// content and [`preview_digest`] with the draft's chosen content, so the preview can
+/// never drift from what a send would carry.
+fn render_digest(
+    sink: &NotificationSinkSettings,
+    content: NotificationDeliveryContent,
+    rooms: &[QualifyingRoom],
+) -> Option<(String, String)> {
     let rooms = ordered_rooms(rooms);
     let first = rooms.first()?;
     let format = match sink.config {
@@ -138,16 +163,88 @@ pub fn render_intent(
         BodyFormat::Markdown => MAX_SERVERCHAN_TITLE_GRAPHEMES,
         BodyFormat::PlainText => MAX_NOTIFICATION_SUBJECT_GRAPHEMES,
     };
-    let text_cap = text_cap_graphemes(sink);
-    Some(NotificationDeliveryIntent {
-        sink_id: sink.id.clone(),
-        destination: sink.destination.clone(),
-        from_address: sink.from_address.clone(),
-        sender_name: sink.sender_name.clone(),
-        subject: digest_subject(first, rooms.len(), subject_cap),
-        body: digest_body(&rooms, text_cap, format),
-        idempotency_key: idempotency_key(&sink.id, window_id),
-    })
+    let names = sink.direct_partner_label;
+    let text_cap = text_cap_graphemes(content, sink.text_budget_graphemes());
+    Some((
+        digest_subject(first, rooms.len(), subject_cap, names),
+        digest_body(&rooms, text_cap, format, names),
+    ))
+}
+
+/// The sample conversation a settings preview renders: one direct message from one
+/// partner. The caller supplies it from the message catalog, never from the account.
+#[derive(Clone, Eq, PartialEq)]
+pub struct NotificationDeliveryPreviewSample {
+    /// The sample partner's full Matrix user id.
+    pub partner_user_id: String,
+    /// The sample local alias for that partner. Empty means none is set.
+    pub partner_alias: String,
+    /// The sample message text.
+    pub message_text: String,
+}
+
+/// `Debug` redacts the sample: it is catalog text today, but the type must not be the
+/// first place a real identifier could leak from.
+impl fmt::Debug for NotificationDeliveryPreviewSample {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("NotificationDeliveryPreviewSample")
+            .finish_non_exhaustive()
+    }
+}
+
+/// What a recipient would see for the sample conversation under a draft destination.
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct NotificationDeliveryPreview {
+    /// The name shown next to the sender address; empty for ServerChan, which has none.
+    pub sender_name: String,
+    /// The mail subject, or the ServerChan `title`.
+    pub subject: String,
+    /// The body, exactly as a send would write it.
+    pub body: String,
+}
+
+/// Render the sample conversation through the digest renderer under a draft destination.
+///
+/// The draft's chosen content mode is rendered as if its plaintext consent were accepted,
+/// so the user sees what they are about to agree to. Nothing is checked for
+/// deliverability, nothing is stored, and no account or credential is read
+/// (`docs/architecture/state-machine.md`, "Local Notification Delivery").
+pub fn preview_digest(
+    sink: &NotificationSinkSettings,
+    sample: &NotificationDeliveryPreviewSample,
+) -> NotificationDeliveryPreview {
+    let alias = sample.partner_alias.trim();
+    let room = QualifyingRoom {
+        room_id: String::new(),
+        display_label: String::new(),
+        space_labels: Vec::new(),
+        kind: RoomAttentionKind::Dm,
+        direct_partner: Some(DirectPartner {
+            user_id: sample.partner_user_id.clone(),
+            local_alias: (!alias.is_empty()).then(|| alias.to_owned()),
+        }),
+        unread: 1,
+        mentions: 0,
+        message_text: bounded_notification_delivery_message_source(&sample.message_text),
+    };
+    let (subject, body) =
+        render_digest(sink, sink.content, std::slice::from_ref(&room)).unwrap_or_default();
+    let sender_name = match sink.config {
+        NotificationSinkConfig::ServerChan { .. } => String::new(),
+        NotificationSinkConfig::Resend { .. } | NotificationSinkConfig::Smtp { .. } => {
+            if sink.sender_name.is_empty() {
+                DEFAULT_NOTIFICATION_SENDER_NAME.to_owned()
+            } else {
+                sink.sender_name.clone()
+            }
+        }
+    };
+    NotificationDeliveryPreview {
+        sender_name,
+        subject,
+        body,
+    }
 }
 
 /// Whether the destination's minimum interval between two attempts has elapsed, so a
@@ -173,11 +270,10 @@ pub fn coalesce_window(
         .is_some_and(|elapsed| elapsed >= min_interval)
 }
 
-/// The per-room text cap for this destination: the content mode's own cap, never more
-/// than the provider budget. Zero means no text is rendered.
-fn text_cap_graphemes(sink: &NotificationSinkSettings) -> usize {
-    let budget = sink.text_budget_graphemes();
-    match sink.effective_content() {
+/// The per-room text cap for `content`: the content mode's own cap, never more than the
+/// provider budget. Zero means no text is rendered.
+fn text_cap_graphemes(content: NotificationDeliveryContent, budget: usize) -> usize {
+    match content {
         NotificationDeliveryContent::NamesOnly => 0,
         NotificationDeliveryContent::Prefix { graphemes } => (graphemes as usize).min(budget),
         NotificationDeliveryContent::Full => budget,
@@ -233,8 +329,13 @@ fn attention_kind_priority(kind: RoomAttentionKind) -> u8 {
 
 /// The one-line, names-only subject (or ServerChan title): the first room's headline
 /// and how many more rooms the message covers.
-fn digest_subject(first: &QualifyingRoom, room_count: usize, cap: usize) -> String {
-    let headline = room_headline(first);
+fn digest_subject(
+    first: &QualifyingRoom,
+    room_count: usize,
+    cap: usize,
+    names: NotificationDeliveryPartnerLabel,
+) -> String {
+    let headline = room_headline(first, names);
     let subject = match room_count.saturating_sub(1) {
         0 => headline,
         1 => format!("{headline} and 1 more room"),
@@ -245,12 +346,17 @@ fn digest_subject(first: &QualifyingRoom, room_count: usize, cap: usize) -> Stri
 
 /// Render the body of one digest, naming at most [`MAX_NOTIFICATION_DIGEST_ROOMS`]
 /// rooms and keeping the rest as a counted tail.
-fn digest_body(rooms: &[&QualifyingRoom], text_cap: usize, format: BodyFormat) -> String {
+fn digest_body(
+    rooms: &[&QualifyingRoom],
+    text_cap: usize,
+    format: BodyFormat,
+    names: NotificationDeliveryPartnerLabel,
+) -> String {
     let mut blocks: Vec<String> = Vec::new();
     for room in rooms.iter().take(MAX_NOTIFICATION_DIGEST_ROOMS) {
         let mut block = match format {
-            BodyFormat::PlainText => room_line(room),
-            BodyFormat::Markdown => escape_markdown(&room_line(room)),
+            BodyFormat::PlainText => room_line(room, names),
+            BodyFormat::Markdown => escape_markdown(&room_line(room, names)),
         };
         if let Some(text) = room_text(room, text_cap, format) {
             block.push('\n');
@@ -267,8 +373,24 @@ fn digest_body(rooms: &[&QualifyingRoom], text_cap: usize, format: BodyFormat) -
     blocks.join("\n\n")
 }
 
-/// One room's headline: the kind, the safe display label, and the first parent space.
-fn room_headline(room: &QualifyingRoom) -> String {
+/// One room's headline.
+///
+/// A one-to-one direct message is named by its partner, `… from {name}`, with no space:
+/// the partner is the conversation. Every other room is named by its safe display label
+/// and its first parent space, `… in {room · space}`.
+fn room_headline(room: &QualifyingRoom, names: NotificationDeliveryPartnerLabel) -> String {
+    if let Some(name) = room
+        .direct_partner
+        .as_ref()
+        .and_then(|partner| partner_name(partner, names))
+    {
+        return match room.kind {
+            RoomAttentionKind::Mention => format!("Mention from {name}"),
+            RoomAttentionKind::Dm | RoomAttentionKind::Message => {
+                format!("Direct message from {name}")
+            }
+        };
+    }
     let label = safe_label(&room.display_label).unwrap_or_else(|| "Room".to_owned());
     let place = match room.space_labels.iter().find_map(|space| safe_label(space)) {
         Some(space) => format!("{label} · {space}"),
@@ -281,9 +403,25 @@ fn room_headline(room: &QualifyingRoom) -> String {
     }
 }
 
+/// The name a direct-message partner is shown by: the local alias when the destination
+/// asks for it and one is set, otherwise the full Matrix user id. A display name is never
+/// used, because it does not identify who is writing.
+fn partner_name(
+    partner: &DirectPartner,
+    names: NotificationDeliveryPartnerLabel,
+) -> Option<String> {
+    let alias = match names {
+        NotificationDeliveryPartnerLabel::LocalAlias => {
+            partner.local_alias.as_deref().and_then(safe_label)
+        }
+        NotificationDeliveryPartnerLabel::MatrixId => None,
+    };
+    alias.or_else(|| safe_label(&partner.user_id))
+}
+
 /// One room's digest line: the headline and the counts.
-fn room_line(room: &QualifyingRoom) -> String {
-    let headline = room_headline(room);
+fn room_line(room: &QualifyingRoom, names: NotificationDeliveryPartnerLabel) -> String {
+    let headline = room_headline(room, names);
     let counts = room_counts(room.mentions, room.unread);
     if counts.is_empty() {
         headline

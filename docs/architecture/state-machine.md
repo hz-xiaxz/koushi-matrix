@@ -6398,13 +6398,32 @@ transport or to one country's infrastructure. The app must be running to send.
   ServerChan `title` is always a single-line, names-only summary because the WeChat
   card may show only the title.
 - **Plaintext consent.** Any mode other than names only requires a consent stored on
-  the destination and bound to its sink kind, endpoint, and recipient (the **Send to**
-  address, or for ServerChan the SendKey owner, so saving or clearing the SendKey
+  the destination and bound to its sink kind, endpoint, and recipient (the **Recipient
+  email address**, or for ServerChan the SendKey owner, so saving or clearing the SendKey
   counts as a recipient change). Any change to one of them drops the consent and
   returns the destination to names only, on load and on every patch. The copy states
   that the provider receives plaintext and that whether and how long it stores it
   depends on that provider. The setting is independent of the OS notification
   preview.
+- **Direct message names (#1492).** A direct message with exactly one other member
+  is named by that person, not by the room label: the partner's personal local alias
+  when the destination's `direct_partner_label` is `localAlias` (the default) and an
+  alias is set, otherwise the partner's full Matrix user id. A display name is never
+  used, because it is not unique and often equals the bare localpart. The headline
+  reads `Direct message from {name}` or `Mention from {name}` and carries no space
+  name; every other room keeps `… in {room label}`. An alias is this device's private
+  label, so the settings say that it leaves the device when the option is on; it is a
+  name, not message text, and needs no plaintext consent. The partner's user id is the
+  only Matrix identifier a digest may carry; room, event, and transaction ids never
+  appear.
+- **Preview (#1492).** The destination editor shows the message a destination would
+  send, rendered by Core from the same `digest` code as a real send: sender name,
+  subject or ServerChan title, and body. The input is the unsaved draft plus a fixed
+  sample direct message whose alias, user id, and text come from the message catalog,
+  never from the account's rooms. The preview renders the chosen content mode as if
+  its consent were accepted, so the user sees what a text mode would send before
+  agreeing. It is a stateless query: it stores nothing, needs no account, and a
+  credential is never read.
 - **Outcome.** Each destination shows setup completeness, the last attempt and its
   result, and a test action. The words are "accepted by the service" or a typed
   failure; the app never states that a message was received.

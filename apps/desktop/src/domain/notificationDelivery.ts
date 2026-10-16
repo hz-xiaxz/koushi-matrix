@@ -240,7 +240,8 @@ export function newNotificationSink(id: string, kind: NotificationSinkKind): Not
       dwell_secs: DEFAULT_NOTIFICATION_DELIVERY_DWELL_SECS,
       min_interval_secs: DEFAULT_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
       only_when_unfocused: true
-    }
+    },
+    direct_partner_label: "localAlias"
   };
 }
 

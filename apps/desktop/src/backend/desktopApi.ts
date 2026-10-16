@@ -53,6 +53,8 @@ import type {
   CreateRoomAccessPreview,
   RoomTagKind,
   NotificationSinkSettings,
+  NotificationDeliveryPreview,
+  NotificationDeliveryPreviewSample,
   SavedSessionInfo,
   SearchScopeKind,
   SecureBackupSetupIntent,
@@ -227,6 +229,14 @@ export interface DesktopApi {
   ): Promise<CommandAdmission>;
   clearNotificationDeliverySecret(sinkId: string): Promise<CommandAdmission>;
   testNotificationDelivery(sinkId: string): Promise<CommandAdmission>;
+  /**
+   * #1492: the message the unsaved draft would send for the catalog's sample direct
+   * message, rendered by Rust's digest. Stateless: no account, no credential, nothing kept.
+   */
+  previewNotificationDelivery(
+    sink: NotificationSinkSettings,
+    sample: NotificationDeliveryPreviewSample
+  ): Promise<NotificationDeliveryPreview>;
   changePassword(newPassword: string): Promise<CommandAdmission>;
   deactivateAccount(eraseData: boolean): Promise<CommandAdmission>;
   probeLocalEncryptionHealth(): Promise<CommandAdmission>;

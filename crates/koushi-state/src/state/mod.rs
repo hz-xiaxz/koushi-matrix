@@ -139,9 +139,10 @@ pub use notification_delivery::{
     MAX_NOTIFICATION_DELIVERY_SINKS, NOTIFICATION_DELIVERY_MAIL_TEXT_BUDGET,
     NOTIFICATION_DELIVERY_SERVERCHAN_TEXT_BUDGET, NotificationDeliveryContent,
     NotificationDeliveryContentConsent, NotificationDeliveryOutcomeState,
-    NotificationDeliveryPresetState, NotificationDeliverySettings, NotificationDeliverySinkState,
-    NotificationDeliveryState, NotificationDeliveryTarget, NotificationDeliveryTargets,
-    NotificationDeliveryTiming, NotificationSinkConfig, NotificationSinkSettings, SmtpTls,
+    NotificationDeliveryPartnerLabel, NotificationDeliveryPresetState,
+    NotificationDeliverySettings, NotificationDeliverySinkState, NotificationDeliveryState,
+    NotificationDeliveryTarget, NotificationDeliveryTargets, NotificationDeliveryTiming,
+    NotificationSinkConfig, NotificationSinkSettings, SmtpTls,
     bounded_notification_delivery_message_source,
 };
 
@@ -254,14 +255,15 @@ pub use local_encryption::{LocalEncryptionHealth, LocalEncryptionState};
 // ── Re-exports: native_attention ─────────────────────────────────────────────
 pub(crate) use native_attention::native_attention_projection_from_rooms_with_live_room;
 pub use native_attention::{
-    NativeAttentionCandidate, NativeAttentionCapabilities, NativeAttentionCapability,
-    NativeAttentionContext, NativeAttentionDispatchId, NativeAttentionDispatchState,
-    NativeAttentionObservationKind, NativeAttentionProjection, NativeAttentionProjectionInput,
-    NativeAttentionSoundOutcome, NativeAttentionState, NativeAttentionSummary,
-    NativeAttentionSuppressionReason, NativeNotificationPayload, NativeNotificationTarget,
-    RoomAttentionCandidate, attention_room_candidates, attention_room_candidates_for_state,
-    attention_room_notification_modes, native_attention_capabilities_for_platform,
-    native_attention_projection_from_rooms, native_attention_state_from_rooms,
+    DirectPartner, NativeAttentionCandidate, NativeAttentionCapabilities,
+    NativeAttentionCapability, NativeAttentionContext, NativeAttentionDispatchId,
+    NativeAttentionDispatchState, NativeAttentionObservationKind, NativeAttentionProjection,
+    NativeAttentionProjectionInput, NativeAttentionSoundOutcome, NativeAttentionState,
+    NativeAttentionSummary, NativeAttentionSuppressionReason, NativeNotificationPayload,
+    NativeNotificationTarget, RoomAttentionCandidate, attention_room_candidates,
+    attention_room_candidates_for_state, attention_room_notification_modes,
+    native_attention_capabilities_for_platform, native_attention_projection_from_rooms,
+    native_attention_state_from_rooms,
 };
 
 // ── Re-exports: cjk ─────────────────────────────────────────────────────────

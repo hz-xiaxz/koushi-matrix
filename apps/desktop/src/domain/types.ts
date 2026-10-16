@@ -450,6 +450,28 @@ export interface NotificationSinkSettings {
   content: NotificationDeliveryContent;
   content_consent: NotificationDeliveryContentConsent | null;
   timing: NotificationDeliveryTiming;
+  /**
+   * #1492: how a one-to-one direct message names its partner - the local alias when one
+   * is set, or always the full Matrix user id.
+   */
+  direct_partner_label: NotificationDeliveryPartnerLabel;
+}
+
+export type NotificationDeliveryPartnerLabel = "localAlias" | "matrixId";
+
+/** #1492: the catalog's sample direct message the preview renders; never account data. */
+export interface NotificationDeliveryPreviewSample {
+  partnerUserId: string;
+  partnerAlias: string;
+  messageText: string;
+}
+
+/** #1492: the sample message a draft destination would send, rendered by Rust's digest. */
+export interface NotificationDeliveryPreview {
+  /** Empty for ServerChan, which has no sender name. */
+  sender_name: string;
+  subject: string;
+  body: string;
 }
 
 /**

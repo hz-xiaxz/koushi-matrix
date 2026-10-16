@@ -58,6 +58,7 @@ pub(super) fn dm(room_id: &str, unread: u32) -> RoomAttentionCandidate {
         mentions: 0,
         parent_space_ids: Vec::new(),
         parent_space_labels: Vec::new(),
+        direct_partner: None,
         newest_message_text: None,
     }
 }

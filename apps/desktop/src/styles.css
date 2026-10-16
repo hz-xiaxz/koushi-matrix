@@ -10344,6 +10344,30 @@ kbd {
   background: var(--surface-raised);
 }
 .notification-delivery-consent-title { margin: 0; font-weight: 700; }
+.notification-delivery-content-option { display: grid; gap: 8px; }
+.notification-delivery-content-detail {
+  display: grid;
+  gap: 8px;
+  padding-inline-start: 26px;
+}
+.notification-delivery-preview {
+  display: grid;
+  gap: 6px;
+  padding: 12px 14px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-raised);
+}
+.notification-delivery-preview-title { margin: 0; font-weight: 700; }
+.notification-delivery-preview-fields {
+  display: grid;
+  grid-template-columns: max-content minmax(0, 1fr);
+  gap: 4px 12px;
+  margin: 0;
+}
+.notification-delivery-preview-fields dt { color: var(--text-muted); }
+.notification-delivery-preview-fields dd { margin: 0; overflow-wrap: anywhere; }
+.notification-delivery-preview-body { white-space: pre-wrap; }
 .notification-delivery-remove { color: var(--danger); }
 .notification-delivery-footer {
   display: flex;

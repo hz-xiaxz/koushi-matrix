@@ -370,9 +370,24 @@ impl NotificationDeliveryContent {
     }
 }
 
+/// How a digest names the other member of a direct message (#1492).
+///
+/// A display name is never used: it is not unique and often equals the bare localpart, so
+/// the recipient could not tell who wrote.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "camelCase")]
+pub enum NotificationDeliveryPartnerLabel {
+    /// The partner's personal local alias when one is set, else their Matrix user id. The
+    /// alias is this device's private label, so choosing this sends it to the provider.
+    #[default]
+    LocalAlias,
+    /// Always the partner's full Matrix user id.
+    MatrixId,
+}
+
 /// The user's acceptance that one destination receives message text in plaintext.
 ///
-/// Bound to the sink kind, its endpoint, and its recipient - the **Send to** address,
+/// Bound to the sink kind, its endpoint, and its recipient - the recipient email address,
 /// or for ServerChan the SendKey owner. Saving or clearing a ServerChan SendKey is a
 /// recipient change, which the core applies by dropping this consent. A change to any
 /// of the three drops it and returns the destination to names only.
@@ -444,6 +459,8 @@ pub struct NotificationSinkSettings {
     pub content: NotificationDeliveryContent,
     pub content_consent: Option<NotificationDeliveryContentConsent>,
     pub timing: NotificationDeliveryTiming,
+    /// How a direct message's other member is named (#1492).
+    pub direct_partner_label: NotificationDeliveryPartnerLabel,
 }
 
 impl NotificationSinkSettings {

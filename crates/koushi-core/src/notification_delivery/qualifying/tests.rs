@@ -22,6 +22,7 @@ fn candidate(
         mentions,
         parent_space_ids: Vec::new(),
         parent_space_labels: Vec::new(),
+        direct_partner: None,
         newest_message_text: None,
     }
 }

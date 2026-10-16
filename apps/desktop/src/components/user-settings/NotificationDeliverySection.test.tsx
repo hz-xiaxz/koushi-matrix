@@ -12,6 +12,7 @@ import { setActiveLocaleProfile } from "../../i18n/messages";
 import type {
   AccountNotificationsOperationState,
   NotificationDeliveryPresetState,
+  NotificationDeliveryPreviewSample,
   NotificationDeliverySettings,
   NotificationDeliverySinkState,
   NotificationDeliveryState,
@@ -44,6 +45,7 @@ const baseSink: Omit<NotificationSinkSettings, "id" | "config"> = {
   targets: { direct_messages: true, mentions: true, keywords: true, watched: [] },
   content: { kind: "namesOnly" },
   content_consent: null,
+  direct_partner_label: "localAlias",
   timing: { dwell_secs: 300, min_interval_secs: 900, only_when_unfocused: true }
 };
 
@@ -96,7 +98,16 @@ function actions(): NotificationDeliveryActions {
     update: vi.fn(),
     save: vi.fn(async () => undefined),
     clearSecret: vi.fn(async () => undefined),
-    test: vi.fn(async () => undefined)
+    test: vi.fn(async () => undefined),
+    // Stands in for Rust's digest renderer: echoes which partner name and mode it was asked for.
+    preview: vi.fn(async (sink: NotificationSinkSettings, sample: NotificationDeliveryPreviewSample) => {
+      const partner = sink.direct_partner_label === "localAlias" ? sample.partnerAlias : sample.partnerUserId;
+      return {
+        sender_name: sink.config.kind === "serverChan" ? "" : sink.sender_name || "Koushi",
+        subject: `Direct message from ${partner}`,
+        body: sink.content.kind === "namesOnly" ? `Direct message from ${partner}` : sample.messageText
+      };
+    })
   };
 }
 
@@ -825,8 +836,15 @@ describe("NotificationDeliverySection content", () => {
       "names only"
     );
     expect(screen.getByTestId("notification-delivery-content-independent")).toBeTruthy();
-    // The full mode states its bound rather than promising the whole message.
-    expect(mode("full").parentElement?.textContent).toContain("4000");
+    expect(screen.getByTestId("notification-delivery-content-always-sent").textContent).toContain(
+      "unread counts"
+    );
+    // The full mode states its bound, under the option, rather than promising the whole message.
+    fireEvent.click(mode("full"));
+    const option = mode("full").closest(".notification-delivery-content-option") as HTMLElement;
+    expect(within(option).getByTestId("notification-delivery-content-limit").textContent).toContain("4000");
+    expect(within(option).getByTestId("notification-delivery-content-plaintext")).toBeTruthy();
+    expect(within(option).getByTestId("notification-delivery-consent")).toBeTruthy();
   });
 
   test("shows the plaintext warning inline and sends the accepted answer, never a consent", async () => {
@@ -912,11 +930,12 @@ describe("NotificationDeliverySection content", () => {
     expect(mode("prefix").disabled).toBe(true);
     expect(mode("full").disabled).toBe(true);
     expect(screen.getByTestId("notification-delivery-content-needs-key")).toBeTruthy();
-    expect(mode("full").parentElement?.textContent).toContain("1000");
 
     typeSecret(SYNTHETIC_SENDKEY);
     expect(mode("prefix").disabled).toBe(false);
     expect(screen.queryByTestId("notification-delivery-content-needs-key")).toBeNull();
+    fireEvent.click(mode("full"));
+    expect(screen.getByTestId("notification-delivery-content-limit").textContent).toContain("1000");
   });
 
   test("a new ServerChan SendKey asks for the plaintext answer again", async () => {
@@ -944,6 +963,69 @@ describe("NotificationDeliverySection content", () => {
     fireEvent.click(screen.getByTestId("notification-delivery-consent-acknowledge"));
     await clickSave();
     expect(lastSave(handlers)).toMatchObject({ secret: SYNTHETIC_SENDKEY, acceptContentConsent: true });
+  });
+});
+
+describe("NotificationDeliverySection direct message names and preview (#1492)", () => {
+  test("names partners by alias by default and saves the unchecked choice", async () => {
+    const handlers = renderSection();
+    openSink();
+    const alias = screen.getByTestId("notification-delivery-partner-alias") as HTMLInputElement;
+    expect(alias.checked).toBe(true);
+    // The hint says where the alias goes and what replaces it.
+    const hint = screen.getByTestId("notification-delivery-partner-alias-hint").textContent ?? "";
+    expect(hint).toContain("Resend");
+    expect(hint).toContain("@user:server");
+
+    fireEvent.click(alias);
+    await clickSave();
+    expect(lastSave(handlers).sink.direct_partner_label).toBe("matrixId");
+  });
+
+  test("renders Rust's preview of the unsaved sink and follows edits", async () => {
+    const handlers = renderSection();
+    openSink();
+    await waitFor(() =>
+      expect(screen.getByTestId("notification-delivery-preview-subject").textContent).toBe(
+        "Direct message from Alex (design team)"
+      )
+    );
+    expect(screen.getByTestId("notification-delivery-preview-sender").textContent).toBe("Koushi");
+
+    fireEvent.click(screen.getByTestId("notification-delivery-partner-alias"));
+    await waitFor(() =>
+      expect(screen.getByTestId("notification-delivery-preview-subject").textContent).toBe(
+        "Direct message from @alex:example.org"
+      )
+    );
+    const [sink, sample] = vi.mocked(handlers.preview).mock.calls.at(-1)!;
+    expect(sink.direct_partner_label).toBe("matrixId");
+    expect(sample.partnerUserId).toBe("@alex:example.org");
+
+    fireEvent.click(mode("full"));
+    await waitFor(() =>
+      expect(screen.getByTestId("notification-delivery-preview-body").textContent).toBe(
+        "Are you free for a quick call this afternoon?"
+      )
+    );
+  });
+
+  test("a ServerChan preview has a title and no sender", async () => {
+    renderSection({ delivery: delivery({ sinks: [serverChanSink] }) });
+    openSink(SC_SINK_ID);
+    const preview = screen.getByTestId("notification-delivery-preview");
+    await waitFor(() => expect(screen.getByTestId("notification-delivery-preview-subject")).toBeTruthy());
+    expect(screen.queryByTestId("notification-delivery-preview-sender")).toBeNull();
+    expect(preview.textContent).toContain("Title");
+  });
+
+  test("hides a failed preview instead of showing stale text", async () => {
+    const handlers = actions();
+    vi.mocked(handlers.preview).mockRejectedValue(new Error("unavailable"));
+    renderSection({ handlers });
+    openSink();
+    await waitFor(() => expect(handlers.preview).toHaveBeenCalled());
+    expect(screen.queryByTestId("notification-delivery-preview-subject")).toBeNull();
   });
 });
 

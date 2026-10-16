@@ -10,9 +10,10 @@
 use serde::Deserialize;
 
 use super::{
-    NotificationDeliveryContent, NotificationDeliveryContentConsent, NotificationDeliverySettings,
-    NotificationDeliveryTarget, NotificationDeliveryTargets, NotificationDeliveryTiming,
-    NotificationSinkConfig, NotificationSinkSettings,
+    NotificationDeliveryContent, NotificationDeliveryContentConsent,
+    NotificationDeliveryPartnerLabel, NotificationDeliverySettings, NotificationDeliveryTarget,
+    NotificationDeliveryTargets, NotificationDeliveryTiming, NotificationSinkConfig,
+    NotificationSinkSettings,
 };
 
 /// The prefix bound the pre-#1460 schema enforced. A migrated prefix never exceeds it,
@@ -57,6 +58,7 @@ struct NotificationSinkWire {
     content: Option<NotificationDeliveryContent>,
     content_consent: Option<NotificationDeliveryContentConsent>,
     timing: Option<NotificationDeliveryTiming>,
+    direct_partner_label: NotificationDeliveryPartnerLabel,
     // Pre-#1460 per-sink switch.
     enabled: Option<bool>,
 }
@@ -101,6 +103,7 @@ impl NotificationDeliverySettingsWire {
                     content: wire.content.unwrap_or_default(),
                     content_consent: wire.content_consent,
                     timing: wire.timing.unwrap_or_default(),
+                    direct_partner_label: wire.direct_partner_label,
                 };
                 if is_legacy {
                     migrate_legacy_sink(
