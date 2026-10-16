@@ -1090,14 +1090,17 @@ pub(super) fn create_room_request(
     }
 
     // #1421: a restricted rule needs a version that supports it (>= 8) and a
-    // knock_restricted rule needs one that supports knocking on a restricted
-    // room (>= 10). Each is pinned explicitly rather than trusting a server
-    // default; a non-restricted explicit policy does not pin.
+    // knock or knock_restricted rule needs one that supports knocking (>= 7,
+    // and >= 10 for knock_restricted). Each is pinned explicitly rather than
+    // trusting a server default, which is what makes the availability a Rust
+    // decision instead of a server probe; a non-restricted explicit policy does
+    // not pin.
     let membership_rule_version = match join_rule {
         Some(matrix_sdk::ruma::events::room::join_rules::JoinRule::Restricted(_)) => {
             Some(matrix_sdk::ruma::RoomVersionId::V9)
         }
-        Some(matrix_sdk::ruma::events::room::join_rules::JoinRule::KnockRestricted(_)) => {
+        Some(matrix_sdk::ruma::events::room::join_rules::JoinRule::Knock)
+        | Some(matrix_sdk::ruma::events::room::join_rules::JoinRule::KnockRestricted(_)) => {
             Some(matrix_sdk::ruma::RoomVersionId::V10)
         }
         _ => None,

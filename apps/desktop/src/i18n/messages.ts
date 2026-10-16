@@ -324,6 +324,9 @@ export type MessageId =
   | "dialog.createJoinInvite"
   | "dialog.createJoinPublic"
   | "dialog.createJoinPublicHint"
+  | "dialog.createJoinKnock"
+  | "dialog.createJoinKnockHint"
+  | "dialog.createJoinKnockRestricted"
   | "dialog.createEarlierMessages"
   | "dialog.createHistoryShared"
   | "dialog.createHistoryInvited"
@@ -2323,6 +2326,9 @@ const en: Catalog = {
   "dialog.createJoinInvite": "Only people you invite",
   "dialog.createJoinPublic": "Anyone",
   "dialog.createJoinPublicHint": "Anyone, including people outside your Spaces, can find this room in the public room directory and join it. A public room is not encrypted.",
+  "dialog.createJoinKnock": "Ask to join",
+  "dialog.createJoinKnockHint": "People can send a request to join. A room admin approves or declines each request.",
+  "dialog.createJoinKnockRestricted": "Members of {spaceName} can ask to join",
   "dialog.createEarlierMessages": "Earlier messages",
   "dialog.createHistoryShared": "New members can read earlier messages",
   "dialog.createHistoryInvited": "New members read from when they were invited",
@@ -4287,6 +4293,9 @@ const ja: Catalog = {
   "dialog.createJoinInvite": "招待した人だけ",
   "dialog.createJoinPublic": "誰でも",
   "dialog.createJoinPublicHint": "スペース外の人も含め、誰でも公開ルームディレクトリからこのルームを見つけて参加できます。公開ルームは暗号化されません。",
+  "dialog.createJoinKnock": "参加リクエストを送る",
+  "dialog.createJoinKnockHint": "誰でも参加リクエストを送れます。ルーム管理者が承認または拒否します。",
+  "dialog.createJoinKnockRestricted": "{spaceName} のメンバーは参加リクエストを送れる",
   "dialog.createEarlierMessages": "過去のメッセージ",
   "dialog.createHistoryShared": "新しいメンバーも過去のメッセージを読める",
   "dialog.createHistoryInvited": "新しいメンバーは招待された時点から読める",

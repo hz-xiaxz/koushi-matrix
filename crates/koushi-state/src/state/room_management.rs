@@ -770,8 +770,14 @@ pub struct CreateRoomAccessPreview {
     #[serde(default, skip_serializing_if = "Option::is_none")]
     pub rejection: Option<CreateRoomAccessRejection>,
     /// An explicit restricted rule pins room version V9, as does the legacy
-    /// private-in-Space preset.
+    /// private-in-Space preset; a knock or knock_restricted rule pins V10.
     pub room_version_pinned: bool,
+    /// Whether Rust will create a room that admits knocking (it pins V10, so
+    /// the version supports it). React only renders the choice (#1421).
+    pub knock_available: bool,
+    /// Whether the knock_restricted choice has a membership route: it needs an
+    /// attachment Space to carry the allow list (#1421).
+    pub knock_restricted_available: bool,
 }
 
 /// A stateless Rust preview of the create dialog's effective proposed tuple
@@ -863,7 +869,7 @@ pub fn preview_create_room_access(
     let room_version_pinned = if draft_rule.is_some() {
         matches!(
             draft_rule,
-            Some(RoomJoinRule::Restricted | RoomJoinRule::KnockRestricted)
+            Some(RoomJoinRule::Restricted | RoomJoinRule::KnockRestricted | RoomJoinRule::Knock)
         )
     } else {
         !public && parent_id.is_some()
@@ -890,6 +896,8 @@ pub fn preview_create_room_access(
         effective_history: history,
         rejection,
         room_version_pinned,
+        knock_available: true,
+        knock_restricted_available: parent_id.is_some(),
     }
 }
 

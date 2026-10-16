@@ -2137,6 +2137,9 @@ export interface CreateRoomAccessPreview {
   effectiveHistory: RoomHistoryVisibility;
   rejection?: CreateRoomAccessRejection;
   roomVersionPinned: boolean;
+  /** Rust-owned availability (#1421): the choice is rendered only when true. */
+  knockAvailable: boolean;
+  knockRestrictedAvailable: boolean;
 }
 
 export type RoomManagementOperationState =

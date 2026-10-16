@@ -361,6 +361,8 @@ fn create_preview_seeds_and_accepts_a_knock_restricted_space_route() {
     assert_eq!(preview.effective_rule, Some(RoomJoinRule::KnockRestricted));
     assert_eq!(preview.rejection, None);
     assert!(preview.room_version_pinned);
+    assert!(preview.knock_available);
+    assert!(preview.knock_restricted_available);
 
     // Without a membership route a knock_restricted create is rejected.
     let mut empty = RoomAccessDraft::new(scope.clone());
@@ -380,6 +382,27 @@ fn create_preview_seeds_and_accepts_a_knock_restricted_space_route() {
         rejected.rejection,
         Some(CreateRoomAccessRejection::EmptyAccessTargets)
     );
+
+    // At Home the knock choice is available and the restricted knock route is
+    // not (it needs an attachment Space for its allow list).
+    let mut home = RoomAccessDraft::new(scope.clone());
+    home.set_rule(Some(RoomJoinRule::Knock));
+    state.room_management.draft = Some(home);
+    let home_preview = preview_create_room_access(
+        &state,
+        &scope,
+        CreateRoomAccessPreviewInput {
+            visibility: CreateRoomVisibility::Private,
+            invited_only: false,
+            encrypted: true,
+            parent_space_id: None,
+        },
+    );
+    assert_eq!(home_preview.effective_rule, Some(RoomJoinRule::Knock));
+    assert_eq!(home_preview.rejection, None);
+    assert!(home_preview.room_version_pinned);
+    assert!(home_preview.knock_available);
+    assert!(!home_preview.knock_restricted_available);
 }
 
 #[test]

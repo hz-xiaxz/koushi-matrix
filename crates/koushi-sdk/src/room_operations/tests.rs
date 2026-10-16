@@ -169,6 +169,14 @@ fn create_room_request_writes_knock_without_the_private_preset() {
     // An explicit policy writes its own join rule; the legacy private_chat
     // preset would win over it on the server.
     assert!(request.preset.is_none());
+    // A knock create pins the version that supports knocking (#1421).
+    assert_eq!(
+        request
+            .room_version
+            .as_ref()
+            .map(|version| version.as_str()),
+        Some("10")
+    );
     let initial_state = initial_state_json(&request);
     let join_rules = initial_state
         .iter()

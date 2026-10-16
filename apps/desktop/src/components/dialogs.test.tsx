@@ -4,7 +4,7 @@ import { renderToStaticMarkup } from "react-dom/server";
 import { cleanup, fireEvent, render, screen, waitFor, within } from "@testing-library/react";
 import { afterEach, describe, expect, it, vi } from "vitest";
 
-import type { ComposerDocument, StagedUploadItem } from "../domain/types";
+import type { ComposerDocument, CreateRoomAccessPreview, StagedUploadItem } from "../domain/types";
 import type { MentionCandidate } from "../domain/projectionTypes";
 import { documentFromText } from "../domain/composerDocument";
 import { t } from "../i18n/messages";
@@ -679,6 +679,53 @@ describe("CreateEntityDialog room access", () => {
     expect(radios).toEqual(["invite", "public"]);
   });
 
+  it("offers Ask to join at Home only when Rust reports it available (#1421)", () => {
+    const preview = (knockAvailable: boolean): CreateRoomAccessPreview => ({
+      scope: { kind: "create" as const, sessionId: 1 },
+      confirmed: false,
+      effectiveRule: "invite" as const,
+      effectiveHistory: "shared" as const,
+      roomVersionPinned: false,
+      knockAvailable,
+      knockRestrictedAvailable: false,
+      outcome: {
+        join: { messageId: "room.accessOutcomeJoinInvite" },
+        history: { messageId: "room.accessOutcomeHistoryShared" },
+        encryption: { messageId: "room.accessOutcomeEncrypted" },
+        directory: { messageId: "room.accessOutcomeDirectoryLoading" },
+        nonRetroactive: { messageId: "room.historyNonRetroactive" }
+      }
+    });
+    const { rerender } = render(
+      <CreateEntityDialog
+        kind="room"
+        isBusy={false}
+        value=""
+        createAccessPreview={preview(true)}
+        onCancel={vi.fn()}
+        onSubmit={vi.fn()}
+        onValueChange={vi.fn()}
+      />
+    );
+    const radios = () =>
+      within(screen.getByRole("group", { name: t("dialog.createWhoCanJoin") }))
+        .getAllByRole("radio")
+        .map((radio) => radio.getAttribute("value"));
+    expect(radios()).toEqual(["knock", "invite", "public"]);
+    rerender(
+      <CreateEntityDialog
+        kind="room"
+        isBusy={false}
+        value=""
+        createAccessPreview={preview(false)}
+        onCancel={vi.fn()}
+        onSubmit={vi.fn()}
+        onValueChange={vi.fn()}
+      />
+    );
+    expect(radios()).toEqual(["invite", "public"]);
+  });
+
   it("chooses earlier-message access with two plain choices and summarizes above the buttons", () => {
     const onSetRoomAccessDraft = vi.fn();
     render(
@@ -705,6 +752,8 @@ describe("CreateEntityDialog room access", () => {
           effectiveRule: "invite",
           effectiveHistory: "shared",
           roomVersionPinned: false,
+          knockAvailable: true,
+          knockRestrictedAvailable: false,
           outcome: {
             join: { messageId: "room.accessOutcomeJoinInvite" },
             history: { messageId: "room.accessOutcomeHistoryShared" },
@@ -773,6 +822,8 @@ describe("CreateEntityDialog room access", () => {
           effectiveRule: "restricted",
           effectiveHistory: "shared",
           roomVersionPinned: true,
+          knockAvailable: true,
+          knockRestrictedAvailable: false,
           outcome: {
             join: { messageId: "room.accessOutcomeJoinSpaceMembers", substitutions: ["Design"] },
             history: { messageId: "room.accessOutcomeHistoryShared" },
@@ -823,6 +874,8 @@ describe("CreateEntityDialog room access", () => {
           effectiveRule: "restricted",
           effectiveHistory: "shared",
           roomVersionPinned: true,
+          knockAvailable: true,
+          knockRestrictedAvailable: false,
           outcome: {
             join: { messageId: "room.accessOutcomeJoinMembershipRoute" },
             history: { messageId: "room.accessOutcomeHistoryShared" },
