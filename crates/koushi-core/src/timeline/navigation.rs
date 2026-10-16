@@ -102,6 +102,26 @@ pub(crate) struct NavigationProjectionDemand {
     /// room projection exactly when it did before #1060.
     pub(crate) room_revision: u64,
     pub(crate) focused: Option<TimelineKey>,
+    /// #1465: the AppActor navigation request that owns the projection of
+    /// `focused`, when a main-pane navigation is in flight for it. Only a
+    /// `Subscribe` carrying this request id may take over a pending focused
+    /// build; any other subscribe for the key (a renderer recovery/replay) is
+    /// an observer. Cleared whenever `focused` changes without a new owner.
+    pub(crate) focused_owner: Option<RequestId>,
+}
+
+impl NavigationProjectionDemand {
+    /// Whether `request_id` is the admitted navigation owner of `key`.
+    pub(crate) fn owns_focused(&self, key: &TimelineKey, request_id: RequestId) -> bool {
+        self.focused.as_ref() == Some(key) && self.focused_owner == Some(request_id)
+    }
+
+    fn replace_focused(&mut self, focused: Option<TimelineKey>) {
+        if self.focused != focused {
+            self.focused_owner = None;
+        }
+        self.focused = focused;
+    }
 }
 
 /// Stable latest-wins ingress shared across session-scoped timeline-manager
@@ -158,15 +178,31 @@ impl NavigationProjectionIngress {
             if accepted {
                 demand.room_revision = demand.room_revision.wrapping_add(1);
             }
-            demand.focused = focused;
+            demand.replace_focused(focused);
         });
         true
     }
 
     /// Replace only the desired focused foreground, carrying the retained
     /// room projection forward so an unpolled room subscription survives.
+    /// The focused key has no navigation owner.
+    #[cfg(test)]
     pub(crate) fn admit_focused(&self, focused: Option<TimelineKey>) {
-        self.tx.send_modify(|demand| demand.focused = focused);
+        self.admit_focused_with_owner(focused, None);
+    }
+
+    /// #1465: replace the desired focused foreground together with the
+    /// navigation request that owns its projection. `owner` is ignored when
+    /// there is no focused key.
+    pub(crate) fn admit_focused_with_owner(
+        &self,
+        focused: Option<TimelineKey>,
+        owner: Option<RequestId>,
+    ) {
+        self.tx.send_modify(|demand| {
+            demand.focused_owner = focused.as_ref().and(owner);
+            demand.focused = focused;
+        });
     }
 }
 

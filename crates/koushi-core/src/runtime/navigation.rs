@@ -1156,12 +1156,24 @@ impl AppActor {
             .or_else(|| self.current_focused_context_timeline_key())
     }
 
-    /// Publish the current desired focused foreground. Called before a new
-    /// focused `Subscribe` enters the mailbox, so the retained value can never
-    /// retire that newer owner.
+    /// #1465: the navigation request that owns the projection of `focused`:
+    /// the in-flight focused navigation for that key, if any. A renderer
+    /// recovery/replay subscribe for the same key is never the owner.
+    fn focused_foreground_owner(&self, focused: Option<&TimelineKey>) -> Option<RequestId> {
+        self.pending_focused_navigation
+            .as_ref()
+            .filter(|pending| Some(&pending.key) == focused)
+            .map(|pending| pending.projection_request_id)
+    }
+
+    /// Publish the current desired focused foreground and its navigation
+    /// owner. Called before a new focused `Subscribe` enters the mailbox, so
+    /// the retained value can never retire that newer owner, and the manager
+    /// recognises that `Subscribe` as the projection owner (#1465).
     pub(super) fn admit_focused_foreground(&self) {
-        self.account_actor
-            .admit_focused_foreground(self.desired_focused_foreground());
+        let desired = self.desired_focused_foreground();
+        let owner = self.focused_foreground_owner(desired.as_ref());
+        self.account_actor.admit_focused_foreground(desired, owner);
     }
 
     /// Retire `released` (and any other undesired focused timeline) through
@@ -1171,7 +1183,8 @@ impl AppActor {
         let desired = self
             .desired_focused_foreground()
             .filter(|desired| desired != released);
-        self.account_actor.admit_focused_foreground(desired);
+        let owner = self.focused_foreground_owner(desired.as_ref());
+        self.account_actor.admit_focused_foreground(desired, owner);
     }
 
     /// #1037: an accepted main-composer send for `room_id` returns the main

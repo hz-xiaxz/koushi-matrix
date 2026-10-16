@@ -42,6 +42,9 @@ use super::residency::SubscriptionReconcileTrigger;
 /// deadline remains the backstop.
 pub(super) const FOCUSED_TIMELINE_BUILD_TIMEOUT: Duration = Duration::from_secs(10);
 
+/// Bound on observer subscribes remembered for one pending focused build.
+const FOCUSED_BUILD_MAX_OBSERVERS: usize = 8;
+
 /// The prepared SDK timeline, before its actor is spawned on the manager.
 pub(super) enum PreparedFocusedTimeline {
     Sdk(Arc<Timeline>),
@@ -85,10 +88,16 @@ pub(super) struct FocusedBuildCompletion {
 /// finish or roll back exactly as the former inline path did.
 pub(super) struct PendingFocusedBuild {
     pub(super) activation: TimelineActorGenerationActivation,
-    /// Latest-wins: a repeated subscribe for the same key while the build is
-    /// pending adopts the newest request as the projection correlation.
+    /// The projection owner: the request the installed actor's first
+    /// `InitialItems` (and so the focused-projection commit) correlates with.
+    /// #1465: only the admitted navigation owner of the key may replace it
+    /// while the build is pending; a renderer recovery/replay subscribe is an
+    /// observer and never changes it.
     pub(super) request_id: RequestId,
     pub(super) emit_failure_terminal: bool,
+    /// Observer subscribes coalesced into this build, each with whether it
+    /// asked for a failure terminal. Bounded; the oldest is dropped first.
+    pub(super) observers: Vec<(RequestId, bool)>,
     pub(super) lease_room_id: Option<OwnedRoomId>,
     pub(super) lease_added: bool,
     pub(super) reconcile_trigger: SubscriptionReconcileTrigger,
@@ -121,6 +130,10 @@ pub(super) struct FocusedBuildSupervisor {
     /// Holds a sessionless build open at the SDK `build()` boundary.
     #[cfg(test)]
     pub(super) test_gate: Option<FocusedBuildTestGate>,
+    /// #1465: an installed sessionless test actor publishes its first focused
+    /// projection for the build's projection owner, like a real actor.
+    #[cfg(test)]
+    pub(super) test_actor_projection: bool,
 }
 
 impl FocusedBuildSupervisor {
@@ -173,26 +186,53 @@ impl FocusedBuildSupervisor {
                 lease_room_id,
                 lease_added,
                 reconcile_trigger,
+                observers: Vec::new(),
                 started: executor::Instant::now(),
                 task: executor::AbortOnDrop::new(task),
             },
         );
     }
 
-    /// Adopt a repeated subscribe for a key whose build is still pending.
+    /// Coalesce a repeated subscribe for a key whose build is still pending;
+    /// the in-flight build is reused, never restarted.
+    ///
+    /// #1465: `owner` is true only for the admitted navigation owner of the
+    /// key, which becomes the projection owner (a genuine same-key
+    /// supersession). Any other subscribe is an observer: the projection
+    /// owner is kept and the observer only receives its own failure terminal.
     pub(super) fn coalesce(
         &mut self,
         key: &TimelineKey,
         request_id: RequestId,
         emit_failure_terminal: bool,
+        owner: bool,
     ) -> bool {
         let Some(pending) = self.pending.get_mut(key) else {
             return false;
         };
-        pending.request_id = request_id;
-        pending.emit_failure_terminal |= emit_failure_terminal;
+        let stage = if owner {
+            pending.request_id = request_id;
+            pending.emit_failure_terminal |= emit_failure_terminal;
+            pending
+                .observers
+                .retain(|(observer, _)| *observer != request_id);
+            "coalesced"
+        } else {
+            if pending.request_id != request_id
+                && !pending
+                    .observers
+                    .iter()
+                    .any(|(observer, _)| *observer == request_id)
+            {
+                if pending.observers.len() == FOCUSED_BUILD_MAX_OBSERVERS {
+                    pending.observers.remove(0);
+                }
+                pending.observers.push((request_id, emit_failure_terminal));
+            }
+            "observer_coalesced"
+        };
         record_focused_build(
-            "coalesced",
+            stage,
             pending.activation.generation,
             Some(pending.elapsed_ms()),
         );
@@ -341,5 +381,9 @@ impl super::manager::TimelineManagerActor {
     }
 }
 
+#[cfg(test)]
+pub(crate) mod gated_manager;
+#[cfg(test)]
+mod owner_tests;
 #[cfg(test)]
 mod tests;

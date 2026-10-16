@@ -993,6 +993,7 @@ async fn committed_navigation_projection_failure_does_not_emit_a_second_terminal
                 cleanup: NavigationProjectionCleanup::default(),
             }),
             focused: None,
+            focused_owner: None,
         })
         .await;
 
@@ -2950,6 +2951,7 @@ async fn navigation_demand_retires_only_undesired_focused_timelines() {
             room_revision: 1,
             room: None,
             focused: Some(focused_key()),
+            focused_owner: None,
         })
         .await;
     assert!(manager.timelines.contains_key(&focused_key()));
@@ -2962,6 +2964,7 @@ async fn navigation_demand_retires_only_undesired_focused_timelines() {
             room_revision: 1,
             room: None,
             focused: None,
+            focused_owner: None,
         })
         .await;
     assert!(!manager.timelines.contains_key(&focused_key()));

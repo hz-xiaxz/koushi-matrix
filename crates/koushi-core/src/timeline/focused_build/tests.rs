@@ -268,8 +268,12 @@ async fn superseded_focused_build_cannot_install_under_the_newer_owner() {
     harness.no_pending_action();
 }
 
+/// #1465: a repeated subscribe for a pending focused build reuses the build.
+/// A non-owner (renderer recovery/replay) subscribe is an observer and keeps
+/// the projection owner; only the admitted navigation owner of the key adopts.
 #[tokio::test]
-async fn repeated_subscribe_for_a_pending_focused_build_adopts_the_latest_request() {
+async fn repeated_subscribe_for_a_pending_focused_build_keeps_the_owner_until_a_navigation_owner_adopts()
+ {
     let mut harness = spawn_harness();
     let key = focused_key();
     harness.subscribe(fake_rid(10), key.clone()).await;
@@ -277,7 +281,23 @@ async fn repeated_subscribe_for_a_pending_focused_build_adopts_the_latest_reques
     harness.subscribe(fake_rid(11), key.clone()).await;
 
     let probe = harness.probe(&key).await;
-    assert_eq!(probe.pending_request_id, Some(fake_rid(11)));
+    assert_eq!(
+        probe.pending_request_id,
+        Some(fake_rid(10)),
+        "an observer subscribe never replaces the projection owner"
+    );
+    assert_eq!(probe.room_leases, 1, "a coalesced subscribe takes no lease");
+
+    harness
+        .ingress
+        .admit_focused_with_owner(Some(key.clone()), Some(fake_rid(12)));
+    harness.subscribe(fake_rid(12), key.clone()).await;
+    let probe = harness.probe(&key).await;
+    assert_eq!(
+        probe.pending_request_id,
+        Some(fake_rid(12)),
+        "the admitted navigation owner adopts the pending build"
+    );
     assert_eq!(probe.room_leases, 1, "a coalesced subscribe takes no lease");
     assert!(
         matches!(

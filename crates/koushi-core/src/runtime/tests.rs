@@ -5435,4 +5435,5 @@ async fn scheduled_sends_open_command_emits_the_projection_through_the_runtime()
 mod activity_renderer_states;
 mod anchored_send;
 mod navigation_network;
+mod search_navigation_owner;
 mod settings_loading;

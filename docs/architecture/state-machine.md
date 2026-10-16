@@ -2405,8 +2405,13 @@ stateDiagram-v2
 - TimelineManager never awaits the SDK `TimelineFocus::Event` build inline
   (#1146). The build is manager-owned preparation fenced by its actor
   generation; the manager keeps polling commands, navigation demand, and other
-  completions meanwhile. A repeated subscribe for the same key adopts the
-  newest request id; unsubscribe, demand retirement (supersession, Home, room
+  completions meanwhile. A repeated subscribe for the same key adopts its
+  request id as the projection owner only when AppActor admitted that id as
+  the key's navigation owner in the demand (genuine same-key supersession, or
+  navigation adopting a renderer-started build); any other subscribe for the
+  key (renderer recovery/replay, a right-panel mount) is an observer that
+  reuses the build, keeps the projection owner, and receives only its own
+  failure terminal (#1465). Unsubscribe, demand retirement (supersession, Home, room
   change, navigation deadline), shutdown, and the 10 s build timeout release
   the lease and activation, and a late completion can never install an actor.
   SDK event-focused initialization is transactional: initial `/context`
@@ -3661,8 +3666,9 @@ stateDiagram-v2
   other focused actor with the full unsubscribe bookkeeping (generation
   invalidation/quiescence, local-read correlation, retained send-completion
   cleanup, actor lease); room/thread actors and session residency are untouched.
-  AppActor admits a new desired focused key before that key's `Subscribe`
-  enters the mailbox, so coalesced Focused A → None → A or Focused A → Room B
+  AppActor admits a new desired focused key, together with the pending event
+  navigation's projection request id for that key, before that key's
+  `Subscribe` enters the mailbox, so coalesced Focused A → None → A or Focused A → Room B
   can never let an old release retire the newer owner, and a focused-only update
   carries the retained room projection forward without replaying it. Event
   navigation supersession, failure, and room/Space/Home switches release focused

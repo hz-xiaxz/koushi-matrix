@@ -1026,7 +1026,17 @@ export function ContextualRightPanel({
       focusedContext.kind === "opening" || focusedContext.kind === "open"
         ? focusedContext.room_id
         : null;
-    const focusedTimelineTransport = timelineTransport;
+    // #1465: a Search navigation renders its target in the main pane, which
+    // owns the focused build's projection. Search mode must not mount a second
+    // focused TimelineView for that same key; the explicit focused-context
+    // surface keeps rendering it.
+    const navigation = snapshot.state.ui.navigation;
+    const focusedContextOwnedByMainPane =
+      (focusedContext.kind === "opening" || focusedContext.kind === "open") &&
+      (navigation.main_timeline_anchor?.event_id === focusedContext.event_id ||
+        navigation.event_navigation.kind === "opening");
+    const focusedTimelineTransport =
+      mode === "search" && focusedContextOwnedByMainPane ? null : timelineTransport;
     const focusedPinnedEventIds = pinnedEventsForRoom(snapshot, focusedRoomId).map(
       (event) => event.event_id
     );

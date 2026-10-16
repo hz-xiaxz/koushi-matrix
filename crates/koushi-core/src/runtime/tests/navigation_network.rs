@@ -555,7 +555,7 @@ async fn start_focused(state: AppState, prepare: impl FnOnce(&mut AppActor)) -> 
     BlockedMailbox::start_with(state, |actor| {
         actor
             .account_actor
-            .admit_focused_foreground(Some(focused_key(ROOM_A)));
+            .admit_focused_foreground(Some(focused_key(ROOM_A)), None);
         prepare(actor);
     })
     .await
