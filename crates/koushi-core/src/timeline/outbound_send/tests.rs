@@ -49,6 +49,7 @@ use super::super::test_support::{
     test_timeline_actor_handle, thread_key,
 };
 use super::super::thread_projection::ThreadRootProjectionFetchRegistry;
+use super::super::typing::TypingLane;
 use super::{
     EncryptedSendDiagnosticSnapshot, MAX_PENDING_SEND_PROJECTIONS, MAX_SETTLED_SEND_TOMBSTONES,
     MAX_SUBMISSION_TOMBSTONES, MediaSendQueuedDelivery, OwnUserTrackingDiagnosticState,
@@ -814,6 +815,7 @@ async fn duplicate_submission_routes_one_manager_enqueue_worker() {
         global_send_completion_observer_future: None,
         send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
         read_workers: ReadWorkerSupervisor::unavailable(),
+        typing_lane: TypingLane::unavailable(),
         action_tx,
         event_tx,
         msg_tx,
@@ -1292,6 +1294,7 @@ async fn shutdown_cleans_captured_room_keys_before_acknowledging() {
         global_send_completion_observer_future: None,
         send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
         read_workers: ReadWorkerSupervisor::unavailable(),
+        typing_lane: TypingLane::unavailable(),
         action_tx,
         event_tx,
         msg_tx: msg_tx.clone(),
@@ -1386,6 +1389,7 @@ async fn manager_enqueue_worker_waits_for_reducer_acceptance_delivery() {
         global_send_completion_observer_future: None,
         send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
         read_workers: ReadWorkerSupervisor::unavailable(),
+        typing_lane: TypingLane::unavailable(),
         action_tx,
         event_tx,
         msg_tx,

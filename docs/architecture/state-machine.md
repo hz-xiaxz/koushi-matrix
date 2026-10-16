@@ -3609,11 +3609,53 @@ stateDiagram-v2
   stay in Rust when implemented.
 - Session-view clears reset all live signals and emit `LiveSignalsChanged` when
   anything was present.
-- `TimelineCommand::SendReadReceipt`, `SetFullyRead`, and `SetTyping` are
-  routed to the subscribed `TimelineActor`. Success events carry request ids;
-  failures are redacted `OperationFailed` events. Event ids, room ids, and user
+- `TimelineCommand::SendReadReceipt` and `SetFullyRead` are routed to the
+  subscribed `TimelineActor`. `TimelineCommand::SetTyping` is admitted by the
+  session-owned room-scoped typing lane below, which does not require a
+  subscribed actor. Success events carry request ids; failures are redacted
+  `OperationFailed` events. Event ids, room ids, and user
   ids may exist in app snapshots as visible Matrix UI data but must not appear
   in ordinary logs, Debug output, QA stdout, screenshots, or issue evidence.
+
+### Room-Scoped Typing Lane
+
+Typing notices are the one outbound live signal that performs third-party HTTP
+from Core, so a bounded session-scoped lane owns them instead of a
+`TimelineActor` mailbox handler (#1481). The lane is keyed by room id; the room,
+thread, and focused timelines of one room share one ordered sequence.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> InFlight: SetTyping (admit one task)
+    InFlight --> InFlightQueued: SetTyping (queue below bound)
+    InFlight --> InFlight: SetTyping (queue full, QueueOverflow)
+    InFlightQueued --> InFlightQueued: SetTyping (queue below bound)
+    InFlightQueued --> InFlightQueued: SetTyping (queue full, QueueOverflow)
+    InFlight --> Idle: completion settled (TypingSet or OperationFailed)
+    InFlightQueued --> InFlight: completion settled, queue now empty
+    InFlightQueued --> InFlightQueued: completion settled, queue non-empty
+    InFlight --> Idle: owner shutdown (cancel and settle)
+    InFlightQueued --> Idle: owner shutdown (cancel and settle all)
+```
+
+- Admission is bounded FIFO per room: at most one in-flight request and at most
+  `TYPING_LANE_QUEUE_CAPACITY` queued requests, with the session-wide set of
+  rooms holding unsettled notices bounded by `TYPING_LANE_MAX_ROOMS`. Submission
+  order equals admission order, so an older `true` can never be submitted after
+  a newer `false`. A request beyond a bound settles immediately with
+  `TimelineFailureKind::QueueOverflow`; a key for another account settles with
+  `NotSubscribed`. Rooms progress independently.
+- Each admitted request settles exactly once: `TypingSet { request_id, key,
+  is_typing }` on success, otherwise a correlated `OperationFailed`. Completion
+  for a request retired by shutdown is inert.
+- One absolute `TYPING_LANE_TIMEOUT` bounds each network request. The SDK typing
+  throttle and HTTP retry remain authoritative; the lane is not a second
+  debounce or retry state machine and does not treat cancellation as proof that
+  the homeserver did not apply a notice.
+- Owner teardown (manager shutdown, account switch, logout, session clear)
+  cancels the lane's in-flight tasks and settles every admitted request, so the
+  lane holds no detached work after its owner is gone.
 - The local core `live_signals` QA scenario is the Phase A proof:
   `read_receipt=ok fully_read=ok typing=ok presence=ok live_signals=ok`. Its
   output must remain private-data-free and must not print Matrix room IDs, user

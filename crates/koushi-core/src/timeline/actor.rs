@@ -388,10 +388,6 @@ pub(super) enum TimelineActorMessage {
         projections: Vec<PendingSendProjection>,
         acknowledged: oneshot::Sender<bool>,
     },
-    SetTyping {
-        request_id: RequestId,
-        is_typing: bool,
-    },
     TypingUsersUpdated(Vec<String>),
     IgnoredUsersUpdated(std::collections::BTreeSet<String>),
     LoadLinkPreviews {
@@ -2840,12 +2836,6 @@ impl TimelineActor {
                         }
                     }
                 }
-            }
-            TimelineActorMessage::SetTyping {
-                request_id,
-                is_typing,
-            } => {
-                self.handle_set_typing(request_id, is_typing).await;
             }
             TimelineActorMessage::TypingUsersUpdated(user_ids) => {
                 self.emit_typing_users_action(user_ids);

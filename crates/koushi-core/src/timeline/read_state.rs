@@ -2183,25 +2183,6 @@ impl TimelineActor {
             })
             .await;
     }
-    pub(super) async fn handle_set_typing(&mut self, request_id: RequestId, is_typing: bool) {
-        match self.timeline.room().typing_notice(is_typing).await {
-            Ok(()) => {
-                self.emit(CoreEvent::LiveSignals(LiveSignalsEvent::TypingSet {
-                    request_id,
-                    key: self.key.clone(),
-                    is_typing,
-                }));
-            }
-            Err(_) => {
-                self.emit_failure(
-                    request_id,
-                    CoreFailure::TimelineOperationFailed {
-                        kind: TimelineFailureKind::Sdk,
-                    },
-                );
-            }
-        }
-    }
     pub(super) fn live_receipts_from_endpoints(
         &self,
         changes: std::collections::BTreeMap<

@@ -29,6 +29,7 @@ use super::outbound_send::{
 };
 use super::read_state::ReadWorkerSupervisor;
 use super::thread_projection::ThreadRootProjectionFetchRegistry;
+use super::typing::TypingLane;
 
 pub(super) fn fake_rid(seq: u64) -> RequestId {
     RequestId {
@@ -179,6 +180,7 @@ pub(super) fn live_tail_test_manager(
         global_send_completion_observer_future: None,
         send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
         read_workers: ReadWorkerSupervisor::unavailable(),
+        typing_lane: TypingLane::unavailable(),
         action_tx,
         event_tx,
         msg_tx,
