@@ -1426,6 +1426,24 @@ fn avatar_content_is_never_upscaled() {
 }
 
 #[test]
+fn heif_avatar_content_reports_the_fetch_resolution() {
+    // #1450: the HEIC fixture rides the same avatar entry point as every other
+    // source, and the retained content reports the fetch resolution with its
+    // WebP dimensions (the 64x64 fixture is inside the 120 px budget).
+    let heic = include_bytes!(concat!(
+        env!("CARGO_MANIFEST_DIR"),
+        "/../koushi-media/tests/fixtures/heif/opaque.heic"
+    ))
+    .to_vec();
+    let (content, resolution) =
+        prepare_avatar_content(heic, AvatarResolution::LocalResize, &avatar_policy())
+            .expect("HEIF decodes through the avatar entry point");
+    assert_eq!(resolution, AvatarResolution::LocalResize);
+    assert_eq!(content.mime_type.as_deref(), Some("image/webp"));
+    assert_eq!((content.width, content.height), (Some(64), Some(64)));
+}
+
+#[test]
 fn undecodable_avatar_content_passes_through_with_its_own_dimensions() {
     // A 1x1 GIF: `koushi_media` treats GIF as non-decodable, so the bytes
     // are kept verbatim while the header still gives the dimensions.

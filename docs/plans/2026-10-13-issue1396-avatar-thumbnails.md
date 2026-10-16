@@ -78,9 +78,29 @@ above is what makes that comparison readable from one export.
 
 ## Residual
 
-Renderer-side decoded-bitmap eviction (P6) is unchanged and stays a follow-up:
-`koushi-thumbnail://` still serves `Cache-Control: no-store`, so a re-entered
-scope decodes again. Link-preview sizing beyond the budget split is out of scope.
+Renderer-side decoded-bitmap eviction (P6) — decided 2026-10-15 (#1450): keep
+decoding, do not add a renderer bitmap cache.
+
+`koushi-thumbnail://` serves `Cache-Control: no-store`, so leaving and
+re-entering a scope re-decodes the retained bytes. Those bytes must not become
+cacheable: they are decrypted avatar media, and `REPOSITORY_RULES.md`
+("Security Rules") prohibits persisting plaintext-derived data in a first-party
+store such as the WebView HTTP cache. A compliant reuse would need a new
+renderer-side decoded-bitmap cache (JS memory, LRU, canvas rendering) at every
+avatar call site — a larger mechanism than the residual is worth.
+
+Measured cost of the decode a reuse cache would avoid: the retained avatar is a
+lossless WebP bounded by the 120 px long edge (400x200 → 120x60, 5,210 bytes);
+decoding it with the `image` crate takes ~112 µs per decode in release and
+~1.38 ms in an unoptimized debug build, over 500 rounds — far below one frame.
+The `no-store` header stays pinned by
+`apps/desktop/src-tauri/src/tests.rs::renderable_thumbnail_protocol_serves_known_cached_bytes`,
+which is the headless check that re-entry re-fetches instead of serving a
+cached response. Reproduce the measurement with a throwaway
+`cargo test -p koushi-media --release` timing loop over
+`prepare_image_output_fitted(.., 120, WebP, ..)` output.
+
+Link-preview sizing beyond the budget split is out of scope.
 
 ## Verification
 
