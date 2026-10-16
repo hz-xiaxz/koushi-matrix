@@ -48,3 +48,27 @@ only displays. The post-review findings are recorded in the PR.
 - An encrypted knock room and a real `knock_restricted` Space create are not in
   the QA yet.
 - The knock request's free-text reason is not shown; the requester label only.
+
+## Post-implementation review follow-ups
+
+The post-implementation independent review (gpt-6.1-sol) raised no blocker. Its
+actionable findings were fixed:
+
+- **Invite search regression:** widening `settings.members` to include KNOCK made
+  a requester count as an existing destination member, which blocked selecting
+  them in the invite search (the exact action acceptance needs). Only
+  Joined/Invited members now count as destinations.
+- **Allow-target picker:** the picker is shown for `knockRestricted` too, so a
+  retained allow Space is not hidden and uneditable.
+- **Availability/i18n:** the knock_restricted label now states that allowed Space
+  members join directly while others ask to join.
+- **Permissions:** Accept and Decline are gated independently (`can_invite`,
+  `can_kick`) instead of requiring both.
+- **Requester identity:** each request row shows the requester's Matrix ID beside
+  the spoofable display label.
+- **Layout:** the request section has its own bounded scrolling track, and the
+  roster keeps the panel's shrinkable row.
+- **Count:** the header counts the roster, not pending requests.
+- **Settlement:** resolving a request now reloads the room settings snapshot
+  after the command settles, so a resolved request is not left behind as a
+  stale, re-actionable row.

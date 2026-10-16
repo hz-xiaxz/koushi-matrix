@@ -596,7 +596,8 @@ export function CreateEntityDialog({
                     </span>
                   </label>
                 ))}
-                {createRule === "restricted" && joinedSpaces.length > 1 ? (
+                {(createRule === "restricted" || createRule === "knockRestricted") &&
+                joinedSpaces.length > 1 ? (
                   <div
                     className="create-room-allow-targets"
                     role="group"

@@ -240,6 +240,10 @@ pub fn build_invite_target_query_state(
         .map(|members| {
             members
                 .iter()
+                // #1421: a pending knock is not a destination member; the
+                // requester must stay selectable so accepting the request can
+                // invite them.
+                .filter(|member| member.membership != crate::RoomMemberMembership::Knocked)
                 .map(|member| member.user_id.as_str())
                 .collect::<BTreeSet<_>>()
         })

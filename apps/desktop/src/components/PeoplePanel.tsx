@@ -101,9 +101,8 @@ export function PeoplePanel(props: PeoplePanelProps) {
     () => members.filter((member) => member.membership !== "knocked"),
     [members]
   );
-  const canResolveKnock =
-    roomManagement.settings?.permissions.can_invite === true &&
-    roomManagement.settings?.permissions.can_kick === true;
+  const canAcceptKnock = roomManagement.settings?.permissions.can_invite === true;
+  const canDeclineKnock = roomManagement.settings?.permissions.can_kick === true;
   const filteredMembers = useFilteredMembers(rosterMembers, query);
   const memberWindow = useMemo(() => {
     const viewportHeight =
@@ -148,7 +147,7 @@ export function PeoplePanel(props: PeoplePanelProps) {
       <header className="people-panel-header">
         <h2 id="people-title">{t("panel.people")}</h2>
         <span className="people-panel-count">
-          {t("people.memberCount", { count: String(members.length) })}
+          {t("people.memberCount", { count: String(rosterMembers.length) })}
         </span>
         <Tooltip
           label={t("action.close", { title: t("panel.people") })}
@@ -201,18 +200,21 @@ export function PeoplePanel(props: PeoplePanelProps) {
               <li key={member.user_id} className="people-knock-request-row">
                 <span className="people-knock-request-name" dir="auto">
                   {member.display_label}
+                  <span className="people-knock-request-id" dir="auto">
+                    {member.user_id}
+                  </span>
                 </span>
                 <span className="people-knock-request-actions">
                   <button
                     type="button"
-                    disabled={!canResolveKnock}
+                    disabled={!canAcceptKnock}
                     onClick={() => onResolveKnockRequest(contextId, member.user_id, "accept")}
                   >
                     {t("people.knockAccept")}
                   </button>
                   <button
                     type="button"
-                    disabled={!canResolveKnock}
+                    disabled={!canDeclineKnock}
                     onClick={() => onResolveKnockRequest(contextId, member.user_id, "decline")}
                   >
                     {t("people.knockDecline")}
