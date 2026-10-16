@@ -34,7 +34,10 @@ const RETIRED = [
   ["--server=conduit", "no lane supports conduit; use --server=tuwunel"],
   ["--core-backend", "the runner rejects it: one Sliding Sync engine"],
   ["KOUSHI_QA_FORCE_SYNC_BACKEND", "backend forcing was removed"],
-  ["--scenario=timeline_legacy", "the runner rejects timeline_legacy_* scenarios"]
+  ["--scenario=timeline_legacy", "the runner rejects timeline_legacy_* scenarios"],
+  ["--scenario=compat", "retired with the real-homeserver QA surface (#1435)"],
+  ["--scenario=space_compat", "retired with the real-homeserver QA surface (#1435)"],
+  ["--scenario=startup_latency", "retired with the real-homeserver QA surface (#1435)"]
 ];
 
 const problems = [];
@@ -61,11 +64,7 @@ function guiScenarios() {
 
 function coreScenarios() {
   const names = new Set();
-  for (const bin of [
-    "headless_core_qa/registry.rs",
-    "real-homeserver-qa.rs",
-    "real_homeserver_qa/config.rs"
-  ]) {
+  for (const bin of ["headless_core_qa/registry.rs"]) {
     const source = readFileSync(
       join(repoRoot, "crates/koushi-qa/src/bin", bin),
       "utf8"

@@ -329,6 +329,60 @@ fn create_preview_reports_rejections_and_room_version() {
 }
 
 #[test]
+fn create_preview_seeds_and_accepts_a_knock_restricted_space_route() {
+    let scope = RoomAccessDraftScope::Create { session_id: 1 };
+    let mut state = AppState::default();
+    let mut draft = RoomAccessDraft::new(scope.clone());
+    draft.seed_create_selection(
+        CreateRoomVisibility::Private,
+        false,
+        Some("!space:example.invalid"),
+    );
+    // A rule that carries no allow list clears the retained target; choosing
+    // knock_restricted then re-seeds the attachment Space (#1421).
+    draft.set_rule(Some(RoomJoinRule::Invite));
+    draft.set_rule(Some(RoomJoinRule::KnockRestricted));
+    assert_eq!(
+        draft.allow_targets,
+        vec!["!space:example.invalid".to_owned()]
+    );
+    state.room_management.draft = Some(draft);
+
+    let preview = preview_create_room_access(
+        &state,
+        &scope,
+        CreateRoomAccessPreviewInput {
+            visibility: CreateRoomVisibility::Private,
+            invited_only: false,
+            encrypted: true,
+            parent_space_id: Some("!space:example.invalid".to_owned()),
+        },
+    );
+    assert_eq!(preview.effective_rule, Some(RoomJoinRule::KnockRestricted));
+    assert_eq!(preview.rejection, None);
+    assert!(preview.room_version_pinned);
+
+    // Without a membership route a knock_restricted create is rejected.
+    let mut empty = RoomAccessDraft::new(scope.clone());
+    empty.set_rule(Some(RoomJoinRule::KnockRestricted));
+    state.room_management.draft = Some(empty);
+    let rejected = preview_create_room_access(
+        &state,
+        &scope,
+        CreateRoomAccessPreviewInput {
+            visibility: CreateRoomVisibility::Private,
+            invited_only: false,
+            encrypted: true,
+            parent_space_id: None,
+        },
+    );
+    assert_eq!(
+        rejected.rejection,
+        Some(CreateRoomAccessRejection::EmptyAccessTargets)
+    );
+}
+
+#[test]
 fn preview_reports_confirmed_and_proposed_directory_publication() {
     let scope = RoomAccessDraftScope::Room {
         room_id: "!room:example.invalid".to_owned(),

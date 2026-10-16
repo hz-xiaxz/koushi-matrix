@@ -14,6 +14,35 @@ test("settings reserve native-button space without a mounted titlebar", async ({
   expect(rect!.y + rect!.height).toBeLessThanOrEqual(320);
 });
 
+test("native modals own a macOS title-bar drag region above the safe block", async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 320 });
+  await page.goto("/e2e/modalSafeAreaHarness.html");
+  await page.evaluate(() => { document.documentElement.dataset.platform = "macos"; });
+  await page.getByRole("button", { name: "Open parent", exact: true }).click();
+  const modal = page.locator("dialog:modal");
+  const dragRegion = modal.locator(".native-modal-drag-region");
+  await expect(dragRegion).toHaveCount(1);
+  expect(await dragRegion.getAttribute("data-tauri-drag-region")).toBe("");
+  const rect = await dragRegion.evaluate((el) => {
+    const box = el.getBoundingClientRect();
+    return { y: box.y, height: box.height };
+  });
+  expect(rect.y).toBe(0);
+  expect(rect.height).toBeGreaterThanOrEqual(44);
+  // The strip stays in the reserved block, above the dialog content.
+  const headerBox = await modal.locator(".app-modal-header").first().boundingBox();
+  expect(headerBox!.y).toBeGreaterThanOrEqual(44);
+});
+
+test("the modal drag strip collapses to zero height off macOS", async ({ page }) => {
+  await page.goto("/e2e/modalSafeAreaHarness.html");
+  await page.evaluate(() => { document.documentElement.dataset.platform = "linux"; });
+  await page.getByRole("button", { name: "Open parent", exact: true }).click();
+  const height = await page.locator("dialog:modal .native-modal-drag-region")
+    .evaluate((el) => el.getBoundingClientRect().height);
+  expect(height).toBe(0);
+});
+
 for (const platform of ["macos", "windows", "linux"]) {
   for (const zoom of [0.75, 1, 1.5]) {
     test(`${platform} overlays fit a short window at zoom ${zoom}`, async ({ page }) => {

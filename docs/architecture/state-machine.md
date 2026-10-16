@@ -4281,8 +4281,9 @@ stateDiagram-v2
   default idle state and drop selected-room settings.
 - Headless core QA covers this with the `room_management` scenario and
   private-data-free tokens `room_settings=ok`, `permission_guard=ok`,
-  `moderation=ok`, `space_access=ok`, `space_add_existing=ok`, and
-  `space_leave_children=ok`. The lane uses a disposable management
+  `moderation=ok`, `space_access=ok`, `space_add_existing=ok`,
+  `space_leave_children=ok`, `knock_room_created=ok`, and
+  `knock_join_request=ok`. The lane uses a disposable management
   room so timeline and room/space stages are not disrupted. `space_access=ok`
   proves a disposable Space's join rule switches invite ↔ public for its
   creator, reaches a second member's open settings through sync, is refused for
@@ -4300,6 +4301,12 @@ stateDiagram-v2
   `space_leave_children=ok` proves `LeaveSpace` leaves only the admitted
   children of a disposable Space (a room outside the Space named in the
   command stays joined), then the Space, while an unselected child stays joined.
+  `knock_room_created=ok` and `knock_join_request=ok` prove a create with the
+  explicit `knock` access policy writes its own `m.room.join_rules` initial
+  state (an explicit policy never carries the legacy `private_chat` preset,
+  which would win over it) and that a second, SDK-only account's knock request is
+  accepted. A create-only `knock_restricted` policy carries a membership allow
+  list and pins room version V10; it is not offered to the existing-room editor.
 
 ## Suggested Space rooms (#1410)
 

@@ -61,6 +61,10 @@ gates, tracked as #1435 with the options and acceptance criteria.
 `scripts/check-agents-docs.mjs` keeps its own hard-coded retired-flag list;
 adding these entry points to it is part of #1435 rather than this change.
 
+**Correction (2026-10-15, #1435).** The tombstone was deleted the same day with
+both gates reworked in the same change; see
+[2026-10-15-issue1435-remove-real-homeserver-qa.md](2026-10-15-issue1435-remove-real-homeserver-qa.md).
+
 ## 3. Invite-dialog history wording — no further change
 
 #1422 summarises what an invitee can read and keeps the encrypted-room caveat

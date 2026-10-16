@@ -230,18 +230,13 @@ describe("desktop release scripts", () => {
     expect(releaseGate).not.toContain('"apps", "desktop", "src-tauri"');
   });
 
-  test("local and real homeserver QA preserve shared Cargo target dir", () => {
+  test("local homeserver QA preserves shared Cargo target dir", () => {
     const localQaSource = readFileSync(
       new URL("../../../../scripts/lib/local-homeserver-qa.mjs", import.meta.url),
       "utf8"
     );
-    const realQaSource = readFileSync(
-      new URL("../../../../scripts/desktop-real-homeserver-qa.mjs", import.meta.url),
-      "utf8"
-    );
 
     expect(localQaSource).toMatch(/"CARGO_TARGET_DIR"/);
-    expect(realQaSource).toMatch(/"CARGO_TARGET_DIR"/);
   });
 
   test("linux GUI smoke source wires the shared local homeserver helper module", () => {

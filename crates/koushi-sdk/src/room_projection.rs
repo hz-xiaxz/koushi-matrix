@@ -2251,19 +2251,27 @@ pub(super) fn sdk_join_rule_for_access_policy(
         .collect();
     targets.sort_unstable();
     targets.dedup();
-    match rule {
-        MatrixRoomJoinRule::Restricted => {
-            if targets.is_empty() {
-                return Err(MatrixRoomOperationError::InvalidRoomSetting);
-            }
-            let mut rules = Vec::with_capacity(targets.len());
-            for target in targets {
-                let room_id = matrix_sdk::ruma::RoomId::parse(target)
-                    .map_err(|_| MatrixRoomOperationError::InvalidRoomSetting)?;
-                rules.push(AllowRule::room_membership(room_id));
-            }
-            Ok(JoinRule::Restricted(Restricted::new(rules)))
+    // A restricted rule needs at least one membership target; a
+    // non-restricted rule carries none.
+    let membership_rules = |targets: &[&str]| -> Result<Vec<AllowRule>, MatrixRoomOperationError> {
+        if targets.is_empty() {
+            return Err(MatrixRoomOperationError::InvalidRoomSetting);
         }
+        let mut rules = Vec::with_capacity(targets.len());
+        for target in targets {
+            let room_id = matrix_sdk::ruma::RoomId::parse(*target)
+                .map_err(|_| MatrixRoomOperationError::InvalidRoomSetting)?;
+            rules.push(AllowRule::room_membership(room_id));
+        }
+        Ok(rules)
+    };
+    match rule {
+        MatrixRoomJoinRule::Restricted => Ok(JoinRule::Restricted(Restricted::new(
+            membership_rules(&targets)?,
+        ))),
+        MatrixRoomJoinRule::KnockRestricted => Ok(JoinRule::KnockRestricted(Restricted::new(
+            membership_rules(&targets)?,
+        ))),
         MatrixRoomJoinRule::Public => {
             if targets.is_empty() {
                 Ok(JoinRule::Public)
@@ -2285,9 +2293,9 @@ pub(super) fn sdk_join_rule_for_access_policy(
                 Err(MatrixRoomOperationError::InvalidRoomSetting)
             }
         }
-        MatrixRoomJoinRule::KnockRestricted
-        | MatrixRoomJoinRule::Private
-        | MatrixRoomJoinRule::Unknown => Err(MatrixRoomOperationError::InvalidRoomSetting),
+        MatrixRoomJoinRule::Private | MatrixRoomJoinRule::Unknown => {
+            Err(MatrixRoomOperationError::InvalidRoomSetting)
+        }
     }
 }
 

@@ -13,7 +13,7 @@ const api = vi.hoisted(() => ({
   closeReceiptReader: vi.fn().mockResolvedValue(undefined)
 }));
 
-vi.mock("../../backend/appRuntime", () => ({ api }));
+vi.mock("../../backend/appRuntime", () => ({ api, startSessionVerificationWindowDrag: vi.fn() }));
 
 import { ReceiptReaders } from "./ReceiptReaders";
 import type { ReceiptSourceRef } from "../../domain/coreEvents";

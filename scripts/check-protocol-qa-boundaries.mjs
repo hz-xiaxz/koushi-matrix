@@ -96,7 +96,7 @@ export function findProtocolQaBoundaryViolations(root) {
   if (qaManifest === null) {
     violations.push("missing crates/koushi-qa/Cargo.toml");
   } else {
-    for (const binary of ["headless-core-qa", "real-homeserver-qa"]) {
+    for (const binary of ["headless-core-qa"]) {
       if (!qaManifest.includes(`name = \"${binary}\"`)) {
         violations.push(`koushi-qa binary missing: ${binary}`);
       }
@@ -108,16 +108,14 @@ export function findProtocolQaBoundaryViolations(root) {
 
   for (const legacyPath of [
     "crates/koushi-core/src/bin/headless-core-qa.rs",
-    "crates/koushi-core/src/bin/headless_core_qa",
-    "crates/koushi-core/src/bin/real-homeserver-qa.rs",
-    "crates/koushi-core/src/bin/real_homeserver_qa"
+    "crates/koushi-core/src/bin/headless_core_qa"
   ]) {
     if (fs.existsSync(path.join(root, legacyPath))) {
       violations.push(`QA source remains in koushi-core: ${legacyPath}`);
     }
   }
 
-  for (const binary of ["headless-core-qa", "real-homeserver-qa"]) {
+  for (const binary of ["headless-core-qa"]) {
     if (coreManifest.includes(`name = \"${binary}\"`)) {
       violations.push(`koushi-core still declares QA binary: ${binary}`);
     }

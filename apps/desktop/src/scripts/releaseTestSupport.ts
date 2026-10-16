@@ -29,20 +29,6 @@ export function readLinuxProductionSource(): string {
   return linuxProductionFiles.map((file) => readFileSync(join(repoRoot, file), "utf8")).join("\n");
 }
 
-export function readRealHomeserverProductionSource(): string {
-  const files = [
-    "crates/koushi-qa/src/bin/real-homeserver-qa.rs",
-    "crates/koushi-qa/src/bin/real_homeserver_qa/config.rs",
-    "crates/koushi-qa/src/bin/real_homeserver_qa/credentials.rs",
-    "crates/koushi-qa/src/bin/real_homeserver_qa/event_source.rs",
-    "crates/koushi-qa/src/bin/real_homeserver_qa/waiters.rs",
-    "crates/koushi-qa/src/bin/real_homeserver_qa/cleanup.rs",
-    "crates/koushi-qa/src/bin/real_homeserver_qa/compat_flow.rs",
-    "crates/koushi-qa/src/bin/real_homeserver_qa/startup_latency.rs"
-  ];
-  return files.map((file) => readFileSync(join(repoRoot, file), "utf8")).join("\n");
-}
-
 export function gitTrackedFiles(): string[] {
   return execFileSync("git", ["ls-files"], { cwd: repoRoot, encoding: "utf8" })
     .split("\n").map((file) => file.trim()).filter(Boolean);
