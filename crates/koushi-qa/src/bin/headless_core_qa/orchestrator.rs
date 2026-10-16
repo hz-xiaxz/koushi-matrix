@@ -83,6 +83,11 @@ async fn wait_for_redact_edit_snapshot(
 }
 
 pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<String, String> {
+    if scenario == QaScenario::HistoryKeyRecoveryWindow {
+        println!("safety=ok");
+        super::scenario_history_key_recovery_window::run(&config).await?;
+        return Ok(scenario_report(&config.server_kind, scenario));
+    }
     if scenario == QaScenario::Safety {
         println!("safety=ok");
         return Ok(scenario_report(&config.server_kind, scenario));

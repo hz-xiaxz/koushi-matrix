@@ -19,6 +19,19 @@ describe("TauriDesktopApi", () => {
     vi.clearAllMocks();
   });
 
+  test("history key recovery is explicitly scoped to its owning account", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    setRendererSelectedAccountTabId("account:one");
+    const api = new TauriDesktopApi().forAccountTab("account:one");
+    await api.requestHistoryKeys("!history:example.invalid");
+    expect(invoke).toHaveBeenLastCalledWith("request_history_keys", { roomId: "!history:example.invalid", forceAll: false, accountTabId: "account:one" });
+    await api.requestHistoryKeys("!history:example.invalid", true);
+    expect(invoke).toHaveBeenLastCalledWith("request_history_keys", { roomId: "!history:example.invalid", forceAll: true, accountTabId: "account:one" });
+    setRendererSelectedAccountTabId("account:two");
+    await expect(api.requestHistoryKeys("!history:example.invalid")).rejects.toThrow("account tab is no longer selected");
+    expect(invoke).toHaveBeenCalledTimes(2);
+  });
+
   test("observes reader avatars with stable IDs and lossless counters", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
     const request = {

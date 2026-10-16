@@ -42,9 +42,12 @@ import {
   seedAvatarDemandFixture
 } from "./lib/avatar-demand-fixture.mjs";
 
+import { seedHistoryKeyRecoveryFixture } from "./lib/history-key-recovery-fixture.mjs";
+
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const localSecretsRoot = join(repoRoot, ".local-secrets", "headless-local-qa");
 const checks = [
+  "scenario history_key_recovery_window",
   "scenario safety",
   "scenario avatar_demand",
   "scenario login_sync",
@@ -154,6 +157,9 @@ printUsage();
 async function run() {
   assertSdkSubmoduleSynced({ repoRoot });
   const scenarios = selectedScenarios(scenarioOption);
+  if (scenarios.includes("history_key_recovery_window") && !runCoreQa) {
+    throw new Error("--scenario=history_key_recovery_window requires --core");
+  }
 
   const retiredScenario = scenarios.find((scenario) => scenario.startsWith("timeline_legacy_"));
   if (retiredScenario) {
@@ -261,7 +267,8 @@ async function runForServer(serverKind, scenario) {
       scenario !== "avatar_demand" &&
       scenario !== "account_notifications" &&
       scenario !== "notification_delivery" &&
-      scenario !== "user_verification"
+      scenario !== "user_verification" &&
+      scenario !== "history_key_recovery_window"
     ) {
       const sdkUsers = await registerQaUsers(homeserver, "sdk");
 
@@ -330,11 +337,14 @@ async function registerQaUsers(homeserver, label, scenario) {
   if (scenario === "live_signals" || scenario === "all") {
     await setFixtureAvatar(homeserver, registrationB);
   }
-  await registerUser(homeserver, userC, passwordC);
+  const registrationC = await registerUser(homeserver, userC, passwordC);
   const avatarFixture = scenario === "avatar_demand"
     ? await seedAvatarDemandFixture({ homeserver, ownerAccessToken: registrationA.access_token, runId: userSuffix })
     : undefined;
-  return { userA, passwordA, userB, passwordB, userC, avatarFixture };
+  const historyLargeRoom = scenario === "history_key_recovery_window"
+    ? await seedHistoryKeyRecoveryFixture({ homeserver, owner: registrationA, regular: registrationC, runId: userSuffix })
+    : undefined;
+  return { userA, passwordA, userB, passwordB, userC, passwordC, avatarFixture, historyLargeRoom };
 }
 
 function runHeadlessQa({
@@ -411,6 +421,8 @@ function runCoreHeadlessQa({
   userB,
   passwordB,
   userC,
+  passwordC,
+  historyLargeRoom,
   logPath,
   scenario,
   qaLabel = "core",
@@ -439,6 +451,10 @@ function runCoreHeadlessQa({
   };
   if (userC) {
     env.KOUSHI_LOCAL_QA_USER_C = userC;
+  }
+  if (scenario === "history_key_recovery_window") {
+    env.KOUSHI_LOCAL_QA_PASSWORD_C = passwordC;
+    env.KOUSHI_QA_HISTORY_LARGE_ROOM = historyLargeRoom;
   }
   if (avatarFixture) {
     env.KOUSHI_QA_AVATAR_FIXTURE = JSON.stringify(avatarFixture);
@@ -500,7 +516,8 @@ function runCoreHeadlessQa({
     validate: (output) =>
       assertQaOutputIsPrivate("headless core QA", output, [
         ["passwordA", passwordA],
-        ["passwordB", passwordB]
+        ["passwordB", passwordB],
+        ["passwordC", passwordC]
       ])
   });
   appendQaOutput(logPath, result.stdout, result.stderr);

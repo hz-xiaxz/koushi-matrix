@@ -867,6 +867,17 @@
         }
       },
       "room_management": {
+        "history_keys": {
+          "!history:example.invalid": {
+            "generation": 2,
+            "status": {
+              "kind": "requested",
+              "received_keys": 3,
+              "recipients": 2,
+              "responses": 1
+            }
+          }
+        },
         "operation": {
           "kind": "idle"
         },

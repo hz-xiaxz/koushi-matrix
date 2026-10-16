@@ -150,9 +150,16 @@ impl AccountActor {
     pub(super) async fn route_room_command(&self, command: RoomCommand) {
         trace_room_route("send", &command);
         let forward_failure = space_member_forward_failure_action(&command);
+        let history_request = match &command {
+            RoomCommand::RequestHistoryKeys { request_id, .. } => Some(*request_id),
+            _ => None,
+        };
         let sent = self.room_actor.send(RoomMessage::Command(command)).await;
         if !sent {
             trace_room_route_closed();
+            if let Some(request_id) = history_request {
+                self.emit_failure(request_id, CoreFailure::StoreUnavailable);
+            }
             if let Some((request_id, failure_action)) = forward_failure {
                 let _ = self.send_actions(vec![failure_action]).await;
                 self.emit_failure(

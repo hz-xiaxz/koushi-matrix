@@ -15,6 +15,7 @@ import {
 import { Fragment, useEffect, useRef, useState, type ReactNode } from "react";
 
 import { t } from "../i18n/messages";
+import { HistoryKeyRecoveryControl } from "./HistoryKeyRecoveryControl";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import {
   InlineTextPropertyEditor,
@@ -88,6 +89,7 @@ export function RoomInfoPanel({
   onSetRoomUrlPreviewOverride,
   onOpenPeople,
   onRepairRoomTimeline,
+  onRequestHistoryKeys,
   onForceRotateOutboundSession,
   inviteHistoryPolicy,
   onOpenRecovery,
@@ -115,6 +117,7 @@ export function RoomInfoPanel({
   onSetRoomUrlPreviewOverride?: (roomId: string, enabled: boolean) => void;
   onOpenPeople?: () => void;
   onRepairRoomTimeline?: (roomId: string) => void | Promise<void>;
+  onRequestHistoryKeys?: (roomId: string, forceAll?: boolean) => void;
   onForceRotateOutboundSession?: (roomId: string) => void | Promise<void>;
   inviteHistoryPolicy?: InviteHistoryPolicy | null;
   onOpenRecovery?: () => void;
@@ -902,6 +905,13 @@ export function RoomInfoPanel({
         />
       ) : null}
 
+      {isEncrypted && onRequestHistoryKeys ? (
+        <details className="settings-section">
+          <summary>{t("historyKeys.troubleshooting")}</summary>
+          <p className="profile-settings-hint">{t("historyKeys.warning")}</p>
+          <HistoryKeyRecoveryControl forceAll state={roomManagement?.history_keys?.[roomId]} onRequest={() => onRequestHistoryKeys(roomId, true)} />
+        </details>
+      ) : null}
       {onRepairRoomTimeline ? (
         <section className="settings-section" aria-label={t("room.repair")}>
           <h3>{t("room.repair")}</h3>

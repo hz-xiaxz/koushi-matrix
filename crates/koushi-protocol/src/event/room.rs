@@ -10,6 +10,11 @@ use serde::{Deserialize, Serialize};
 
 #[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 pub enum RoomEvent {
+    HistoryKeysRequested {
+        request_id: RequestId,
+        room_id: String,
+        recipients: u16,
+    },
     RoomCreated {
         request_id: RequestId,
         room_id: String,
@@ -185,6 +190,16 @@ pub enum RoomEvent {
 impl fmt::Debug for RoomEvent {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
         match self {
+            Self::HistoryKeysRequested {
+                request_id,
+                recipients,
+                ..
+            } => formatter
+                .debug_struct("HistoryKeysRequested")
+                .field("request_id", request_id)
+                .field("room_id", &"RoomId(..)")
+                .field("recipients", recipients)
+                .finish(),
             Self::RoomCreated { request_id, .. } => formatter
                 .debug_struct("RoomCreated")
                 .field("request_id", request_id)

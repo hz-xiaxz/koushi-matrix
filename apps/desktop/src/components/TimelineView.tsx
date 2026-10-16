@@ -362,9 +362,13 @@ export const TimelineView = memo(function TimelineView({
   onRegisterJumpToLatest,
   editMentionCandidates = [],
   editMentionCandidatesLoading = false,
-  onMentionQueryChange
+  onMentionQueryChange,
+  onRequestHistoryKeys,
+  historyKeyRecovery
 }: {
   timelineKey: TimelineKey;
+  onRequestHistoryKeys?: (roomId: string, forceAll?: boolean) => void;
+  historyKeyRecovery?: import("../domain/types").HistoryKeyRecoveryState;
   accountTabId?: string;
   roomId: string;
   presentationContext?: "room" | "thread" | "focused";
@@ -3661,6 +3665,8 @@ export const TimelineView = memo(function TimelineView({
                   (contentEventId === initialTargetEventId || activityEventId === initialTargetEventId)
                 }
                 onRequestRoomKey={onRequestRoomKey}
+                onRequestHistoryKeys={onRequestHistoryKeys}
+                historyKeyRecovery={historyKeyRecovery}
                 autoLoadLinkPreviews={timelineItemIndexInRange(
                   visibleIndex,
                   linkPreviewRequestRange

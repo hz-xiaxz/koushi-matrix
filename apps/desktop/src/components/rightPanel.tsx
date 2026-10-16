@@ -211,6 +211,7 @@ export function ContextualRightPanel({
   onRebuildSearchIndex = () => undefined,
   onSetRoomUrlPreviewOverride = () => undefined,
   onRepairRoomTimeline = () => undefined,
+  onRequestHistoryKeys,
   onForceRotateOutboundSession = () => undefined,
   historyExportControls,
   onUpdateRoomSetting = () => undefined,
@@ -388,6 +389,7 @@ export function ContextualRightPanel({
   onRebuildSearchIndex?: () => void;
   onSetRoomUrlPreviewOverride?: (roomId: string, enabled: boolean) => void;
   onRepairRoomTimeline?: (roomId: string) => void | Promise<void>;
+  onRequestHistoryKeys?: (roomId: string, forceAll?: boolean) => void;
   onForceRotateOutboundSession?: (roomId: string) => void | Promise<void>;
   historyExportControls?: HistoryExportControls;
   onLoadAccountManagementCapabilities?: () => void;
@@ -749,6 +751,7 @@ export function ContextualRightPanel({
           }}
           onRepairRoomTimeline={onRepairRoomTimeline}
           onForceRotateOutboundSession={onForceRotateOutboundSession}
+          onRequestHistoryKeys={onRequestHistoryKeys}
           historyExport={snapshot.state.ui.history_export}
           historyExportControls={historyExportControls}
           onOpenPeople={() => {
@@ -1070,6 +1073,8 @@ export function ContextualRightPanel({
             ) : null}
             <TimelineView
               roomId={focusedRoomId}
+              onRequestHistoryKeys={onRequestHistoryKeys}
+              historyKeyRecovery={snapshot.state.domain.room_management.history_keys?.[focusedRoomId]}
               timelineKey={focusedTimelineKeyValue}
               accountTabId={selectedAccountTabId ?? undefined}
               transport={focusedTimelineTransport}
@@ -1173,6 +1178,8 @@ export function ContextualRightPanel({
             accountTabId={selectedAccountTabId ?? undefined}
             presentationContext="thread"
             roomId={threadRoomId}
+            onRequestHistoryKeys={onRequestHistoryKeys}
+            historyKeyRecovery={snapshot.state.domain.room_management.history_keys?.[threadRoomId]}
             timelineKey={threadTimelineKeyValue}
             transport={timelineTransport}
             onReply={threadReplyStable}

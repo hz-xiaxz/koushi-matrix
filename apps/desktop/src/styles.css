@@ -10701,3 +10701,6 @@ button.channel-access-pill:focus-visible {
   line-height: var(--room-count-block-size);
   white-space: nowrap;
 }
+
+.history-key-recovery { max-inline-size: 100%; margin-block: 0.5rem; }
+.history-key-recovery .message-send-action { white-space: normal; text-align: start; }

@@ -439,6 +439,12 @@ impl AccountActor {
             Some(self.navigation_projection.subscribe()),
             Some(self.focused_projection_tx.clone()),
         );
+        let _ = self
+            .timeline_manager
+            .send(crate::timeline::TimelineMessage::BindHistoryRecovery(
+                self.room_actor.sender(),
+            ))
+            .await;
         self.room_actor
             .bind_timeline_residency(session.clone(), self.timeline_manager.residency_handle());
         #[cfg(any(test, feature = "test-hooks"))]

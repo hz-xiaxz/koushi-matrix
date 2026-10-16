@@ -943,6 +943,10 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandAdmission>("request_room_key", { roomId, eventId, origin, timelineKey });
   }
 
+  async requestHistoryKeys(roomId: string, forceAll = false): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("request_history_keys", { roomId, forceAll });
+  }
+
   async requestLateDecryption(
     roomId: string,
     timelineKey?: TimelineKey

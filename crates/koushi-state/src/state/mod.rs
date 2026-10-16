@@ -19,6 +19,11 @@ mod e2ee;
 mod errors;
 mod files_view;
 mod history_export;
+mod history_keys;
+pub use history_keys::{
+    HistoryKeyRecoveryFailure, HistoryKeyRecoveryState, HistoryKeyRecoveryStatus,
+    history_key_request_targets_all,
+};
 mod invite_workflow;
 mod live_signals;
 mod local_encryption;

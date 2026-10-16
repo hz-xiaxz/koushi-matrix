@@ -338,6 +338,7 @@ impl TimelineManagerActor {
         let (msg_tx, msg_rx) = mpsc::channel(8);
         let (terminal_ingress, terminal_rx) = TimelineSendTerminalIngress::channel();
         Self {
+            history_recovery: None,
             session: None,
             room_list_service: Some(room_list_service),
             room_subscription_checkpoint_task: None,

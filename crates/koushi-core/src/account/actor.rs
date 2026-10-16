@@ -128,6 +128,18 @@ pub(crate) type ResidencyInstallGapSessions = (
 
 /// Messages routed to the AccountActor task.
 pub(crate) enum AccountMessage {
+    #[cfg(any(test, feature = "test-hooks"))]
+    PauseHistoryKeyImport {
+        disclosure: bool,
+        reached: oneshot::Sender<()>,
+        resume: oneshot::Receiver<()>,
+        installed: oneshot::Sender<bool>,
+    },
+    #[cfg(any(test, feature = "test-hooks"))]
+    HistoryRecoveryBarrier {
+        room_id: Option<String>,
+        completed: oneshot::Sender<crate::room::HistoryKeyRecoveryDiagnostics>,
+    },
     ReadReceiptWindow {
         source: koushi_protocol::view::ReceiptSourceRef,
         start: u64,
@@ -2562,6 +2574,33 @@ impl AccountActor {
                 } => {
                     self.residency_teardown_gap = Some((reached, release));
                     let _ = configured.send(());
+                }
+                #[cfg(any(test, feature = "test-hooks"))]
+                AccountMessage::PauseHistoryKeyImport {
+                    disclosure,
+                    reached,
+                    resume,
+                    installed,
+                } => {
+                    let _ = self
+                        .room_actor
+                        .send(crate::room::RoomMessage::PauseHistoryKeyImport {
+                            disclosure,
+                            reached,
+                            resume,
+                            installed,
+                        })
+                        .await;
+                }
+                #[cfg(any(test, feature = "test-hooks"))]
+                AccountMessage::HistoryRecoveryBarrier { room_id, completed } => {
+                    let _ = self
+                        .room_actor
+                        .send(crate::room::RoomMessage::HistoryRecoveryBarrier {
+                            room_id,
+                            completed,
+                        })
+                        .await;
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestInstallSession { session, completed } => {

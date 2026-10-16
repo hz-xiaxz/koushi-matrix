@@ -1822,6 +1822,7 @@ pub fn run() {
             commands::timeline::save_downloaded_media,
             commands::timeline::load_message_source,
             commands::timeline::request_room_key,
+            commands::room::request_history_keys,
             commands::timeline::request_late_decryption,
             commands::timeline::load_link_previews,
             commands::timeline::hide_link_preview,

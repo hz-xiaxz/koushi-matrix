@@ -39,6 +39,7 @@ export const PR_CI_SCENARIOS = Object.freeze(["invites_dm", "gate_no_proof"]);
 // Focused scenarios outside `all` that run nightly, one run per scenario, so
 // one failure does not hide the others. `all` runs in its own nightly job.
 export const NIGHTLY_SCENARIOS = Object.freeze([
+  "history_key_recovery_window",
   "gate_negative",
   "gate_restore",
   "device_cleanup",

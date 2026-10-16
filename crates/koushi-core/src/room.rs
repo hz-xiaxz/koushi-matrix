@@ -5,6 +5,7 @@
 
 mod actor;
 mod directory;
+mod history_keys;
 mod list_observer;
 mod management;
 mod mentions;
@@ -17,6 +18,7 @@ mod space_members;
 
 pub(crate) use actor::RoomMessage;
 pub use actor::{MissingSpaceChildLink, RoomActor, RoomActorHandle, RoomListReconcileAck};
+pub use history_keys::HistoryKeyRecoveryDiagnostics;
 #[cfg(test)]
 pub(crate) use navigation_enrichment::NavigationEnrichmentDemand;
 pub(crate) use navigation_enrichment::NavigationEnrichmentIngress;

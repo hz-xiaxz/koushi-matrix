@@ -274,6 +274,11 @@ to upstream or revert.
   timer, or manual share/repair control; the only debugging control is stock
   `Room::discard_room_key()`. Details: overview "Initial outbound Megolm
   delivery".
+  Explicit historical recovery is a separate receive-side workflow governed by
+  the Security Model and historical-recovery specification: it forwards only
+  SDK-marked shared-history inbound sessions after fresh membership and trust
+  checks. It uses the inbound historical export path and never changes the
+  standard outbound pre-share or rotation path.
 
 ## QA Gates And Cleanup
 

@@ -36,7 +36,7 @@ exclude = ["vendor/matrix-rust-sdk"]
 license = "MIT OR Apache-2.0"
 
 [workspace.dependencies]
-matrix-sdk = { path = "vendor/matrix-rust-sdk/crates/matrix-sdk", default-features = false, features = ["automatic-room-key-forwarding", "e2e-encryption", "experimental-search", "sqlite"] }
+matrix-sdk = { path = "vendor/matrix-rust-sdk/crates/matrix-sdk", default-features = false, features = ["automatic-room-key-forwarding", "e2e-encryption", "experimental-search", "experimental-send-custom-to-device", "sqlite"] }
 matrix-sdk-base = { path = "vendor/matrix-rust-sdk/crates/matrix-sdk-base" }
 matrix-sdk-search = { path = "vendor/matrix-rust-sdk/crates/matrix-sdk-search" }
 matrix-sdk-test = { path = "vendor/matrix-rust-sdk/testing/matrix-sdk-test" }

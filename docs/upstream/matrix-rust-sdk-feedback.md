@@ -52,6 +52,38 @@ or SDK boundary without logging private Matrix payloads.
 
 ## Upstreamable Patch Material
 
+- Explicit historical-key recovery primitives (2026-10-17): the product's
+  custom request protocol, authorization, retries and UI remain in Koushi Core.
+  The SDK fork adds generic access to application metadata in the encrypted
+  crypto store, bounded shared-history bundle export, and room-scoped import
+  from a currently cross-signing-verified, unblocked forwarder. Import derives
+  forwarding provenance inside the SDK and retains its normal merge behavior;
+  it does not treat file import as authenticated sharing. The public wrappers
+  are gated by the existing experimental custom-to-device feature. The generic
+  bounded store accessor defaults to unsupported, never an unbounded fallback;
+  MemoryStore checks the count under its read lock and SQLite applies SQL
+  LIMIT before decrypting/unpickling rows. Other custom stores can opt in.
+  Count/byte overflow, unverified/blocked forwarders, cross-room rejection,
+  idempotence and encrypted SQLite retrieval have focused coverage. Import
+  diagnostics now log counts instead of the imported room/session map.
+  Upstream intent: propose these small generic primitives separately from
+  Koushi's application-specific wire protocol and remove equivalent fork APIs
+  when public upstream replacements become available.
+
+- Invited-room historical-key recovery window (2026-10-17): Koushi retains
+  pending inviter bundles for 30 days after invitation acceptance instead of
+  the SDK default of 24 hours. Users may restart well after accepting an invite
+  before the bundle import has completed. The SDK owns both live acceptance
+  and startup expiry cleanup and exposes no public window configuration, so a
+  small patch to their common predicate is necessary. Matching the recorded
+  inviter, joined-room state, room scope, SDK trust checks and future-timestamp
+  rejection are preserved. Fixed-clock tests cover acceptance at 24 hours,
+  29 days and just before 30 days, with rejection at/after 30 days and for
+  future timestamps. Upstream intent: propose a configurable acceptance window
+  rather than require all SDK clients to adopt Koushi's default; remove the
+  local patch when an equivalent public setting is available. The change does
+  not resend bundles or reconstruct already-expired pending records.
+
 - Cancellation-safe event-focused initialization (#1146, 2026-10-07, fork
   topic `8c861d4` on `fix/1146-transactional-focused-cache`) changes only `event_cache/caches/event_focused/mod.rs` and its constructor caller in
   `event_cache/caches/mod.rs`. Initial context loading now completes on local,

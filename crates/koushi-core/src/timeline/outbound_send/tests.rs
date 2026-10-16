@@ -792,6 +792,7 @@ async fn duplicate_submission_routes_one_manager_enqueue_worker() {
     let (msg_tx, msg_rx) = mpsc::channel(1);
     let (terminal_ingress, terminal_rx) = TimelineSendTerminalIngress::channel();
     let mut manager = TimelineManagerActor {
+        history_recovery: None,
         session: None,
         room_list_service: None,
         room_subscription_checkpoint_task: None,
@@ -1261,6 +1262,7 @@ async fn shutdown_cleans_captured_room_keys_before_acknowledging() {
     let (msg_tx, msg_rx) = mpsc::channel(4);
     let (terminal_ingress, terminal_rx) = TimelineSendTerminalIngress::channel();
     let manager = TimelineManagerActor {
+        history_recovery: None,
         session: None,
         room_list_service: None,
         room_subscription_checkpoint_task: None,
@@ -1362,6 +1364,7 @@ async fn manager_enqueue_worker_waits_for_reducer_acceptance_delivery() {
     let (msg_tx, msg_rx) = mpsc::channel(1);
     let (terminal_ingress, terminal_rx) = TimelineSendTerminalIngress::channel();
     let mut manager = TimelineManagerActor {
+        history_recovery: None,
         session: None,
         room_list_service: None,
         room_subscription_checkpoint_task: None,

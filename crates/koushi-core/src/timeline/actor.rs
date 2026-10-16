@@ -198,6 +198,7 @@ impl ThreadSummaryProjectionIngress {
 }
 
 pub(super) enum TimelineActorMessage {
+    BindHistoryRecovery(mpsc::Sender<crate::room::RoomMessage>),
     ReadReceiptWindow {
         source: koushi_protocol::view::ReceiptSourceRef,
         start: u64,
@@ -818,6 +819,7 @@ pub(super) struct LocalViewedBoundary {
 }
 
 pub(super) struct TimelineActor {
+    pub(super) history_recovery: Option<mpsc::Sender<crate::room::RoomMessage>>,
     pub(super) key: TimelineKey,
     pub(super) timeline: Arc<Timeline>,
     pub(super) session: Arc<MatrixClientSession>,
@@ -1994,6 +1996,7 @@ impl TimelineActor {
             reply_quote_hydration.retain(root_event_id);
         }
         let mut actor = TimelineActor {
+            history_recovery: None,
             key: key.clone(),
             timeline,
             session,
@@ -2622,6 +2625,10 @@ impl TimelineActor {
             }
             TimelineActorMessage::ReplyQuoteRetryDue { event_id, token } => {
                 self.handle_reply_quote_retry_due(event_id, token);
+            }
+            TimelineActorMessage::BindHistoryRecovery(tx) => {
+                self.history_recovery = Some(tx);
+                self.report_history_decryption().await;
             }
             TimelineActorMessage::RequestRoomKey {
                 request_id,

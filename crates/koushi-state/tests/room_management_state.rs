@@ -345,6 +345,7 @@ fn room_management_debug_output_redacts_private_values() {
         format!(
             "{:?}",
             RoomManagementState {
+                history_keys: Default::default(),
                 selected_room_id: Some("!private-room:example.invalid".to_owned()),
                 settings: Some(settings.clone()),
                 draft: None,
@@ -518,6 +519,7 @@ fn room_member_role_update_without_permission_is_rejected_in_rust_state() {
 fn room_settings_snapshot_replaces_existing_room_management_state() {
     let mut state = ready_state();
     state.room_management = RoomManagementState {
+        history_keys: Default::default(),
         selected_room_id: Some("!old:example.invalid".to_owned()),
         settings: Some(editable_settings("!old:example.invalid")),
         draft: None,
@@ -542,6 +544,7 @@ fn room_settings_snapshot_replaces_existing_room_management_state() {
     assert_eq!(
         state.room_management,
         RoomManagementState {
+            history_keys: Default::default(),
             selected_room_id: Some("!new:example.invalid".to_owned()),
             settings: Some(editable_settings("!new:example.invalid")),
             draft: None,
@@ -562,6 +565,7 @@ fn room_settings_snapshot_preserves_same_room_pending_operation() {
     let mut state = ready_state();
     let room_id = "!room:example.invalid";
     state.room_management = RoomManagementState {
+        history_keys: Default::default(),
         selected_room_id: Some(room_id.to_owned()),
         settings: Some(editable_settings(room_id)),
         draft: None,
@@ -943,6 +947,7 @@ fn access_policy() -> RoomSettingChange {
 fn access_policy_edit_is_rejected_with_the_unsupported_condition_kind() {
     let mut state = ready_state();
     state.room_management = RoomManagementState {
+        history_keys: Default::default(),
         selected_room_id: Some("!room:example.invalid".to_owned()),
         settings: Some(settings_with_access(
             "!room:example.invalid",
@@ -983,6 +988,7 @@ fn access_policy_edit_is_rejected_with_the_unsupported_condition_kind() {
 fn access_policy_edit_is_rejected_when_the_current_policy_is_unverified() {
     let mut state = ready_state();
     state.room_management = RoomManagementState {
+        history_keys: Default::default(),
         selected_room_id: Some("!room:example.invalid".to_owned()),
         settings: Some(settings_with_access(
             "!room:example.invalid",
@@ -1023,6 +1029,7 @@ fn access_policy_edit_is_rejected_when_the_current_policy_is_unverified() {
 fn access_policy_edit_is_admitted_for_verified_membership_only_content() {
     let mut state = ready_state();
     state.room_management = RoomManagementState {
+        history_keys: Default::default(),
         selected_room_id: Some("!room:example.invalid".to_owned()),
         settings: Some(settings_with_access(
             "!room:example.invalid",
@@ -1073,6 +1080,7 @@ fn a_pre_send_rejection_is_admitted_against_the_raw_read_not_the_preserved_value
         },
     );
     state.room_management = RoomManagementState {
+        history_keys: Default::default(),
         selected_room_id: Some(room.to_owned()),
         settings: Some(settings_with_access(room, accepted.clone())),
         ..RoomManagementState::default()
@@ -1645,6 +1653,7 @@ fn a_newly_selected_target_must_be_a_joined_verified_space() {
 fn an_existing_non_space_condition_is_rejected_when_its_edit_would_drop_it() {
     let mut state = ready_state();
     state.room_management = RoomManagementState {
+        history_keys: Default::default(),
         selected_room_id: Some("!room:example.invalid".to_owned()),
         settings: Some(settings_with_access(
             "!room:example.invalid",
@@ -1738,6 +1747,7 @@ fn directory_visibility_observation_only_applies_to_the_open_room() {
 fn opening_a_room_editor_restores_the_confirmed_allow_list() {
     let mut state = ready_state();
     state.room_management = RoomManagementState {
+        history_keys: Default::default(),
         selected_room_id: Some("!room:example.invalid".to_owned()),
         settings: Some(settings_with_access(
             "!room:example.invalid",
@@ -1782,6 +1792,7 @@ fn opening_a_room_editor_restores_the_confirmed_allow_list() {
 fn two_rapid_room_target_edits_apply_against_the_current_draft() {
     let mut state = ready_state();
     state.room_management = RoomManagementState {
+        history_keys: Default::default(),
         selected_room_id: Some("!room:example.invalid".to_owned()),
         settings: Some(settings_with_access(
             "!room:example.invalid",
@@ -1856,6 +1867,7 @@ fn the_draft_serializes_only_renderable_allow_targets() {
     let room = "!room:example.invalid";
     let mut state = ready_state();
     state.room_management = RoomManagementState {
+        history_keys: Default::default(),
         selected_room_id: Some(room.to_owned()),
         settings: Some(settings_with_access(
             room,
@@ -1908,6 +1920,7 @@ fn the_access_preview_never_serializes_a_preserved_target_identity() {
     let room = "!room:example.invalid";
     let mut state = ready_state();
     state.room_management = RoomManagementState {
+        history_keys: Default::default(),
         selected_room_id: Some(room.to_owned()),
         settings: Some(settings_with_access(
             room,

@@ -1929,6 +1929,13 @@ Repeated Core evaluations with the same coarse signature are deduplicated.
 
 ## Security Model
 
+Historical-key recovery follows the guarded, Rust-owned contract in
+[the historical recovery design](../superpowers/specs/2026-10-17-history-key-recovery-design.md).
+Invitation bundles remain eligible for 30 days after acceptance on this
+client. Explicit recovery never shares sessions that lack the SDK's
+shared_history permission, bypasses current membership or verified device
+trust, or treats a queued request as completed recovery.
+
 Full prohibitions live in
 [REPOSITORY_RULES.md](../../REPOSITORY_RULES.md) and the detailed policy
 extension in

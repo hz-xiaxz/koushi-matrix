@@ -1137,6 +1137,13 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
     assert_eq!(failed["kind"], json!("OperationFailed"));
     assert_eq!(failed["failure"], json!("SessionNotFound"));
 
+    let history_keys_requested =
+        serialize_core_event(&CoreEvent::Room(RoomEvent::HistoryKeysRequested {
+            request_id,
+            room_id: "!history:example.invalid".to_owned(),
+            recipients: 2,
+        }))
+        .expect("serialize historical key request");
     let room_left = serialize_core_event(&CoreEvent::Room(RoomEvent::RoomLeft {
         request_id,
         room_id: "!r:example.test".to_owned(),
@@ -1732,6 +1739,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
             "roomInviteAccepted": room_invite_accepted,
             "roomInviteDeclined": room_invite_declined,
             "roomLeft": room_left,
+            "historyKeysRequested": history_keys_requested,
             "roomKeyRequestStateChanged": room_key_request_state_changed,
             "composerSlashCommandRejected": composer_slash_command_rejected,
             "roomMarkedAsRead": room_marked_as_read,
@@ -1887,6 +1895,7 @@ fn core_event_contract_artifact_key_set_does_not_shrink() {
         "roomInviteAccepted",
         "roomInviteDeclined",
         "roomLeft",
+        "historyKeysRequested",
         "roomKeyRequestStateChanged",
         "composerSlashCommandRejected",
         "roomMarkedAsRead",

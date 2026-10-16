@@ -1167,6 +1167,31 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             via_servers,
             kind,
         ),
+        AppAction::HistoryKeyRecoveryChanged {
+            room_id,
+            state: next,
+        } => {
+            let current = state
+                .room_management
+                .history_keys
+                .entry(room_id)
+                .or_default();
+            let regresses_same_operation = next.generation == current.generation
+                && matches!(
+                    next.status,
+                    crate::HistoryKeyRecoveryStatus::Sending
+                        | crate::HistoryKeyRecoveryStatus::Idle
+                )
+                && !matches!(
+                    current.status,
+                    crate::HistoryKeyRecoveryStatus::Sending
+                        | crate::HistoryKeyRecoveryStatus::Idle
+                );
+            if next.generation >= current.generation && !regresses_same_operation {
+                *current = next;
+            }
+            Vec::new()
+        }
         AppAction::RoomSettingsSnapshotLoaded { room_id, settings } => {
             room_management::handle_room_settings_snapshot_loaded(state, room_id, settings)
         }

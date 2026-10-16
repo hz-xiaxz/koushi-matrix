@@ -110,6 +110,8 @@ mod scenario_avatars;
 mod scenario_hidden_state_acl;
 #[path = "headless_core_qa/scenarios/history_export.rs"]
 mod scenario_history_export;
+#[path = "headless_core_qa/scenarios/history_key_recovery_window.rs"]
+mod scenario_history_key_recovery_window;
 #[path = "headless_core_qa/scenarios/identity.rs"]
 mod scenario_identity;
 #[path = "headless_core_qa/scenarios/idle_sync_gap_inspection.rs"]

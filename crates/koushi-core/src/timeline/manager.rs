@@ -208,6 +208,7 @@ async fn hydrate_initial_thread(
 
 /// Messages routed to the `TimelineManagerActor`.
 pub(crate) enum TimelineMessage {
+    BindHistoryRecovery(mpsc::Sender<crate::room::RoomMessage>),
     ReadReceiptWindow {
         source: koushi_protocol::view::ReceiptSourceRef,
         start: u64,
@@ -544,6 +545,7 @@ impl TimelineManagerHandle {
 /// Colocated as a child task under `AccountActor` (spec: "actor deployment
 /// is flexible; boundaries define ownership not one task per actor").
 pub struct TimelineManagerActor {
+    pub(super) history_recovery: Option<mpsc::Sender<crate::room::RoomMessage>>,
     pub(super) session: Option<Arc<MatrixClientSession>>,
     pub(super) room_list_service: Option<Arc<matrix_sdk_ui::room_list_service::RoomListService>>,
     pub(super) room_subscription_checkpoint_task: Option<executor::JoinHandle<()>>,
@@ -650,6 +652,7 @@ impl TimelineManagerActor {
             gate: MembershipOperationGate::new(),
         };
         let actor = TimelineManagerActor {
+            history_recovery: None,
             session: None,
             room_list_service: None,
             room_subscription_checkpoint_task: None,
@@ -748,6 +751,7 @@ impl TimelineManagerActor {
             )) as GlobalSendCompletionObserverFuture);
         let typing_lane = TypingLane::matrix(Arc::clone(&session));
         let actor = TimelineManagerActor {
+            history_recovery: None,
             session: Some(Arc::clone(&session)),
             room_list_service: None,
             room_subscription_checkpoint_task: None,
@@ -932,6 +936,9 @@ impl TimelineManagerActor {
             };
             let Some(msg) = msg else { break };
             match msg {
+                TimelineMessage::BindHistoryRecovery(tx) => {
+                    self.history_recovery = Some(tx);
+                }
                 TimelineMessage::ReadReceiptWindow {
                     source,
                     start,
@@ -2511,6 +2518,12 @@ impl TimelineManagerActor {
             self.msg_tx.clone(),
         );
         let handle = self.await_driving_manager_workers(spawn).await;
+        if let Some(tx) = &self.history_recovery {
+            let _ = handle
+                .tx
+                .send(TimelineActorMessage::BindHistoryRecovery(tx.clone()))
+                .await;
+        }
         record_subscribe_stage("spawn_done", None);
         handle
     }

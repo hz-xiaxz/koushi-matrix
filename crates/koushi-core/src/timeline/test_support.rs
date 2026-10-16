@@ -160,6 +160,7 @@ pub(super) fn live_tail_test_manager(
     let (msg_tx, msg_rx) = mpsc::channel(8);
     let (terminal_ingress, terminal_rx) = TimelineSendTerminalIngress::channel();
     TimelineManagerActor {
+        history_recovery: None,
         session: None,
         room_list_service: None,
         room_subscription_checkpoint_task: None,
