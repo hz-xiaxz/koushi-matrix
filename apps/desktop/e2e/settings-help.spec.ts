@@ -193,6 +193,47 @@ test("language round trip persists the explicit choice across Settings reopen", 
   ).toHaveValue("en");
 });
 
+for (const { tag, lang } of [
+  { tag: "zh-Hans", lang: "zh-Hans" },
+  { tag: "zh-Hant", lang: "zh-Hant" },
+  { tag: "ko", lang: "ko" }
+] as const) {
+  test(`selecting ${tag} switches the running UI and persists across Settings reopen (#1461)`, async ({ page }) => {
+    await gotoReadyShell(page);
+    await page.evaluate(() => window.__harness.clearInvocations());
+    await page.getByRole("button", { name: "App Settings", exact: true }).click();
+    await expect(page.getByRole("dialog", { name: "App Settings", exact: true })).toBeVisible();
+    const languageSelect = page.locator(
+      "dialog.user-settings-modal #settings-page-appearance .profile-settings-field select"
+    );
+    await expect(languageSelect.locator("option")).toHaveText([
+      "English", "日本語", "简体中文", "繁體中文", "한국어"
+    ]);
+
+    await languageSelect.selectOption(tag);
+    await expect(languageSelect).toHaveValue(tag);
+    await expect.poll(() => page.evaluate(() => document.documentElement.lang)).toBe(lang);
+    expect(
+      await page.evaluate(() => window.__harness.invocationsOf("update_settings").at(-1)?.args)
+    ).toEqual({
+      patch: { locale: { language_tag: tag, text_direction: "auto" }, scope: "app" }
+    });
+    // The running UI renders the translated catalog, not English: the dialog is renamed.
+    await expect(page.locator("dialog.user-settings-modal")).toBeVisible();
+    await expect(page.getByRole("dialog", { name: "App Settings", exact: true })).toHaveCount(0);
+
+    await page.keyboard.press("Escape");
+    await expect(page.locator("dialog.user-settings-modal")).toHaveCount(0);
+    // Reopen through the native menu so the locator does not depend on translated names.
+    await page.evaluate(() => window.__harness.pushDesktopMenu("openAppSettings"));
+    await expect(
+      page.locator(
+        "dialog.user-settings-modal #settings-page-appearance .profile-settings-field select"
+      )
+    ).toHaveValue(tag);
+  });
+}
+
 test("native Help opens a URL-copy dialog before sign-in", async ({ page, context }) => {
   await context.grantPermissions(["clipboard-read", "clipboard-write"]);
   await gotoReadyShell(page);

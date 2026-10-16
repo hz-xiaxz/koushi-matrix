@@ -621,17 +621,17 @@ function resolveLocaleDisplayProfile(locale: LocaleSettings): LocaleDisplayProfi
   const catalogLocale =
     pseudoLocale === "accented" || pseudoLocale === "bidi"
       ? "pseudo"
-      : parsed?.language === "ja"
-        ? "ja"
+      : parsed && parsed.language !== "rtl"
+        ? parsed.language
         : "en";
   const lang =
     pseudoLocale === "accented"
       ? "en-XA"
       : pseudoLocale === "bidi"
         ? "ar-XB"
-        : catalogLocale === "ja"
-          ? "ja"
-          : "en";
+        : catalogLocale === "pseudo"
+          ? "en"
+          : catalogLocale;
   const dir =
     locale.text_direction === "ltr" || locale.text_direction === "rtl"
       ? locale.text_direction
@@ -652,7 +652,7 @@ function resolveLocaleDisplayProfile(locale: LocaleSettings): LocaleDisplayProfi
 function parseLocale(
   rawTag: string | null
 ): {
-  language: "en" | "ja" | "rtl";
+  language: "en" | "ja" | "zh-Hans" | "zh-Hant" | "ko" | "rtl";
   direction: "ltr" | "rtl";
   pseudo_locale: "none" | "accented" | "bidi";
 } | null {
@@ -683,6 +683,17 @@ function parseLocale(
   }
   if (primary === "ja") {
     return { language: "ja", direction: "ltr", pseudo_locale };
+  }
+  if (primary === "ko") {
+    return { language: "ko", direction: "ltr", pseudo_locale };
+  }
+  if (primary === "zh") {
+    // Mirror of the Rust #1461 policy: script subtag, then TW/HK/MO region.
+    const lower = rest.map((subtag) => subtag.toLowerCase());
+    const script = lower.find((subtag) => subtag === "hans" || subtag === "hant");
+    const traditional =
+      script === "hant" || (!script && lower.some((subtag) => ["tw", "hk", "mo"].includes(subtag)));
+    return { language: traditional ? "zh-Hant" : "zh-Hans", direction: "ltr", pseudo_locale };
   }
   if (["ar", "dv", "fa", "he", "ps", "sd", "ug", "ur", "yi"].includes(primary)) {
     return { language: "rtl", direction: "rtl", pseudo_locale };
@@ -885,7 +896,8 @@ function receiptReaderRows(source: ReceiptSourceRef): {
       : "Focused" in kind
         ? roomSignals?.focused_receipts_by_event?.[kind.Focused.event_id]?.[source.event_id]
         : roomSignals?.receipts_by_event[source.event_id];
-  const locale = currentSnapshot.state.domain.locale_profile.catalog_locale === "ja" ? "ja" : "en";
+  const catalogLocale = currentSnapshot.state.domain.locale_profile.catalog_locale;
+  const locale = catalogLocale === "pseudo" ? "en" : catalogLocale;
   const rows = (summary?.readers ?? []).map((reader): ReaderRow => {
     const displayLabel = (reader.display_name ?? reader.original_display_label) || reader.user_id;
     return {

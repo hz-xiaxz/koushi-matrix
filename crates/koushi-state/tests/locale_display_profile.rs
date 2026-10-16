@@ -207,3 +207,92 @@ fn display_platform_owns_the_oauth_device_name() {
         "Koushi on Linux"
     );
 }
+
+#[test]
+fn chinese_and_korean_tags_resolve_by_documented_script_region_policy() {
+    // #1461: explicit script subtag wins, then region, then Simplified default.
+    let cases = [
+        ("zh", CatalogLocale::ZhHans, "zh-Hans"),
+        ("zh-Hans", CatalogLocale::ZhHans, "zh-Hans"),
+        ("zh-CN", CatalogLocale::ZhHans, "zh-Hans"),
+        ("zh-SG", CatalogLocale::ZhHans, "zh-Hans"),
+        ("zh_CN", CatalogLocale::ZhHans, "zh-Hans"),
+        ("ZH-hans-cn", CatalogLocale::ZhHans, "zh-Hans"),
+        ("zh-Hans-TW", CatalogLocale::ZhHans, "zh-Hans"),
+        ("zh-Hans-HK", CatalogLocale::ZhHans, "zh-Hans"),
+        ("zh-US", CatalogLocale::ZhHans, "zh-Hans"),
+        ("zh-Hant", CatalogLocale::ZhHant, "zh-Hant"),
+        ("zh-TW", CatalogLocale::ZhHant, "zh-Hant"),
+        ("zh-HK", CatalogLocale::ZhHant, "zh-Hant"),
+        ("zh-MO", CatalogLocale::ZhHant, "zh-Hant"),
+        ("zh-hant-tw", CatalogLocale::ZhHant, "zh-Hant"),
+        ("zh-Hant-CN", CatalogLocale::ZhHant, "zh-Hant"),
+        ("ko", CatalogLocale::Ko, "ko"),
+        ("ko-KR", CatalogLocale::Ko, "ko"),
+        ("ko_kr", CatalogLocale::Ko, "ko"),
+    ];
+    for (tag, catalog, lang) in cases {
+        let profile = resolve_locale_display_profile(
+            &locale_settings(tag, TextDirectionPreference::Auto),
+            DisplayPlatform::Windows,
+        );
+        assert_eq!(profile.catalog_locale, catalog, "{tag}");
+        assert_eq!(profile.lang, lang, "{tag}");
+        assert_eq!(profile.dir, LocaleDirection::Ltr, "{tag}");
+        assert_eq!(profile.pseudo_locale, PseudoLocaleMode::None, "{tag}");
+        assert_eq!(
+            koushi_state::resolve_catalog_locale(&locale_settings(
+                tag,
+                TextDirectionPreference::Auto
+            )),
+            catalog,
+            "{tag}"
+        );
+    }
+}
+
+#[test]
+fn invalid_or_private_chinese_and_korean_tags_fall_back_to_english() {
+    for tag in [
+        "zh-x-private-room-alpha",
+        "ko-x-private",
+        "zh--CN",
+        "zh-Hans-overlongsubtag",
+        "ko-KR!",
+        "zho",
+        "kor",
+    ] {
+        let profile = resolve_locale_display_profile(
+            &locale_settings(tag, TextDirectionPreference::Auto),
+            DisplayPlatform::Linux,
+        );
+        assert_eq!(profile.catalog_locale, CatalogLocale::En, "{tag}");
+        assert_eq!(profile.lang, "en", "{tag}");
+        assert_eq!(profile.dir, LocaleDirection::Ltr, "{tag}");
+        assert!(!format!("{profile:?}").contains("private"), "{tag}");
+    }
+}
+
+#[test]
+fn chinese_and_korean_profiles_serialize_bcp47_catalog_ids() {
+    for (tag, wire) in [("zh-CN", "zh-Hans"), ("zh-TW", "zh-Hant"), ("ko-KR", "ko")] {
+        let profile = resolve_locale_display_profile(
+            &locale_settings(tag, TextDirectionPreference::Auto),
+            DisplayPlatform::Macos,
+        );
+        assert_eq!(
+            serde_json::to_value(&profile).unwrap(),
+            json!({
+                "lang": wire,
+                "dir": "ltr",
+                "catalog_locale": wire,
+                "pseudo_locale": "none",
+                "platform": "macos",
+                "modifier_labels": { "primary": "Cmd" }
+            })
+        );
+        let round_trip: koushi_state::LocaleDisplayProfile =
+            serde_json::from_value(serde_json::to_value(&profile).unwrap()).unwrap();
+        assert_eq!(round_trip, profile);
+    }
+}

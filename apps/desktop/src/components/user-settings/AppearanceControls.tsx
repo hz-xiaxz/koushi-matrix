@@ -240,7 +240,7 @@ export function LanguageControls({ catalogLocale, selectedLocale, onUpdateSettin
   // the snapshot; the component never reads the global catalog or parses raw
   // tags. An unsupported stored tag resolves to the English catalog, and a
   // supported explicit tag is sent on change.
-  const selectedLanguageTag = catalogLocale === "ja" ? "ja-JP" : "en";
+  const selectedLanguageTag = languageTagForCatalogLocale(catalogLocale);
   return (
     <label className="profile-settings-field">
       <span>{t("settings.language")}</span>
@@ -257,7 +257,26 @@ export function LanguageControls({ catalogLocale, selectedLocale, onUpdateSettin
       >
         <option value="en">{t("settings.languageEnglish")}</option>
         <option value="ja-JP">{t("settings.languageJapanese")}</option>
+        <option value="zh-Hans">{t("settings.languageSimplifiedChinese")}</option>
+        <option value="zh-Hant">{t("settings.languageTraditionalChinese")}</option>
+        <option value="ko">{t("settings.languageKorean")}</option>
       </select>
     </label>
   );
+}
+
+/** The selector value for a Rust-resolved catalog; the pseudo catalog and any
+ * unsupported stored tag show as English (#1461). */
+function languageTagForCatalogLocale(catalogLocale: CatalogLocale): string {
+  switch (catalogLocale) {
+    case "ja":
+      return "ja-JP";
+    case "zh-Hans":
+    case "zh-Hant":
+    case "ko":
+      return catalogLocale;
+    case "en":
+    case "pseudo":
+      return "en";
+  }
 }

@@ -4,7 +4,9 @@ import { describe, expect, test } from "vitest";
 import { contextMenuItems } from "../domain/contextMenus";
 import { elementShortcutParity, keyboardShortcutGroups } from "../domain/shortcuts";
 import {
+  MESSAGE_PLACEHOLDER_PATTERN,
   catalogs,
+  localeLanguageTag,
   pseudoLocalize,
   setActiveLocaleProfile,
   t,
@@ -451,12 +453,126 @@ const japaneseIdenticalMessageAllowlist = new Set<MessageId>([
   // locale, so "English" and "日本語" read the same in both catalogs.
   "settings.languageEnglish",
   "settings.languageJapanese",
+  "settings.languageSimplifiedChinese",
+  "settings.languageTraditionalChinese",
+  "settings.languageKorean",
   "timeline.mediaUploadProgress",
   "workspace.people",
   // Templates combine a localized reply count with user-provided sender/body text.
   "timeline.threadSummaryWithBody",
   "timeline.threadSummaryWithPreview",
   "timeline.threadSummaryWithSender"
+]);
+
+describe("Chinese and Korean catalogs (#1461)", () => {
+  const translatedLocales = ["zh-Hans", "zh-Hant", "ko"] as const;
+  const placeholders = (template: string) =>
+    [...template.matchAll(MESSAGE_PLACEHOLDER_PATTERN)].map((match) => match[0]).sort();
+
+  test.each(translatedLocales)("%s catalog has exactly the English message ids", (locale) => {
+    expect(Object.keys(catalogs[locale]).sort()).toEqual(Object.keys(catalogs.en).sort());
+    for (const id of Object.keys(catalogs.en) as MessageId[]) {
+      expect(typeof catalogs[locale][id], id).toBe("string");
+      expect(catalogs[locale][id].trim(), id).not.toBe("");
+    }
+  });
+
+  test.each(translatedLocales)("%s catalog preserves every named placeholder", (locale) => {
+    const mismatches = (Object.keys(catalogs.en) as MessageId[]).filter(
+      (id) => placeholders(catalogs[locale][id]).join() !== placeholders(catalogs.en[id]).join()
+    );
+    expect(mismatches).toEqual([]);
+  });
+
+  test.each(translatedLocales)(
+    "%s catalog translates every message id except the named allowlist",
+    (locale) => {
+      const identical = (Object.keys(catalogs.en) as MessageId[]).filter(
+        (id) => catalogs[locale][id] === catalogs.en[id] && !translatedLocaleIdenticalAllowlist.has(id)
+      );
+      expect(identical).toEqual([]);
+    }
+  );
+
+  test("Traditional Chinese is a Taiwan-vocabulary catalog, not a copy of Simplified Chinese", () => {
+    const sameAsSimplified = (Object.keys(catalogs.en) as MessageId[]).filter(
+      (id) =>
+        catalogs["zh-Hant"][id] === catalogs["zh-Hans"][id] &&
+        !translatedLocaleIdenticalAllowlist.has(id)
+    );
+    // Short CJK labels can legitimately coincide; whole-catalog identity cannot.
+    expect(sameAsSimplified.length).toBeLessThan(Object.keys(catalogs.en).length / 10);
+    expect(t("settings.appSettings", {}, "zh-Hant")).toContain("設定");
+    expect(t("settings.appSettings", {}, "zh-Hans")).toContain("设置");
+    expect(t("settings.accountSettings", {}, "zh-Hant")).toContain("帳號");
+    expect(t("timeline.messagesTab", {}, "zh-Hant")).toContain("訊息");
+  });
+
+  test("language self-names read the same in every catalog", () => {
+    for (const locale of Object.keys(catalogs) as Locale[]) {
+      if (locale === "pseudo") continue;
+      expect(catalogs[locale]["settings.languageEnglish"]).toBe("English");
+      expect(catalogs[locale]["settings.languageJapanese"]).toBe("日本語");
+      expect(catalogs[locale]["settings.languageSimplifiedChinese"]).toBe("简体中文");
+      expect(catalogs[locale]["settings.languageTraditionalChinese"]).toBe("繁體中文");
+      expect(catalogs[locale]["settings.languageKorean"]).toBe("한국어");
+    }
+  });
+
+  test("interpolates caller-owned mixed-script values unchanged in each new locale", () => {
+    const roomName = "研究室 🧪 العربية <한국어>";
+    for (const locale of translatedLocales) {
+      const rendered = t("composer.placeholder", { roomName }, locale);
+      expect(rendered).toContain(roomName);
+      expect(rendered).not.toContain("{roomName}");
+      expect(rendered).not.toBe(t("composer.placeholder", { roomName }, "en"));
+    }
+  });
+
+  test("presentation language tags match the Rust catalog ids", () => {
+    expect(localeLanguageTag("zh-Hans")).toBe("zh-Hans");
+    expect(localeLanguageTag("zh-Hant")).toBe("zh-Hant");
+    expect(localeLanguageTag("ko")).toBe("ko");
+    expect(localeLanguageTag("pseudo")).toBe("en");
+  });
+});
+
+// Ids that the zh-Hans, zh-Hant, and ko catalogs keep identical to English:
+// product/brand names, language self-names, protocol terms, and format-only
+// templates. Everything else must be translated.
+const translatedLocaleIdenticalAllowlist = new Set<MessageId>([
+  // Brand names, protocol/format names, numeric or symbol-only templates,
+  // language self-names, and the locale-independent download file name.
+  "access.conditionSummarySeparator",
+  "access.labelSeparator",
+  "accountTabs.select",
+  "app.title",
+  "auth.flowOidc",
+  "auth.matrixDesktop",
+  "auth.matrixId",
+  "auth.matrixIdPlaceholder",
+  "settings.credentialStoreLinux",
+  "settings.fontInter",
+  "settings.languageEnglish",
+  "settings.languageJapanese",
+  "settings.languageKorean",
+  "settings.languageSimplifiedChinese",
+  "settings.languageTraditionalChinese",
+  "settings.notificationDeliverySecretServerChan",
+  "settings.twemojiColr",
+  "timeline.downloadDefaultImageName",
+  "timeline.mediaUploadProgress",
+  "timeline.threadSummaryWithBody",
+  "timeline.threadSummaryWithPreview",
+  "timeline.threadSummaryWithSender",
+  "upload.formatJpeg",
+  "upload.formatPng",
+  "upload.formatWebp",
+  "upload.previewActualSize",
+  "upload.resizeEighth",
+  "upload.resizeHalf",
+  "upload.resizeQuarter",
+  "window.title"
 ]);
 
 function lineNumberAt(sourceFile: ts.SourceFile, node: ts.Node): number {

@@ -30,18 +30,61 @@ describe("LanguageControls language dropdown", () => {
     setActiveLocaleProfile("en");
   });
 
-  test("is one labeled select offering exactly English and 日本語", () => {
+  test("is one labeled select offering each shipped language by its native name", () => {
     render(<LanguageControls {...baseProps} />);
 
     expect(screen.getAllByRole("combobox")).toHaveLength(1);
     expect(screen.getByRole("combobox", { name: "Language" })).toBeTruthy();
     const options = screen.getAllByRole("option");
-    expect(options.map((option) => option.textContent)).toEqual(["English", "日本語"]);
+    expect(options.map((option) => option.textContent)).toEqual([
+      "English",
+      "日本語",
+      "简体中文",
+      "繁體中文",
+      "한국어"
+    ]);
     expect(options.map((option) => (option as HTMLOptionElement).value)).toEqual([
       "en",
-      "ja-JP"
+      "ja-JP",
+      "zh-Hans",
+      "zh-Hant",
+      "ko"
     ]);
   });
+
+  test.each([
+    ["zh-Hans", "zh-Hans"],
+    ["zh-Hant", "zh-Hant"],
+    ["ko", "ko"]
+  ] as const)(
+    "selecting %s saves its tag, and the resolved %s catalog selects it again",
+    (tag, catalogLocale) => {
+      const onUpdateSettings = vi.fn();
+      const { rerender } = render(
+        <LanguageControls
+          catalogLocale="en"
+          selectedLocale={{ language_tag: null, text_direction: "auto" }}
+          onUpdateSettings={onUpdateSettings}
+        />
+      );
+
+      fireEvent.change(languageSelect(), { target: { value: tag } });
+      expect(onUpdateSettings).toHaveBeenCalledWith({
+        locale: { language_tag: tag, text_direction: "auto" }
+      });
+
+      // A regional stored tag such as zh-TW resolves in Rust; the control
+      // follows the resolved catalog, not the raw tag.
+      rerender(
+        <LanguageControls
+          catalogLocale={catalogLocale}
+          selectedLocale={{ language_tag: `${tag}-XX`, text_direction: "auto" }}
+          onUpdateSettings={onUpdateSettings}
+        />
+      );
+      expect(languageSelect().value).toBe(tag);
+    }
+  );
 
   test("an unset language_tag displays English without rewriting the saved setting", () => {
     const onUpdateSettings = vi.fn();

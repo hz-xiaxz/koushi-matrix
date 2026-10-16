@@ -1,4 +1,4 @@
-import { getActiveLocale, t } from "../i18n/messages";
+import { getActiveLocale, localeLanguageTag, t } from "../i18n/messages";
 import type { HistoryExportLabels } from "./types";
 
 /** The page text of an export, resolved from the catalog in the active
@@ -6,7 +6,7 @@ import type { HistoryExportLabels } from "./types";
 export function historyExportLabels(): HistoryExportLabels {
   const raw = (id: Parameters<typeof t>[0]) => t(id);
   return {
-    lang: getActiveLocale() === "ja" ? "ja" : "en",
+    lang: localeLanguageTag(getActiveLocale()),
     edited: raw("historyExport.page.edited"),
     inReplyTo: raw("historyExport.page.inReplyTo"),
     replyUnavailable: raw("historyExport.page.replyUnavailable"),

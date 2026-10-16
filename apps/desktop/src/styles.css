@@ -220,6 +220,31 @@
   font-size: 1.05em;
 }
 
+/* #1461: Han glyph shapes differ by language, so Chinese and Korean product
+   chrome names script-matched CJK fonts after the platform UI fonts (macOS,
+   Windows, Linux Noto CJK). Japanese keeps the platform default stack, whose
+   lang-aware system-ui fallback already selects Japanese glyphs. */
+:root:lang(zh-Hans) {
+  --font-system-ui:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Noto Sans", Arial, "PingFang SC", "Hiragino Sans GB", "Microsoft YaHei UI",
+    "Microsoft YaHei", "Noto Sans CJK SC", "Noto Sans SC", "Source Han Sans SC";
+}
+
+:root:lang(zh-Hant) {
+  --font-system-ui:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Noto Sans", Arial, "PingFang TC", "Microsoft JhengHei UI",
+    "Microsoft JhengHei", "Noto Sans CJK TC", "Noto Sans TC", "Source Han Sans TC";
+}
+
+:root:lang(ko) {
+  --font-system-ui:
+    ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI",
+    "Noto Sans", Arial, "Apple SD Gothic Neo", "Malgun Gothic",
+    "Noto Sans CJK KR", "Noto Sans KR", "Source Han Sans K";
+}
+
 :root[data-ui-font="inter"] {
   --font-ui: Inter, var(--font-system-ui), var(--font-system-emoji), sans-serif;
 }

@@ -1187,7 +1187,12 @@ export function InviteTargetsDialog({
         <div className="invite-dialog-body">
         {workflow.operation.kind === "completed" && workflow.operation.notice ? (
           <div className="invite-target-notice" role="status">
-            {workflow.operation.notice}
+            {/* The Rust notice is fixed product text for the already-in-Space
+                outcome; render it from the catalog so every locale reads it
+                in its own language (#1461). */}
+            {workflow.operation.results.some((result) => result.kind === "alreadyInSpace")
+              ? t("dialog.inviteAlreadyInSpace")
+              : workflow.operation.notice}
           </div>
         ) : null}
         <div className="invite-selected-targets" aria-label={t("dialog.inviteSelectedTargets")}>

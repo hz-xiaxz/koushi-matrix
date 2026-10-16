@@ -28,6 +28,13 @@ pub enum LocaleDirection {
 pub enum CatalogLocale {
     En,
     Ja,
+    /// Simplified Chinese catalog; serialized as the BCP 47 tag `zh-Hans`.
+    #[serde(rename = "zh-Hans")]
+    ZhHans,
+    /// Traditional Chinese (Taiwan vocabulary) catalog; serialized as `zh-Hant`.
+    #[serde(rename = "zh-Hant")]
+    ZhHant,
+    Ko,
     Pseudo,
 }
 
@@ -62,6 +69,9 @@ struct ParsedLanguage {
 enum SupportedLanguage {
     En,
     Ja,
+    ZhHans,
+    ZhHant,
+    Ko,
     Rtl,
 }
 
@@ -172,10 +182,16 @@ fn catalog_locale(parsed: Option<ParsedLanguage>) -> CatalogLocale {
             ..
         }) => CatalogLocale::Pseudo,
         Some(ParsedLanguage {
-            primary: SupportedLanguage::Ja,
+            primary,
             pseudo_locale: PseudoLocaleMode::None,
-        }) => CatalogLocale::Ja,
-        _ => CatalogLocale::En,
+        }) => match primary {
+            SupportedLanguage::Ja => CatalogLocale::Ja,
+            SupportedLanguage::ZhHans => CatalogLocale::ZhHans,
+            SupportedLanguage::ZhHant => CatalogLocale::ZhHant,
+            SupportedLanguage::Ko => CatalogLocale::Ko,
+            SupportedLanguage::En | SupportedLanguage::Rtl => CatalogLocale::En,
+        },
+        None => CatalogLocale::En,
     }
 }
 
@@ -185,6 +201,9 @@ fn resolved_lang(catalog_locale: CatalogLocale, pseudo_locale: PseudoLocaleMode)
         PseudoLocaleMode::Bidi => "ar-XB",
         PseudoLocaleMode::None => match catalog_locale {
             CatalogLocale::Ja => "ja",
+            CatalogLocale::ZhHans => "zh-Hans",
+            CatalogLocale::ZhHant => "zh-Hant",
+            CatalogLocale::Ko => "ko",
             CatalogLocale::En | CatalogLocale::Pseudo => "en",
         },
     }
@@ -200,7 +219,14 @@ fn auto_direction(
 
     match parsed.map(|language| language.primary) {
         Some(SupportedLanguage::Rtl) => LocaleDirection::Rtl,
-        Some(SupportedLanguage::En | SupportedLanguage::Ja) | None => LocaleDirection::Ltr,
+        Some(
+            SupportedLanguage::En
+            | SupportedLanguage::Ja
+            | SupportedLanguage::ZhHans
+            | SupportedLanguage::ZhHant
+            | SupportedLanguage::Ko,
+        )
+        | None => LocaleDirection::Ltr,
     }
 }
 
@@ -229,9 +255,33 @@ fn parse_language_tag(language_tag: &str) -> Option<ParsedLanguage> {
     };
 
     Some(ParsedLanguage {
-        primary: supported_language(&primary)?,
+        primary: supported_language(&primary, &rest)?,
         pseudo_locale,
     })
+}
+
+/// Chinese script policy (#1461): an explicit `Hans`/`Hant` script subtag wins;
+/// otherwise the region selects the script (`TW`/`HK`/`MO` -> Traditional,
+/// everything else including bare `zh`, `CN`, and `SG` -> Simplified).
+fn chinese_script(rest: &[&str]) -> SupportedLanguage {
+    for subtag in rest {
+        if subtag.eq_ignore_ascii_case("hant") {
+            return SupportedLanguage::ZhHant;
+        }
+        if subtag.eq_ignore_ascii_case("hans") {
+            return SupportedLanguage::ZhHans;
+        }
+    }
+    let traditional_region = rest.iter().any(|subtag| {
+        ["tw", "hk", "mo"]
+            .iter()
+            .any(|region| subtag.eq_ignore_ascii_case(region))
+    });
+    if traditional_region {
+        SupportedLanguage::ZhHant
+    } else {
+        SupportedLanguage::ZhHans
+    }
 }
 
 fn is_primary_language_subtag(subtag: &str) -> bool {
@@ -242,10 +292,12 @@ fn is_valid_language_subtag(subtag: &str) -> bool {
     (1..=8).contains(&subtag.len()) && subtag.chars().all(|ch| ch.is_ascii_alphanumeric())
 }
 
-fn supported_language(primary: &str) -> Option<SupportedLanguage> {
+fn supported_language(primary: &str, rest: &[&str]) -> Option<SupportedLanguage> {
     match primary {
         "en" => Some(SupportedLanguage::En),
         "ja" => Some(SupportedLanguage::Ja),
+        "zh" => Some(chinese_script(rest)),
+        "ko" => Some(SupportedLanguage::Ko),
         "ar" | "dv" | "fa" | "he" | "ps" | "sd" | "ug" | "ur" | "yi" => {
             Some(SupportedLanguage::Rtl)
         }
