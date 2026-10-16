@@ -7,6 +7,7 @@ import {
 } from "lucide-react";
 import { useState } from "react";
 
+import { uiDateTimeFormat } from "../domain/intlFormatCache";
 import { t } from "../i18n/messages";
 import { ImeTextField } from "./ImeTextControl";
 import { peopleFacingLabel } from "../app/uiShared";
@@ -186,10 +187,9 @@ function formatBytes(bytes: number): string {
 }
 
 function formatDate(timestampMs: number): string {
-  const date = new Date(timestampMs);
-  return date.toLocaleDateString(undefined, {
+  return uiDateTimeFormat({
     year: "numeric",
     month: "short",
     day: "numeric"
-  });
+  }).format(new Date(timestampMs));
 }

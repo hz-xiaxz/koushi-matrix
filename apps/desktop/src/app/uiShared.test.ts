@@ -1,8 +1,10 @@
-import { describe, expect, it } from "vitest";
+import { afterEach, describe, expect, it } from "vitest";
 
-import { t } from "../i18n/messages";
+import { setActiveLocaleProfile, t } from "../i18n/messages";
 import {
   SCHEDULED_SEND_PERSISTENCE_FAILED_CODE,
+  formatScheduledSendTime,
+  formatTime,
   graphemeCount,
   hasScheduledSendPersistenceFailure,
   roomAccessTooltipLabel
@@ -66,6 +68,38 @@ describe("room access tooltip label (#1166)", () => {
     );
     expect(roomAccessTooltipLabel("access.conditionsDescription")).toBe(
       t("access.conditionsDescription")
+    );
+  });
+});
+
+describe("date/time formatting follows the selected catalog locale (#1477)", () => {
+  afterEach(() => setActiveLocaleProfile("en"));
+
+  const timestampMs = Date.UTC(2026, 8, 21, 14, 5, 0);
+  const timeOptions = { hour: "2-digit", minute: "2-digit" } as const;
+  const scheduledOptions = { month: "short", day: "numeric", hour: "2-digit", minute: "2-digit" } as const;
+
+  it.each(["en", "ja", "zh-Hans", "ko"] as const)("formats under the %s catalog", (locale) => {
+    setActiveLocaleProfile(locale);
+    expect(formatTime(timestampMs)).toBe(
+      new Intl.DateTimeFormat(locale, timeOptions).format(timestampMs)
+    );
+    expect(formatScheduledSendTime(timestampMs)).toBe(
+      new Intl.DateTimeFormat(locale, scheduledOptions).format(timestampMs)
+    );
+  });
+
+  it("renders English and Japanese times differently", () => {
+    setActiveLocaleProfile("en");
+    const english = formatTime(timestampMs);
+    setActiveLocaleProfile("ja");
+    expect(formatTime(timestampMs)).not.toBe(english);
+  });
+
+  it("formats the pseudo catalog as English", () => {
+    setActiveLocaleProfile("pseudo", "accented");
+    expect(formatTime(timestampMs)).toBe(
+      new Intl.DateTimeFormat("en", timeOptions).format(timestampMs)
     );
   });
 });

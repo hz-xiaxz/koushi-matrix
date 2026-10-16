@@ -1,15 +1,15 @@
 import { Check } from "lucide-react";
 import type { ReactNode } from "react";
 
-import { getActiveLocale, t } from "../../i18n/messages";
+import { t } from "../../i18n/messages";
 import type { PresenceKind } from "../../domain/types";
-import { cachedDateTimeFormat } from "../../domain/intlFormatCache";
+import { uiDateTimeFormat } from "../../domain/intlFormatCache";
 
 function formatMessageTimestamp(timestampMs: number | null): string | null {
   if (timestampMs === null) {
     return null;
   }
-  return cachedDateTimeFormat(getActiveLocale(), {
+  return uiDateTimeFormat({
     timeStyle: "short"
   }).format(new Date(timestampMs));
 }

@@ -69,6 +69,27 @@ if (readFileSync(desktopApiPath, "utf8").includes("setRoomListProjection")) {
   failures.push("apps/desktop/src/backend/desktopApi.ts: fake-only setRoomListProjection remains");
 }
 
+// User-visible date/time/list/number formatting has one locale owner: the
+// `ui*Format` helpers in intlFormatCache.ts, pinned to the catalog locale
+// (#1477). HistoryExportDialog builds a machine `YYYY-MM-DD` value with en-CA.
+const intlFormatOwners = new Set([
+  "apps/desktop/src/domain/intlFormatCache.ts",
+  "apps/desktop/src/components/HistoryExportDialog.tsx"
+]);
+for (const path of sourceFiles(frontend)) {
+  const source = readFileSync(path, "utf8");
+  const projectPath = relative(root, path);
+  if (/\.toLocale(?:Date|Time)?String\(/.test(source)) {
+    failures.push(`${projectPath}: format dates and numbers through the ui*Format helpers in intlFormatCache.ts`);
+  }
+  if (
+    /new Intl\.(?:DateTimeFormat|NumberFormat|ListFormat|RelativeTimeFormat|PluralRules|DisplayNames)\(/.test(source) &&
+    !intlFormatOwners.has(projectPath)
+  ) {
+    failures.push(`${projectPath}: construct Intl formatters only through the ui*Format helpers in intlFormatCache.ts`);
+  }
+}
+
 if (failures.length > 0) {
   console.error(failures.join("\n"));
   process.exit(1);

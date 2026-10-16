@@ -82,7 +82,7 @@ import { Composer, type ComposerSendingAccount } from "./composer";
 import { UploadStagingDialog, uploadStagingItemsAreSendable } from "./dialogs";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import { useStableEvent } from "./useStableEvent";
-import { cachedDateTimeFormat } from "../domain/intlFormatCache";
+import { uiDateTimeFormat, uiNumberFormat } from "../domain/intlFormatCache";
 
 const EMPTY_PINNED_EVENTS: DesktopSnapshot["state"]["domain"]["room_interactions"][string]["pinned_events"] = [];
 
@@ -95,7 +95,7 @@ function activityTabLabel(tab: ActivityTab): string {
 }
 
 function activityTimestamp(timestampMs: number): string {
-  return cachedDateTimeFormat(undefined, {
+  return uiDateTimeFormat({
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(timestampMs));
@@ -481,7 +481,7 @@ export function ExplorePane({
                   <div className="directory-result-meta">
                     <span>
                       {t("directory.memberCount", {
-                        count: new Intl.NumberFormat().format(room.joined_members)
+                        count: uiNumberFormat().format(room.joined_members)
                       })}
                     </span>
                     {room.world_readable ? <span>{t("directory.worldReadable")}</span> : null}

@@ -12,6 +12,7 @@ import {
   Monitor
 } from "lucide-react";
 
+import { uiDateTimeFormat } from "../domain/intlFormatCache";
 import { settingsCategories, type SettingsCategoryId } from "../domain/settingsNavigation";
 import { HelpContent } from "./HelpDialog";
 import { t, type MessageId } from "../i18n/messages";
@@ -492,7 +493,7 @@ export function UserSettingsPanel({
               <DetailRow
                 label={t("sessionStatus.lastChecked")}
                 value={currentSessionDetails
-                  ? new Intl.DateTimeFormat(undefined, { dateStyle: "medium", timeStyle: "short" })
+                  ? uiDateTimeFormat({ dateStyle: "medium", timeStyle: "short" })
                       .format(currentSessionDetails.checked_at_ms)
                   : t("sessionStatus.unavailable")}
               />

@@ -33,7 +33,7 @@ import {
 } from "../../app/uiShared";
 import type { MediaSaveNameFacts } from "../../backend/linkMediaPort";
 import { contextMenuItems } from "../../domain/contextMenus";
-import { MESSAGE_PLACEHOLDER_PATTERN, getActiveLocale, t, type MessageId } from "../../i18n/messages";
+import { MESSAGE_PLACEHOLDER_PATTERN, t, type MessageId } from "../../i18n/messages";
 import { onMenuKeyDown } from "../ContextMenuSurface";
 import { LazyEmojiPicker } from "../LazyEmojiPicker";
 import { Tooltip } from "../Tooltip";
@@ -86,7 +86,7 @@ import {
   renderPlainTextBody,
   type OpenMatrixTargetHandler
 } from "./TimelineMessageBody";
-import { cachedDateTimeFormat, cachedListFormat } from "../../domain/intlFormatCache";
+import { uiDateTimeFormat, uiListFormat } from "../../domain/intlFormatCache";
 
 export type TimelineThreadAttention = {
   rootEventId: string;
@@ -1632,7 +1632,7 @@ function formatReactionTooltip(
       : previewLabels;
   const names =
     labels.length > 0
-      ? cachedListFormat(getActiveLocale(), { style: "long", type: "conjunction" }).format(labels)
+      ? uiListFormat({ style: "long", type: "conjunction" }).format(labels)
       : t("timeline.reactionSenderUnknown", { count: totalCount });
   return t("timeline.reactionTooltip", { names, key: reactionKey });
 }
@@ -1652,7 +1652,7 @@ function syntheticDateDividerTimestampMs(
 }
 
 function formatDateDividerLabel(timestampMs: number): string {
-  return cachedDateTimeFormat(getActiveLocale(), {
+  return uiDateTimeFormat({
     weekday: "short",
     year: "numeric",
     month: "short",
