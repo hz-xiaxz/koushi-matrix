@@ -1474,3 +1474,25 @@ Mechanical guard: `scripts/check-retained-reachability.mjs` fails CI when a
 manifest entry's recorded consumer disappears, when a registered Tauri command
 has neither a renderer caller nor a recorded renderer-less verdict, or when a
 removed surface reappears in `crates/` or `apps/`.
+
+## 2026-10-16 (#1462): late-decrypted in-room verification events
+
+Upstreamable bug fix, no new public surface. Sync feeds an in-room
+verification event to the verification machine only when it decrypts on the
+first attempt (`response_processors::verification::process_if_relevant`). If
+the room key arrives later, R2D2 resolves the UTD for display and nothing else
+sees the event, so the recipient never gets an actionable request. With
+Simplified Sliding Sync the room key (on the `encryption` connection) and the
+room event (on the room-list connection) race on independent long-polls, so
+this happens in practice.
+
+`event_cache::redecryptor::retry_decryption_for_events` now feeds resolved
+in-room verification events (the same selection as `process_if_relevant`,
+honouring `handle_verification_events`) to `receive_verification_event` before
+it publishes `RedecryptorReport::ResolvedUtds`. The machine's timestamp check
+still drops requests resolved long after they were sent. Covered by
+`test_redecryptor_feeds_late_decrypted_verification_request`.
+
+Fork branch `fix/1462-late-decrypted-verification` (commit `5b6c8738d`).
+Koushi surfaces the request from the `ResolvedUtds` report because SDK event
+handlers do not fire for redecrypted events.
