@@ -1,4 +1,9 @@
-export type Locale = "en" | "ja" | "pseudo";
+import { ko } from "./messages.ko";
+import { zhHans } from "./messages.zhHans";
+import { zhHant } from "./messages.zhHant";
+
+/** Catalog ids are the Rust `CatalogLocale` wire values and valid BCP 47 tags. */
+export type Locale = "en" | "ja" | "zh-Hans" | "zh-Hant" | "ko" | "pseudo";
 
 export type MessageId =
   | "access.public"
@@ -293,6 +298,7 @@ export type MessageId =
   | "dialog.invitePerson"
   | "dialog.inviteSearchFailed"
   | "dialog.inviteSelectedTargets"
+  | "dialog.inviteAlreadyInSpace"
   | "dialog.matrixUserId"
   | "dialog.newDmTitle"
   | "dialog.privateRoom"
@@ -840,6 +846,9 @@ export type MessageId =
   | "settings.language"
   | "settings.languageEnglish"
   | "settings.languageJapanese"
+  | "settings.languageSimplifiedChinese"
+  | "settings.languageTraditionalChinese"
+  | "settings.languageKorean"
   | "settings.accountSwitcher"
   | "settings.current"
   | "settings.autoLoadOlderMessages"
@@ -1949,7 +1958,7 @@ export type MessageId =
   | "historyExport.page.stateOther"
 
 type MessageValues = Record<string, string | number>;
-type Catalog = Record<MessageId, string>;
+export type Catalog = Record<MessageId, string>;
 export type PseudoLocaleMode = "accented" | "bidi";
 type ActivePseudoLocaleMode = PseudoLocaleMode | "none";
 
@@ -2355,6 +2364,7 @@ const en: Catalog = {
   "dialog.invitePerson": "Invite {name}",
   "dialog.inviteNoResults": "No invite candidates found. Try another name or enter a full Matrix ID.",
   "dialog.inviteSelectedTargets": "Selected invite targets",
+  "dialog.inviteAlreadyInSpace": "Already in the Space",
   "dialog.matrixUserId": "Matrix user ID",
   "dialog.newDmTitle": "New DM",
   "dialog.privateRoom": "Private room",
@@ -2913,6 +2923,9 @@ const en: Catalog = {
   "settings.language": "Language",
   "settings.languageEnglish": "English",
   "settings.languageJapanese": "日本語",
+  "settings.languageSimplifiedChinese": "简体中文",
+  "settings.languageTraditionalChinese": "繁體中文",
+  "settings.languageKorean": "한국어",
   "settings.accountSwitcher": "Account switcher",
   "settings.current": "Current",
   "settings.autoLoadOlderMessages": "Automatically load older messages",
@@ -4458,6 +4471,7 @@ const ja: Catalog = {
   "dialog.invitePerson": "{name}を招待",
   "dialog.inviteNoResults": "招待候補が見つかりません。別の名前か、完全なMatrix IDで検索してください。",
   "dialog.inviteSelectedTargets": "選択中の招待先",
+  "dialog.inviteAlreadyInSpace": "既にスペースにいます",
   "dialog.matrixUserId": "MatrixユーザーID",
   "dialog.newDmTitle": "新しいDM",
   "dialog.privateRoom": "非公開ルーム",
@@ -5016,6 +5030,9 @@ const ja: Catalog = {
   "settings.language": "言語",
   "settings.languageEnglish": "English",
   "settings.languageJapanese": "日本語",
+  "settings.languageSimplifiedChinese": "简体中文",
+  "settings.languageTraditionalChinese": "繁體中文",
+  "settings.languageKorean": "한국어",
   "settings.accountSwitcher": "アカウント切り替え",
   "settings.current": "現在",
   "settings.autoLoadOlderMessages": "古いメッセージを自動で読み込む",
@@ -6241,7 +6258,23 @@ const pseudo: Catalog = Object.fromEntries(
   Object.entries(en).map(([id, value]) => [id, pseudoLocalize(value)])
 ) as Catalog;
 
-export const catalogs: Record<Locale, Catalog> = { en, ja, pseudo };
+export const catalogs: Record<Locale, Catalog> = {
+  en,
+  ja,
+  "zh-Hans": zhHans,
+  "zh-Hant": zhHant,
+  ko,
+  pseudo
+};
+
+/**
+ * The BCP 47 tag for presentation formatting (`Intl`, `<html lang>` of
+ * generated artifacts) of a Rust-resolved catalog locale. The pseudo catalog
+ * formats as English.
+ */
+export function localeLanguageTag(locale: Locale): Exclude<Locale, "pseudo"> {
+  return locale === "pseudo" ? "en" : locale;
+}
 
 /**
  * Resolve a catalog-owned string that becomes part of a generated artifact and
