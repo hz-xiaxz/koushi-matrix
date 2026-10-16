@@ -830,7 +830,7 @@ describe("TimelineView", () => {
     expect(gap.parentElement?.nextElementSibling?.textContent).toContain("Newer");
   });
 
-  it("shows conversation start only with Rust-owned authoritative continuity", async () => {
+  it("shows conversation start only when the displayed window reaches the SDK start", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const transport = baseTransport({
       listenCoreEvents(nextListener) {
@@ -851,6 +851,17 @@ describe("TimelineView", () => {
       emit({
         kind: "Timeline",
         event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 1,
+            items: [message("$latest:example.invalid", "Latest")]
+          }
+        }
+      });
+      emit({
+        kind: "Timeline",
+        event: {
           PaginationStateChanged: {
             request_id: null,
             key: KEY,
@@ -862,6 +873,8 @@ describe("TimelineView", () => {
     });
     expect(screen.queryByText("Start of conversation")).toBeNull();
 
+    // The SDK start is authoritative, but the displayed rows have not reached
+    // it, so Core has not projected the timeline-start row (#1443).
     rerender(
       <TimelineView
         timelineKey={KEY}
@@ -871,6 +884,30 @@ describe("TimelineView", () => {
         continuity={{ kind: "healthy", generation: 2, authoritative_start: true }}
       />
     );
+    expect(screen.queryByText("Start of conversation")).toBeNull();
+
+    // Core materialized the timeline-start row: the displayed oldest boundary
+    // reaches the SDK start.
+    act(() => {
+      emit({
+        kind: "Timeline",
+        event: {
+          InitialItems: {
+            request_id: null,
+            key: KEY,
+            generation: 3,
+            items: [
+              {
+                ...message("$start:example.invalid", ""),
+                id: { Synthetic: { synthetic_id: "timeline-start" } },
+                is_hidden: true
+              },
+              message("$latest:example.invalid", "Latest")
+            ]
+          }
+        }
+      });
+    });
     expect(await screen.findByText("Start of conversation")).not.toBeNull();
   });
 

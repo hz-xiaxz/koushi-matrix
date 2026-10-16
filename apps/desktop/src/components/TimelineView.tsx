@@ -1739,12 +1739,18 @@ export const TimelineView = memo(function TimelineView({
   const backwardState = getPaginationState(store, timelineKey, "Backward");
   const isPaginating = automaticBackfillEligible && backwardState === "Paginating";
   const endReached = backwardState === "EndReached" && continuity.kind === "healthy" && continuity.authoritative_start;
+  // #1443: the SDK start proves the canonical timeline starts there; Core proves
+  // the displayed window reaches it by keeping the timeline-start row out of the
+  // display until a front insertion is boundary-adjacent. The marker needs both.
+  const displayedStartReached = items.some(
+    (item) => "Synthetic" in item.id && item.id.Synthetic.synthetic_id === "timeline-start"
+  );
   const canRenderRoomNavigation = roomTimelineRoomId === roomId;
   const canJumpToBottom = Boolean(navigationSnapshot?.can_jump_to_bottom &&
     (navigationSnapshot.newer_event_count > 0 || navigationSnapshot.unread_event_count > 0));
   const readStateStatusMessage = navigationSnapshot ? readStateStatusMessageForSync(navigationSnapshot.read_state_sync) : null;
   const showPaginationSpinner = !suppressPaginationUi && isPaginating;
-  const showTimelineStart = presentationContext !== "thread" && !suppressPaginationUi && endReached;
+  const showTimelineStart = presentationContext !== "thread" && !suppressPaginationUi && endReached && displayedStartReached;
   const showUnsentBar = notSentTransactionIds.length > 0;
   const anchoredNavigation = isAnchored ? onReturnToLive : undefined;
   const chromeSignature = [

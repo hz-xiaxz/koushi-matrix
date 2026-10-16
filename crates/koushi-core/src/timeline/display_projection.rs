@@ -82,6 +82,36 @@ impl DisplayProjectionState {
         finalize_display_projection_diffs(&before, &self.display_items, false).0
     }
 
+    /// Oldest canonical index the display currently reaches, or `None` when it
+    /// is empty. A value above zero means a bounded live-edge trim is hiding a
+    /// canonical prefix (#1443).
+    pub(super) fn first_visible_canonical_index(&self) -> Option<usize> {
+        self.slots.first().map(|slot| slot.canonical_index)
+    }
+
+    /// #1443: re-materialize `window` of the canonical run in place, keeping
+    /// pending sends and suppressed transaction ids. Returns the incremental
+    /// diffs that turn the previous display into the rebuilt one; a prefix
+    /// expansion is emitted as `Insert`-at-0 prepends, never a reset, so the
+    /// caller keeps the reader's scroll anchor.
+    pub(super) fn rematerialize_window(
+        &mut self,
+        canonical_items: &[TimelineItem],
+        window: std::ops::Range<usize>,
+        context: &DisplayProjectionContext,
+    ) -> Vec<TimelineDiff> {
+        let before = self.display_items.clone();
+        let rebuilt = Self::from_canonical_window(canonical_items, window);
+        self.slots = rebuilt.slots;
+        self.display_items = project_display_items(
+            &self.slots,
+            &self.pending_items,
+            &self.suppressed_transaction_ids,
+            context,
+        );
+        finalize_display_projection_diffs(&before, &self.display_items, false).0
+    }
+
     pub(super) fn pending_items(&self) -> &[TimelineItem] {
         &self.pending_items
     }
@@ -786,7 +816,6 @@ impl DisplayMembershipRope {
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(super) struct DisplayProjectionContext {
     max_live_edge_items: Option<usize>,
-    include_prepend: bool,
     include_append: bool,
     project_thread_roots: bool,
     pub(super) thread_root_order: TimelineThreadRootOrder,
@@ -801,7 +830,6 @@ impl DisplayProjectionContext {
         let bounded_live_edge = matches!(kind, TimelineKind::Room { .. }) && observation.at_bottom;
         Self {
             max_live_edge_items: bounded_live_edge.then_some(ROOM_REPLAY_INITIAL_ITEMS_MAX),
-            include_prepend: !bounded_live_edge,
             include_append: true,
             project_thread_roots: matches!(kind, TimelineKind::Room { .. }),
             thread_root_order: TimelineThreadRootOrder::RootEvent,
@@ -823,7 +851,6 @@ impl DisplayProjectionContext {
     fn bounded_live_edge() -> Self {
         Self {
             max_live_edge_items: Some(ROOM_REPLAY_INITIAL_ITEMS_MAX),
-            include_prepend: false,
             include_append: true,
             project_thread_roots: true,
             thread_root_order: TimelineThreadRootOrder::RootEvent,
@@ -881,13 +908,12 @@ fn project_sdk_batch(
     for diff in canonical_diffs {
         if let TimelineDiff::PushFront { item } = diff {
             pending_push_fronts.push(item.clone());
-            // The bounded live edge still takes a page that extends its window:
-            // a short room is at the bottom and near the top at once, and Core
-            // reports that page as an expected prepend. Boundary adjacency keeps
-            // the window a contiguous canonical suffix, so a page behind an
-            // already trimmed prefix stays out, and the trim below keeps the cap.
-            let include = context.include_prepend.then_some(true);
-            if !membership.insert(0, item.clone(), include) {
+            // #1443: `insert` decides visibility from boundary adjacency. The
+            // bounded live edge still takes a page that extends a window already
+            // reaching canonical 0 (a short room is at the bottom and near the
+            // top at once), while a page behind an already trimmed prefix stays
+            // hidden; the trim below keeps the cap.
+            if !membership.insert(0, item.clone(), None) {
                 translation_ambiguous = true;
             }
             membership.trim_to_live_edge(context.max_live_edge_items);
@@ -910,8 +936,8 @@ fn project_sdk_batch(
                     translation_ambiguous = true;
                 }
                 canonical_items.insert(canonical_index, item.clone());
-                let include = (canonical_index == 0 && context.include_prepend).then_some(true);
-                if !membership.insert(canonical_index, item.clone(), include) {
+                // #1443: adjacency, not "any prepend", decides visibility.
+                if !membership.insert(canonical_index, item.clone(), None) {
                     translation_ambiguous = true;
                 }
             }

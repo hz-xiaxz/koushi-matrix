@@ -902,9 +902,20 @@ test("scrollback prepend keeps the anchor item visually stable and gates auto-ba
     },
     {
       key: timelineKey(),
-      items: Array.from({ length: 10 }, (_, i) =>
-        makeItem(`$old${String(i).padStart(2, "0")}`, `older message ${i}`)
-      )
+      items: [
+        // The SDK inserts the hidden timeline-start row at the front when the
+        // start is reached; Core carries it in the display only while the
+        // displayed window is boundary-adjacent (#1443), which is what makes
+        // the marker visible below.
+        {
+          ...makeItem("$timeline-start", ""),
+          id: { Synthetic: { synthetic_id: "timeline-start" } },
+          is_hidden: true
+        },
+        ...Array.from({ length: 10 }, (_, i) =>
+          makeItem(`$old${String(i).padStart(2, "0")}`, `older message ${i}`)
+        )
+      ]
     }
   );
   await expect(container.locator("[data-item-id]")).toHaveCount(40);
