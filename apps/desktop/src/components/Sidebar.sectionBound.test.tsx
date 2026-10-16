@@ -173,16 +173,39 @@ describe("sidebar section bound", () => {
     });
   });
 
-  it("places the header fold control between the create and options buttons", () => {
+  it("places the header fold control next to the section collapse chevron", () => {
     render(<Sidebar snapshot={boundedSnapshot(8, { expanded: true })} {...sidebarProps()} />);
 
-    const meta = document.querySelector('[data-room-section="rooms"] .section-title-meta');
-    const headerActions = Array.from(meta!.querySelectorAll("button")).map((button) =>
-      button.getAttribute("aria-label")
+    const header = document.querySelector('[data-room-section="rooms"] .section-title');
+    const lead = header!.querySelector(".section-title-lead");
+    const meta = header!.querySelector(".section-title-meta");
+    const headerActions = Array.from(header!.querySelectorAll("button")).map(
+      (button) => button.getAttribute("aria-label") ?? button.textContent
     );
-    expect(headerActions).toEqual([
+    // #1486: folding is a view control like hiding the section, so it sits with
+    // the heading's own collapse toggle at the start of the row instead of with
+    // the actions that create content or open the section menu.
+    expect(
+      Array.from(lead!.querySelectorAll("button")).map(
+        (button) => button.getAttribute("aria-label") ?? button.textContent
+      )
+    ).toEqual([
+      t("roomList.categoryRooms"),
+      t("roomList.showFewerInSection", { section: t("roomList.categoryRooms") })
+    ]);
+    expect(
+      Array.from(meta!.querySelectorAll("button")).map((button) =>
+        button.getAttribute("aria-label")
+      )
+    ).toEqual([
       t("action.createRoom"),
+      t("roomList.sectionOptions", { section: t("roomList.categoryRooms") })
+    ]);
+    // The heading still reads left to right as one row.
+    expect(headerActions).toEqual([
+      t("roomList.categoryRooms"),
       t("roomList.showFewerInSection", { section: t("roomList.categoryRooms") }),
+      t("action.createRoom"),
       t("roomList.sectionOptions", { section: t("roomList.categoryRooms") })
     ]);
     // #1387: mounting the fold is not a focus handoff, so it must not steal it.

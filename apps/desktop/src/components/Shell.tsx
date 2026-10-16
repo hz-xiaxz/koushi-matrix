@@ -1479,16 +1479,41 @@ function SectionTitle({
     <div
       className="section-title"
     >
-      <button
-        className="section-title-toggle"
-        type="button"
-        aria-expanded={!collapsed}
-        aria-controls={`${sectionId}-room-list`}
-        onClick={onToggle}
-      >
-        <span className="section-title-label">{label}</span>
-        <ChevronDown size={ICON_SIZE.compact} aria-hidden="true" />
-      </button>
+      {/* #1486: folding an expanded section back to its bound is a view
+          control, like the heading's own collapse toggle, so the two sit
+          together at the start of the row. The right group keeps the actions
+          that create content or open the section menu. */}
+      <div className="section-title-lead">
+        <button
+          className="section-title-toggle"
+          type="button"
+          aria-expanded={!collapsed}
+          aria-controls={`${sectionId}-room-list`}
+          onClick={onToggle}
+        >
+          <span className="section-title-label">{label}</span>
+          <ChevronDown size={ICON_SIZE.compact} aria-hidden="true" />
+        </button>
+        {foldControl && onToggleExpanded ? (
+          // #1486: the control sits at the start of the heading, so its bubble
+          // opens towards the rows instead of over the space rail.
+          <Tooltip label={t("roomList.showFewer")} placement="below" align="start">
+            {(tooltipProps) => (
+              <button
+                className="section-title-action"
+                type="button"
+                aria-controls={`${sectionId}-room-list`}
+                aria-expanded={true}
+                aria-label={t("roomList.showFewerInSection", { section: label })}
+                onClick={(event) => onToggleExpanded(false, event.currentTarget)}
+                {...tooltipProps}
+              >
+                <ChevronsDownUp size={ICON_SIZE.compact} aria-hidden="true" />
+              </button>
+            )}
+          </Tooltip>
+        ) : null}
+      </div>
       <span className="section-title-meta">
         {unreadCount === undefined ? (
           <span className="section-count">{count}</span>
@@ -1514,23 +1539,6 @@ function SectionTitle({
                 {...tooltipProps}
               >
                 <Plus size={ICON_SIZE.compact} aria-hidden="true" />
-              </button>
-            )}
-          </Tooltip>
-        ) : null}
-        {foldControl && onToggleExpanded ? (
-          <Tooltip label={t("roomList.showFewer")} placement="below" align="end">
-            {(tooltipProps) => (
-              <button
-                className="section-title-action"
-                type="button"
-                aria-controls={`${sectionId}-room-list`}
-                aria-expanded={true}
-                aria-label={t("roomList.showFewerInSection", { section: label })}
-                onClick={(event) => onToggleExpanded(false, event.currentTarget)}
-                {...tooltipProps}
-              >
-                <ChevronsDownUp size={ICON_SIZE.compact} aria-hidden="true" />
               </button>
             )}
           </Tooltip>

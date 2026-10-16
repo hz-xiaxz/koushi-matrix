@@ -158,8 +158,9 @@ collapsing the section does not change it.
 
 Long sections show their first five conversations, followed by a **Show N more**
 control at the end of the section. That control only expands the section; to
-bound it again, use the fold button in the section heading, which Rooms and DMs
-place between the create (+) and section options (⋯) buttons. The choice is
+bound it again, use the fold button in the section heading. It sits at the left
+of the heading, next to the heading's own collapse chevron, while the create (+)
+and section options (⋯) buttons stay to its right. The choice is
 remembered per Home or Space and per section, and it is separate from collapsing:
 a collapsed section hides every row and both controls, and neither control
 changes whether the section is collapsed. While the filter box has text, every
