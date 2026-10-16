@@ -1715,6 +1715,7 @@ pub fn run() {
             commands::settings::set_notification_delivery_secret,
             commands::settings::save_notification_sink,
             commands::settings::clear_notification_delivery_secret,
+            commands::settings::preview_notification_delivery,
             commands::settings::test_notification_delivery,
             desktop_menu::native_menu_label_keys,
             desktop_menu::set_native_menu_labels,

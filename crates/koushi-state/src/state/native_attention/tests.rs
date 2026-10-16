@@ -209,3 +209,37 @@ fn native_badge_diagnostics_count_only_unique_non_muted_rooms() {
     assert_eq!(projection.badge_room_count, 1);
     assert_eq!(projection.badge_excluded_room_count, 3);
 }
+
+#[test]
+fn a_one_to_one_direct_message_carries_its_partner_and_the_local_alias() {
+    let mut dm = unread_room();
+    dm.is_dm = true;
+    dm.dm_user_ids = vec!["@partner:example.invalid".to_owned()];
+    let partner = candidate_of(&dm).direct_partner.expect("a partner");
+    assert_eq!(partner.user_id, "@partner:example.invalid");
+    assert_eq!(partner.local_alias, None);
+
+    // A group conversation, or a direct message with more than one other member, has
+    // no single partner to name.
+    let mut group_dm = dm.clone();
+    group_dm
+        .dm_user_ids
+        .push("@other:example.invalid".to_owned());
+    assert!(candidate_of(&group_dm).direct_partner.is_none());
+    assert!(candidate_of(&unread_room()).direct_partner.is_none());
+
+    let mut state = AppState {
+        rooms: vec![dm],
+        ..AppState::default()
+    };
+    state.profile.local_aliases.insert(
+        "@partner:example.invalid".to_owned(),
+        "  Lab partner ".to_owned(),
+    );
+    let candidates = attention_room_candidates_for_state(&state);
+    let partner = candidates[0].direct_partner.as_ref().expect("a partner");
+    assert_eq!(partner.local_alias.as_deref(), Some("Lab partner"));
+    let debug = format!("{:?}", candidates[0]);
+    assert!(!debug.contains("partner:example.invalid"));
+    assert!(!debug.contains("Lab partner"));
+}

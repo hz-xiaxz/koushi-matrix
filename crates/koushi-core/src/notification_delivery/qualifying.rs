@@ -63,6 +63,7 @@ pub(crate) fn qualifying_rooms(
             display_label: candidate.display_label.clone(),
             space_labels: candidate.parent_space_labels.clone(),
             kind: candidate.kind,
+            direct_partner: candidate.direct_partner.clone(),
             unread: candidate.unread,
             mentions: candidate.mentions,
             message_text: if carries_text {

@@ -59,9 +59,10 @@ use std::time::{Duration, Instant};
 
 use koushi_state::{
     AppState, NotificationDeliveryContent, NotificationDeliveryContentConsent,
-    NotificationDeliveryOutcomeState, NotificationDeliverySettings, NotificationDeliveryTarget,
-    NotificationDeliveryTargets, NotificationDeliveryTiming, NotificationSinkConfig,
-    NotificationSinkSettings, SettingsPatch, SettingsPatchScope, room_activity_unread_count,
+    NotificationDeliveryOutcomeState, NotificationDeliveryPartnerLabel,
+    NotificationDeliverySettings, NotificationDeliveryTarget, NotificationDeliveryTargets,
+    NotificationDeliveryTiming, NotificationSinkConfig, NotificationSinkSettings, SettingsPatch,
+    SettingsPatchScope, room_activity_unread_count,
 };
 
 use super::cleanup::cleanup_logged_in_runtime;
@@ -308,7 +309,7 @@ impl QaDeliveryFlow<'_> {
         self.store_secret().await?;
 
         self.assert_channel_off(&dm_room_id, &dm_key_b).await?;
-        let label = self.room_label(&dm_room_id)?;
+        let label = self.dm_partner_name(&dm_room_id)?;
         self.assert_dwell_and_request(&dm_room_id, &dm_key_b, &label)
             .await?;
         self.assert_read_cancels(&dm_room_id, &dm_key_b, &label)
@@ -518,7 +519,7 @@ impl QaDeliveryFlow<'_> {
         let request = self.request(0)?;
         let expectation = DeliveryRequestExpectation {
             label: "notification delivery request",
-            headline: "Direct message in",
+            headline: "Direct message from",
             room_label: label,
             unread,
             room_id,
@@ -632,7 +633,7 @@ impl QaDeliveryFlow<'_> {
             &request.body,
             &DeliveryRequestExpectation {
                 label: "notification delivery rearm",
-                headline: "Direct message in",
+                headline: "Direct message from",
                 room_label: label,
                 unread: rearm_unread,
                 room_id,
@@ -697,7 +698,7 @@ impl QaDeliveryFlow<'_> {
             &request.body,
             &DeliveryRequestExpectation {
                 label: "notification delivery min interval",
-                headline: "Direct message in",
+                headline: "Direct message from",
                 room_label: label,
                 unread,
                 room_id,
@@ -1144,7 +1145,7 @@ impl QaDeliveryFlow<'_> {
         self.wait_requests(requests_before + 1, "notification delivery prefix request")
             .await?;
         let request = self.request(requests_before)?;
-        let label = self.room_label(room_id)?;
+        let label = self.dm_partner_name(room_id)?;
         assert_prefix_quoted(
             &request.body,
             "notification delivery prefix",
@@ -1163,7 +1164,7 @@ impl QaDeliveryFlow<'_> {
         room_id: &str,
         room_key_b: &TimelineKey,
     ) -> Result<(), String> {
-        let label = self.room_label(room_id)?;
+        let label = self.dm_partner_name(room_id)?;
         self.mark_room_read_to_latest(room_id).await?;
         let requests_before = self.stub.count();
         self.set_primary_content(QA_DELIVERY_PREFIX, false)?;
@@ -1212,7 +1213,7 @@ impl QaDeliveryFlow<'_> {
         room_id: &str,
         room_key_b: &TimelineKey,
     ) -> Result<(), String> {
-        let label = self.room_label(room_id)?;
+        let label = self.dm_partner_name(room_id)?;
         self.mark_room_read_to_latest(room_id).await?;
         let requests_before = self.stub.count();
         self.set_primary_content(NotificationDeliveryContent::NamesOnly, true)?;
@@ -1266,7 +1267,7 @@ impl QaDeliveryFlow<'_> {
         room_id: &str,
         room_key_b: &TimelineKey,
     ) -> Result<(), String> {
-        let label = self.room_label(room_id)?;
+        let label = self.dm_partner_name(room_id)?;
         self.mark_room_read_to_latest(room_id).await?;
         let requests_before = self.stub.count();
         self.set_primary_content(QA_DELIVERY_PREFIX, true)?;
@@ -1324,7 +1325,7 @@ impl QaDeliveryFlow<'_> {
         room_id: &str,
         room_key_b: &TimelineKey,
     ) -> Result<(), String> {
-        let label = self.room_label(room_id)?;
+        let label = self.dm_partner_name(room_id)?;
         self.mark_room_read_to_latest(room_id).await?;
         let requests_before = self.stub.count();
         // Set the option and a consent that covers the sink as it is, then change the
@@ -1550,6 +1551,7 @@ impl QaDeliveryFlow<'_> {
                 min_interval_secs: 0,
                 only_when_unfocused: true,
             },
+            direct_partner_label: NotificationDeliveryPartnerLabel::LocalAlias,
         });
         self.apply_settings("notification delivery serverchan install sink")
             .await?;
@@ -1665,8 +1667,8 @@ impl QaDeliveryFlow<'_> {
                 "notification delivery serverchan: the form carried no title or desp".to_owned(),
             );
         };
-        if !title.starts_with("Direct message in")
-            || !desp.contains("Direct message in")
+        if !title.starts_with("Direct message from")
+            || !desp.contains("Direct message from")
             || !desp.contains(&format!("{unread} unread"))
         {
             return Err(
@@ -1682,7 +1684,10 @@ impl QaDeliveryFlow<'_> {
         let carries_text = [title, desp, request.body.as_str()].iter().any(|field| {
             field.contains(QA_DELIVERY_PREFIX_MARKER) || field.contains(&escaped_marker)
         });
-        if carries_text || carries_matrix_identifier(title) || carries_matrix_identifier(desp) {
+        if carries_text
+            || carries_matrix_identifier(title, Some(self.user_b))
+            || carries_matrix_identifier(desp, Some(self.user_b))
+        {
             return Err(
                 "notification delivery serverchan: the form carried message text or a Matrix identifier without consent"
                     .to_owned(),
@@ -1764,6 +1769,24 @@ impl QaDeliveryFlow<'_> {
 
     fn secret_value(&self) -> String {
         self.secret.to_owned()
+    }
+
+    /// The name a digest gives a one-to-one direct message (#1492): the partner's full
+    /// Matrix user id, because the scenario sets no local alias for them.
+    fn dm_partner_name(&self, room_id: &str) -> Result<String, String> {
+        let snapshot = self.conn_a.snapshot();
+        let room = snapshot
+            .rooms
+            .iter()
+            .find(|room| room.room_id == room_id)
+            .ok_or_else(|| "notification delivery: the direct message is not listed".to_owned())?;
+        match room.dm_user_ids.as_slice() {
+            [partner] if room.is_dm && partner == self.user_b => Ok(partner.clone()),
+            _ => Err(
+                "notification delivery: the room is not a direct message with the sender"
+                    .to_owned(),
+            ),
+        }
     }
 
     fn room_label(&self, room_id: &str) -> Result<String, String> {
@@ -2132,29 +2155,38 @@ fn assert_delivery_body(
             "{label}: the body did not carry the room's unread count"
         ));
     }
+    // #1492: a direct message is named by its partner, so the partner's user id is the
+    // one Matrix identifier the body may carry, and only as the room's name.
+    let partner = (expectation.room_label == expectation.user_b).then_some(expectation.user_b);
     for (what, needle) in [
-        ("the room id", expectation.room_id),
-        ("the event id", expectation.event_id),
-        ("the message text", expectation.message_body),
-        ("the device owner's account id", expectation.user_a),
-        ("the sender's account id", expectation.user_b),
+        ("the room id", Some(expectation.room_id)),
+        ("the event id", Some(expectation.event_id)),
+        ("the message text", Some(expectation.message_body)),
+        ("the device owner's account id", Some(expectation.user_a)),
+        (
+            "the sender's account id",
+            partner.is_none().then_some(expectation.user_b),
+        ),
     ] {
-        if body.contains(needle) {
+        if needle.is_some_and(|needle| body.contains(needle)) {
             return Err(format!("{label}: the body carried {what}"));
         }
     }
-    if carries_matrix_identifier(body) {
+    if carries_matrix_identifier(body, partner) {
         return Err(format!("{label}: the body carried a Matrix identifier"));
     }
     Ok(())
 }
 
-/// Whether any whitespace-delimited token in `body` is a Matrix identifier, which
+/// Whether any whitespace-delimited token in `body` is a Matrix identifier other than
+/// `partner`, the direct-message partner a digest names (#1492). Every other identifier
 /// is what the lane's private-data rule forbids in anything it emits.
-fn carries_matrix_identifier(body: &str) -> bool {
+fn carries_matrix_identifier(body: &str, partner: Option<&str>) -> bool {
     body.split_whitespace().any(|token| {
         let token = token.trim_end_matches([':', ',', '.']);
-        matches!(token.chars().next(), Some('@' | '!' | '$')) && token.contains(':')
+        matches!(token.chars().next(), Some('@' | '!' | '$'))
+            && token.contains(':')
+            && Some(token) != partner
     })
 }
 
@@ -2167,7 +2199,7 @@ fn assert_prefix_quoted(
     unread: u64,
     marker: &str,
 ) -> Result<(), String> {
-    let headline = format!("Direct message in {room_label}");
+    let headline = format!("Direct message from {room_label}");
     let Some(marker_at) = body.find(&format!("> {marker}")) else {
         return Err(format!(
             "{context}: the body carried none of the room's newest message text as a quoted line"
@@ -2189,7 +2221,7 @@ fn assert_prefix_quoted(
             "{context}: the body did not carry the room's unread count"
         ));
     }
-    if carries_matrix_identifier(body) {
+    if carries_matrix_identifier(body, Some(room_label)) {
         return Err(format!("{context}: the body carried a Matrix identifier"));
     }
     Ok(())
@@ -2205,7 +2237,7 @@ fn assert_prefix_absent(
     unread: u64,
     marker: &str,
 ) -> Result<(), String> {
-    let headline = format!("Direct message in {room_label}");
+    let headline = format!("Direct message from {room_label}");
     if !request.body.contains(&headline) {
         return Err(format!(
             "{context}: the delivery did not reach the stub naming the room"
@@ -2292,6 +2324,7 @@ fn delivery_settings(stub: &QaDeliveryStub, sink_id: &str) -> NotificationDelive
                 min_interval_secs: 0,
                 only_when_unfocused: true,
             },
+            direct_partner_label: NotificationDeliveryPartnerLabel::LocalAlias,
         }],
     }
 }

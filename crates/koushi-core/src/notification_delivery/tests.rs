@@ -6,15 +6,17 @@
 use std::time::Duration;
 
 use koushi_state::{
-    BoundedNotificationDeliveryText, NotificationDeliveryContent, NotificationSinkConfig,
-    NotificationSinkSettings, RoomAttentionKind,
+    BoundedNotificationDeliveryText, DirectPartner, NotificationDeliveryContent,
+    NotificationDeliveryPartnerLabel, NotificationSinkConfig, NotificationSinkSettings,
+    RoomAttentionKind,
 };
 
 use crate::executor::Instant;
 
 use super::digest::{
     MAX_NOTIFICATION_DIGEST_ROOMS, MAX_SERVERCHAN_TITLE_GRAPHEMES,
-    NOTIFICATION_TEXT_TRUNCATED_MARKER, coalesce_window, render_intent,
+    NOTIFICATION_TEXT_TRUNCATED_MARKER, NotificationDeliveryPreviewSample, coalesce_window,
+    preview_digest, render_intent,
 };
 use super::dwell::{DwellTracker, QualifyingRoom};
 
@@ -33,6 +35,7 @@ fn room(
         display_label: label.to_owned(),
         space_labels: Vec::new(),
         kind,
+        direct_partner: None,
         unread,
         mentions,
         message_text: None,
@@ -591,4 +594,127 @@ fn delivery_debug_output_redacts_identifiers_and_message_text() {
             "{leaked} must not be logged"
         );
     }
+}
+
+const PARTNER_ID: &str = "@partner:example.invalid";
+
+/// A one-to-one direct message with `PARTNER_ID`, whose room label is a display name.
+fn direct(kind: RoomAttentionKind, alias: Option<&str>) -> QualifyingRoom {
+    let mut room = room("!direct:example.invalid", "partner", kind, 1, 0);
+    room.space_labels = vec!["Fixture Space".to_owned()];
+    room.direct_partner = Some(DirectPartner {
+        user_id: PARTNER_ID.to_owned(),
+        local_alias: alias.map(str::to_owned),
+    });
+    room
+}
+
+fn subject_for(sink: &NotificationSinkSettings, room: QualifyingRoom) -> String {
+    render_intent(sink, &[room], "w-1")
+        .expect("an intent")
+        .subject
+}
+
+#[test]
+fn a_direct_message_is_named_from_its_partners_alias_without_a_space() {
+    let home = sink("home", "me@example.invalid");
+    assert_eq!(
+        subject_for(&home, direct(RoomAttentionKind::Dm, Some("Hiroshi (lab)"))),
+        "Direct message from Hiroshi (lab)"
+    );
+    let intent = render_intent(
+        &home,
+        &[direct(RoomAttentionKind::Dm, Some("Hiroshi (lab)"))],
+        "w-1",
+    )
+    .expect("an intent");
+    assert_eq!(intent.body, "Direct message from Hiroshi (lab): 1 unread");
+}
+
+#[test]
+fn a_direct_message_without_an_alias_or_with_the_option_off_names_the_full_user_id() {
+    let home = sink("home", "me@example.invalid");
+    assert_eq!(
+        subject_for(&home, direct(RoomAttentionKind::Dm, None)),
+        format!("Direct message from {PARTNER_ID}")
+    );
+    // A blank alias is no alias.
+    assert_eq!(
+        subject_for(&home, direct(RoomAttentionKind::Dm, Some("  "))),
+        format!("Direct message from {PARTNER_ID}")
+    );
+    let ids_only = NotificationSinkSettings {
+        direct_partner_label: NotificationDeliveryPartnerLabel::MatrixId,
+        ..home
+    };
+    assert_eq!(
+        subject_for(&ids_only, direct(RoomAttentionKind::Dm, Some("Hiroshi"))),
+        format!("Direct message from {PARTNER_ID}")
+    );
+}
+
+#[test]
+fn a_mention_in_a_direct_message_is_from_the_partner_and_a_group_room_stays_in() {
+    let home = sink("home", "me@example.invalid");
+    assert_eq!(
+        subject_for(&home, direct(RoomAttentionKind::Mention, Some("Hiroshi"))),
+        "Mention from Hiroshi"
+    );
+    let mut group = room(
+        "!group:example.invalid",
+        "Lab",
+        RoomAttentionKind::Mention,
+        1,
+        1,
+    );
+    group.space_labels = vec!["Fixture Space".to_owned()];
+    assert_eq!(subject_for(&home, group), "Mention in Lab · Fixture Space");
+}
+
+fn preview_sample() -> NotificationDeliveryPreviewSample {
+    NotificationDeliveryPreviewSample {
+        partner_user_id: PARTNER_ID.to_owned(),
+        partner_alias: "Hiroshi".to_owned(),
+        message_text: "See you at 3".to_owned(),
+    }
+}
+
+#[test]
+fn the_preview_is_what_a_consented_send_renders_for_the_sample() {
+    for content in [
+        NotificationDeliveryContent::NamesOnly,
+        NotificationDeliveryContent::Prefix { graphemes: 4 },
+        NotificationDeliveryContent::Full,
+    ] {
+        for draft in [sink("home", "me@example.invalid"), serverchan(content)] {
+            let mut draft = consented(draft, content);
+            let preview = preview_digest(&draft, &preview_sample());
+            let mut room = direct(RoomAttentionKind::Dm, Some("Hiroshi"));
+            room.space_labels.clear();
+            let room = with_text(room, "See you at 3");
+            let sent = render_intent(&draft, &[room], "w-1").expect("an intent");
+            assert_eq!(preview.subject, sent.subject);
+            assert_eq!(preview.body, sent.body);
+            assert_eq!(preview.sender_name, sent.sender_name);
+
+            // The draft's own choice is previewed before its consent is accepted.
+            draft.content_consent = None;
+            assert_eq!(preview_digest(&draft, &preview_sample()), preview);
+        }
+    }
+}
+
+#[test]
+fn the_preview_shows_the_default_sender_name_and_none_for_serverchan() {
+    let mut draft = sink("home", "me@example.invalid");
+    draft.sender_name.clear();
+    let preview = preview_digest(&draft, &preview_sample());
+    assert_eq!(preview.sender_name, "Koushi");
+    assert_eq!(preview.subject, "Direct message from Hiroshi");
+    assert_eq!(preview.body, "Direct message from Hiroshi: 1 unread");
+
+    let wechat = serverchan(NotificationDeliveryContent::Full);
+    let preview = preview_digest(&wechat, &preview_sample());
+    assert_eq!(preview.sender_name, "");
+    assert!(preview.body.contains("See you at 3"));
 }

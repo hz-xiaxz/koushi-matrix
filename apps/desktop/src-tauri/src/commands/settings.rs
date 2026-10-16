@@ -111,6 +111,43 @@ pub async fn save_notification_sink(
     Ok(admission)
 }
 
+/// What the destination editor's preview shows (#1492): the sender name, the subject or
+/// ServerChan title, and the body, exactly as the digest renderer writes them.
+#[derive(Clone, serde::Serialize)]
+pub struct NotificationDeliveryPreviewDto {
+    pub sender_name: String,
+    pub subject: String,
+    pub body: String,
+}
+
+/// #1492: render the catalog's sample direct message through the digest renderer under
+/// the unsaved draft. Stateless: it needs no account, stores nothing, and reads no
+/// credential.
+#[tauri::command]
+pub fn preview_notification_delivery(
+    sink: koushi_state::NotificationSinkSettings,
+    partner_user_id: String,
+    partner_alias: String,
+    message_text: String,
+) -> NotificationDeliveryPreviewDto {
+    use koushi_core::notification_delivery::digest::{
+        NotificationDeliveryPreviewSample, preview_digest,
+    };
+    let preview = preview_digest(
+        &sink,
+        &NotificationDeliveryPreviewSample {
+            partner_user_id,
+            partner_alias,
+            message_text,
+        },
+    );
+    NotificationDeliveryPreviewDto {
+        sender_name: preview.sender_name,
+        subject: preview.subject,
+        body: preview.body,
+    }
+}
+
 #[tauri::command]
 pub async fn clear_notification_delivery_secret(
     account_tab_id: Option<String>,

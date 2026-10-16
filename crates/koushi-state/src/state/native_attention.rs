@@ -409,6 +409,17 @@ pub(crate) fn native_attention_projection_from_rooms_with_live_room(
     }
 }
 
+/// The other member of a direct message, for naming it in a delivered digest (#1492).
+///
+/// Only a direct message with exactly one other member has one. The user id is the
+/// room list's own direct target; the alias is this device's personal local alias for
+/// that user, when one is set.
+#[derive(Clone, Eq, PartialEq)]
+pub struct DirectPartner {
+    pub user_id: String,
+    pub local_alias: Option<String>,
+}
+
 /// One room the attention projection counts as holding unread attention (#1427).
 ///
 /// The device-local delivery channel needs the same rooms the badge counts, but for
@@ -442,6 +453,9 @@ pub struct RoomAttentionCandidate {
     /// message text, so it is carried here and never serialized, logged, or rendered
     /// except by `digest` under a per-sink consent.
     pub newest_message_text: Option<BoundedNotificationDeliveryText>,
+    /// The other member when the room is a one-to-one direct message (#1492). The alias
+    /// is filled by [`attention_room_candidates_for_state`], which owns the alias list.
+    pub direct_partner: Option<DirectPartner>,
 }
 
 impl fmt::Debug for RoomAttentionCandidate {
@@ -460,6 +474,10 @@ impl fmt::Debug for RoomAttentionCandidate {
             .field(
                 "newest_message_text",
                 &self.newest_message_text.as_ref().map(|_| "MessageText(..)"),
+            )
+            .field(
+                "direct_partner",
+                &self.direct_partner.as_ref().map(|_| "DirectPartner(..)"),
             )
             .finish()
     }
@@ -552,6 +570,13 @@ pub fn attention_room_candidates(
                 .filter(|event| !event.is_redacted)
                 .and_then(|event| event.message_text.as_deref())
                 .and_then(bounded_notification_delivery_message_source),
+            direct_partner: match room.dm_user_ids.as_slice() {
+                [user_id] if room.is_dm => Some(DirectPartner {
+                    user_id: user_id.clone(),
+                    local_alias: None,
+                }),
+                _ => None,
+            },
         });
     }
 
@@ -589,6 +614,14 @@ pub fn attention_room_candidates_for_state(state: &AppState) -> Vec<RoomAttentio
         capabilities: state.native_attention.summary.capabilities,
     });
     for candidate in &mut candidates {
+        if let Some(partner) = candidate.direct_partner.as_mut() {
+            partner.local_alias = state
+                .profile
+                .local_aliases
+                .get(&partner.user_id)
+                .map(|alias| alias.trim().to_owned())
+                .filter(|alias| !alias.is_empty());
+        }
         candidate.parent_space_labels = candidate
             .parent_space_ids
             .iter()

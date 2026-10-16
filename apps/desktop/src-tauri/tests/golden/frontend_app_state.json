@@ -1114,6 +1114,7 @@
                   "sink_kind": "resend"
                 },
                 "destination": "fixture@example.invalid",
+                "direct_partner_label": "localAlias",
                 "from_address": "koushi@example.invalid",
                 "id": "resend",
                 "secret_binding": "resend:https://api.resend.com/emails#0123abcd",
@@ -1153,6 +1154,7 @@
                 },
                 "content_consent": null,
                 "destination": "fixture@example.invalid",
+                "direct_partner_label": "matrixId",
                 "from_address": "fixture@qq.example.invalid",
                 "id": "smtp",
                 "secret_binding": null,
@@ -1179,6 +1181,7 @@
                 },
                 "content_consent": null,
                 "destination": "",
+                "direct_partner_label": "localAlias",
                 "from_address": "",
                 "id": "wechat",
                 "secret_binding": null,

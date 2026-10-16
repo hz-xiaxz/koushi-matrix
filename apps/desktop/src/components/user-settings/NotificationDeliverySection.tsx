@@ -52,6 +52,8 @@ import type {
   AccountNotificationsOperationState,
   NotificationDeliveryContent,
   NotificationDeliveryPresetState,
+  NotificationDeliveryPreview,
+  NotificationDeliveryPreviewSample,
   NotificationDeliverySettings,
   NotificationDeliverySinkState,
   NotificationDeliveryState,
@@ -82,13 +84,19 @@ export interface NotificationDeliveryActions {
   ) => Promise<void>;
   clearSecret: (sinkId: string) => Promise<void>;
   test: (sinkId: string) => Promise<void>;
+  /** Renders a sample digest for the unsaved sink through Rust's digest renderer (#1492). */
+  preview: (
+    sink: NotificationSinkSettings,
+    sample: NotificationDeliveryPreviewSample
+  ) => Promise<NotificationDeliveryPreview>;
 }
 
 export const noopNotificationDeliveryActions: NotificationDeliveryActions = {
   update: () => undefined,
   save: async () => undefined,
   clearSecret: async () => undefined,
-  test: async () => undefined
+  test: async () => undefined,
+  preview: async () => ({ sender_name: "", subject: "", body: "" })
 };
 
 /**
@@ -307,6 +315,7 @@ export function NotificationDeliverySection({
             onCancel={closeEditor}
             onRemove={() => void removeSink(sink.id)}
             onTest={() => runTest(sink.id)}
+            onPreview={actions.preview}
           />
         )
       };
@@ -753,7 +762,8 @@ function NotificationSinkDetail({
   onSave,
   onCancel,
   onRemove,
-  onTest
+  onTest,
+  onPreview
 }: {
   sink: NotificationSinkSettings;
   saved: NotificationSinkSettings | null;
@@ -768,6 +778,7 @@ function NotificationSinkDetail({
   onCancel: () => void;
   onRemove: () => void;
   onTest: () => Promise<void>;
+  onPreview: NotificationDeliveryActions["preview"];
 }) {
   const secretRef = useRef<HTMLInputElement | null>(null);
   const [secretFilled, setSecretFilled] = useState(false);
@@ -1129,6 +1140,7 @@ function NotificationSinkDetail({
           setProblem(null);
         }}
         onChange={change}
+        onPreview={onPreview}
       />
 
       <section
@@ -1465,10 +1477,57 @@ function SinkTargets({
 type ContentMode = NotificationDeliveryContent["kind"];
 
 /**
- * What one destination's messages contain (#1460, #1468). A text mode needs a consent bound
- * to this sink kind, endpoint and recipient. The plaintext warning is shown inline with a
- * checkbox; Save carries the answer as `acceptContentConsent` and Rust mints the consent.
- * This component never builds one: choosing names only drops the stored one instead.
+ * The made-up direct-message partner the preview renders (#1492). A Matrix ID reads the same
+ * in every locale, so it lives here rather than in the catalog; the alias and the message are
+ * catalog text. Nothing here belongs to a real account.
+ */
+const PREVIEW_SAMPLE_USER_ID = "@alex:example.org";
+const PREVIEW_DEBOUNCE_MS = 150;
+
+/**
+ * Renders the sample digest for the unsaved sink (#1492). Rust's digest renderer is the only
+ * author of the preview; this hook just asks again after the sink settles and drops answers
+ * that arrive for a sink the user has since edited.
+ */
+function useNotificationDeliveryPreview(
+  sink: NotificationSinkSettings,
+  onPreview: NotificationDeliveryActions["preview"]
+): NotificationDeliveryPreview | null {
+  const [preview, setPreview] = useState<{ key: string; value: NotificationDeliveryPreview } | null>(null);
+  const key = JSON.stringify(sink);
+  const sinkRef = useRef(sink);
+  sinkRef.current = sink;
+  useEffect(() => {
+    let current = true;
+    const timer = window.setTimeout(() => {
+      const sample: NotificationDeliveryPreviewSample = {
+        partnerUserId: PREVIEW_SAMPLE_USER_ID,
+        partnerAlias: t("settings.notificationDeliveryPreviewSampleAlias"),
+        messageText: t("settings.notificationDeliveryPreviewSampleMessage")
+      };
+      onPreview(sinkRef.current, sample).then(
+        (value) => {
+          if (current) {
+            setPreview({ key, value });
+          }
+        },
+        () => undefined
+      );
+    }, PREVIEW_DEBOUNCE_MS);
+    return () => {
+      current = false;
+      window.clearTimeout(timer);
+    };
+  }, [key, onPreview]);
+  return preview?.key === key ? preview.value : null;
+}
+
+/**
+ * What one destination's messages contain (#1460, #1468, #1492). A text mode needs a consent
+ * bound to this sink kind, endpoint and recipient. The plaintext warning is shown inline under
+ * the chosen mode with a checkbox; Save carries the answer as `acceptContentConsent` and Rust
+ * mints the consent. This component never builds one: choosing names only drops the stored
+ * one instead. The preview below is Rust's rendering of a sample direct message.
  */
 function SinkContent({
   sink,
@@ -1478,7 +1537,8 @@ function SinkContent({
   needsConsent,
   consentChecked,
   onConsentChange,
-  onChange
+  onChange,
+  onPreview
 }: {
   sink: NotificationSinkSettings;
   presets: readonly NotificationDeliveryPresetState[];
@@ -1488,10 +1548,13 @@ function SinkContent({
   consentChecked: boolean;
   onConsentChange: (checked: boolean) => void;
   onChange: (sink: NotificationSinkSettings) => void;
+  onPreview: NotificationDeliveryActions["preview"];
 }) {
   const content = sink.content;
   const service = notificationDeliveryServiceLabel(sink, presets);
   const budget = notificationTextBudget(sink);
+  const serverChan = sink.config.kind === "serverChan";
+  const preview = useNotificationDeliveryPreview(sink, onPreview);
 
   function choose(mode: ContentMode) {
     if (mode === content.kind) {
@@ -1516,8 +1579,61 @@ function SinkContent({
   const modes: { mode: ContentMode; label: string }[] = [
     { mode: "namesOnly", label: t("settings.notificationDeliveryContentNamesOnly") },
     { mode: "prefix", label: t("settings.notificationDeliveryContentPrefix") },
-    { mode: "full", label: t("settings.notificationDeliveryContentFull", { count: budget }) }
+    { mode: "full", label: t("settings.notificationDeliveryContentFull") }
   ];
+
+  function renderTextDetails() {
+    return (
+      <div className="notification-delivery-content-detail">
+        {content.kind === "prefix" ? (
+          <NumberField
+            label={t("settings.notificationDeliveryContentPrefixCount")}
+            value={content.graphemes}
+            field="prefix"
+            syncScope={syncScope}
+            testId="notification-delivery-content-prefix-count"
+            maxLength={3}
+            clamp={clampNotificationDeliveryPrefixGraphemes}
+            onChange={(graphemes) => onChange({ ...sink, content: { kind: "prefix", graphemes } })}
+          />
+        ) : null}
+        <p className="profile-settings-hint" data-testid="notification-delivery-content-limit">
+          {t("settings.notificationDeliveryContentLimit", { service, count: budget })}
+        </p>
+        <p className="profile-settings-hint" data-testid="notification-delivery-content-plaintext">
+          {t("settings.notificationDeliveryContentPlaintext", { service })}
+        </p>
+        {needsConsent ? (
+          <div
+            className="notification-delivery-consent"
+            role="group"
+            aria-label={t("settings.notificationDeliveryConsentTitle")}
+            data-testid="notification-delivery-consent"
+          >
+            <p className="notification-delivery-consent-title">{t("settings.notificationDeliveryConsentTitle")}</p>
+            <p className="profile-settings-hint" data-testid="notification-delivery-consent-body">
+              {t("settings.notificationDeliveryConsentBody", {
+                service,
+                destination: serverChan
+                  ? t("settings.notificationDeliveryConsentServerChanRecipient")
+                  : sink.destination.trim()
+              })}
+            </p>
+            <p className="profile-settings-hint">{t("settings.notificationDeliveryConsentRebind")}</p>
+            <label className="settings-detail-row">
+              <input
+                type="checkbox"
+                data-testid="notification-delivery-consent-acknowledge"
+                checked={consentChecked}
+                onChange={(event) => onConsentChange(event.currentTarget.checked)}
+              />
+              <span>{t("settings.notificationDeliveryConsentAcknowledge")}</span>
+            </label>
+          </div>
+        ) : null}
+      </div>
+    );
+  }
 
   return (
     <section
@@ -1527,83 +1643,87 @@ function SinkContent({
       data-mode={content.kind}
     >
       <h5 className="settings-subheading">{t("settings.notificationDeliveryContent")}</h5>
+      <p className="profile-settings-hint" data-testid="notification-delivery-content-always-sent">
+        {t("settings.notificationDeliveryContentAlwaysSent")}
+      </p>
       <div role="radiogroup" aria-label={t("settings.notificationDeliveryContent")} className="settings-control-stack">
         {modes.map(({ mode, label }) => (
-          <label className="settings-detail-row" key={mode}>
-            <input
-              type="radio"
-              name={`notification-delivery-content-${sink.id}`}
-              value={mode}
-              data-testid="notification-delivery-content-mode"
-              data-mode={mode}
-              checked={content.kind === mode}
-              disabled={mode !== "namesOnly" && mode !== content.kind && !textAvailable}
-              onChange={() => choose(mode)}
-            />
-            <span>{label}</span>
-          </label>
+          <div className="notification-delivery-content-option" key={mode} data-mode={mode}>
+            <label className="settings-detail-row">
+              <input
+                type="radio"
+                name={`notification-delivery-content-${sink.id}`}
+                value={mode}
+                data-testid="notification-delivery-content-mode"
+                data-mode={mode}
+                checked={content.kind === mode}
+                disabled={mode !== "namesOnly" && mode !== content.kind && !textAvailable}
+                onChange={() => choose(mode)}
+              />
+              <span>{label}</span>
+            </label>
+            {mode !== "namesOnly" && content.kind === mode ? renderTextDetails() : null}
+          </div>
         ))}
       </div>
-      {content.kind === "prefix" ? (
-        <NumberField
-          label={t("settings.notificationDeliveryContentPrefixCount")}
-          value={content.graphemes}
-          field="prefix"
-          syncScope={syncScope}
-          testId="notification-delivery-content-prefix-count"
-          maxLength={3}
-          clamp={clampNotificationDeliveryPrefixGraphemes}
-          onChange={(graphemes) => onChange({ ...sink, content: { kind: "prefix", graphemes } })}
-        />
-      ) : null}
       {!textAvailable ? (
         <p className="profile-settings-hint" data-testid="notification-delivery-content-needs-key">
           {t("settings.notificationDeliveryContentNeedsKey")}
         </p>
       ) : null}
-      <p className="profile-settings-hint" data-testid="notification-delivery-content-limit">
-        {t("settings.notificationDeliveryContentLimit", { service, count: budget })}
-      </p>
       <p className="profile-settings-hint" data-testid="notification-delivery-content-fallback">
         {t("settings.notificationDeliveryContentFallback")}
       </p>
-      {content.kind !== "namesOnly" ? (
-        <p className="profile-settings-hint" data-testid="notification-delivery-content-plaintext">
-          {t("settings.notificationDeliveryContentPlaintext", { service })}
-        </p>
-      ) : null}
-      {needsConsent ? (
-        <div
-          className="notification-delivery-consent"
-          role="group"
-          aria-label={t("settings.notificationDeliveryConsentTitle")}
-          data-testid="notification-delivery-consent"
-        >
-          <p className="notification-delivery-consent-title">{t("settings.notificationDeliveryConsentTitle")}</p>
-          <p className="profile-settings-hint" data-testid="notification-delivery-consent-body">
-            {t("settings.notificationDeliveryConsentBody", {
-              service,
-              destination:
-                sink.config.kind === "serverChan"
-                  ? t("settings.notificationDeliveryConsentServerChanRecipient")
-                  : sink.destination.trim()
-            })}
-          </p>
-          <p className="profile-settings-hint">{t("settings.notificationDeliveryConsentRebind")}</p>
-          <label className="settings-detail-row">
-            <input
-              type="checkbox"
-              data-testid="notification-delivery-consent-acknowledge"
-              checked={consentChecked}
-              onChange={(event) => onConsentChange(event.currentTarget.checked)}
-            />
-            <span>{t("settings.notificationDeliveryConsentAcknowledge")}</span>
-          </label>
-        </div>
-      ) : null}
       <p className="profile-settings-hint" data-testid="notification-delivery-content-independent">
         {t("settings.notificationDeliveryContentIndependent")}
       </p>
+      <label className="settings-detail-row">
+        <input
+          type="checkbox"
+          data-testid="notification-delivery-partner-alias"
+          checked={sink.direct_partner_label === "localAlias"}
+          onChange={(event) =>
+            onChange({
+              ...sink,
+              direct_partner_label: event.currentTarget.checked ? "localAlias" : "matrixId"
+            })
+          }
+        />
+        <span>{t("settings.notificationDeliveryPartnerAlias")}</span>
+      </label>
+      <p className="profile-settings-hint" data-testid="notification-delivery-partner-alias-hint">
+        {t("settings.notificationDeliveryPartnerAliasHint", { service })}
+      </p>
+      <div
+        className="notification-delivery-preview"
+        role="group"
+        aria-label={t("settings.notificationDeliveryPreview")}
+        data-testid="notification-delivery-preview"
+        aria-busy={preview === null}
+      >
+        <p className="notification-delivery-preview-title">{t("settings.notificationDeliveryPreview")}</p>
+        <p className="profile-settings-hint">{t("settings.notificationDeliveryPreviewHint")}</p>
+        {preview ? (
+          <dl className="notification-delivery-preview-fields">
+            {serverChan ? null : (
+              <>
+                <dt>{t("settings.notificationDeliveryPreviewSender")}</dt>
+                <dd data-testid="notification-delivery-preview-sender">{preview.sender_name}</dd>
+              </>
+            )}
+            <dt>
+              {serverChan
+                ? t("settings.notificationDeliveryPreviewTitle")
+                : t("settings.notificationDeliveryPreviewSubject")}
+            </dt>
+            <dd data-testid="notification-delivery-preview-subject">{preview.subject}</dd>
+            <dt>{t("settings.notificationDeliveryPreviewBody")}</dt>
+            <dd className="notification-delivery-preview-body" data-testid="notification-delivery-preview-body">
+              {preview.body}
+            </dd>
+          </dl>
+        ) : null}
+      </div>
     </section>
   );
 }

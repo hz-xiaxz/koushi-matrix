@@ -108,6 +108,30 @@ fn a_sink_saved_before_the_credential_binding_existed_still_loads() {
 }
 
 #[test]
+fn a_sink_saved_before_direct_partner_names_names_partners_by_alias() {
+    // #1492: a file written before the option existed reads back with the default, and
+    // the chosen value survives a round trip.
+    let delivery: NotificationDeliverySettings = serde_json::from_str(
+        r#"{"sinks":[{"id":"home","destination":"me@example.com","from_address":"koushi@example.com","config":{"kind":"resend","endpoint":"https://relay.example.com/emails"}}]}"#,
+    )
+    .expect("a settings file written before the option existed must still load");
+    assert_eq!(
+        delivery.sinks[0].direct_partner_label,
+        NotificationDeliveryPartnerLabel::LocalAlias
+    );
+
+    let mut ids_only = sink("home", "me@example.com");
+    ids_only.direct_partner_label = NotificationDeliveryPartnerLabel::MatrixId;
+    let json = serde_json::to_string(&ids_only).expect("serializable");
+    assert!(json.contains(r#""direct_partner_label":"matrixId""#));
+    let back: NotificationSinkSettings = serde_json::from_str(&json).expect("loads");
+    assert_eq!(
+        back.direct_partner_label,
+        NotificationDeliveryPartnerLabel::MatrixId
+    );
+}
+
+#[test]
 fn a_binding_that_does_not_name_this_configuration_is_dropped_on_load() {
     // The settings file can be edited while the app is closed, so a binding that does not
     // match is dropped at load rather than trusted.

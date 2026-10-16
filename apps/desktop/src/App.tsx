@@ -846,7 +846,8 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
     },
     test: async (sinkId) => {
       await desktopApi.testNotificationDelivery(sinkId).catch(() => undefined);
-    }
+    },
+    preview: (sink, sample) => desktopApi.previewNotificationDelivery(sink, sample)
   }), []);
   const consumeNotificationActivation = useCallback((target: DesktopNotificationActivation) => {
     setPendingNotificationActivation((pending) => pending === target ? null : pending);
@@ -3380,7 +3381,8 @@ function AccountContent({
     },
     test: async (sinkId) => {
       await settleCommand(api.testNotificationDelivery(sinkId));
-    }
+    },
+    preview: (sink, sample) => api.previewNotificationDelivery(sink, sample)
   }), []);
 
   // Contact security details in User info (#1024): read-only load and close.

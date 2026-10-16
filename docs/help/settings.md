@@ -279,20 +279,21 @@ changed.
 
 ### Message content
 
-**Space and room names only** is the default: a notification names the rooms that
-need attention, each room's kind, and its unread and mention counts, and no
-message text leaves this device. Two modes add text:
+Space names, room names, and unread counts are always sent. **Don't send message
+text** is the default: a notification names the rooms that need attention, each
+room's kind, and its unread and mention counts, and no message text leaves this
+device. Two options add text:
 
-- **Names and the first characters of each message**, with **Characters to
-  include** (80 by default, at most 500).
-- **Names and the message text**, up to the service's own limit per room (4000
+- **Send the beginning of each message**, with **Characters to include** (80 by
+  default, at most 500).
+- **Send the full message text**, up to the service's own limit per room (4000
   characters for mail, 1000 for ServerChan). Longer text is cut and marked as
   truncated; it is never presented as the whole message.
 
 Images, files, messages that could not be decrypted, and deleted messages are
 sent as names only whatever the mode.
 
-Choosing a text mode shows a warning under the modes. It states that the text
+Choosing a text option shows a warning directly under that option. It states that the text
 leaves this device as plain text and passes through the service to the recipient
 without end-to-end encryption, and that whether and for how long the service
 keeps it depends on that service's own terms. Check **I understand that the text
@@ -305,6 +306,18 @@ the consent; choosing names only clears it.
 
 This setting is separate from **Show message content in notifications** under
 **OS notifications**.
+
+A direct message is headed **Direct message from** (or **Mention from**) and the
+other person's name; other rooms are headed with **in** and the room and space
+names. **Use the alias you set for a contact, if there is one** is on by default:
+a contact you gave an alias is named by that alias, which is then sent to the
+service. Without an alias, or with the box unchecked, the full Matrix ID (such as
+`@user:server`) is used.
+
+**Preview** shows an example direct message notification with the current
+settings: the sender name (**Koushi** unless you changed it), the subject (the
+title for WeChat), and the body. It is rendered by the same code that writes real
+notifications, from a made-up contact and message.
 
 ### Timing
 

@@ -15,7 +15,7 @@ use std::collections::{BTreeMap, BTreeSet};
 use std::fmt;
 use std::time::Duration;
 
-use koushi_state::{BoundedNotificationDeliveryText, RoomAttentionKind};
+use koushi_state::{BoundedNotificationDeliveryText, DirectPartner, RoomAttentionKind};
 
 use crate::executor::Instant;
 
@@ -47,6 +47,11 @@ pub struct QualifyingRoom {
     /// Which qualifying attention state the room is in. It decides the ranking
     /// of the room inside a digest and the wording of its line.
     pub kind: RoomAttentionKind,
+    /// The other member of a one-to-one direct message, with the local alias the
+    /// user gave them. `Some` names the room by its partner (`Direct message from
+    /// …`) whatever [`Self::kind`] is, because a direct message with a mention is
+    /// ranked as a mention (#1492).
+    pub direct_partner: Option<DirectPartner>,
     /// The room's unread message count, from the same projection that feeds the
     /// badge. Thread replies are already counted here by
     /// `room_activity_unread_count`.
@@ -71,6 +76,10 @@ impl fmt::Debug for QualifyingRoom {
             .field("display_label", &"RoomName(..)")
             .field("space_labels", &self.space_labels.len())
             .field("kind", &self.kind)
+            .field(
+                "direct_partner",
+                &self.direct_partner.as_ref().map(|_| "DirectPartner(..)"),
+            )
             .field("unread", &self.unread)
             .field("mentions", &self.mentions)
             .field(

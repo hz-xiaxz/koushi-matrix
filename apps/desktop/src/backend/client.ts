@@ -62,6 +62,8 @@ import type {
   HistoryExportStart,
   FilesViewScope,
   NotificationSinkSettings,
+  NotificationDeliveryPreview,
+  NotificationDeliveryPreviewSample,
   ScheduledSendsScope,
   SubmissionResponse,
   ThreadOpenIntent,
@@ -467,6 +469,18 @@ export class TauriDesktopApi implements DesktopApi {
 
   async testNotificationDelivery(sinkId: string): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("test_notification_delivery", { sinkId });
+  }
+
+  async previewNotificationDelivery(
+    sink: NotificationSinkSettings,
+    sample: NotificationDeliveryPreviewSample
+  ): Promise<NotificationDeliveryPreview> {
+    return this.invokeCommand<NotificationDeliveryPreview>("preview_notification_delivery", {
+      sink,
+      partnerUserId: sample.partnerUserId,
+      partnerAlias: sample.partnerAlias,
+      messageText: sample.messageText
+    });
   }
 
   async loadAccountManagementCapabilities(): Promise<CommandAdmission> {

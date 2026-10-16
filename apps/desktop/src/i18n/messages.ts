@@ -1074,6 +1074,17 @@ export type MessageId =
   | "settings.notificationDeliveryContentFallback"
   | "settings.notificationDeliveryContentPlaintext"
   | "settings.notificationDeliveryContentIndependent"
+  | "settings.notificationDeliveryContentAlwaysSent"
+  | "settings.notificationDeliveryPartnerAlias"
+  | "settings.notificationDeliveryPartnerAliasHint"
+  | "settings.notificationDeliveryPreview"
+  | "settings.notificationDeliveryPreviewHint"
+  | "settings.notificationDeliveryPreviewSender"
+  | "settings.notificationDeliveryPreviewSubject"
+  | "settings.notificationDeliveryPreviewTitle"
+  | "settings.notificationDeliveryPreviewBody"
+  | "settings.notificationDeliveryPreviewSampleAlias"
+  | "settings.notificationDeliveryPreviewSampleMessage"
   | "settings.notificationDeliveryConsentTitle"
   | "settings.notificationDeliveryConsentBody"
   | "settings.notificationDeliveryConsentServerChanRecipient"
@@ -3235,11 +3246,11 @@ const en: Catalog = {
   "settings.notificationDeliveryContent":
     "Message content",
   "settings.notificationDeliveryContentNamesOnly":
-    "Space and room names only",
+    "Don't send message text",
   "settings.notificationDeliveryContentPrefix":
-    "Names and the first characters of each message",
+    "Send the beginning of each message",
   "settings.notificationDeliveryContentFull":
-    "Names and the message text (up to {count} characters per room)",
+    "Send the full message text",
   "settings.notificationDeliveryContentPrefixCount":
     "Characters to include",
   "settings.notificationDeliveryContentNeedsKey":
@@ -3252,6 +3263,28 @@ const en: Catalog = {
     "{service} receives this text as plain text, outside end-to-end encryption.",
   "settings.notificationDeliveryContentIndependent":
     "This is separate from the message preview setting for OS notifications.",
+  "settings.notificationDeliveryContentAlwaysSent":
+    "Space names, room names, and unread counts are always sent.",
+  "settings.notificationDeliveryPartnerAlias":
+    "Use the alias you set for a contact, if there is one",
+  "settings.notificationDeliveryPartnerAliasHint":
+    "Direct message notifications name the other person. The alias is sent to {service}. Without an alias, the full Matrix ID (such as @user:server) is used.",
+  "settings.notificationDeliveryPreview":
+    "Preview",
+  "settings.notificationDeliveryPreviewHint":
+    "An example direct message notification with these settings.",
+  "settings.notificationDeliveryPreviewSender":
+    "From",
+  "settings.notificationDeliveryPreviewSubject":
+    "Subject",
+  "settings.notificationDeliveryPreviewTitle":
+    "Title",
+  "settings.notificationDeliveryPreviewBody":
+    "Body",
+  "settings.notificationDeliveryPreviewSampleAlias":
+    "Alex (design team)",
+  "settings.notificationDeliveryPreviewSampleMessage":
+    "Are you free for a quick call this afternoon?",
   "settings.notificationDeliveryConsentTitle":
     "Send message text unencrypted?",
   "settings.notificationDeliveryConsentBody":
@@ -5338,11 +5371,11 @@ const ja: Catalog = {
   "settings.notificationDeliveryContent":
     "送信内容",
   "settings.notificationDeliveryContentNamesOnly":
-    "スペース名とルーム名のみ",
+    "本文は送らない",
   "settings.notificationDeliveryContentPrefix":
-    "名前とメッセージの冒頭",
+    "本文の冒頭を送る",
   "settings.notificationDeliveryContentFull":
-    "名前とメッセージ本文（ルームごとに最大{count}文字）",
+    "本文をすべて送る",
   "settings.notificationDeliveryContentPrefixCount":
     "含める文字数",
   "settings.notificationDeliveryContentNeedsKey":
@@ -5355,6 +5388,28 @@ const ja: Catalog = {
     "{service}は、この本文をエンドツーエンド暗号化の外で平文として受け取ります。",
   "settings.notificationDeliveryContentIndependent":
     "OS通知のメッセージプレビュー設定とは別の設定です。",
+  "settings.notificationDeliveryContentAlwaysSent":
+    "スペース名・ルーム名・未読数は常に送ります。",
+  "settings.notificationDeliveryPartnerAlias":
+    "相手にエイリアスを設定していれば、その名前を使う",
+  "settings.notificationDeliveryPartnerAliasHint":
+    "ダイレクトメッセージの通知には相手の名前が入ります。エイリアスは{service}に送られます。エイリアスがない場合は、完全なMatrix ID（@user:server など）を使います。",
+  "settings.notificationDeliveryPreview":
+    "プレビュー",
+  "settings.notificationDeliveryPreviewHint":
+    "この設定で届くダイレクトメッセージ通知の例です。",
+  "settings.notificationDeliveryPreviewSender":
+    "差出人",
+  "settings.notificationDeliveryPreviewSubject":
+    "件名",
+  "settings.notificationDeliveryPreviewTitle":
+    "タイトル",
+  "settings.notificationDeliveryPreviewBody":
+    "本文",
+  "settings.notificationDeliveryPreviewSampleAlias":
+    "田中さん（デザイン班）",
+  "settings.notificationDeliveryPreviewSampleMessage":
+    "今日の午後、少し電話できますか？",
   "settings.notificationDeliveryConsentTitle":
     "メッセージ本文を暗号化せずに送信しますか？",
   "settings.notificationDeliveryConsentBody":
