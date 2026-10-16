@@ -1086,6 +1086,9 @@ pub struct RoomMemberRoleOption {
 pub enum RoomMemberMembership {
     Joined,
     Invited,
+    /// A pending knock request (#1421): a room admin accepts it (invite) or
+    /// declines it (kick).
+    Knocked,
     #[default]
     Unknown,
 }

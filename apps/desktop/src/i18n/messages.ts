@@ -480,7 +480,11 @@ export type MessageId =
   | "people.membership"
   | "people.membershipJoined"
   | "people.membershipInvited"
+  | "people.membershipKnocked"
   | "people.membershipUnknown"
+  | "people.knockRequests"
+  | "people.knockAccept"
+  | "people.knockDecline"
   | "people.memberCount"
   | "people.memberActions"
   | "people.openProfile"
@@ -2487,7 +2491,11 @@ const en: Catalog = {
   "people.membership": "Membership",
   "people.membershipJoined": "Joined",
   "people.membershipInvited": "Invited",
+  "people.membershipKnocked": "Asked to join",
   "people.membershipUnknown": "Unknown",
+  "people.knockRequests": "Join requests",
+  "people.knockAccept": "Accept",
+  "people.knockDecline": "Decline",
   "people.memberCount": "{count} members",
   "people.memberActions": "Member actions",
   "people.openProfile": "Open profile for {name}",
@@ -4454,7 +4462,11 @@ const ja: Catalog = {
   "people.membership": "参加状態",
   "people.membershipJoined": "参加済み",
   "people.membershipInvited": "招待中",
+  "people.membershipKnocked": "参加リクエスト中",
   "people.membershipUnknown": "不明",
+  "people.knockRequests": "参加リクエスト",
+  "people.knockAccept": "承認",
+  "people.knockDecline": "拒否",
   "people.memberCount": "メンバー {count}人",
   "people.memberActions": "メンバー操作",
   "people.openProfile": "{name}のプロフィールを開く",

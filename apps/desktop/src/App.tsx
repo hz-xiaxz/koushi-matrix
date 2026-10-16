@@ -7719,6 +7719,15 @@ function AccountContent({
           onModerateMember={(roomId, targetUserId, action, reason) => {
             runInBackground(moderateRoomMember(roomId, targetUserId, action, reason));
           }}
+          onResolveKnockRequest={(roomId, targetUserId, decision) => {
+            // #1421: accepting a knock invites the requester; declining kicks
+            // the pending membership. Both reuse the existing command paths.
+            runInBackground(
+              decision === "accept"
+                ? api.inviteUser(roomId, targetUserId)
+                : moderateRoomMember(roomId, targetUserId, "kick", null)
+            );
+          }}
           onSetLocalUserAlias={(userId, alias) => {
             runInBackground(setLocalUserAlias(userId, alias));
           }}

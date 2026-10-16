@@ -1762,7 +1762,10 @@ async fn matrix_room_member_summaries(
     room: &matrix_sdk::Room,
     power_levels: &matrix_sdk::ruma::events::room::power_levels::RoomPowerLevels,
 ) -> Vec<MatrixRoomMemberSummary> {
-    let Ok(members) = room.members(matrix_sdk::RoomMemberships::ACTIVE).await else {
+    let Ok(members) = room
+        .members(matrix_sdk::RoomMemberships::ACTIVE | matrix_sdk::RoomMemberships::KNOCK)
+        .await
+    else {
         return Vec::new();
     };
     let own_user_id = room.own_user_id();
@@ -1787,6 +1790,9 @@ async fn matrix_room_member_summaries(
                 }
                 matrix_sdk::ruma::events::room::member::MembershipState::Invite => {
                     koushi_state::RoomMemberMembership::Invited
+                }
+                matrix_sdk::ruma::events::room::member::MembershipState::Knock => {
+                    koushi_state::RoomMemberMembership::Knocked
                 }
                 _ => koushi_state::RoomMemberMembership::Unknown,
             },
