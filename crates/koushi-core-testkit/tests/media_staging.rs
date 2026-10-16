@@ -589,7 +589,7 @@ async fn settings_change_fences_blocked_preparation() {
         .media
         .image_upload_compression_policy
         .target_long_edge += 1;
-    let changed_policy = settings.media.image_upload_compression_policy.clone();
+    let changed_policy = settings.media.image_upload_compression_policy;
     runtime
         .inject_actions(vec![AppAction::SettingsLoaded { values: settings }])
         .await;
