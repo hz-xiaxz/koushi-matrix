@@ -36,13 +36,14 @@ use super::super::outbound_send::{
 use super::super::read_state::{ReadRetrySource, ReadWorkerSupervisor};
 use super::super::test_support::{fake_rid, room_key, timeline_item};
 use super::super::thread_projection::ThreadRootProjectionFetchRegistry;
+use super::super::typing::TypingLane;
 use super::{
     event_cache_diff_batch_diagnostic_event, event_cache_item_diagnostic_event, record_read_retry,
     record_thread_projection, record_thread_summary_reconciliation,
     timeline_diff_batch_diagnostic_event, trace_event_cache_diff_without_item,
     trace_event_cache_diffs, trace_timeline_actor_operation, trace_timeline_actor_scan,
     trace_timeline_diffs, trace_timeline_items, trace_timeline_link_preview,
-    trace_timeline_paginate, trace_timeline_route,
+    trace_timeline_paginate, trace_timeline_route, trace_typing_operation,
 };
 
 #[test]
@@ -147,6 +148,7 @@ fn timeline_diagnostic_helpers_collect_typed_records_without_trace_env() {
         Some("success"),
     );
     trace_timeline_actor_scan("target_scan", "send_reaction", request_id, &key, 3, 4, true);
+    trace_typing_operation("admit", request_id, 0, 0, "accepted", 0, true);
     trace_timeline_route("manager_received", "send_reaction", request_id, &key);
     trace_timeline_paginate(
         "sdk_finish",
@@ -212,6 +214,7 @@ fn timeline_diagnostic_helpers_collect_typed_records_without_trace_env() {
     let expected = [
         ("core.timeline", "actor_finish"),
         ("core.timeline", "target_scan"),
+        ("core.typing", "admit"),
         ("core.timeline", "manager_received"),
         ("core.timeline", "sdk_finish"),
         ("core.timeline", "complete"),
@@ -575,6 +578,7 @@ async fn subscribe_replay_path_records_subscribed_done_stage() {
         global_send_completion_observer_future: None,
         send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
         read_workers: ReadWorkerSupervisor::unavailable(),
+        typing_lane: TypingLane::unavailable(),
         action_tx,
         event_tx,
         msg_tx: manager_tx.clone(),
@@ -790,6 +794,7 @@ async fn diagnostics_producer_paths_run_without_trace_environment() {
         global_send_completion_observer_future: None,
         send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
         read_workers: ReadWorkerSupervisor::unavailable(),
+        typing_lane: TypingLane::unavailable(),
         action_tx,
         event_tx,
         msg_tx: _manager_tx,

@@ -536,6 +536,7 @@ fn timeline_operation_token(value: &str) -> &'static str {
         "redact_reaction" => "redact_reaction",
         "send_read_receipt" => "send_read_receipt",
         "set_fully_read" => "set_fully_read",
+        "set_typing" => "set_typing",
         "paginate" => "paginate",
         "link_preview" => "link_preview",
         "subscribe" => "subscribe",
@@ -1417,6 +1418,35 @@ pub(super) fn trace_timeline_actor_operation(
                 outcome.map(timeline_outcome_token).unwrap_or("pending"),
             ),
         ],
+    );
+}
+
+/// Room-scoped typing-lane attribution (#1481). Private-data-free: an opaque
+/// request correlation, the queue wait, the operation duration, and the named
+/// stage, so a trace can say which operation waited and for how long. The room
+/// id never reaches the record.
+pub(super) fn trace_typing_operation(
+    stage: &'static str,
+    request_id: RequestId,
+    queue_wait_ms: u128,
+    duration_ms: u128,
+    outcome: &'static str,
+    queue_depth: u64,
+    accepted: bool,
+) {
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Debug, "core.typing", stage)
+            .field(DiagnosticField::token("kind", "set_typing"))
+            .field(DiagnosticField::request_id(
+                "request_id",
+                request_id.connection_id.0,
+                request_id.sequence,
+            ))
+            .field(DiagnosticField::milliseconds("queue_wait", queue_wait_ms))
+            .field(DiagnosticField::milliseconds("duration", duration_ms))
+            .field(DiagnosticField::token("outcome", outcome))
+            .field(DiagnosticField::count("queue_depth", queue_depth))
+            .field(DiagnosticField::boolean("accepted", accepted)),
     );
 }
 

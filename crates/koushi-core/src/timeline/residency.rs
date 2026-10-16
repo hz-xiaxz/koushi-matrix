@@ -50,6 +50,8 @@ use super::read_state::ReadRetrySource;
 use super::read_state::ReadWorkerSupervisor;
 #[cfg(any(test, feature = "test-hooks"))]
 use super::thread_projection::ThreadRootProjectionFetchRegistry;
+#[cfg(any(test, feature = "test-hooks"))]
+use super::typing::TypingLane;
 // END GENERATED SIBLING IMPORTS
 
 /// The only successful local room-removal causes that may mutate session
@@ -356,6 +358,7 @@ impl TimelineManagerActor {
             global_send_completion_observer_future: None,
             send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
             read_workers: ReadWorkerSupervisor::unavailable(),
+            typing_lane: TypingLane::unavailable(),
             action_tx,
             event_tx,
             msg_tx,

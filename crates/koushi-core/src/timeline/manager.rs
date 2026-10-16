@@ -29,7 +29,7 @@ use crate::threads_list::{
     ThreadRootProjectionService,
 };
 use koushi_protocol::command::{InitialBackfillPolicy, TimelineCommand};
-use koushi_protocol::event::{CoreEvent, TimelineEvent, TimelineItem};
+use koushi_protocol::event::{CoreEvent, LiveSignalsEvent, TimelineEvent, TimelineItem};
 use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
 use koushi_protocol::ids::{RequestId, RuntimeConnectionId, TimelineKey, TimelineKind};
 
@@ -70,6 +70,7 @@ use super::residency::{
 use super::thread_projection::{
     ThreadRootProjectionFetchRegistry, ThreadSummaryActivityObservation,
 };
+use super::typing::{TypingLane, TypingLaneSettlement};
 // END GENERATED SIBLING IMPORTS
 
 /// Bounded diff queue capacity per subscribed timeline (overview.md, Async rule 10).
@@ -572,6 +573,9 @@ pub struct TimelineManagerActor {
     pub(super) global_send_completion_observer_future: Option<GlobalSendCompletionObserverFuture>,
     pub(super) send_enqueue_workers: SendEnqueueWorkerSupervisor,
     pub(super) read_workers: ReadWorkerSupervisor,
+    /// Session/manager-owned room-scoped typing lane (#1481). Typing HTTP must
+    /// never be awaited in an actor mailbox handler.
+    pub(super) typing_lane: TypingLane,
     pub(super) action_tx: mpsc::Sender<Vec<AppAction>>,
     pub(super) event_tx: broadcast::Sender<CoreEvent>,
     pub(super) msg_tx: mpsc::Sender<TimelineMessage>,
@@ -622,6 +626,7 @@ impl Drop for TimelineManagerActor {
         // then settle worker registrations before stopping the observer.
         self.terminal_ingress.stop_accepting();
         self.read_workers.cancel_all();
+        self.settle_typing_lane();
         self.send_enqueue_workers.cancel_all();
         self.focused_builds.abort_all();
         self.global_send_completion_observer_future.take();
@@ -665,6 +670,7 @@ impl TimelineManagerActor {
             global_send_completion_observer_future: None,
             send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
             read_workers: ReadWorkerSupervisor::unavailable(),
+            typing_lane: TypingLane::unavailable(),
             thread_root_order: TimelineThreadRootOrder::LatestReply,
             hide_redacted: false,
             action_tx,
@@ -740,6 +746,7 @@ impl TimelineManagerActor {
                 terminal_ingress.clone(),
                 Some(session.client()),
             )) as GlobalSendCompletionObserverFuture);
+        let typing_lane = TypingLane::matrix(Arc::clone(&session));
         let actor = TimelineManagerActor {
             session: Some(Arc::clone(&session)),
             room_list_service: None,
@@ -767,6 +774,7 @@ impl TimelineManagerActor {
                 read_persistence,
                 send_read_receipts,
             ),
+            typing_lane,
             thread_root_order: TimelineThreadRootOrder::LatestReply,
             hide_redacted: false,
             action_tx,
@@ -895,6 +903,13 @@ impl TimelineManagerActor {
                     if !self.read_workers.retry_tasks.is_empty() => {
                     if let Some(retry) = retry {
                         self.handle_read_worker_completion(retry).await;
+                    }
+                    continue;
+                }
+                completion = self.typing_lane.tasks.next(),
+                    if !self.typing_lane.tasks.is_empty() => {
+                    if let Some(completion) = completion {
+                        self.handle_typing_completion(completion);
                     }
                     continue;
                 }
@@ -1168,6 +1183,7 @@ impl TimelineManagerActor {
         self.focused_builds.cancel_all().await;
         self.read_workers.cancel_all();
         self.read_workers.publish_persistence();
+        self.settle_typing_lane();
         let abandoned_read_waiters = self
             .read_workers
             .waiters
@@ -1689,15 +1705,8 @@ impl TimelineManagerActor {
                 key,
                 is_typing,
             } => {
-                self.route_to_actor_or_fail(
-                    request_id,
-                    &key,
-                    TimelineActorMessage::SetTyping {
-                        request_id,
-                        is_typing,
-                    },
-                )
-                .await;
+                trace_timeline_route("manager_received", "set_typing", request_id, &key);
+                self.handle_set_typing(request_id, key, is_typing);
             }
             TimelineCommand::LoadLinkPreviews {
                 request_id,
@@ -2300,6 +2309,7 @@ impl TimelineManagerActor {
             SendEnqueue(super::outbound_send::SendEnqueueWorkerCompletion),
             FocusedBuild(super::focused_build::FocusedBuildCompletion),
             Read(super::read_state::ReadWorkerCompletion),
+            Typing(super::typing::TypingCompletion),
         }
         // Boxed: the wrapped SDK futures (timeline build, actor spawn) are large,
         // and nesting them inline in this state machine overflows the stack.
@@ -2325,6 +2335,10 @@ impl TimelineManagerActor {
                     if !self.read_workers.retry_tasks.is_empty() => {
                     driven.extend(retry.map(Driven::Read));
                 }
+                completion = self.typing_lane.tasks.next(),
+                    if !self.typing_lane.tasks.is_empty() => {
+                    driven.extend(completion.map(Driven::Typing));
+                }
                 _ = super::outbound_send::poll_global_send_completion_observer(
                     &mut self.global_send_completion_observer_future,
                 ) => {
@@ -2343,6 +2357,7 @@ impl TimelineManagerActor {
                     Box::pin(self.handle_focused_build_completion(completion)).await;
                 }
                 Driven::Read(completion) => self.handle_read_worker_completion(completion).await,
+                Driven::Typing(completion) => self.handle_typing_completion(completion),
             }
         }
         output
@@ -2498,6 +2513,45 @@ impl TimelineManagerActor {
         let handle = self.await_driving_manager_workers(spawn).await;
         record_subscribe_stage("spawn_done", None);
         handle
+    }
+    /// Admit a room-scoped typing notice into the session-owned lane (#1481).
+    /// Typing never enters a `TimelineActor` mailbox, so a slow typing request
+    /// cannot stall that actor's pending-send publication or diff batches.
+    fn handle_set_typing(&mut self, request_id: RequestId, key: TimelineKey, is_typing: bool) {
+        if let Err(kind) = self.typing_lane.admit(request_id, key, is_typing) {
+            self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
+        }
+    }
+
+    pub(super) fn handle_typing_completion(&mut self, completion: super::typing::TypingCompletion) {
+        for settlement in self.typing_lane.settle(completion) {
+            self.emit_typing_settlement(settlement);
+        }
+    }
+
+    /// One correlated terminal per admitted typing request: `TypingSet` on
+    /// success, `OperationFailed` otherwise.
+    fn emit_typing_settlement(&self, settlement: TypingLaneSettlement) {
+        let (request_id, key, is_typing, failure) = settlement.into_parts();
+        match failure {
+            None => self.emit(CoreEvent::LiveSignals(LiveSignalsEvent::TypingSet {
+                request_id,
+                key,
+                is_typing,
+            })),
+            Some(kind) => {
+                self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind })
+            }
+        }
+    }
+
+    /// Cancel every in-flight typing task and settle every admitted request.
+    /// Used by ordered shutdown and by the fail-safe drop, so no admitted
+    /// request is left without a terminal.
+    pub(super) fn settle_typing_lane(&mut self) {
+        for settlement in self.typing_lane.settle_all() {
+            self.emit_typing_settlement(settlement);
+        }
     }
     async fn route_to_actor_or_fail(
         &mut self,

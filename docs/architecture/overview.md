@@ -1253,6 +1253,48 @@ relay that model, not fight it.
     subscriptions → stop search queues → stop sync → persist session state →
     drop SDK handles → (on logout/removal) clear credentials and stores →
     publish the final versioned snapshot / state delta.
+14. **Room-scoped outbound signals use owner-polled lanes, not actor mailbox
+    awaits.** A `TimelineActor` mailbox handler must not await outbound HTTP.
+    Work that needs a remote result is admitted to a session/manager-owned
+    operation lane, returns immediately, and is settled from the typed
+    completion that owner polls. `Room::typing_notice` is the first case:
+    `crates/koushi-core/src/timeline/read_state.rs` awaited the HTTP call
+    inline, so pending-send publication and diff batches queued behind it
+    (#1481). Sends, adds of reactions, and redactions enqueue through the SDK
+    send queue and return after local echo, and receipt/fully-read operations
+    already use manager-owned read workers. Two pre-existing direct waits are
+    recorded deviations, tracked for their own slice: removing a remote
+    reaction redacts through `Room::redact`, and preparing a remote edit can
+    fetch `/event` on a cache miss. New or changed handlers comply
+    immediately; the migration is a recorded inventory, not a silent one.
+    - Typing notices are room-scoped, not timeline-scoped. One lane owns them
+      per room, shared by the room, thread, and focused views of that room, and
+      admission does not require a subscribed `TimelineActor`. Admission rejects
+      a key whose account is not the owning session's account, and the
+      session-wide set of rooms with unsettled notices is bounded by
+      `TYPING_LANE_MAX_ROOMS`.
+    - Each room has at most one in-flight typing request plus a bounded FIFO of
+      at most `TYPING_LANE_QUEUE_CAPACITY` admitted requests. Submission order
+      equals admission order per room, so a newer request can never be
+      submitted before an older one; rooms do not order each other. A request
+      beyond the bound settles with a correlated
+      `OperationFailed { QueueOverflow }`; work is never silently dropped or
+      admitted without a terminal.
+    - One absolute `TYPING_LANE_TIMEOUT` bounds each request. The SDK's own
+      typing throttle and HTTP retry stay authoritative; the lane adds no
+      second debounce, retry, or expiry state machine.
+    - Every admitted request settles exactly once with `TypingSet { request_id,
+      key, is_typing }` on success or a correlated `OperationFailed` otherwise.
+      A completion that does not match the room's active request is inert, so a
+      duplicate or retired completion cannot settle a newer request. Owner
+      shutdown and owner drop cancel the lane's tasks and settle every
+      admitted-but-unsettled request, so no completion outlives its owner and
+      no stale completion mutates later state.
+    - Diagnostics record a private-data-free operation kind, an opaque local
+      correlation, queue wait, operation duration, and outcome, and distinguish
+      lane admission, submission, and completion; distinguishing renderer
+      receipt is deferred to the follow-up below. They never log
+      Matrix room/user/event ids, message content, or raw SDK errors.
 
 ### Desktop Window Model
 

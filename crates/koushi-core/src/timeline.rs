@@ -71,6 +71,7 @@ mod room_key_recovery;
 #[cfg(test)]
 mod test_support;
 mod thread_projection;
+mod typing;
 
 pub(crate) use diagnostics::record_thread_summary_reconciliation;
 

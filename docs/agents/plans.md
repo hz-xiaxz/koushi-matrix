@@ -19,6 +19,13 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
+[#1481 room-scoped typing lane](../plans/2026-10-16-issue1481-typing-lane.md)
+moves the outbound `Room::typing_notice` HTTP call off the `TimelineActor`
+mailbox loop into a session-owned, room-scoped bounded FIFO lane so pending-send
+publication and diff batches no longer wait behind an unrelated typing request;
+the plan also records the handler audit that leaves the SDK-enqueue and
+owner-polled-worker handlers in place.
+
 [#1427 device-local notification delivery](../plans/2026-10-14-issue1427-local-notification-email.md)
 makes the app deliver its own notifications and the default email path, because the
 server-owned `kind: email` pusher cannot work on a homeserver such as matrix.org: an
