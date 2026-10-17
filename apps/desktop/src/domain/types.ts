@@ -2882,6 +2882,14 @@ export type ThreadPaneState =
       is_subscribed: boolean;
       composer: ComposerState;
       staged_uploads: StagedUploadItem[];
+    }
+  | {
+      // #1473: the thread timeline could not be loaded; Retry or Close.
+      kind: "failed";
+      room_id: string;
+      root_event_id: string;
+      intent: ThreadOpenIntent;
+      failure_kind: OperationFailureKind;
     };
 
 export type ThreadAttentionState =

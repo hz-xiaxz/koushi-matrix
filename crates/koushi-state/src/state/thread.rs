@@ -70,6 +70,15 @@ pub enum ThreadPaneState {
         composer: ComposerState,
         staged_uploads: Vec<StagedUploadItem>,
     },
+    /// #1473: the thread timeline could not be loaded. Terminal until the user
+    /// retries (`OpenThread`) or closes the pane; late subscription outcomes
+    /// for the same root are ignored.
+    Failed {
+        room_id: String,
+        root_event_id: String,
+        intent: ThreadOpenIntent,
+        failure_kind: OperationFailureKind,
+    },
 }
 
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]

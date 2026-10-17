@@ -76,6 +76,7 @@ fn media_download_failure_token(kind: TimelineFailureKind) -> &'static str {
         TimelineFailureKind::UnsupportedSlashCommand => "unsupported_slash_command",
         TimelineFailureKind::NotSubscribed => "not_subscribed",
         TimelineFailureKind::Forbidden => "forbidden",
+        TimelineFailureKind::NotFound => "not_found",
         TimelineFailureKind::Network => "network",
         TimelineFailureKind::Timeout => "timeout",
         TimelineFailureKind::Sdk => "sdk",

@@ -1,8 +1,9 @@
 use koushi_state::{
     AppAction, AppEffect, AppState, ComposerMode, ComposerState, ComposerSubmissionTarget,
-    ComposerSubmissionTerminalOutcome, NavigationState, PendingComposerSendKind, RoomSummary,
-    RoomTags, SessionInfo, SessionState, SubmissionId, ThreadAttentionState, ThreadListOrder,
-    ThreadOpenIntent, ThreadPaneState, ThreadsListItem, TimelinePaneState, UiEvent, reduce,
+    ComposerSubmissionTerminalOutcome, NavigationState, OperationFailureKind,
+    PendingComposerSendKind, RoomSummary, RoomTags, SessionInfo, SessionState, SubmissionId,
+    ThreadAttentionState, ThreadListOrder, ThreadOpenIntent, ThreadPaneState, ThreadsListItem,
+    TimelinePaneState, UiEvent, reduce,
 };
 
 fn session_info() -> SessionInfo {
@@ -1669,9 +1670,9 @@ fn open_thread_state_with_intent(
 
 fn thread_intent(state: &AppState) -> Option<ThreadOpenIntent> {
     match &state.thread {
-        ThreadPaneState::Opening { intent, .. } | ThreadPaneState::Open { intent, .. } => {
-            Some(intent.clone())
-        }
+        ThreadPaneState::Opening { intent, .. }
+        | ThreadPaneState::Open { intent, .. }
+        | ThreadPaneState::Failed { intent, .. } => Some(intent.clone()),
         ThreadPaneState::Closed => None,
     }
 }
@@ -2283,7 +2284,7 @@ fn thread_subscription_success_must_match_current_opening_thread() {
 }
 
 #[test]
-fn thread_subscription_failure_exits_matching_opening_thread() {
+fn thread_subscription_failure_moves_matching_opening_thread_to_failed() {
     let mut state = selected_room_state("room-a");
     reduce(
         &mut state,
@@ -2300,10 +2301,21 @@ fn thread_subscription_failure_exits_matching_opening_thread() {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
             message: "fixture-access-token rejected synthetic-thread".to_owned(),
+            failure_kind: OperationFailureKind::Forbidden,
         },
     );
 
-    assert_eq!(state.thread, ThreadPaneState::Closed);
+    // #1473: the pane stays visible in a terminal Failed state instead of
+    // silently closing, so the renderer can explain the failure.
+    assert_eq!(
+        state.thread,
+        ThreadPaneState::Failed {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
+            failure_kind: OperationFailureKind::Forbidden,
+        }
+    );
     assert_eq!(state.thread_attention, ThreadAttentionState::Closed);
     assert_eq!(state.errors.len(), 1);
     assert_eq!(state.errors[0].code, "thread_subscription_failed");
@@ -2340,11 +2352,102 @@ fn stale_thread_subscription_failure_is_ignored() {
                 room_id: "room-a".to_owned(),
                 root_event_id: "$other".to_owned(),
                 message: "late failure".to_owned(),
+                failure_kind: OperationFailureKind::Network,
             },
         ),
         Vec::new()
     );
     assert_eq!(state, opening_state);
+}
+
+fn failed_thread_state(failure_kind: OperationFailureKind) -> AppState {
+    let mut state = selected_room_state("room-a");
+    reduce(
+        &mut state,
+        AppAction::OpenThread {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
+        },
+    );
+    reduce(
+        &mut state,
+        AppAction::ThreadSubscriptionFailed {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            message: "failed".to_owned(),
+            failure_kind,
+        },
+    );
+    assert!(matches!(state.thread, ThreadPaneState::Failed { .. }));
+    state
+}
+
+#[test]
+fn failed_thread_ignores_late_subscription_outcomes() {
+    let mut state = failed_thread_state(OperationFailureKind::NotFound);
+    let failed = state.clone();
+
+    for action in [
+        AppAction::ThreadSubscribed {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+        },
+        AppAction::ThreadSubscriptionFailed {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            message: "failed again".to_owned(),
+            failure_kind: OperationFailureKind::Network,
+        },
+        AppAction::ThreadActivityObserved {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+        },
+    ] {
+        assert_eq!(reduce(&mut state, action), Vec::new());
+        assert_eq!(state, failed);
+    }
+}
+
+#[test]
+fn failed_thread_retry_reopens_with_the_same_intent() {
+    let mut state = failed_thread_state(OperationFailureKind::Network);
+
+    let effects = reduce(
+        &mut state,
+        AppAction::OpenThread {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
+        },
+    );
+
+    assert_eq!(
+        state.thread,
+        ThreadPaneState::Opening {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
+        }
+    );
+    assert!(effects.contains(&AppEffect::OpenThreadTimeline {
+        room_id: "room-a".to_owned(),
+        root_event_id: "$root".to_owned(),
+        intent: ThreadOpenIntent::ExistingThread,
+    }));
+}
+
+#[test]
+fn failed_thread_closes_on_close_thread() {
+    let mut state = failed_thread_state(OperationFailureKind::Forbidden);
+
+    let effects = reduce(&mut state, AppAction::CloseThread);
+
+    assert_eq!(state.thread, ThreadPaneState::Closed);
+    assert_eq!(
+        effects,
+        vec![AppEffect::EmitUiEvent(UiEvent::ThreadChanged)]
+    );
 }
 
 #[test]
@@ -2452,6 +2555,7 @@ fn timeline_and_thread_actions_are_ignored_without_ready_session() {
             room_id: "room-a".to_owned(),
             root_event_id: "$root".to_owned(),
             message: "failed".to_owned(),
+            failure_kind: OperationFailureKind::Network,
         },
         AppAction::CloseThread,
     ];

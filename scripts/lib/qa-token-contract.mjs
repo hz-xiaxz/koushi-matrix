@@ -88,6 +88,8 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
   thread_late_joiner: Object.freeze([
     "thread_late_joiner_root_not_visible=ok",
     "thread_late_joiner_thread_panel=ok",
+    "thread_late_joiner_withheld_open_settled=ok",
+    "thread_late_joiner_withheld_retry_close=ok",
     "thread_late_joiner=ok"
   ]),
   notification_delivery: Object.freeze([

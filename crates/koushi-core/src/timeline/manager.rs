@@ -184,9 +184,18 @@ async fn hydrate_initial_thread(
             .pagination()
             .run_backwards_until(INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT)
             .await
-            .map_err(|_| {
-                record_subscribe_stage("initial_backfill_sdk_failed", None);
-                TimelineFailureKind::Sdk
+            .map_err(|error| {
+                let kind = classify_thread_backfill_error(&error);
+                record_subscribe_stage(
+                    match kind {
+                        TimelineFailureKind::Forbidden | TimelineFailureKind::NotFound => {
+                            "initial_backfill_root_withheld"
+                        }
+                        _ => "initial_backfill_sdk_failed",
+                    },
+                    None,
+                );
+                kind
             })?;
         // Keep the pre-pagination subscription: the SDK relay is asynchronous.
         let counts = initial_updates.scan(initial_items, |items, diffs| {
@@ -201,8 +210,39 @@ async fn hydrate_initial_thread(
         Ok(result) => result,
         Err(_) => {
             record_subscribe_stage("initial_backfill_projection_deadline", None);
-            Ok(false)
+            Err(TimelineFailureKind::Timeout)
         }
+    }
+}
+
+/// #1473: a server that withholds the thread root is a permanent visibility
+/// outcome, not a transient SDK failure. Synapse answers `/relations` with
+/// HTTP 404 `M_UNKNOWN` ("Unknown parent event."), tuwunel the root fetch with
+/// 403 `M_FORBIDDEN`, so the HTTP status is authoritative when the errcode is
+/// generic.
+fn classify_thread_backfill_error(
+    error: &matrix_sdk::event_cache::EventCacheError,
+) -> TimelineFailureKind {
+    use matrix_sdk::event_cache::EventCacheError;
+    use matrix_sdk::ruma::api::error::ErrorKind;
+
+    let EventCacheError::PaginationError(error) = error else {
+        return TimelineFailureKind::Sdk;
+    };
+    if let Some(api_error) = error.as_client_api_error() {
+        return match (api_error.error_kind(), api_error.status_code.as_u16()) {
+            (Some(ErrorKind::Forbidden), _) | (_, 403) => TimelineFailureKind::Forbidden,
+            (Some(ErrorKind::NotFound), _) | (_, 404) => TimelineFailureKind::NotFound,
+            _ => TimelineFailureKind::Sdk,
+        };
+    }
+    match error.as_ref() {
+        matrix_sdk::Error::Http(http_error)
+            if matches!(**http_error, matrix_sdk::HttpError::Reqwest(_)) =>
+        {
+            TimelineFailureKind::Network
+        }
+        _ => TimelineFailureKind::Sdk,
     }
 }
 
@@ -1289,6 +1329,21 @@ impl TimelineManagerActor {
                 if matches!(key.kind, TimelineKind::Room { .. }) {
                     self.handle_committed_room_selection(request_id, key, replay_existing, true)
                         .await;
+                } else if matches!(key.kind, TimelineKind::Thread { .. })
+                    && !self.timelines.contains_key(&key)
+                {
+                    // #1473: thread actors are built only by the Rust-owned
+                    // `OpenThread` subscribe, which owns the initial-hydration
+                    // gate. A renderer recovery that raced a failed open must
+                    // not leave an unhydrated actor whose replay would later
+                    // report a false success; it only replays a retained one.
+                    record_subscribe_stage("thread_recovery_without_actor", None);
+                    self.emit_failure(
+                        request_id,
+                        CoreFailure::TimelineOperationFailed {
+                            kind: TimelineFailureKind::NotSubscribed,
+                        },
+                    );
                 } else {
                     self.handle_subscribe(
                         request_id,
@@ -2609,7 +2664,7 @@ impl TimelineManagerActor {
         kind: TimelineFailureKind,
         emit_failure_terminal: bool,
     ) {
-        if let Some(action) = timeline_subscription_failed_action(key) {
+        if let Some(action) = timeline_subscription_failed_action(key, kind) {
             if emit_failure_terminal {
                 let _ = self.action_tx.send(vec![action]).await;
             } else {
@@ -2681,184 +2736,4 @@ mod edit_text_formatting_tests;
 mod thread_mention_projection_tests;
 
 #[cfg(test)]
-mod tests {
-
-    use futures_util::StreamExt;
-
-    #[tokio::test]
-    async fn initial_thread_hydrates_across_hidden_cached_chunks() {
-        use matrix_sdk::{
-            ruma::{event_id, room_id, user_id},
-            test_utils::mocks::MatrixMockServer,
-        };
-        use matrix_sdk_base::{
-            ThreadingSupport,
-            linked_chunk::{ChunkIdentifier, LinkedChunkId, Position, Update},
-        };
-        use matrix_sdk_test::event_factory::EventFactory;
-        use matrix_sdk_ui::timeline::TimelineFocus;
-        let server = MatrixMockServer::new().await;
-        let client = server
-            .client_builder()
-            .on_builder(|b| {
-                b.with_threading_support(ThreadingSupport::Enabled {
-                    with_subscriptions: true,
-                })
-            })
-            .build()
-            .await;
-        let room_id = room_id!("!thread:example.test");
-        let room = server.sync_joined_room(&client, room_id).await;
-        let root = event_id!("$root:example.test");
-        let reply = event_id!("$reply:example.test");
-        let factory = EventFactory::new()
-            .room(room_id)
-            .sender(user_id!("@alice:example.test"));
-        let chunks = vec![
-            vec![
-                factory.text_msg("root").event_id(root).into_event(),
-                factory
-                    .text_msg("reply")
-                    .event_id(reply)
-                    .in_thread(root, root)
-                    .into_event(),
-            ],
-            vec![factory.reaction(reply, "x").into_event()],
-            vec![
-                factory
-                    .text_msg("* edited reply")
-                    .edit(
-                        reply,
-                        matrix_sdk::ruma::events::room::message::MessageType::text_plain(
-                            "edited reply",
-                        )
-                        .into(),
-                    )
-                    .into_event(),
-            ],
-        ];
-        let mut updates = Vec::new();
-        for (i, items) in chunks.into_iter().enumerate() {
-            let id = ChunkIdentifier::new(i as u64);
-            updates.push(Update::NewItemsChunk {
-                previous: i.checked_sub(1).map(|n| ChunkIdentifier::new(n as u64)),
-                new: id,
-                next: None,
-            });
-            updates.push(Update::PushItems {
-                at: Position::new(id, 0),
-                items,
-            });
-        }
-        client
-            .event_cache_store()
-            .lock()
-            .await
-            .unwrap()
-            .as_clean()
-            .unwrap()
-            .handle_linked_chunk_updates(LinkedChunkId::Thread(room_id, root), updates)
-            .await
-            .unwrap();
-        let timeline = super::koushi_timeline_builder(
-            &room,
-            TimelineFocus::Thread {
-                root_event_id: root.to_owned(),
-            },
-        )
-        .build()
-        .await
-        .unwrap();
-        assert!(timeline.subscribe().await.0.is_empty());
-        assert!(
-            tokio::time::timeout(
-                std::time::Duration::from_secs(2),
-                super::hydrate_initial_thread(&timeline, &client, room_id, root)
-            )
-            .await
-            .expect("cached visible history must not wait for the opening deadline")
-            .unwrap()
-        );
-        let (mut items, mut stream) = timeline.subscribe().await;
-        tokio::time::timeout(std::time::Duration::from_secs(2), async {
-            while !items
-                .iter()
-                .any(|i| i.as_event().is_some_and(|e| e.event_id() == Some(reply)))
-            {
-                for diff in stream.next().await.unwrap() {
-                    diff.apply(&mut items);
-                }
-            }
-        })
-        .await
-        .expect("reply is projected");
-        let requests = server.server().received_requests().await.unwrap();
-        assert!(
-            !requests.iter().any(
-                |r| r.url.path().contains("/relations/") || r.url.path().ends_with("/messages")
-            )
-        );
-    }
-
-    #[tokio::test]
-    async fn initial_thread_open_waits_for_delayed_projection() {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<usize>();
-        let receiver = futures_util::stream::unfold(receiver, |mut rx| async move {
-            rx.recv().await.map(|count| (count, rx))
-        });
-        let mut ready = Box::pin(super::await_initial_thread_projection(false, receiver));
-        assert!(
-            futures_util::poll!(ready.as_mut()).is_pending(),
-            "successful pagination must not fail before its projection arrives"
-        );
-        sender.send(0).unwrap();
-        assert!(futures_util::poll!(ready.as_mut()).is_pending());
-        sender.send(2).unwrap();
-        assert!(ready.await);
-    }
-
-    #[tokio::test]
-    async fn initial_thread_projection_end_and_closed_stream() {
-        assert!(
-            super::await_initial_thread_projection(true, futures_util::stream::pending()).await
-        );
-        assert!(
-            !super::await_initial_thread_projection(false, futures_util::stream::empty()).await
-        );
-    }
-
-    #[tokio::test(start_paused = true)]
-    async fn initial_thread_projection_deadline_is_not_extended_by_empty_updates() {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<usize>();
-        let receiver = futures_util::stream::unfold(receiver, |mut rx| async move {
-            rx.recv().await.map(|count| (count, rx))
-        });
-        let mut ready = Box::pin(super::await_initial_thread_projection(false, receiver));
-        assert!(futures_util::poll!(ready.as_mut()).is_pending());
-        tokio::time::advance(std::time::Duration::from_secs(9)).await;
-        sender.send(0).unwrap();
-        assert!(futures_util::poll!(ready.as_mut()).is_pending());
-        tokio::time::advance(std::time::Duration::from_secs(1)).await;
-        assert!(!ready.await);
-        assert!(sender.is_closed());
-    }
-
-    #[tokio::test]
-    async fn initial_thread_projection_cancellation_releases_subscription() {
-        let (sender, receiver) = tokio::sync::mpsc::unbounded_channel::<usize>();
-        let receiver = futures_util::stream::unfold(receiver, |mut rx| async move {
-            rx.recv().await.map(|count| (count, rx))
-        });
-        let mut ready = Box::pin(super::await_initial_thread_projection(false, receiver));
-        assert!(futures_util::poll!(ready.as_mut()).is_pending());
-        drop(ready);
-        assert!(sender.is_closed());
-    }
-
-    #[test]
-    fn existing_thread_initial_backfill_requires_items_or_authoritative_end() {
-        assert!(super::initial_thread_backfill_is_authoritative(true, 0));
-        assert!(super::initial_thread_backfill_is_authoritative(false, 1));
-        assert!(!super::initial_thread_backfill_is_authoritative(false, 0));
-    }
-}
+mod thread_hydration_tests;

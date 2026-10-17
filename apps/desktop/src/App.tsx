@@ -5603,10 +5603,13 @@ function AccountContent({
       return false;
     }
     const current = getAppStoreSnapshot();
+    // #1473: a Failed pane for this root is still a visible thread pane
+    // (message + Retry), so it counts as opened.
+    const threadKind = current?.state.ui.thread.kind;
     const opened =
-      (current?.state.ui.thread.kind === "opening" || current?.state.ui.thread.kind === "open") &&
-      current.state.ui.thread.room_id === roomId &&
-      current.state.ui.thread.root_event_id === rootEventId;
+      (threadKind === "opening" || threadKind === "open" || threadKind === "failed") &&
+      current?.state.ui.thread.room_id === roomId &&
+      current?.state.ui.thread.root_event_id === rootEventId;
     if (!opened) {
       appendDiagnosticLog({
         timestampMs: Date.now(),

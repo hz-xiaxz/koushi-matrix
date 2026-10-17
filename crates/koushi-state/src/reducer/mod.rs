@@ -1852,7 +1852,14 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             room_id,
             root_event_id,
             message,
-        } => thread::handle_thread_subscription_failed(state, room_id, root_event_id, message),
+            failure_kind,
+        } => thread::handle_thread_subscription_failed(
+            state,
+            room_id,
+            root_event_id,
+            message,
+            failure_kind,
+        ),
         AppAction::ThreadActivityObserved {
             room_id,
             root_event_id,

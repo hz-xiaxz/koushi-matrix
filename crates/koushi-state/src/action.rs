@@ -1590,6 +1590,9 @@ pub enum AppAction {
         room_id: String,
         root_event_id: String,
         message: String,
+        /// #1473: classified cause, so the pane can say whether the server
+        /// withholds the root (`Forbidden`/`NotFound`) or the load failed.
+        failure_kind: crate::OperationFailureKind,
     },
     /// Core observed a matching event-backed thread reply. Vector mutation
     /// shape alone must not dispatch this action.

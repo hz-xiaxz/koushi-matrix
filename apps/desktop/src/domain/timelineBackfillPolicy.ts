@@ -12,7 +12,53 @@ export type TimelineBackfillEvaluationTrigger =
   | "resync_replayed"
   | "setting_changed"
   | "timeline_reset"
-  | "live_edge_settled";
+  | "live_edge_settled"
+  | "retry_backoff_elapsed";
+
+/**
+ * #1473: whether a trigger may clear the `external_transition` retry fence set
+ * by a failed or non-terminal pagination. Self-induced and geometry-only
+ * settlements (the pagination's own terminal, layout, anchor, live edge) do not
+ * count as an external transition, otherwise a permanently failing request
+ * (for example a thread whose root the server withholds) retries in a tight
+ * loop. Only a genuine user scroll, a real projection/setting change, or a
+ * bounded backoff retry ({@link externalTransitionAutoRetryDelayMs}) clears it.
+ */
+export function clearsExternalTransitionFence(
+  trigger: TimelineBackfillEvaluationTrigger,
+  genuineUserScroll: boolean
+): boolean {
+  switch (trigger) {
+    case "pagination_terminal":
+    case "layout_settled":
+    case "room_anchor_settled":
+    case "live_edge_settled":
+      return false;
+    case "user_scroll":
+      return genuineUserScroll;
+    case "initial_projection":
+    case "prepend_settled":
+    case "gap_projection_changed":
+    case "gap_repair_released":
+    case "resync_replayed":
+    case "setting_changed":
+    case "timeline_reset":
+    case "retry_backoff_elapsed":
+      return true;
+  }
+}
+
+/**
+ * #1473: backoff before each automatic retry of a fenced backfill, so a
+ * transient failure in an underfilled timeline (where no user scroll is
+ * possible) still recovers while a permanent failure stops after a few tries.
+ */
+export const EXTERNAL_TRANSITION_AUTO_RETRY_DELAYS_MS: readonly number[] = [2_000, 8_000, 30_000];
+
+/** Delay before the next automatic retry, or `null` once the budget is spent. */
+export function externalTransitionAutoRetryDelayMs(attemptsUsed: number): number | null {
+  return EXTERNAL_TRANSITION_AUTO_RETRY_DELAYS_MS[attemptsUsed] ?? null;
+}
 
 export type TimelineBackfillDemand =
   | "underfilled"

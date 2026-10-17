@@ -1132,6 +1132,29 @@ export function ContextualRightPanel({
   }
 
   const threadState = snapshot.state.ui.thread;
+  if (threadState.kind === "failed") {
+    // #1473: a failed open stays visible with Retry/Close instead of closing silently.
+    const rootWithheld =
+      threadState.failure_kind === "forbidden" || threadState.failure_kind === "notFound";
+    return (
+      <aside className="thread-pane" aria-label={t("panel.context")}>
+        <PanelHeader title={t("panel.thread")} onClose={onCloseThread} />
+        <section className="thread-scroll thread-timeline-panel">
+          <div className="thread-root-placeholder" role="alert">
+            <p>{t(rootWithheld ? "timeline.threadRootNotVisible" : "timeline.threadLoadFailed")}</p>
+            <button
+              type="button"
+              onClick={() =>
+                onOpenThread(threadState.room_id, threadState.root_event_id, threadState.intent)
+              }
+            >
+              {t("timeline.threadRetry")}
+            </button>
+          </div>
+        </section>
+      </aside>
+    );
+  }
   if (threadState.kind !== "opening" && threadState.kind !== "open") {
     return <aside className="thread-pane" aria-label={t("panel.context")} />;
   }

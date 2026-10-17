@@ -2,7 +2,10 @@ import { describe, expect, test } from "vitest";
 
 import type { PaginationState } from "./coreEvents";
 import {
+  clearsExternalTransitionFence,
+  EXTERNAL_TRANSITION_AUTO_RETRY_DELAYS_MS,
   evaluateTimelineBackfill,
+  externalTransitionAutoRetryDelayMs,
   type TimelineBackfillBlocker,
   type TimelineBackfillSnapshot
 } from "./timelineBackfillPolicy";
@@ -238,6 +241,55 @@ describe("evaluateTimelineBackfill", () => {
           });
         }
       });
+    }
+  });
+});
+
+describe("clearsExternalTransitionFence (#1473)", () => {
+  test("self-induced and geometry settlements keep the fence", () => {
+    for (const trigger of [
+      "pagination_terminal",
+      "layout_settled",
+      "room_anchor_settled",
+      "live_edge_settled"
+    ] as const) {
+      expect(clearsExternalTransitionFence(trigger, false)).toBe(false);
+      expect(clearsExternalTransitionFence(trigger, true)).toBe(false);
+    }
+  });
+
+  test("only a genuine user scroll clears the fence", () => {
+    expect(clearsExternalTransitionFence("user_scroll", false)).toBe(false);
+    expect(clearsExternalTransitionFence("user_scroll", true)).toBe(true);
+  });
+
+  test("real projection and setting transitions clear the fence", () => {
+    for (const trigger of [
+      "initial_projection",
+      "prepend_settled",
+      "gap_projection_changed",
+      "gap_repair_released",
+      "resync_replayed",
+      "setting_changed",
+      "timeline_reset",
+      "retry_backoff_elapsed"
+    ] as const) {
+      expect(clearsExternalTransitionFence(trigger, false)).toBe(true);
+    }
+  });
+
+  test("automatic retries back off and stop after a bounded budget", () => {
+    const delays: number[] = [];
+    for (let attempt = 0; ; attempt += 1) {
+      const delay = externalTransitionAutoRetryDelayMs(attempt);
+      if (delay === null) break;
+      delays.push(delay);
+    }
+    expect(delays).toEqual([...EXTERNAL_TRANSITION_AUTO_RETRY_DELAYS_MS]);
+    expect(delays.length).toBeGreaterThan(0);
+    expect(delays.length).toBeLessThanOrEqual(5);
+    for (let i = 1; i < delays.length; i += 1) {
+      expect(delays[i]).toBeGreaterThan(delays[i - 1]!);
     }
   });
 });

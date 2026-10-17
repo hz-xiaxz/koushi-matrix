@@ -2130,9 +2130,27 @@ stateDiagram-v2
   content readiness, not an exact page-publication barrier. Remaining updates
   continue through the actor subscription. Stream closure, deadline expiry,
   pagination error, or subscription failure publishes
-  no InitialItems and drives `ThreadSubscriptionFailed`,
-  closes the pane, clears pane-level thread attention, and records a
-  private-data-free recoverable error. `NewThreadDraft` skips this page.
+  no InitialItems and drives `ThreadSubscriptionFailed { failure_kind }`, which
+  moves the pane to `Failed { room_id, root_event_id, intent, failure_kind }`
+  (never a silent close), clears pane-level thread attention, clears staged
+  thread uploads (the thread composer draft is kept for Retry), and records a
+  private-data-free recoverable error. A server that withholds the root or its
+  relations answers HTTP 403/404 (Synapse: 404 `M_UNKNOWN` "Unknown parent
+  event"); the status or `M_FORBIDDEN`/`M_NOT_FOUND` errcode maps to
+  `Forbidden`/`NotFound`, a transport failure to `Network`, and expiry of the
+  shared deadline to `Timeout`; a successful pagination whose projection never
+  shows content stays `Sdk`. `Failed` is terminal until a user transition:
+  Retry dispatches the same `OpenThread` with the stored intent, and Close
+  returns to `Closed`; late `ThreadSubscribed`, `ThreadSubscriptionFailed`, or
+  activity for that root are ignored. A failed hydration retains no thread
+  actor, so leaving `Failed` (close, room change, replacement) has nothing to
+  unsubscribe.
+  `NewThreadDraft` skips this page.
+- Renderer timeline recovery (the Tauri `ensure_timeline_subscribed` fallback)
+  never builds a thread actor. For a Thread key it only replays an actor Core
+  already retains; an absent Thread key yields a `NotSubscribed` operation
+  failure for that request and no reducer action, so a failed open cannot leave
+  an unhydrated actor behind that a later replay would report as success (#1473).
 - Thread pane identity and open/closed state are Rust-owned `AppState`. Visible
   thread items are not stored in `AppState`; they flow as `TimelineEvent`
   batches/diffs keyed by the thread `TimelineKey`. Legacy top-level frontend
@@ -2337,8 +2355,11 @@ stateDiagram-v2
     OpeningExisting --> OpenExisting: ThreadSubscribed [matching room/root]
     OpenDraft --> OpenDraft: ThreadSubscribed [matching room/root] / is_subscribed=true
     OpenDraft --> OpenExisting: ThreadSubmissionAccepted or ThreadActivityObserved [matching room/root]
-    OpeningExisting --> Closed: ThreadSubscriptionFailed [matching room/root]
-    OpenDraft --> Closed: ThreadSubscriptionFailed [matching room/root, not subscribed]
+    OpeningExisting --> Failed: ThreadSubscriptionFailed [matching room/root]
+    OpenDraft --> Failed: ThreadSubscriptionFailed [matching room/root, not subscribed]
+    Failed --> OpeningExisting: OpenThread retry (ExistingThread/PinnedReply)
+    Failed --> OpenDraft: OpenThread retry (NewThreadDraft)
+    Failed --> Closed: CloseThread/SelectRoom/session clear
     OpeningExisting --> Closed: CloseThread/SelectRoom/session clear
     OpenExisting --> Closed: CloseThread/SelectRoom/session clear
     OpenDraft --> Closed: CloseThread/SelectRoom/session clear

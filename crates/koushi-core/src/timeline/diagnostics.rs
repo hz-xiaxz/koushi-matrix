@@ -1,6 +1,7 @@
 use std::time::Duration;
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
+use koushi_protocol::failure::TimelineFailureKind;
 use koushi_sdk::{
     MatrixCommittedRoomTimelineCheckpoint as MatrixRoomSubscriptionCheckpoint,
     MatrixLiveTailRefreshDiagnostics,
@@ -453,7 +454,10 @@ pub(super) fn timeline_key_matches_read_state_key(
     }
 }
 
-pub(super) fn timeline_subscription_failed_action(key: &TimelineKey) -> Option<AppAction> {
+pub(super) fn timeline_subscription_failed_action(
+    key: &TimelineKey,
+    kind: TimelineFailureKind,
+) -> Option<AppAction> {
     match &key.kind {
         TimelineKind::Room { .. } => None,
         TimelineKind::Thread {
@@ -463,6 +467,7 @@ pub(super) fn timeline_subscription_failed_action(key: &TimelineKey) -> Option<A
             room_id: room_id.clone(),
             root_event_id: root_event_id.clone(),
             message: "timeline subscription failed".to_owned(),
+            failure_kind: thread_subscription_failure_kind(kind),
         }),
         TimelineKind::Focused { room_id, event_id } => {
             Some(AppAction::FocusedContextSubscriptionFailed {
@@ -471,6 +476,21 @@ pub(super) fn timeline_subscription_failed_action(key: &TimelineKey) -> Option<A
                 message: "timeline subscription failed".to_owned(),
             })
         }
+    }
+}
+
+/// #1473: the thread pane explains a withheld root (`Forbidden`/`NotFound`)
+/// differently from a transient load failure.
+pub(super) fn thread_subscription_failure_kind(
+    kind: TimelineFailureKind,
+) -> koushi_state::OperationFailureKind {
+    use koushi_state::OperationFailureKind;
+    match kind {
+        TimelineFailureKind::Forbidden => OperationFailureKind::Forbidden,
+        TimelineFailureKind::NotFound => OperationFailureKind::NotFound,
+        TimelineFailureKind::Network => OperationFailureKind::Network,
+        TimelineFailureKind::Timeout => OperationFailureKind::Timeout,
+        _ => OperationFailureKind::Sdk,
     }
 }
 

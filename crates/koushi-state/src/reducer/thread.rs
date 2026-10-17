@@ -1,4 +1,4 @@
-use crate::{ComposerDraftRevision, SubmissionId};
+use crate::{ComposerDraftRevision, OperationFailureKind, SubmissionId};
 use crate::{
     effect::{AppEffect, UiEvent},
     state::{
@@ -384,7 +384,7 @@ fn promote_matching_thread_intent(
             intent,
             ..
         } => (room_id, root_event_id, intent),
-        ThreadPaneState::Closed => return false,
+        ThreadPaneState::Closed | ThreadPaneState::Failed { .. } => return false,
     };
     if open_room_id != room_id
         || open_root_event_id != root_event_id
@@ -404,6 +404,7 @@ pub(crate) fn handle_thread_subscription_failed(
     room_id: String,
     root_event_id: String,
     _message: String,
+    failure_kind: OperationFailureKind,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state) {
         return Vec::new();
@@ -420,13 +421,25 @@ pub(crate) fn handle_thread_subscription_failed(
             is_subscribed,
             ..
         } => open_room_id == &room_id && open_root_event_id == &root_event_id && !*is_subscribed,
-        ThreadPaneState::Closed => false,
+        ThreadPaneState::Closed | ThreadPaneState::Failed { .. } => false,
     };
     if !matches_pending_subscription {
         return Vec::new();
     }
 
-    state.thread = ThreadPaneState::Closed;
+    let intent = match &state.thread {
+        ThreadPaneState::Opening { intent, .. } | ThreadPaneState::Open { intent, .. } => {
+            intent.clone()
+        }
+        ThreadPaneState::Closed | ThreadPaneState::Failed { .. } => unreachable!(),
+    };
+    state.upload_staging.clear_thread_targets_for_room(&room_id);
+    state.thread = ThreadPaneState::Failed {
+        room_id,
+        root_event_id,
+        intent,
+        failure_kind,
+    };
     state.thread_attention = ThreadAttentionState::Closed;
     state.errors.push(AppError {
         code: "thread_subscription_failed".to_owned(),
@@ -482,8 +495,9 @@ pub(crate) fn handle_close_thread(state: &mut AppState) -> Vec<AppEffect> {
         return Vec::new();
     }
 
-    if let ThreadPaneState::Open { room_id, .. } | ThreadPaneState::Opening { room_id, .. } =
-        &state.thread
+    if let ThreadPaneState::Open { room_id, .. }
+    | ThreadPaneState::Opening { room_id, .. }
+    | ThreadPaneState::Failed { room_id, .. } = &state.thread
     {
         state.upload_staging.clear_thread_targets_for_room(room_id);
     }
