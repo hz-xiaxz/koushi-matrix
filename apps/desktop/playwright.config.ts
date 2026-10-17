@@ -47,8 +47,9 @@ export default defineConfig({
     // Opt a spec in by adding it here; everything else stays Chromium-only.
     {
       name: "webkit",
-      // The engine-native wheel-scroll specs are the only recorded flake left
-      // in this tier (#1425: the viewport moved by 0 px twice, then passed).
+      // The engine-native wheel-scroll specs used to flake here: WebKit stores
+      // scrollTop in whole pixels, and a sub-pixel anchor leftover restarted
+      // stabilization every frame, overwriting wheel input (#1507).
       // Tracing stays OFF in the required run: `retain-on-failure` measured
       // 2026-10-15 on `main` doubled this spec's runtime (date dividers
       // 18.6s -> 30.5s, threshold crossing 15.0s -> 30.2s, wheel 6.5s -> 16.6s)

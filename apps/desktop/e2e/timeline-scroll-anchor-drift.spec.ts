@@ -469,3 +469,48 @@ test("virtualized free-scroll viewport accepts small user wheel movement toward 
   await page.mouse.wheel(0, -180);
   await expect.poll(() => timelineScrollTop(page)).toBeLessThan(beforeScrollTop - 20);
 });
+
+// #1507: WebKit stores scrollTop in whole pixels, so a fractional anchor
+// correction can never land exactly. A leftover above the 0.5 px tolerance used
+// to restart stabilization every frame, rewriting scrollTop ~50 times a second
+// and swallowing the reader's wheel input. Fractional growth steps make at least
+// one leftover exceed the tolerance whatever the starting offset.
+test("a sub-pixel anchor leftover settles instead of rewriting the viewport", async ({ page }) => {
+  await gotoReadyApp(page);
+  await seedTimeline(page, 720);
+  await placeAnchorInViewport(page, 220);
+  await waitAnimationFrames(page, 8);
+  await page.evaluate(() => {
+    const container = document.querySelector<HTMLElement>("[data-testid=timeline-view]")!;
+    const descriptor = Object.getOwnPropertyDescriptor(Element.prototype, "scrollTop")!;
+    const writes = { count: 0 };
+    (window as unknown as { __scrollWrites: { count: number } }).__scrollWrites = writes;
+    Object.defineProperty(container, "scrollTop", {
+      configurable: true,
+      get() { return descriptor.get!.call(this); },
+      set(value: number) { writes.count += 1; descriptor.set!.call(this, value); }
+    });
+  });
+  const writeCount = () => page.evaluate(() => (window as unknown as { __scrollWrites: { count: number } }).__scrollWrites.count);
+
+  for (const growth of [180.2, 180.45, 180.7, 180.95]) {
+    await page.evaluate((padding) => {
+      const container = document.querySelector<HTMLElement>("[data-testid=timeline-view]")!;
+      const containerTop = container.getBoundingClientRect().top;
+      const rows = Array.from(container.querySelectorAll<HTMLElement>("[data-event-id]"))
+        .filter((row) => row.getBoundingClientRect().bottom < containerTop);
+      rows.at(-1)!.style.paddingBlockEnd = `${padding}px`;
+    }, growth);
+    await page.waitForTimeout(300);
+    const settledAt = await writeCount();
+    await page.waitForTimeout(500);
+    expect(await writeCount() - settledAt, `scrollTop rewritten after ${growth}px growth settled`).toBe(0);
+  }
+
+  const timeline = page.locator("[data-testid=timeline-view]");
+  await timeline.hover();
+  const beforeScrollTop = await timelineScrollTop(page);
+  await page.mouse.wheel(0, 180);
+  await expect.poll(() => timelineScrollTop(page)).toBeGreaterThan(beforeScrollTop + 20);
+});
+
