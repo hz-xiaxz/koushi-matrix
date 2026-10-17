@@ -82,3 +82,7 @@ Open `site/dist/index.html` in a browser.
   for copy, layout, or translation fixes.
 
 A failed run leaves the previous site online and never affects a release.
+Run it from `main`: the `github-pages` environment accepts deployments only from
+the default branch, so the build job is skipped on other refs. GitHub Pages is
+set to build from GitHub Actions in the repository settings; that one-time
+setting must stay in place.

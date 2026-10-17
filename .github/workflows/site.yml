@@ -27,7 +27,10 @@ permissions:
 jobs:
   build:
     name: Build site
+    # The github-pages environment only accepts deployments from main.
+    if: github.ref == 'refs/heads/main'
     runs-on: ubuntu-latest
+    timeout-minutes: 30
     container:
       image: mcr.microsoft.com/playwright:v1.60.0-noble
       options: --user 0:0
@@ -36,6 +39,9 @@ jobs:
         uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
         with:
           ref: main
+
+      - name: Check translations
+        run: node site/check-translations.mjs
 
       - name: Resolve release tag and app ref
         id: refs
@@ -50,7 +56,10 @@ jobs:
               "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/latest" \
               | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).tag_name))')"
           fi
-          case "$tag" in v[0-9]*.[0-9]*.[0-9]*) ;; *) echo "Could not resolve a stable release tag: '$tag'" >&2; exit 1 ;; esac
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Could not resolve a stable release tag: '$tag'" >&2
+            exit 1
+          fi
           echo "tag=$tag" >> "$GITHUB_OUTPUT"
           echo "app_ref=${APP_REF:-$tag}" >> "$GITHUB_OUTPUT"
           echo "Site version $tag, screenshots from ${APP_REF:-$tag}"
@@ -74,15 +83,15 @@ jobs:
         run: |
           apt-get update -qq
           DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-noto-cjk
+          for lang in ja ko zh-cn zh-tw; do
+            fc-list ":lang=$lang" | grep -q . || { echo "No font for $lang" >&2; exit 1; }
+          done
 
       - name: Generate screenshots
         run: |
           npm --prefix app/apps/desktop ci
           node -e 'const p=require("./app/apps/desktop/node_modules/@playwright/test/package.json"); if (p.version !== "1.60.0") throw new Error(`Unexpected @playwright/test ${p.version}`);'
           npm --prefix app/apps/desktop run site:screenshots
-
-      - name: Check translations
-        run: node site/check-translations.mjs
 
       - name: Build site
         env:

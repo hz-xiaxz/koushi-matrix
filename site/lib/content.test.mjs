@@ -38,3 +38,11 @@ test("a malformed entry is an error", () => {
 test("hashText is a stable 12-hex prefix of SHA-256", () => {
   assert.equal(hashText("Hello"), "185f8db32271");
 });
+
+test("a translation that drops or changes a {placeholder} is an error", () => {
+  const withVar = { "hero.version": "Version {version}" };
+  const { errors } = checkTranslations(withVar, {
+    ja: { "hero.version": { text: "バージョン", source_hash: hashText(withVar["hero.version"]) } }
+  });
+  assert.deepEqual(errors, ["ja: hero.version must keep placeholders {version}"]);
+});

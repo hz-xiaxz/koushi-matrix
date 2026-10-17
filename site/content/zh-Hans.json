@@ -7,18 +7,6 @@
     "text": "让工作、个人和社区的 Matrix 账号在同一窗口中并排保持打开。加密聊天、擅长中日韩文字的本地全文搜索，以及从你自己的电脑发送的通知。",
     "source_hash": "3bbef07d2b88"
   },
-  "nav.download": {
-    "text": "下载",
-    "source_hash": "d6eafe823591"
-  },
-  "nav.why": {
-    "text": "为什么选择 Koushi",
-    "source_hash": "d5f210b70097"
-  },
-  "nav.settings": {
-    "text": "设置",
-    "source_hash": "74a883a037bc"
-  },
   "nav.language": {
     "text": "语言",
     "source_hash": "a4fe65264ef7"

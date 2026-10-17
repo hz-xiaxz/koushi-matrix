@@ -134,7 +134,7 @@ export function renderPage({ locale, strings, staleKeys = [], englishStrings = s
           <p class="lede">${t("hero.lede")}</p>
           <p class="cta">
             <a class="button" href="${DOWNLOAD}/Koushi-macos-arm64.dmg">${t("hero.download")}</a>
-            <span class="version">${t("hero.version", { version: escapeHtml(release.version) })}</span>
+            <span class="version">${t("hero.version", { version: release.version })}</span>
           </p>
           <p class="other-platforms">${t("hero.other")}
             <a href="${DOWNLOAD}/Koushi-windows-x64-unsigned.exe">${t("hero.windows")}</a> ·

@@ -7,18 +7,6 @@
     "text": "仕事・個人・コミュニティの Matrix アカウントを並べて開いたまま使えます。暗号化チャット、日本語・中国語・韓国語に強いローカル全文検索、自分のパソコンから送る通知。",
     "source_hash": "3bbef07d2b88"
   },
-  "nav.download": {
-    "text": "ダウンロード",
-    "source_hash": "d6eafe823591"
-  },
-  "nav.why": {
-    "text": "Koushi を選ぶ理由",
-    "source_hash": "d5f210b70097"
-  },
-  "nav.settings": {
-    "text": "設定",
-    "source_hash": "74a883a037bc"
-  },
   "nav.language": {
     "text": "言語",
     "source_hash": "a4fe65264ef7"

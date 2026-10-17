@@ -17,6 +17,10 @@ export function loadLocales(contentDir) {
   return { en, locales };
 }
 
+function placeholders(text) {
+  return [...text.matchAll(/\{[a-z]+\}/g)].map((match) => match[0]).sort().join(" ");
+}
+
 export function checkTranslations(en, locales) {
   const errors = [];
   const stale = {};
@@ -29,6 +33,11 @@ export function checkTranslations(en, locales) {
       const entry = entries[key];
       if (typeof entry !== "object" || entry === null || typeof entry.text !== "string" || typeof entry.source_hash !== "string") {
         errors.push(`${locale}: ${key} must be {text, source_hash}`);
+        continue;
+      }
+      const expected = placeholders(en[key]);
+      if (placeholders(entry.text) !== expected) {
+        errors.push(`${locale}: ${key} must keep placeholders ${expected}`);
         continue;
       }
       if (entry.source_hash !== hashText(en[key])) {
@@ -44,13 +53,10 @@ export function checkTranslations(en, locales) {
   return { errors, stale };
 }
 
-/** Flat key → text for one locale, with stale keys replaced by English. */
-export function resolveStrings(en, locales, locale, staleKeys = []) {
+/** Flat key → text for one locale; the renderer substitutes English for stale keys. */
+export function resolveStrings(en, locales, locale) {
   if (locale === "en") {
     return { ...en };
   }
-  const stale = new Set(staleKeys);
-  return Object.fromEntries(
-    Object.keys(en).map((key) => [key, stale.has(key) ? en[key] : locales[locale][key].text])
-  );
+  return Object.fromEntries(Object.keys(en).map((key) => [key, locales[locale][key].text]));
 }

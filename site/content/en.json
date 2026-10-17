@@ -1,9 +1,6 @@
 {
   "meta.title": "Koushi — a desktop Matrix client for conversations in many languages",
   "meta.description": "Keep your work, personal, and community Matrix accounts open side by side. Encrypted chat, local full-text search that understands Japanese, Chinese, and Korean, and notifications sent from your own computer.",
-  "nav.download": "Download",
-  "nav.why": "Why Koushi",
-  "nav.settings": "Settings",
   "nav.language": "Language",
   "hero.tagline": "A desktop Matrix client for conversations in many languages.",
   "hero.lede": "Keep your work, personal, and community Matrix accounts open side by side in one window. Each account has its own tab, stays signed in, and keeps syncing.",

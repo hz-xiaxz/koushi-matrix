@@ -7,18 +7,6 @@
     "text": "업무, 개인, 커뮤니티 Matrix 계정을 한 창에 나란히 열어 두세요. 암호화된 채팅, 한국어·일본어·중국어에 강한 로컬 전문 검색, 내 컴퓨터에서 보내는 알림까지.",
     "source_hash": "3bbef07d2b88"
   },
-  "nav.download": {
-    "text": "다운로드",
-    "source_hash": "d6eafe823591"
-  },
-  "nav.why": {
-    "text": "Koushi를 쓰는 이유",
-    "source_hash": "d5f210b70097"
-  },
-  "nav.settings": {
-    "text": "설정",
-    "source_hash": "74a883a037bc"
-  },
   "nav.language": {
     "text": "언어",
     "source_hash": "a4fe65264ef7"
