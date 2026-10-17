@@ -212,6 +212,7 @@ const snapshot = {
       spaces: [space],
       profile: { ignored_user_ids: [], users: {} },
       room_management: roomManagement,
+      sender_device_advisories: { rooms: {} },
       space_members: spaceMembers
     },
     ui: { timeline: { media_downloads: {} } }

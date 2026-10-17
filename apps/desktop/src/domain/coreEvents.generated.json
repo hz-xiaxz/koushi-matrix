@@ -320,6 +320,17 @@
       "sequence": 7
     }
   },
+  "roomDirectMessageMissing": {
+    "event": {
+      "DirectMessageMissing": {
+        "request_id": {
+          "connection_id": 3,
+          "sequence": 7
+        }
+      }
+    },
+    "kind": "Room"
+  },
   "roomDirectMessageStarted": {
     "event": {
       "DirectMessageStarted": {

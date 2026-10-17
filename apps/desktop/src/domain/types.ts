@@ -135,6 +135,7 @@ export interface AppDomainState {
    */
   notification_delivery: NotificationDeliveryState;
   contact_security: ContactSecurityState;
+  sender_device_advisories: SenderDeviceAdvisoriesState;
   soft_logout_reauth: SoftLogoutReauthState;
   qr_login: QrLoginState;
   settings: SettingsState;
@@ -700,6 +701,16 @@ export interface CreateRoomSettlement extends CommandSettlement {
   spaceLinkFailure: OperationFailureKind | null;
 }
 
+/**
+ * `start_advisory_direct_message` settlement (#1494). `missing` means Core
+ * found no reusable direct chat and created nothing; `draft` says whether the
+ * opened chat now holds the advisory or kept the user's existing draft.
+ */
+export interface AdvisoryDirectMessageSettlement extends CommandSettlement {
+  status: "opened" | "missing";
+  draft: "seeded" | "kept_existing" | null;
+}
+
 export type CommandReceipt = CommandAdmission | CommandSettlement;
 
 export interface OidcBrowserLaunchResponse {
@@ -877,6 +888,13 @@ export interface AccountNotificationsState {
   snapshot: AccountNotificationsSnapshot | null;
   pending_email: PendingNotificationEmail | null;
   operation: AccountNotificationsOperationState;
+}
+
+// Mirrors koushi_state::state::sender_device_advisories (#1494): per open room,
+// the senders who have devices they never confirmed. Rust classifies; React only
+// renders the mark for `rooms[roomId]` members. No entry is ever empty.
+export interface SenderDeviceAdvisoriesState {
+  rooms: Record<string, string[]>;
 }
 
 // Mirrors koushi_state::state::contact_security (#1024). Two independent

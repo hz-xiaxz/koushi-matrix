@@ -675,6 +675,50 @@ pub(crate) fn handle_composer_draft_changed(
     }
 }
 
+/// #1494: the advisory direct message seeds an empty draft. Core takes the
+/// successor of the stored revision, which already carries any accepted-send
+/// tombstone, and hydrates the open composer under the `ComposerDraftsLoaded`
+/// rule. A non-empty draft is never replaced.
+pub(crate) fn handle_composer_draft_seeded(
+    state: &mut AppState,
+    room_id: String,
+    document: crate::ComposerDocument,
+) -> Vec<AppEffect> {
+    if !is_session_ready(state)
+        || document.is_empty()
+        || !state.rooms.iter().any(|room| room.room_id == room_id)
+        || !state
+            .composer_drafts
+            .composer_for_room(&room_id)
+            .document
+            .is_empty()
+    {
+        return Vec::new();
+    }
+    let Ok(revision) = ComposerDraftRevision::checked_successor(
+        state.composer_drafts.room_revision(&room_id),
+        ComposerDraftRevision::ZERO,
+    ) else {
+        return Vec::new();
+    };
+    if !matches!(
+        state
+            .composer_drafts
+            .apply_room_draft(room_id.clone(), document, revision),
+        Ok(true)
+    ) {
+        return Vec::new();
+    }
+    if state.timeline.room_id.as_deref() == Some(room_id.as_str())
+        && state.timeline.composer.pending_transaction_id.is_none()
+        && state.timeline.composer.draft.is_empty()
+    {
+        state.timeline.composer = state.composer_drafts.composer_for_room(&room_id);
+        return vec![AppEffect::EmitUiEvent(UiEvent::TimelineChanged { room_id })];
+    }
+    Vec::new()
+}
+
 pub(crate) fn handle_composer_draft_accepted(
     state: &mut AppState,
     target: crate::ComposerTarget,

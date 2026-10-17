@@ -482,6 +482,7 @@ fn invite_and_dm_room_commands_are_correlated() {
         CoreCommand::Room(RoomCommand::StartDirectMessage {
             request_id,
             user_id: "@bob:example.test".to_owned(),
+            missing: koushi_protocol::command::DirectMessageMissingPolicy::Report,
         }),
     ] {
         assert_eq!(command.request_id(), request_id);

@@ -1384,16 +1384,26 @@ fn tauri_command_routes_build_expected_core_commands() {
         other => panic!("unexpected command: {other:?}"),
     }
 
-    match build_start_direct_message_command(fake_request_id(21), "@target:example.org".to_owned())
-    {
-        CoreCommand::Room(RoomCommand::StartDirectMessage {
-            request_id,
-            user_id,
-        }) => {
-            assert_eq!(request_id, fake_request_id(21));
-            assert_eq!(user_id, "@target:example.org");
+    for missing in [
+        koushi_protocol::command::DirectMessageMissingPolicy::Create,
+        koushi_protocol::command::DirectMessageMissingPolicy::Report,
+    ] {
+        match build_start_direct_message_command(
+            fake_request_id(21),
+            "@target:example.org".to_owned(),
+            missing,
+        ) {
+            CoreCommand::Room(RoomCommand::StartDirectMessage {
+                request_id,
+                user_id,
+                missing: built,
+            }) => {
+                assert_eq!(request_id, fake_request_id(21));
+                assert_eq!(user_id, "@target:example.org");
+                assert_eq!(built, missing);
+            }
+            other => panic!("unexpected command: {other:?}"),
         }
-        other => panic!("unexpected command: {other:?}"),
     }
 
     match build_invite_user_command(

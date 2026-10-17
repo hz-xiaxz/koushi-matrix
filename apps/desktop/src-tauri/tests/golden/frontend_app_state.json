@@ -1087,6 +1087,9 @@
       "secure_backup_gate": {
         "kind": "inactive"
       },
+      "sender_device_advisories": {
+        "rooms": {}
+      },
       "session": {
         "device_id": "FIXTURE_DEVICE",
         "homeserver": "https://matrix.example.invalid",

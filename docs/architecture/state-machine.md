@@ -1545,7 +1545,11 @@ stateDiagram-v2
   the same-account room in the current Core snapshot. An already projected DM
   may settle at the command's baseline `StateDelta` generation; a newly created
   DM waits until its room appears in the projection. A room in the snapshot
-  alone, without the matching event, never completes the request. These
+  alone, without the matching event, never completes the request. With
+  `missing = Report` (#1494; the default is `Create`) the command never
+  creates a room: when no reusable DM exists it emits the request-correlated
+  `RoomEvent::DirectMessageMissing`, which settles at once as a benign no-op
+  without waiting for a projection. These
   commands carry normal request ids; GUI pending/settle feedback must come from
   Rust events/snapshots.
 - `RoomActor` owns projection from the single live `SyncService` and its
@@ -1920,6 +1924,33 @@ stateDiagram-v2
   with `StoreUnavailable` before reducer, actor, SDK, or store effects, and
   cannot schedule draft persistence. Lock or account transition resets the
   state to `Unloaded`, so the next ready boundary retries the repaired store.
+- `ComposerDraftSeeded { room_id, document }` (#1494) is the one draft write
+  that does not come from a composer lease. It exists only inside the desktop
+  command `start_advisory_direct_message` ([Sender Device
+  Advisories](#sender-device-advisories)); no standalone desktop command seeds
+  a draft, and `CoreCommand` `StartDirectMessage` carries no draft. After the
+  direct chat's start outcome is settled (the room is already in the room
+  list), the adapter submits `AppCommand::SeedComposerDraft { expected_account,
+  room_id, document }` and then selects the room. Both commands travel the same
+  ordered command lane and the `AppActor` reduces each in place (overview Async
+  Rule 11), so the seed is reduced before the selection hydrates the composer.
+  The runtime applies the exact-account owner check of the other draft
+  commands. `SeedComposerDraft` holds no lease, so it is not lease-scoped. The
+  reducer writes the document only when the session is Ready, the room is in
+  the room list, and the room's stored draft is empty; it takes the successor
+  of the stored revision (which already carries any accepted-send tombstone;
+  Core chooses it, the renderer does not). When that room is the open timeline,
+  it also hydrates the active composer under the `ComposerDraftsLoaded` rule
+  (only an empty active composer with no pending submission). A non-empty
+  draft is never replaced. The advisory dialog is modal, so the user cannot
+  type into the composer while the seed is in flight. The renderer never
+  decides which room is the target direct chat: it passes
+  `occupied_editor_room_id`, the open timeline's room when its mounted main
+  editor shows a non-empty document (persisted or not), and otherwise none.
+  After resolving the direct chat, the adapter submits no seed and reports
+  `kept_existing` when the resolved room equals `occupied_editor_room_id` or
+  its stored draft is non-empty; otherwise it submits the seed and reports
+  `seeded`.
 
 ```mermaid
 stateDiagram-v2
@@ -1932,6 +1963,7 @@ stateDiagram-v2
     Editing --> Empty: RoomListUpdated [room pruned] / retain joined rooms
     Editing --> Empty: LogoutRequested/SessionCleared
     Empty --> Editing: ComposerDraftsLoaded [active composer empty and persisted draft exists]
+    Empty --> Editing: ComposerDraftSeeded [room known, stored draft empty] / store document + successor revision
 ```
 
 Content, ActiveEmpty, and LeasedEmpty are protected. LeasedEmpty becomes a
@@ -6511,6 +6543,8 @@ stateDiagram-v2
   `VerifiedByYou` when the contact adds an unsigned device. The details carry
   no device ids, names, or key material; the GUI labels devices by ordinal and
   states that the details do not show whether a conversation is encrypted.
+  The timeline-wide counterpart of **Their devices** is described in [Sender
+  Device Advisories](#sender-device-advisories).
 - **Verify user.** `ContactSecuritySummary.verification` is the Rust-owned
   offer: `NotOffered` for a contact you already verified or one without an
   identity; `RequiresYourCrossSigning` when this session lacks your private
@@ -6540,6 +6574,88 @@ stateDiagram-v2
   contact's joined membership before sending the request. This avoids relying
   on delivery of a pre-join event through backfill; if no join is observed
   before the deadline, the request fails with a timeout and is not sent.
+
+## Sender Device Advisories
+
+The timeline shows a small neutral ⓘ beside a sender's name when that sender has
+at least one device they never confirmed (#1494). It is the timeline-wide
+counterpart of the **Their devices** row in [Contact Security
+Details](#contact-security-details) and uses the same classification:
+`ContactDeviceStatus::SomeNotOwnerSigned` over non-dehydrated devices
+(`Device::is_cross_signed_by_owner()`). It says nothing about your own
+verification of the sender, and nothing about which device sent a message.
+
+`AppState.sender_device_advisories.rooms` maps an open room to the set of user
+ids that currently earn the mark. A room without an entry, or a user missing
+from its set, shows no mark.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Absent
+    Absent --> Present: SenderDeviceAdvisoriesUpdated [Ready, non-empty set]
+    Present --> Present: SenderDeviceAdvisoriesUpdated [Ready, changed non-empty set]
+    Present --> Absent: SenderDeviceAdvisoriesUpdated [empty set]
+    Absent --> Absent: SenderDeviceAdvisoriesUpdated [empty set, or not Ready, or room unknown]
+    Present --> Absent: SenderDeviceAdvisoriesCleared [Room timeline closed]
+    Present --> Absent: logout/lock/switch/session clear
+```
+
+- **Owner.** The `TimelineActor` of kind `Room` owns the observation for its
+  room. Thread and focused timelines do not run one; their rows read the same
+  room entry, so a sender who appears only in a thread or a focused window shows
+  no mark there. The observation starts with the actor; at most one store read
+  is in flight per actor, and stopping the actor aborts it and drops its SDK
+  handles inside the runtime (overview Async Rule 12). On unsubscribe the actor
+  projects `SenderDeviceAdvisoriesCleared { room_id }`.
+- **Who is classified.** The distinct senders of the actor's loaded window,
+  excluding the viewing user, newest first, capped at 64 users. Senders beyond
+  the cap show no mark. Room members who never appear in the window, and ignored
+  users (whose events the timeline drops), are not classified.
+- **Who earns the mark.** Only a sender whose classification is
+  `SomeNotOwnerSigned`. A sender without a cross-signing identity
+  (`OwnerIdentityMissing`) earns no mark: MSC4153's `CrossSignedOrLegacy`
+  treats such legacy senders separately, and Koushi does not single them out.
+- **Store only.** Classification reads the SDK crypto store
+  (`get_user_identity`, `get_user_devices`); it never issues `/keys/query`.
+  A user whose devices the SDK has not fetched yet has no devices in the store
+  and earns no mark. A failed store read keeps the last projected set; it is
+  never turned into a confirmation or a new mark. Unencrypted rooms project an
+  empty set; the encryption state is re-read on every classification, so a room
+  that turns encryption on gains marks at its next re-classification without
+  reopening.
+- **Refresh.** The actor re-classifies when the sender set of its window
+  changes, and when the account-wide `devices_stream()` or
+  `user_identities_stream()` reports a user in that sender set (updates for
+  other users are ignored; bursts are coalesced into one read). The read runs
+  off the actor mailbox, so a slow store read never delays timeline diffs, and
+  a result for an older sender set is dropped. The actor projects
+  `SenderDeviceAdvisoriesUpdated { room_id, user_ids }` through its
+  generation-fenced sender, only when the set changed. The reducer accepts it
+  only in a Ready session and only for a room in `state.rooms`; an empty set
+  removes the entry (`Absent --> Absent` is a no-op).
+- **Presentation.** The mark is muted and never red, as in Contact Security
+  Details. Its tooltip says the sender has devices they have not confirmed.
+  Activating it opens the advisory dialog: **View in User info** opens that
+  sender's User info (which performs the fresh retrieval), and **Let them know**
+  starts the advisory direct message below. Nothing is sent automatically, and
+  no verification is requested. The slice carries user ids only, never device
+  ids, names, or counts.
+- **Advisory direct message.** The dialog offers a message language (every
+  catalog locale except pseudo; default: the current UI locale, or `en` when
+  the UI locale is pseudo). **Let them know** calls the desktop command
+  `start_advisory_direct_message` with the localized advisory text and
+  `create_if_missing = false`. Core, not React, decides whether a reusable
+  direct chat exists: the command dispatches `StartDirectMessage` with
+  `missing = Report`, and when the SDK's get-or-create lookup (`get_dm_room`)
+  finds none, the room actor emits `DirectMessageMissing { request_id }` and
+  creates nothing; the command settles as a benign no-op with
+  `status = "missing"`. The dialog then asks whether to start a direct message
+  with the sender; only its confirm action repeats the call with
+  `create_if_missing = true` (`missing = Create`). Cancelling creates nothing.
+  Once a direct chat is resolved, the adapter seeds the draft (main-composer
+  draft rules, `ComposerDraftSeeded`) before selecting the room, and reports
+  `draft = "seeded"` or `draft = "kept_existing"` as decided there; the dialog
+  tells the user when their existing draft was kept.
 
 ## Desktop Application Updates
 

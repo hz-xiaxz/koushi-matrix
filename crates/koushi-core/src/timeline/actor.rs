@@ -988,6 +988,9 @@ pub(super) struct TimelineActor {
     /// Closed `m.room_key.withheld` codes per (room, session) observed in this
     /// timeline's room (issue #460).
     pub(super) withheld_codes: std::collections::BTreeMap<(String, String), &'static str>,
+    /// #1494: the window's classified senders, observed by the Room actor's
+    /// sender-device-advisory task. `None` for thread and focused actors.
+    pub(super) sender_device_senders: Option<watch::Sender<Vec<String>>>,
     pub(super) next_session_alias: u64,
     pub(super) recovery_tick_tasks: std::collections::BTreeMap<String, executor::JoinHandle<()>>,
 }
@@ -1444,6 +1447,30 @@ impl TimelineActor {
             }
         }
         true
+    }
+
+    fn window_senders(&self) -> Vec<String> {
+        super::sender_device_advisories::window_senders(
+            &self.navigation_items,
+            self.own_user_id.as_ref().map(|user_id| user_id.as_str()),
+            &self.ignored_user_ids,
+        )
+    }
+
+    /// #1494: republish the window's classified senders; the observer task
+    /// re-classifies only when the set changed.
+    pub(super) fn publish_sender_device_window(&self) {
+        let Some(senders_tx) = &self.sender_device_senders else {
+            return;
+        };
+        let senders = self.window_senders();
+        senders_tx.send_if_modified(|current| {
+            if *current == senders {
+                return false;
+            }
+            *current = senders;
+            true
+        });
     }
 
     async fn publish_current_canonical_activity(&self) {
@@ -2093,11 +2120,27 @@ impl TimelineActor {
             key_request_states: Default::default(),
             pending_auto_key_requests: Vec::new(),
             withheld_codes: Default::default(),
+            sender_device_senders: None,
         };
 
         actor
             .forward_initial_items_to_search(initial_sdk_items.iter().cloned())
             .await;
+        if let TimelineKind::Room { room_id } = &key.kind {
+            let (senders_tx, senders_rx) = watch::channel(actor.window_senders());
+            actor.sender_device_senders = Some(senders_tx);
+            auxiliary_tasks.push(executor::spawn(
+                super::sender_device_advisories::run_sender_device_advisories(
+                    Arc::clone(&actor.session),
+                    actor.action_tx.clone(),
+                    Arc::clone(&actor.timeline_actor_generations),
+                    key.clone(),
+                    actor.actor_generation,
+                    room_id.clone(),
+                    senders_rx,
+                ),
+            ));
+        }
         // Issue #460: automatic one-shot key requests for Thread timelines at
         // subscription time — existing UTD rows are delivered as InitialItems,
         // not as diffs, so the diff-batch scanner never sees them. The actor

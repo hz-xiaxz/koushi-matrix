@@ -140,6 +140,13 @@ export interface TimelineRowActionHandlers {
   onOpenSenderProfile?: (roomId: string, userId: string) => void;
 }
 
+/** #1494: opens the advisory dialog for a sender with unconfirmed devices. */
+export type OpenSenderDeviceAdvisory = (target: {
+  roomId: string;
+  userId: string;
+  senderDisplayLabel: string;
+}) => void;
+
 /// The visible message text the user selected inside this row (#1155).
 ///
 /// Returns the exact selection text, or `null` when there is nothing to act on:
@@ -336,6 +343,8 @@ export function TimelineItemRow({
   onOpenMatrixTarget,
   onOpenSenderProfile,
   onStartDirectMessage,
+  senderHasUnconfirmedDevices = false,
+  onOpenSenderDeviceAdvisory,
   density = "default",
   onRequestAvatarThumbnail,
   presence,
@@ -411,6 +420,9 @@ export function TimelineItemRow({
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];
   onOpenSenderProfile?: TimelineRowActionHandlers["onOpenSenderProfile"];
   onStartDirectMessage?: (userId: string) => void;
+  /** #1494: Rust lists this row's sender in `sender_device_advisories`. */
+  senderHasUnconfirmedDevices?: boolean;
+  onOpenSenderDeviceAdvisory?: OpenSenderDeviceAdvisory;
   density?: DisplayDensity;
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
   presence?: PresenceKind;
@@ -1069,6 +1081,16 @@ export function TimelineItemRow({
             onOpenSenderProfile={
               senderProfileUserId && onOpenSenderProfile
                 ? () => onOpenSenderProfile(roomId, senderProfileUserId)
+                : undefined
+            }
+            onOpenSenderDeviceAdvisory={
+              senderProfileUserId && senderHasUnconfirmedDevices && onOpenSenderDeviceAdvisory
+                ? () =>
+                    onOpenSenderDeviceAdvisory({
+                      roomId,
+                      userId: senderProfileUserId,
+                      senderDisplayLabel
+                    })
                 : undefined
             }
           />

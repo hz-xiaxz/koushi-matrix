@@ -1324,6 +1324,20 @@ pub async fn room_has_active_member_no_sync(
         .any(|member| member.user_id().as_str() == user_id.as_str()))
 }
 
+/// The reusable direct chat with `user_id`, exactly as `start_direct_message`
+/// would reuse it, without creating one (#1494).
+pub fn find_direct_message(
+    session: &MatrixClientSession,
+    user_id: &str,
+) -> Result<Option<String>, MatrixRoomOperationError> {
+    let user_id = matrix_sdk::ruma::UserId::parse(user_id)
+        .map_err(|_| MatrixRoomOperationError::InvalidUserId)?;
+    Ok(session
+        .client()
+        .get_dm_room(&user_id)
+        .map(|room| room.room_id().to_string()))
+}
+
 pub async fn start_direct_message(
     session: &MatrixClientSession,
     user_id: &str,
@@ -1403,8 +1417,8 @@ mod start_direct_message_tests {
     async fn start_direct_message_reuses_the_existing_joined_dm_room() {
         let server = MatrixMockServer::new().await;
         let session = session_for(&server).await;
-        let target = matrix_sdk::ruma::user_id!("@dm-target:example.org");
-        let dm_room_id = matrix_sdk::ruma::room_id!("!existing-dm:example.org");
+        let target = matrix_sdk::ruma::user_id!("@dm-target:example.test");
+        let dm_room_id = matrix_sdk::ruma::room_id!("!existing-dm:example.test");
 
         // Seed a joined room marked as the DM with the target through
         // m.direct. No createRoom endpoint is mounted, so an accidental
@@ -1424,6 +1438,34 @@ mod start_direct_message_tests {
             .await
             .expect("existing DM must be reused without a create call");
         assert_eq!(started, dm_room_id.to_string());
+    }
+
+    #[tokio::test]
+    async fn find_direct_message_reports_the_reusable_dm_and_never_creates() {
+        let server = MatrixMockServer::new().await;
+        let session = session_for(&server).await;
+        let target = matrix_sdk::ruma::user_id!("@dm-target:example.test");
+        let dm_room_id = matrix_sdk::ruma::room_id!("!existing-dm:example.test");
+
+        // No createRoom endpoint is mounted: a lookup must never create.
+        assert_eq!(
+            super::find_direct_message(&session, target.as_str()).expect("valid user id"),
+            None
+        );
+        server
+            .mock_sync()
+            .ok_and_run(&session.client(), |builder| {
+                builder.add_custom_global_account_data(json!({
+                    "type": "m.direct",
+                    "content": { target: [dm_room_id] }
+                }));
+                builder.add_joined_room(JoinedRoomBuilder::new(dm_room_id));
+            })
+            .await;
+        assert_eq!(
+            super::find_direct_message(&session, target.as_str()).expect("valid user id"),
+            Some(dm_room_id.to_string())
+        );
     }
 
     #[tokio::test]

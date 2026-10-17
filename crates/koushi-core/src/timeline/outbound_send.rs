@@ -2148,6 +2148,7 @@ impl TimelineActor {
                 emitted_items,
             },
         );
+        self.publish_sender_device_window();
     }
     async fn resync_send_queue_statuses(&mut self) {
         let Some(room_id) = timeline_room_id(&self.key) else {

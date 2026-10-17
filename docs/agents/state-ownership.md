@@ -1490,6 +1490,26 @@ normal QA-title mode and cannot change product title semantics.
   contact_security`, `cargo test -p koushi-core --lib contact_security`, and
   `npm --prefix apps/desktop test -- --run
   src/components/ContactSecurityDetails.test.tsx`.
+- Sender device advisories (#1494) are Rust-owned
+  `AppState.sender_device_advisories` (mirrors: `koushi_state` →
+  `koushi_protocol` `state_update` changed slice → Tauri `dto.rs` domain slice →
+  `types.ts` `SenderDeviceAdvisoriesState`), produced by the Room
+  `TimelineActor` from the crypto store only. This is the one place outside
+  User info where a contact's unconfirmed devices are shown: a muted ⓘ beside
+  the sender name, never red, with no prompt. React renders the mark only when
+  `rooms[roomId]` contains `item.sender`; it never classifies devices, reads
+  `e2ee_trust.devices` or per-message shields for it, or keeps its own set. The
+  advisory dialog owns only its visibility, the confirmation step, and the
+  selected message language. It never decides from `RoomSummary.dm_user_ids`
+  whether a direct chat exists: it calls `start_advisory_direct_message(userId,
+  document, createIfMissing, occupiedEditorRoomId)` and shows the confirmation only when Core reports
+  `status: "missing"`. The seed is Rust-owned (`SeedComposerDraft`, empty
+  drafts only); React must not write the advisory through
+  `updateComposerDraft`. The slice carries user ids only, never device ids,
+  names, or counts.
+  Focused checks: `cargo test -p koushi-state --test sender_device_advisories`,
+  `cargo test -p koushi-sdk --lib contact_security`, and `npm --prefix
+  apps/desktop test -- --run src/components/timeline/SenderDeviceAdvisory.test.tsx`.
 - Verification and device DTOs include user/device ids for Rust correlation, but
   the GUI should not display those ids by default. Use ordinal/status labels
   (`Device 1`, `Verified`, etc.) unless a Rust-owned redacted display model is

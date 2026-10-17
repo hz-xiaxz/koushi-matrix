@@ -171,3 +171,41 @@ async fn baseline_dm_projection_requires_the_matching_event_and_account() {
         );
     }
 }
+
+/// #1494: a report-only lookup that finds no direct chat settles as a benign
+/// no-op from its event alone; no room projection is awaited.
+#[tokio::test]
+async fn missing_dm_report_settles_from_its_event_without_a_projection() {
+    let (mut connection, _commands, events, snapshots) = super::tests::scripted_connection(4);
+    let mut baseline = existing_dm_snapshot(7);
+    baseline.state.rooms.clear();
+    snapshots.send(baseline.clone()).expect("baseline snapshot");
+    let request_id = connection.next_request_id();
+    events
+        .send(CoreEvent::Room(RoomEvent::DirectMessageMissing {
+            request_id,
+        }))
+        .expect("correlated missing report");
+
+    let outcome = connection
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::DirectMessageStarted {
+                request_id,
+                account_key: AccountKey("@me:example.invalid".to_owned()),
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + Duration::from_secs(1),
+        )
+        .await;
+    assert!(
+        matches!(
+            outcome,
+            Ok(RequestOutcome::DirectMessageMissing {
+                request_id: settled,
+                generation: 7,
+            }) if settled == request_id
+        ),
+        "missing DM report must settle as DirectMessageMissing: {outcome:?}"
+    );
+}

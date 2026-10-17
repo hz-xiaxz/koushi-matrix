@@ -37,6 +37,7 @@ mod room_activity;
 mod room_interactions;
 mod room_management;
 mod search;
+mod sender_device_advisories;
 mod session;
 mod session_status;
 mod settings;
@@ -68,6 +69,9 @@ pub use contact_security::{
     ContactSecurityFailureKind, ContactSecurityLoadState, ContactSecurityState,
     ContactSecuritySummary, ContactVerificationDirectChat, ContactVerificationOffer,
 };
+
+// ── Re-exports: sender device advisories (#1494) ──────────────────────────
+pub use sender_device_advisories::SenderDeviceAdvisoriesState;
 
 // ── Re-exports: account notifications ───────────────────────────────────────
 pub use account_notifications::{
@@ -405,6 +409,9 @@ pub struct AppState {
     /// Security details of the contact whose User info is open (#1024).
     #[serde(default)]
     pub contact_security: ContactSecurityState,
+    /// Senders with devices they never confirmed, per open room (#1494).
+    #[serde(default)]
+    pub sender_device_advisories: SenderDeviceAdvisoriesState,
     #[serde(default)]
     pub soft_logout_reauth: SoftLogoutReauthState,
     #[serde(default)]
@@ -543,6 +550,7 @@ impl Default for AppState {
             account_management_capabilities: AccountManagementCapabilities::default(),
             account_notifications: AccountNotificationsState::default(),
             contact_security: ContactSecurityState::default(),
+            sender_device_advisories: SenderDeviceAdvisoriesState::default(),
             soft_logout_reauth: SoftLogoutReauthState::Idle,
             qr_login: QrLoginState::Idle,
             settings: SettingsState::default(),

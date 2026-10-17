@@ -4059,6 +4059,56 @@ button:disabled {
   cursor: pointer;
 }
 
+/* #1494: muted, never red; sits at the top-right of the sender name. */
+.sender-device-advisory {
+  display: inline-flex;
+  align-self: flex-start;
+  align-items: center;
+  justify-content: center;
+  /* An 18px hit area around the 11px icon; the negative margins keep the
+     icon at the name's top-right corner. */
+  min-width: 18px;
+  min-height: 18px;
+  margin-block-start: -4px;
+  margin-inline-start: -6px;
+  padding: 0;
+  border: 0;
+  border-radius: var(--r-sm);
+  color: var(--text-muted);
+  background: transparent;
+  cursor: pointer;
+  opacity: 0.75;
+}
+
+.sender-device-advisory:hover {
+  opacity: 1;
+}
+
+.sender-device-advisory:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+  opacity: 1;
+}
+
+.sender-device-advisory-preview {
+  margin: 0;
+  padding: 10px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--r-md);
+  background: var(--surface-hover);
+}
+
+.sender-device-advisory-preview figcaption {
+  margin-bottom: 6px;
+  color: var(--text-muted);
+  font-size: 0.85em;
+}
+
+.sender-device-advisory-preview p {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
 .sender-profile-button:focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 2px;

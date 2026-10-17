@@ -451,6 +451,7 @@ export function defaultSnapshotResponse() {
         operation: { kind: "idle" }
       },
       contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
+      sender_device_advisories: { rooms: {} },
       notification_delivery: { sinks: [], presets: [] },
       account_management_capabilities: { change_password: { kind: "unknown" } },
       soft_logout_reauth: { kind: "idle" },
@@ -547,7 +548,7 @@ export function defaultSnapshotResponse() {
   const DOMAIN_KEYS = new Set([
     "session", "session_lock_reason", "secure_backup_gate", "current_session_status", "device_cleanup",
     "auth", "account_management_url", "account_management", "account_management_capabilities",
-    "account_notifications", "contact_security",
+    "account_notifications", "contact_security", "sender_device_advisories",
     "soft_logout_reauth", "qr_login", "settings", "link_preview_settings", "room_preferences",
     "locale_profile", "typography_profile", "profile", "space_members", "sync", "spaces", "rooms",
     "invites", "invite_workflow", "room_notification_settings", "room_interactions", "directory",

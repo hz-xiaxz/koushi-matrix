@@ -34,6 +34,7 @@ mod room;
 mod room_management;
 mod scheduled_sends;
 mod search;
+mod sender_device_advisories;
 mod session;
 mod session_status;
 mod settings;
@@ -578,6 +579,12 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             contact_security::handle_refreshed(state, &user_id, summary)
         }
         AppAction::ContactSecurityClosed => contact_security::handle_closed(state),
+        AppAction::SenderDeviceAdvisoriesUpdated { room_id, user_ids } => {
+            sender_device_advisories::handle_updated(state, room_id, user_ids)
+        }
+        AppAction::SenderDeviceAdvisoriesCleared { room_id } => {
+            sender_device_advisories::handle_cleared(state, &room_id)
+        }
         AppAction::AccountNotificationsLoadRequested { request_id } => {
             account_notifications::handle_load_requested(state, request_id)
         }
@@ -1612,6 +1619,9 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             document,
             revision,
         } => timeline::handle_composer_draft_changed(state, room_id, document, revision),
+        AppAction::ComposerDraftSeeded { room_id, document } => {
+            timeline::handle_composer_draft_seeded(state, room_id, document)
+        }
         AppAction::SendTextSubmitted {
             room_id,
             transaction_id,
@@ -2227,6 +2237,8 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
         state.account_notifications != crate::state::AccountNotificationsState::default();
     let had_contact_security =
         state.contact_security != crate::state::ContactSecurityState::default();
+    let had_sender_device_advisories =
+        state.sender_device_advisories != crate::state::SenderDeviceAdvisoriesState::default();
     let had_soft_logout_reauth = state.soft_logout_reauth != SoftLogoutReauthState::Idle;
     let had_qr_login = state.qr_login != QrLoginState::Idle;
     let had_live_signals = state.live_signals != Default::default();
@@ -2290,6 +2302,7 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     state.account_management_capabilities = AccountManagementCapabilities::default();
     state.account_notifications = Default::default();
     state.contact_security = Default::default();
+    state.sender_device_advisories = Default::default();
     state.soft_logout_reauth = SoftLogoutReauthState::Idle;
     state.qr_login = QrLoginState::Idle;
     state.live_signals = Default::default();
@@ -2344,6 +2357,11 @@ pub(crate) fn clear_session_views(state: &mut AppState) -> Vec<AppEffect> {
     }
     if had_contact_security {
         effects.push(AppEffect::EmitUiEvent(UiEvent::ContactSecurityChanged));
+    }
+    if had_sender_device_advisories {
+        effects.push(AppEffect::EmitUiEvent(
+            UiEvent::SenderDeviceAdvisoriesChanged,
+        ));
     }
     if had_soft_logout_reauth {
         effects.push(AppEffect::EmitUiEvent(UiEvent::SoftLogoutReauthChanged));

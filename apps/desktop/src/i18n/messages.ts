@@ -514,6 +514,18 @@ export type MessageId =
   | "people.security.devicesNoIdentity"
   | "people.security.devicesAllConfirmedExplain"
   | "people.security.devicesSomeUnconfirmedExplain"
+  | "people.unverifiedDevices.badgeLabel"
+  | "people.unverifiedDevices.tooltipTitle"
+  | "people.unverifiedDevices.tooltipBody"
+  | "people.unverifiedDevices.openUserInfo"
+  | "people.unverifiedDevices.sendAdvisory"
+  | "people.unverifiedDevices.advisoryLanguage"
+  | "people.unverifiedDevices.advisoryPreview"
+  | "people.unverifiedDevices.createDmTitle"
+  | "people.unverifiedDevices.createDmBody"
+  | "people.unverifiedDevices.createDmConfirm"
+  | "people.unverifiedDevices.keptExistingDraft"
+  | "dm.unverifiedDeviceAdvisory"
   | "people.security.devicesNoneExplain"
   | "people.security.devicesNoIdentityExplain"
   | "people.security.devicesUnavailableExplain"
@@ -2613,6 +2625,18 @@ const en: Catalog = {
   "people.security.devicesNoIdentity": "Can't be confirmed yet",
   "people.security.devicesAllConfirmedExplain": "Every device Koushi retrieved for this person has been confirmed by them in their own app.",
   "people.security.devicesSomeUnconfirmedExplain": "Some of this person's devices have not been confirmed yet. If you are concerned, ask them to confirm their devices in their app.",
+  "people.unverifiedDevices.badgeLabel": "{name} has devices they haven't confirmed",
+  "people.unverifiedDevices.tooltipTitle": "Some devices aren't confirmed",
+  "people.unverifiedDevices.tooltipBody": "{name} hasn't confirmed every device signed in to their account.",
+  "people.unverifiedDevices.openUserInfo": "View in User info",
+  "people.unverifiedDevices.sendAdvisory": "Let them know",
+  "people.unverifiedDevices.advisoryLanguage": "Message language",
+  "people.unverifiedDevices.advisoryPreview": "Message",
+  "people.unverifiedDevices.createDmTitle": "Start a DM with {name}?",
+  "people.unverifiedDevices.createDmBody": "You don't have a DM with {name} yet. Koushi will create one and add a draft you can edit before sending.",
+  "people.unverifiedDevices.createDmConfirm": "Start DM",
+  "people.unverifiedDevices.keptExistingDraft": "You already had a draft in this chat, so it was kept. The suggested message was not added.",
+  "dm.unverifiedDeviceAdvisory": "Hi {name}, it looks like one or more devices signed in to your account haven't been verified yet.\n\nMatrix apps such as Element are starting to exclude unverified devices: they won't be able to send or read encrypted messages.\n\nYou can verify a device from one you've already verified, or with your recovery key. If you don't recognize a device, it's safer to sign it out.",
   "people.security.devicesNoneExplain": "No encryption devices were found for this person, so there is nothing to confirm.",
   "people.security.devicesNoIdentityExplain": "This person hasn't set up cross-signing, so they can't confirm their devices yet.",
   "people.security.devicesUnavailableExplain": "Koushi couldn't retrieve this person's devices. This is not a confirmation.",
@@ -4759,6 +4783,18 @@ const ja: Catalog = {
   "people.security.devicesNoIdentity": "まだ確認できません",
   "people.security.devicesAllConfirmedExplain": "Koushiが取得したこの人のデバイスは、すべて本人が自分のアプリで確認しています。",
   "people.security.devicesSomeUnconfirmedExplain": "この人のデバイスの一部はまだ確認されていません。気になる場合は、本人のアプリでデバイスを確認するよう依頼してください。",
+  "people.unverifiedDevices.badgeLabel": "{name}さんに未確認のデバイスがあります",
+  "people.unverifiedDevices.tooltipTitle": "確認されていないデバイスがあります",
+  "people.unverifiedDevices.tooltipBody": "{name}さんは、アカウントにログインしているすべてのデバイスを確認していません。",
+  "people.unverifiedDevices.openUserInfo": "ユーザー情報で見る",
+  "people.unverifiedDevices.sendAdvisory": "知らせる",
+  "people.unverifiedDevices.advisoryLanguage": "メッセージの言語",
+  "people.unverifiedDevices.advisoryPreview": "メッセージ",
+  "people.unverifiedDevices.createDmTitle": "{name}さんとのDMを作成しますか？",
+  "people.unverifiedDevices.createDmBody": "{name}さんとのDMはまだありません。作成して、送信前に編集できる下書きを入力します。",
+  "people.unverifiedDevices.createDmConfirm": "DMを開始",
+  "people.unverifiedDevices.keptExistingDraft": "このチャットには既に下書きがあったため、そのまま残しました。提案したメッセージは追加していません。",
+  "dm.unverifiedDeviceAdvisory": "{name}さん、こんにちは。{name}さんのアカウントで、まだ確認されていないデバイスがログインしているようです。\n\nElementなど、Matrixのアプリでは今後、確認されていないデバイスでは暗号化されたメッセージを送ることも読むこともできなくなります。\n\n確認済みの別のデバイス、またはリカバリーキーを使って確認できます。心当たりのないデバイスであれば、ログアウトさせておくと安全です。",
   "people.security.devicesNoneExplain": "この人の暗号化デバイスが見つからないため、確認できるものがありません。",
   "people.security.devicesNoIdentityExplain": "この人はクロス署名を設定していないため、まだ自分のデバイスを確認できません。",
   "people.security.devicesUnavailableExplain": "Koushiはこの人のデバイスを取得できませんでした。確認済みという意味ではありません。",

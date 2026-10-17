@@ -32,6 +32,7 @@ use wiremock::{
 use super::{
     ContactDeviceFacts, ContactIdentityFacts, ContactVerificationFacts, classify_contact_security,
     load_contact_security, observe_contact_security_changes, read_contact_security,
+    read_users_with_unconfirmed_devices,
 };
 use crate::MatrixClientSession;
 
@@ -620,6 +621,67 @@ async fn retrieval_failure_is_an_error_not_a_summary() {
         load_contact_security(&viewer, "not a user id").await,
         Err(ContactSecurityFailureKind::Sdk)
     );
+}
+
+// ── Sender device advisories (#1494) ────────────────────────────────────────
+
+#[tokio::test]
+async fn sender_advisories_name_only_users_with_unconfirmed_devices_from_the_store() {
+    let server = MatrixMockServer::new().await;
+    server.mock_crypto_endpoints_preset().await;
+    let alice = cross_signed_client(
+        &server,
+        user_id!("@alice:example.test"),
+        device_id!("ALICE1"),
+    )
+    .await;
+    let bob_id = user_id!("@bob:example.test");
+    let carol_id = user_id!("@carol:example.test");
+    let dave_id = user_id!("@dave:example.test");
+    let erin_id = user_id!("@erin:example.test");
+    let _bob = cross_signed_client(&server, bob_id, device_id!("BOB1")).await;
+    let _carol = crypto_client(&server, carol_id, device_id!("CAROL1")).await;
+    let _dave = cross_signed_client(&server, dave_id, device_id!("DAVE1")).await;
+    let _dave_second = crypto_client(&server, dave_id, device_id!("DAVE2")).await;
+    let _erin = cross_signed_client(&server, erin_id, device_id!("ERIN1")).await;
+    let _erin_second = crypto_client(&server, erin_id, device_id!("ERIN2")).await;
+    let alice_session = session(&alice, server.uri());
+    // Bob, Carol and Dave are in the store; Erin was never queried.
+    for user in [bob_id, carol_id, dave_id] {
+        alice
+            .encryption()
+            .request_user_identity(user)
+            .await
+            .expect("identity query");
+    }
+
+    let users = [
+        bob_id,
+        carol_id,
+        dave_id,
+        erin_id,
+        user_id!("@alice:example.test"),
+    ]
+    .map(|user| user.to_string());
+    let advisories = read_users_with_unconfirmed_devices(&alice_session, &users)
+        .await
+        .expect("store read");
+    // Bob: all owner-signed. Carol: no cross-signing, which is not the same as
+    // an unconfirmed device. Erin: not in the store, and the read never
+    // queries the server for her. The viewing user is never named.
+    assert_eq!(
+        advisories.into_iter().collect::<Vec<_>>(),
+        vec![dave_id.to_string()]
+    );
+
+    // An invalid user id is skipped, not an error for the others.
+    let advisories = read_users_with_unconfirmed_devices(
+        &alice_session,
+        &["not a user id".to_owned(), dave_id.to_string()],
+    )
+    .await
+    .expect("store read");
+    assert_eq!(advisories.len(), 1);
 }
 
 // ── Pure fold ───────────────────────────────────────────────────────────────

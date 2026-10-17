@@ -208,21 +208,7 @@ async fn read_contact_security_from_store(
             verified: identity.is_verified(),
             verification_violation: identity.has_verification_violation(),
         });
-    let devices = encryption
-        .get_user_devices(user_id)
-        .await
-        .map_err(|_| ContactSecurityFailureKind::Sdk)?;
-    let mut devices: Vec<_> = devices.devices().collect();
-    devices.sort_by(|left, right| left.device_id().cmp(right.device_id()));
-    let facts = devices.iter().map(|device| ContactDeviceFacts {
-        cross_signed_by_owner: device.is_cross_signed_by_owner(),
-        has_owner_cross_signature: device.signatures().get(user_id).is_some_and(|signatures| {
-            signatures
-                .keys()
-                .any(|key_id| key_id.key_name() != device.device_id())
-        }),
-        dehydrated: device.is_dehydrated(),
-    });
+    let facts = read_device_facts(&encryption, user_id).await?;
     let can_sign_identities = encryption
         .cross_signing_status()
         .await
@@ -232,6 +218,124 @@ async fn read_contact_security_from_store(
         direct_chat: verification_direct_chat(client, user_id),
     };
     Ok(classify_contact_security(identity, facts, verification))
+}
+
+/// The contact's devices from the crypto store, in device-id order.
+async fn read_device_facts(
+    encryption: &matrix_sdk::encryption::Encryption,
+    user_id: &UserId,
+) -> Result<Vec<ContactDeviceFacts>, ContactSecurityFailureKind> {
+    let devices = encryption
+        .get_user_devices(user_id)
+        .await
+        .map_err(|_| ContactSecurityFailureKind::Sdk)?;
+    let mut devices: Vec<_> = devices.devices().collect();
+    devices.sort_by(|left, right| left.device_id().cmp(right.device_id()));
+    Ok(devices
+        .iter()
+        .map(|device| ContactDeviceFacts {
+            cross_signed_by_owner: device.is_cross_signed_by_owner(),
+            has_owner_cross_signature: device.signatures().get(user_id).is_some_and(|signatures| {
+                signatures
+                    .keys()
+                    .any(|key_id| key_id.key_name() != device.device_id())
+            }),
+            dehydrated: device.is_dehydrated(),
+        })
+        .collect())
+}
+
+/// Sender device advisories (#1494): the users among `user_ids` whose devices
+/// in the crypto store classify as `SomeNotOwnerSigned`, as the **Their
+/// devices** row would. Store only: a user the SDK has not fetched has no
+/// devices and is not named, and nothing is queried from the server. The
+/// viewing user and invalid user ids are skipped.
+pub async fn read_users_with_unconfirmed_devices(
+    session: &MatrixClientSession,
+    user_ids: &[String],
+) -> Result<std::collections::BTreeSet<String>, ContactSecurityFailureKind> {
+    let encryption = session.client.encryption();
+    let own_user_id = session.client.user_id();
+    let mut advisories = std::collections::BTreeSet::new();
+    for raw_user_id in user_ids {
+        let Ok(user_id) = parse_user_id(raw_user_id) else {
+            continue;
+        };
+        if Some(user_id) == own_user_id {
+            continue;
+        }
+        let identity = encryption
+            .get_user_identity(user_id)
+            .await
+            .map_err(|_| ContactSecurityFailureKind::Sdk)?
+            .map(|identity| ContactIdentityFacts {
+                verified: identity.is_verified(),
+                verification_violation: identity.has_verification_violation(),
+            });
+        let facts = read_device_facts(&encryption, user_id).await?;
+        // The verification offer does not affect the device status.
+        let summary = classify_contact_security(
+            identity,
+            facts,
+            ContactVerificationFacts {
+                can_sign_identities: false,
+                direct_chat: ContactVerificationDirectChat::New,
+            },
+        );
+        if summary.devices == ContactDevicesStatus::SomeNotOwnerSigned {
+            advisories.insert(raw_user_id.clone());
+        }
+    }
+    Ok(advisories)
+}
+
+/// Sender device advisories for one room (#1494). The room's encryption state
+/// is re-read on every call: an unencrypted or unknown room names nobody, so a
+/// room that turns encryption on gains marks on its next classification.
+pub async fn read_room_sender_device_advisories(
+    session: &MatrixClientSession,
+    room_id: &str,
+    user_ids: &[String],
+) -> Result<std::collections::BTreeSet<String>, ContactSecurityFailureKind> {
+    let encrypted = matrix_sdk::ruma::RoomId::parse(room_id)
+        .ok()
+        .and_then(|room_id| session.client.get_room(&room_id))
+        .is_some_and(|room| room.encryption_state().is_encrypted());
+    if !encrypted {
+        return Ok(std::collections::BTreeSet::new());
+    }
+    read_users_with_unconfirmed_devices(session, user_ids).await
+}
+
+/// The users a device or identity store change named (#1494). `None` means
+/// the update named nobody (the SDK delivers a device removal without device
+/// maps), so the caller must re-read every user it observes.
+pub type SenderDeviceChanges =
+    Pin<Box<dyn Stream<Item = Option<std::collections::BTreeSet<String>>> + Send>>;
+
+pub async fn observe_sender_device_changes(
+    session: &MatrixClientSession,
+) -> Result<SenderDeviceChanges, ContactSecurityFailureKind> {
+    let encryption = session.client.encryption();
+    let devices = encryption
+        .devices_stream()
+        .await
+        .map_err(|_| ContactSecurityFailureKind::Sdk)?
+        .map(|update| named_users(update.new.keys().chain(update.changed.keys())));
+    let identities = encryption
+        .user_identities_stream()
+        .await
+        .map_err(|_| ContactSecurityFailureKind::Sdk)?
+        .map(|update| named_users(update.new.keys().chain(update.changed.keys())));
+    Ok(Box::pin(stream::select(devices, identities)))
+}
+
+fn named_users<'a>(
+    user_ids: impl Iterator<Item = &'a matrix_sdk::ruma::OwnedUserId>,
+) -> Option<std::collections::BTreeSet<String>> {
+    let users: std::collections::BTreeSet<String> =
+        user_ids.map(|user_id| user_id.to_string()).collect();
+    (!users.is_empty()).then_some(users)
 }
 
 /// **Verify user** (#1024): send an interactive SAS verification request

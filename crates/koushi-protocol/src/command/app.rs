@@ -31,6 +31,15 @@ pub enum AppCommand {
         document: ComposerDocument,
         revision: ComposerDraftRevision,
     },
+    /// #1494: write `document` as the room's main-composer draft only when
+    /// the stored draft is empty; Core picks the revision. Issued by the
+    /// advisory direct-message flow before it selects the room.
+    SeedComposerDraft {
+        request_id: RequestId,
+        expected_account: crate::SessionKeyId,
+        room_id: String,
+        document: ComposerDocument,
+    },
     SetThreadComposerDraft {
         request_id: RequestId,
         expected_account: crate::SessionKeyId,
@@ -343,6 +352,16 @@ impl fmt::Debug for AppCommand {
                 ..
             } => formatter
                 .debug_struct("SetComposerDraft")
+                .field("request_id", request_id)
+                .field("room_id", room_id)
+                .field("draft", &"MessageBody(..)")
+                .finish(),
+            Self::SeedComposerDraft {
+                request_id,
+                room_id,
+                ..
+            } => formatter
+                .debug_struct("SeedComposerDraft")
                 .field("request_id", request_id)
                 .field("room_id", room_id)
                 .field("draft", &"MessageBody(..)")

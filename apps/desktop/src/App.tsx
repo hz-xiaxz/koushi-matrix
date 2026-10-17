@@ -41,6 +41,7 @@ import {
   type ComposerDraftScope
 } from "./domain/composerDraftLifecycle";
 import type {
+  AdvisoryDirectMessageSettlement,
   ComposerDocument,
   ComposerDraftRevision,
   CreateRoomAccessPreviewInput,
@@ -117,6 +118,7 @@ import {
 } from "./domain/timelineStore";
 import { TimelineStoreContext } from "./components/timelineStoreContext";
 import { writeClipboardText } from "./components/timeline/TimelineMessageBody";
+import { SenderDeviceAdvisoryDialog } from "./components/timeline/SenderDeviceAdvisoryDialog";
 import { webSearchUrl } from "./domain/externalLinks";
 import {
   type ContextMenuActionId,
@@ -1567,6 +1569,12 @@ function AccountContent({
     kind: InviteActionFailureKind;
   } | null>(null);
   const [newDmDialogOpen, setNewDmDialogOpen] = useState(false);
+  // #1494: the sender whose advisory dialog is open; the dialog owns its steps.
+  const [senderDeviceAdvisoryTarget, setSenderDeviceAdvisoryTarget] = useState<{
+    roomId: string;
+    userId: string;
+    senderDisplayLabel: string;
+  } | null>(null);
   const [resetLocalDataConfirmOpen, setResetLocalDataConfirmOpen] = useState(false);
   const logoutConfirmationInFlightRef = useRef(false);
   const [diagnosticsOpen, setDiagnosticsOpen] = useState(false);
@@ -4727,6 +4735,37 @@ function AccountContent({
     }
   }
 
+  /**
+   * #1494: Core decides whether a direct chat exists and whether the draft is
+   * seeded. React only names the open room whose mounted editor already shows
+   * text, so the user's own words are never replaced.
+   */
+  async function startAdvisoryDirectMessage(
+    userId: string,
+    text: string,
+    createIfMissing: boolean
+  ): Promise<AdvisoryDirectMessageSettlement> {
+    const openRoomId = snapshot?.state.ui.timeline.room_id ?? null;
+    const openEditorDocument = openRoomId
+      ? capturedComposerDocument({ kind: "main", room_id: openRoomId })
+      : undefined;
+    const occupiedEditorRoomId =
+      openEditorDocument && plainBodyFromDocument(openEditorDocument).trim() ? openRoomId : null;
+    const settlement = await settleCommand(
+      api.startAdvisoryDirectMessage(
+        userId,
+        documentFromText(text),
+        createIfMissing,
+        occupiedEditorRoomId
+      )
+    );
+    if (settlement.status === "opened") {
+      setPrimaryView("timeline");
+      await setRightPanelModeClosingFocusedContext("closed");
+    }
+    return settlement;
+  }
+
   async function submitInviteUserDialog() {
     const dialog = inviteUserDialog;
     const workflow = snapshot?.state.domain.invite_workflow ?? DEFAULT_INVITE_WORKFLOW;
@@ -7534,6 +7573,7 @@ function AccountContent({
             onStartDirectMessage={(userId) => {
               runInBackground(startDirectMessage(userId));
             }}
+            onOpenSenderDeviceAdvisory={setSenderDeviceAdvisoryTarget}
             onReply={(roomId, eventId) => {
               runInBackground(setComposerReplyTarget(roomId, eventId));
             }}
@@ -7778,6 +7818,7 @@ function AccountContent({
           onStartDirectMessage={(userId) => {
             runInBackground(startDirectMessage(userId));
           }}
+          onOpenSenderDeviceAdvisory={setSenderDeviceAdvisoryTarget}
           onUpdateMemberRole={(roomId, targetUserId, powerLevel) => {
             runInBackground(updateRoomMemberRole(roomId, targetUserId, powerLevel));
           }}
@@ -8071,6 +8112,23 @@ function AccountContent({
             </div>
           </div>
         </ModalDialog>
+      ) : null}
+      {senderDeviceAdvisoryTarget ? (
+        <SenderDeviceAdvisoryDialog
+          senderDisplayLabel={senderDeviceAdvisoryTarget.senderDisplayLabel}
+          onClose={() => setSenderDeviceAdvisoryTarget(null)}
+          onOpenUserInfo={() => {
+            runInBackground(
+              openRoomUserProfile(
+                senderDeviceAdvisoryTarget.roomId,
+                senderDeviceAdvisoryTarget.userId
+              )
+            );
+          }}
+          onSendAdvisory={(text, createIfMissing) =>
+            startAdvisoryDirectMessage(senderDeviceAdvisoryTarget.userId, text, createIfMissing)
+          }
+        />
       ) : null}
       {newDmDialogOpen ? (
         <UserIdDialog

@@ -77,6 +77,16 @@ fn composer_scope_and_timeline_account_fence_are_core_policy() {
     });
     assert!(command.composer_draft_scope().is_some());
 
+    // #1494: the advisory seed holds no draft lease and needs a Ready session.
+    let seed = CoreCommand::App(AppCommand::SeedComposerDraft {
+        request_id: id,
+        expected_account: expected_account.clone(),
+        room_id: "!room:example.invalid".to_owned(),
+        document: koushi_state::ComposerDocument::from_plain_text("advisory"),
+    });
+    assert!(seed.composer_draft_scope().is_none());
+    assert!(seed.requires_ready_session());
+
     let timeline = TimelineCommand::SubmitText {
         request_id: id,
         expected_account: expected_account.clone(),

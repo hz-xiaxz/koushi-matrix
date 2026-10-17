@@ -327,6 +327,7 @@ function readySnapshot(
           },
           notification_delivery: { sinks: [], presets: defaultNotificationDeliveryPresets() },
           contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
+          sender_device_advisories: { rooms: {} },
           account_management_capabilities: { change_password: { kind: "unknown" } },
           soft_logout_reauth: { kind: "idle" }, qr_login: { kind: "idle" },
           directory: {
@@ -2989,6 +2990,11 @@ mock.setCommandResponse("create_space", () => setCurrentSnapshot(afterCreateSpac
 mock.setCommandResponse("accept_invite", () => currentSnapshot);
 mock.setCommandResponse("decline_invite", () => currentSnapshot);
 mock.setCommandResponse("start_direct_message", () => currentSnapshot);
+mock.setCommandResponse("start_advisory_direct_message", () => ({
+  ...currentSnapshot,
+  status: "opened",
+  draft: "seeded"
+}));
 mock.setCommandResponse("invite_user", () => currentSnapshot);
 mock.setCommandResponse("open_invite_workflow", () => currentSnapshot);
 mock.setCommandResponse("close_invite_workflow", () => currentSnapshot);

@@ -708,6 +708,7 @@ export type RoomEvent =
   | { InviteAccepted: { request_id: RequestId; room_id: string } }
   | { InviteDeclined: { request_id: RequestId; room_id: string } }
   | { DirectMessageStarted: { request_id: RequestId; room_id: string } }
+  | { DirectMessageMissing: { request_id: RequestId } }
   | { RoomJoined: { request_id: RequestId; room_id: string } }
   | { RoomLeft: { request_id: RequestId; room_id: string } }
   | { RoomForgotten: { request_id: RequestId; room_id: string } }

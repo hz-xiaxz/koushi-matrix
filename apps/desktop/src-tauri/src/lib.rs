@@ -1905,6 +1905,7 @@ pub fn run() {
             commands::room::accept_invite,
             commands::room::decline_invite,
             commands::room::start_direct_message,
+            commands::room::start_advisory_direct_message,
             commands::room::invite_user,
             commands::room::invite_user_to_space,
             commands::room::cancel_space_invite,

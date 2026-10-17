@@ -1186,6 +1186,11 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
             room_id: "!dm:example.test".to_owned(),
         }))
         .expect("serialize");
+    let room_direct_message_missing =
+        serialize_core_event(&CoreEvent::Room(RoomEvent::DirectMessageMissing {
+            request_id,
+        }))
+        .expect("serialize");
     let room_tag_set = serialize_core_event(&CoreEvent::Room(RoomEvent::RoomTagSet {
         request_id,
         room_id: "!r:example.test".to_owned(),
@@ -1735,6 +1740,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
             "stateDeltaSearchCrawlerQueued": state_delta,
             "roomDirectoryQueryCompleted": directory_query_completed,
             "roomDirectoryPreviewLoaded": directory_preview_loaded,
+            "roomDirectMessageMissing": room_direct_message_missing,
             "roomDirectMessageStarted": room_direct_message_started,
             "roomInviteAccepted": room_invite_accepted,
             "roomInviteDeclined": room_invite_declined,
@@ -1889,6 +1895,7 @@ fn core_event_contract_artifact_key_set_does_not_shrink() {
         "localEncryptionEventCacheStatus",
         "nativeAttentionSummaryUpdated",
         "operationFailedSessionNotFound",
+        "roomDirectMessageMissing",
         "roomDirectMessageStarted",
         "roomDirectoryPreviewLoaded",
         "roomDirectoryQueryCompleted",

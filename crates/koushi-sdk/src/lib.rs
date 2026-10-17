@@ -20,8 +20,10 @@ mod client_session;
 mod contact_security;
 pub use contact_security::{
     ContactDeviceFacts, ContactIdentityFacts, ContactSecurityChanges, ContactVerificationFacts,
-    classify_contact_security, load_contact_security, observe_contact_security_changes,
-    read_contact_security, request_user_verification,
+    SenderDeviceChanges, classify_contact_security, load_contact_security,
+    observe_contact_security_changes, observe_sender_device_changes, read_contact_security,
+    read_room_sender_device_advisories, read_users_with_unconfirmed_devices,
+    request_user_verification,
 };
 
 mod e2ee;
@@ -148,7 +150,7 @@ pub use room_operations::{
     MatrixSpaceMemberRoleFailureKind, MatrixSpaceMemberRoleUpdateResult,
     MatrixSpaceParentLinkOutcome, MatrixUserTrustState, accept_invited_room, cancel_space_invite,
     check_room_alias_availability, create_public_directory_room, create_room, create_space,
-    discard_outbound_room_key, fetch_room_notification_mode, forget_room,
+    discard_outbound_room_key, fetch_room_notification_mode, find_direct_message, forget_room,
     get_room_directory_visibility, get_room_settings_snapshot, invite_user_to_room,
     join_room_by_id, join_room_target, leave_room, load_pinned_event_ids, mark_room_as_read,
     mark_room_as_unread, moderate_room_member, pin_event, preview_join_target,
