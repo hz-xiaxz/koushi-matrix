@@ -1609,6 +1609,8 @@ export const zhHant: Catalog = {
   "timeline.threadRootNotVisible": "您無法看到討論串的原始訊息。它可能是在您加入之前傳送的。",
   "timeline.messagesTab": "訊息",
   "timeline.openingThread": "正在開啟討論串",
+  "timeline.threadLoadFailed": "無法載入此討論串。",
+  "timeline.threadRetry": "重試",
   "timeline.presenceAway": "離開",
   "timeline.presenceOffline": "離線",
   "timeline.presenceOnline": "線上",

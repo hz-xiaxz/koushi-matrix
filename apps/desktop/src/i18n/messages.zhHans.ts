@@ -1609,6 +1609,8 @@ export const zhHans: Catalog = {
   "timeline.threadRootNotVisible": "你无法查看讨论串的原始消息。它可能是在你加入之前发送的。",
   "timeline.messagesTab": "消息",
   "timeline.openingThread": "正在打开讨论串",
+  "timeline.threadLoadFailed": "无法加载此讨论串。",
+  "timeline.threadRetry": "重试",
   "timeline.presenceAway": "离开",
   "timeline.presenceOffline": "离线",
   "timeline.presenceOnline": "在线",

@@ -1889,7 +1889,14 @@ UI responsibilities:
   Core emits that terminal only after releasing actor task ownership. An `Idle`
   without acceptance evidence, failure, or transport rejection releases the
   epoch but installs an owned retry fence. General failures wait for a new
-  external transition; an admission-rejected `Idle` waits specifically for
+  external transition: a genuine user scroll, a projection change
+  (initial/prepend/Reset/gap positions/resync), or a setting change. The
+  request's own terminal and layout, anchor, or live-edge settlement are not
+  external transitions, so a permanently failing request cannot retry in a
+  tight loop (#1473). Because an underfilled view offers no user scroll, a
+  general failure also arms a bounded backoff (2 s, 8 s, 30 s, then none) whose
+  elapse counts as an external transition; a real external transition or an
+  accepted terminal resets that budget. An admission-rejected `Idle` waits specifically for
   `GapRepairReleased`, so layout and gap-position projection cannot reopen the
   request while repair still owns the scheduler. End/reset releases directly.
   This prevents either event order from opening a duplicate-request
@@ -1898,7 +1905,8 @@ UI responsibilities:
 - Re-evaluate after every transition that can add demand or remove a blocker:
   initial projection, layout/anchor settlement, genuine user scroll,
   pagination terminal state, prepend/Reset settlement, gap-position projection,
-  post-terminal `GapRepairReleased`, resync replay, setting change, reset, and
+  post-terminal `GapRepairReleased`, resync replay, setting change, reset,
+  retry-backoff elapse, and
   live-edge settlement. `GapPositionsUpdated` may precede a repair and is not a
   scheduler-release signal; Core emits `GapRepairReleased` only after terminal
   processing has left no queued or active gap work. Each

@@ -854,18 +854,27 @@ pub async fn ensure_timeline_subscribed(
     let account_key = account_key_from_snapshot(state.inner(), account_tab_id.as_deref()).await?;
     let request_id = next_request_id_for(state.inner(), account_tab_id.as_deref()).await?;
     trace_tauri_timeline_command("submit", "ensure_subscribed", request_id);
-    let admission = submit_core_command_with_admission(
-        state.inner(),
-        CoreCommand::Timeline(TimelineCommand::Subscribe {
+    let key = TimelineKey {
+        account_key,
+        kind: timeline_key.kind,
+    };
+    // #1473: a thread recovery only replays a retained actor; Core builds
+    // thread actors solely through the `OpenThread` hydration path.
+    let command = if matches!(key.kind, TimelineKind::Thread { .. }) {
+        TimelineCommand::EnsureSubscribed {
             request_id,
-            key: TimelineKey {
-                account_key,
-                kind: timeline_key.kind,
-            },
+            key,
+            replay_existing: true,
+        }
+    } else {
+        TimelineCommand::Subscribe {
+            request_id,
+            key,
             initial_backfill: koushi_protocol::command::InitialBackfillPolicy::Disabled,
-        }),
-    )
-    .await?;
+        }
+    };
+    let admission =
+        submit_core_command_with_admission(state.inner(), CoreCommand::Timeline(command)).await?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(admission)
 }

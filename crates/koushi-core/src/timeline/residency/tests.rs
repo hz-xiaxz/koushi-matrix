@@ -350,3 +350,41 @@ async fn sync_started_reconciles_the_full_session_residency_set_once() {
         BTreeSet::from([room_a, room_b])
     );
 }
+
+/// #1473: the renderer's recovery subscribe for a thread key must not build a
+/// fresh, unhydrated thread actor. Thread actors are created only by the
+/// Rust-owned `OpenThread` path; a recovery for an absent key reports
+/// `NotSubscribed` to its request without touching the thread pane.
+#[tokio::test]
+async fn renderer_recovery_for_absent_thread_key_does_not_build_an_actor() {
+    use koushi_protocol::event::CoreEvent;
+    use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
+
+    let mut manager = live_tail_test_manager(HashMap::new());
+    let (event_tx, mut event_rx) = tokio::sync::broadcast::channel(8);
+    manager.event_tx = event_tx;
+    let (action_tx, mut action_rx) = mpsc::channel(8);
+    manager.action_tx = action_tx;
+    let key = super::super::test_support::thread_key();
+
+    manager
+        .handle_command(TimelineCommand::EnsureSubscribed {
+            request_id: fake_rid(1),
+            key: key.clone(),
+            replay_existing: true,
+        })
+        .await;
+
+    assert!(!manager.timelines.contains_key(&key));
+    assert!(action_rx.try_recv().is_err());
+    match event_rx.try_recv() {
+        Ok(CoreEvent::OperationFailed {
+            failure:
+                CoreFailure::TimelineOperationFailed {
+                    kind: TimelineFailureKind::NotSubscribed,
+                },
+            ..
+        }) => {}
+        other => panic!("expected a NotSubscribed terminal, got {other:?}"),
+    }
+}

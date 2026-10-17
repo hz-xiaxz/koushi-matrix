@@ -1609,6 +1609,8 @@ export const ko: Catalog = {
   "timeline.threadRootNotVisible": "원래 스레드 메시지를 볼 수 없습니다. 참가하기 전에 전송된 메시지일 수 있습니다.",
   "timeline.messagesTab": "메시지",
   "timeline.openingThread": "스레드 여는 중",
+  "timeline.threadLoadFailed": "스레드를 불러올 수 없습니다.",
+  "timeline.threadRetry": "다시 시도",
   "timeline.presenceAway": "자리 비움",
   "timeline.presenceOffline": "오프라인",
   "timeline.presenceOnline": "온라인",

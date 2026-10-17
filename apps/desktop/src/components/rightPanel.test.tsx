@@ -1040,3 +1040,52 @@ describe("ContextualRightPanel thread message context menu (#1155)", () => {
     );
   });
 });
+
+// Issue #1473: a failed thread open stays on screen with Retry and Close
+// instead of closing silently.
+describe("ContextualRightPanel failed thread pane (#1473)", () => {
+  function failedThreadSnapshot(failureKind: "forbidden" | "network"): DesktopSnapshot {
+    const base = threadSnapshot("");
+    return {
+      ...base,
+      state: {
+        ...base.state,
+        ui: {
+          ...base.state.ui,
+          thread: {
+            kind: "failed",
+            room_id: "!room:example.invalid",
+            root_event_id: "$root:example.invalid",
+            intent: "existingThread",
+            failure_kind: failureKind
+          }
+        }
+      }
+    };
+  }
+
+  test("explains a withheld root and retries with the same intent", () => {
+    const onOpenThread = vi.fn();
+    renderPanel({ mode: "thread", snapshot: failedThreadSnapshot("forbidden"), onOpenThread });
+
+    expect(screen.getByRole("alert").textContent).toContain(t("timeline.threadRootNotVisible"));
+    fireEvent.click(screen.getByRole("button", { name: t("timeline.threadRetry") }));
+    expect(onOpenThread).toHaveBeenCalledWith(
+      "!room:example.invalid",
+      "$root:example.invalid",
+      "existingThread"
+    );
+  });
+
+  test("shows a generic load failure for other kinds and closes on request", () => {
+    const onCloseThread = vi.fn();
+    renderPanel({ mode: "thread", snapshot: failedThreadSnapshot("network"), onCloseThread });
+
+    expect(screen.getByRole("alert").textContent).toContain(t("timeline.threadLoadFailed"));
+    expect(screen.queryByRole("textbox", { name: "Thread composer" })).toBeNull();
+    fireEvent.click(
+      screen.getByRole("button", { name: t("action.close", { title: t("panel.thread") }) })
+    );
+    expect(onCloseThread).toHaveBeenCalled();
+  });
+});

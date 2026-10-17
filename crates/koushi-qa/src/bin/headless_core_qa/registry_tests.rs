@@ -257,6 +257,8 @@ fn thread_late_joiner_is_registered_with_private_safe_final_tokens() {
             "safety=ok",
             "thread_late_joiner_root_not_visible=ok",
             "thread_late_joiner_thread_panel=ok",
+            "thread_late_joiner_withheld_open_settled=ok",
+            "thread_late_joiner_withheld_retry_close=ok",
             "thread_late_joiner=ok"
         ]
     );

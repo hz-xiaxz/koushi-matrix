@@ -743,7 +743,35 @@ pub(super) async fn login_synced_participant_for_qa(
     gate_label: &str,
     gate: QaParticipantLoginGate<'_>,
 ) -> Result<QaParticipantLoginOutcome, String> {
-    let runtime = CoreRuntime::start_with_data_dir(data_dir);
+    login_synced_participant_on_runtime_for_qa(
+        CoreRuntime::start_with_data_dir(data_dir),
+        homeserver,
+        username,
+        password,
+        device_display_name,
+        label,
+        gate_label,
+        gate,
+    )
+    .await
+}
+
+/// Same as [`login_synced_participant_for_qa`], on a caller-provided runtime
+/// (for example [`start_isolated_qa_runtime`] for a same-user second device).
+#[expect(
+    clippy::too_many_arguments,
+    reason = "mirrors login_synced_participant_for_qa; grouping its inputs is a separate refactor"
+)]
+pub(super) async fn login_synced_participant_on_runtime_for_qa(
+    runtime: CoreRuntime,
+    homeserver: &str,
+    username: &str,
+    password: &str,
+    device_display_name: &str,
+    label: &str,
+    gate_label: &str,
+    gate: QaParticipantLoginGate<'_>,
+) -> Result<QaParticipantLoginOutcome, String> {
     let conn = runtime.attach();
     let mut participant = QaOwnedRuntimeParticipant::new(runtime, conn);
     let login_stage_result: Result<Option<AuthSecret>, String> = async {

@@ -968,6 +968,12 @@ pub enum FrontendThreadPaneState {
         composer: ComposerState,
         staged_uploads: Vec<StagedUploadItem>,
     },
+    Failed {
+        room_id: String,
+        root_event_id: String,
+        intent: koushi_state::ThreadOpenIntent,
+        failure_kind: koushi_state::OperationFailureKind,
+    },
 }
 
 impl From<ThreadPaneState> for FrontendThreadPaneState {
@@ -997,6 +1003,17 @@ impl From<ThreadPaneState> for FrontendThreadPaneState {
                 is_subscribed,
                 composer,
                 staged_uploads,
+            },
+            ThreadPaneState::Failed {
+                room_id,
+                root_event_id,
+                intent,
+                failure_kind,
+            } => Self::Failed {
+                room_id,
+                root_event_id,
+                intent,
+                failure_kind,
             },
         }
     }

@@ -743,6 +743,8 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
         QaStage::ThreadLateJoiner => &[
             "thread_late_joiner_root_not_visible=ok",
             "thread_late_joiner_thread_panel=ok",
+            "thread_late_joiner_withheld_open_settled=ok",
+            "thread_late_joiner_withheld_retry_close=ok",
             "thread_late_joiner=ok",
         ],
         QaStage::AvatarDemand => &["avatar_window_requests=ok"],

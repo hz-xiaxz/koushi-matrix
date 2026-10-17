@@ -174,6 +174,9 @@ pub enum TimelineFailureKind {
     UnsupportedSlashCommand,
     NotSubscribed,
     Forbidden,
+    /// The server answered `M_NOT_FOUND`, e.g. it withholds a thread root the
+    /// account may not see (#1473).
+    NotFound,
     Network,
     Timeout,
     Sdk,

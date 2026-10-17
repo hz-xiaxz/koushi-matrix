@@ -66,6 +66,11 @@ pub(super) fn active_composer_targets(state: &AppState) -> BTreeSet<ComposerTarg
             room_id,
             root_event_id,
             ..
+        }
+        | ThreadPaneState::Failed {
+            room_id,
+            root_event_id,
+            ..
         } => {
             active.insert(ComposerTarget::Thread {
                 room_id: room_id.clone(),

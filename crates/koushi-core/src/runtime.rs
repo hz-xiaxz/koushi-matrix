@@ -5562,6 +5562,13 @@ impl AppActor {
                 room_id,
                 root_event_id,
                 ..
+            }
+            // #1473: a Failed pane still owns its key so closing or replacing
+            // it unsubscribes any actor the failed open left behind.
+            | ThreadPaneState::Failed {
+                room_id,
+                root_event_id,
+                ..
             } => Some(TimelineKey {
                 account_key,
                 kind: TimelineKind::Thread {

@@ -10,6 +10,7 @@ import {
   type TimelineDiff,
   type TimelineItem
 } from "../domain/coreEvents";
+import { EXTERNAL_TRANSITION_AUTO_RETRY_DELAYS_MS } from "../domain/timelineBackfillPolicy";
 import { setActiveLocaleProfile } from "../i18n/messages";
 import { createManualTimelineViewportScheduler } from "./timeline/TimelineViewportScheduler";
 import {
@@ -1795,6 +1796,79 @@ describe("TimelineView", () => {
     act(() => rerender(renderView(false)));
     act(() => rerender(renderView(true)));
     await waitFor(() => expect(paginateBackwards).toHaveBeenCalledTimes(2));
+  });
+
+  // #1473: a failure no external transition will follow (underfilled view, so
+  // no user scroll) still retries, but only on a bounded backoff.
+  it("retries a rejected backfill on a bounded backoff in an underfilled view", async () => {
+    vi.useFakeTimers({ toFake: ["setTimeout", "clearTimeout"] });
+    try {
+      let emit: (payload: CoreEventPayload) => void = () => undefined;
+      const paginateBackwards = vi
+        .fn<() => Promise<void>>()
+        .mockRejectedValue(new Error("transport rejected"));
+      const transport = baseTransport({
+        listenCoreEvents(nextListener) {
+          emit = nextListener;
+          return () => undefined;
+        },
+        paginateBackwards
+      });
+      render(
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={transport}
+          autoLoadOlderMessages
+          onReply={vi.fn()}
+        />
+      );
+      const timeline = screen.getByTestId("timeline-view");
+      Object.defineProperty(timeline, "scrollHeight", { value: 320, configurable: true });
+      Object.defineProperty(timeline, "clientHeight", { value: 600, configurable: true });
+      Object.defineProperty(timeline, "scrollTop", {
+        value: 0,
+        writable: true,
+        configurable: true
+      });
+      act(() => {
+        emit({
+          kind: "Timeline",
+          event: {
+            InitialItems: {
+              request_id: null,
+              key: KEY,
+              generation: 1,
+              items: [message("$latest", "Latest")]
+            }
+          }
+        });
+      });
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(0);
+      });
+      expect(paginateBackwards).toHaveBeenCalledTimes(1);
+
+      let expectedCalls = 1;
+      for (const delayMs of EXTERNAL_TRANSITION_AUTO_RETRY_DELAYS_MS) {
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(delayMs - 1);
+        });
+        expect(paginateBackwards).toHaveBeenCalledTimes(expectedCalls);
+        await act(async () => {
+          await vi.advanceTimersByTimeAsync(1);
+        });
+        expectedCalls += 1;
+        expect(paginateBackwards).toHaveBeenCalledTimes(expectedCalls);
+      }
+
+      await act(async () => {
+        await vi.advanceTimersByTimeAsync(10 * 60_000);
+      });
+      expect(paginateBackwards).toHaveBeenCalledTimes(expectedCalls);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("backfills an underfilled room timeline after short initial items arrive", async () => {

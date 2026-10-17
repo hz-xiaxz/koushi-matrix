@@ -491,6 +491,9 @@ function normalizeDroppedLogEntries(value: number | undefined): number {
 }
 
 function threadPanelSummary(thread: DiagnosticReportInput["snapshot"]["state"]["ui"]["thread"]): string {
+  if (thread.kind === "failed") {
+    return `failed kind=${thread.failure_kind}`;
+  }
   if (thread.kind !== "open") {
     return thread.kind;
   }

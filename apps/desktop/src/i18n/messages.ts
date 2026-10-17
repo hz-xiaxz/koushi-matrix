@@ -1599,6 +1599,8 @@ export type MessageId =
   | "timeline.threadRootNotVisible"
   | "timeline.messagesTab"
   | "timeline.openingThread"
+  | "timeline.threadLoadFailed"
+  | "timeline.threadRetry"
   | "timeline.presenceAway"
   | "timeline.presenceOffline"
   | "timeline.presenceOnline"
@@ -3834,6 +3836,8 @@ const en: Catalog = {
     "The original thread message isn't visible to you. It may have been sent before you joined.",
   "timeline.messagesTab": "Messages",
   "timeline.openingThread": "Opening thread",
+  "timeline.threadLoadFailed": "Couldn't load this thread.",
+  "timeline.threadRetry": "Retry",
   "timeline.presenceAway": "Away",
   "timeline.presenceOffline": "Offline",
   "timeline.presenceOnline": "Online",
@@ -5952,6 +5956,8 @@ const ja: Catalog = {
     "スレッドの元のメッセージは表示できません。参加する前に送信された可能性があります。",
   "timeline.messagesTab": "メッセージ",
   "timeline.openingThread": "スレッドを開いています",
+  "timeline.threadLoadFailed": "スレッドを読み込めませんでした。",
+  "timeline.threadRetry": "再試行",
   "timeline.presenceAway": "離席中",
   "timeline.presenceOffline": "オフライン",
   "timeline.presenceOnline": "オンライン",

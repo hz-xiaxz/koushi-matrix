@@ -184,9 +184,18 @@ async fn hydrate_initial_thread(
             .pagination()
             .run_backwards_until(INITIAL_EMPTY_ROOM_BACKFILL_EVENT_COUNT)
             .await
-            .map_err(|_| {
-                record_subscribe_stage("initial_backfill_sdk_failed", None);
-                TimelineFailureKind::Sdk
+            .map_err(|error| {
+                let kind = classify_thread_backfill_error(&error);
+                record_subscribe_stage(
+                    match kind {
+                        TimelineFailureKind::Forbidden | TimelineFailureKind::NotFound => {
+                            "initial_backfill_root_withheld"
+                        }
+                        _ => "initial_backfill_sdk_failed",
+                    },
+                    None,
+                );
+                kind
             })?;
         // Keep the pre-pagination subscription: the SDK relay is asynchronous.
         let counts = initial_updates.scan(initial_items, |items, diffs| {
@@ -201,8 +210,39 @@ async fn hydrate_initial_thread(
         Ok(result) => result,
         Err(_) => {
             record_subscribe_stage("initial_backfill_projection_deadline", None);
-            Ok(false)
+            Err(TimelineFailureKind::Timeout)
         }
+    }
+}
+
+/// #1473: a server that withholds the thread root is a permanent visibility
+/// outcome, not a transient SDK failure. Synapse answers `/relations` with
+/// HTTP 404 `M_UNKNOWN` ("Unknown parent event."), tuwunel the root fetch with
+/// 403 `M_FORBIDDEN`, so the HTTP status is authoritative when the errcode is
+/// generic.
+fn classify_thread_backfill_error(
+    error: &matrix_sdk::event_cache::EventCacheError,
+) -> TimelineFailureKind {
+    use matrix_sdk::event_cache::EventCacheError;
+    use matrix_sdk::ruma::api::error::ErrorKind;
+
+    let EventCacheError::PaginationError(error) = error else {
+        return TimelineFailureKind::Sdk;
+    };
+    if let Some(api_error) = error.as_client_api_error() {
+        return match (api_error.error_kind(), api_error.status_code.as_u16()) {
+            (Some(ErrorKind::Forbidden), _) | (_, 403) => TimelineFailureKind::Forbidden,
+            (Some(ErrorKind::NotFound), _) | (_, 404) => TimelineFailureKind::NotFound,
+            _ => TimelineFailureKind::Sdk,
+        };
+    }
+    match error.as_ref() {
+        matrix_sdk::Error::Http(http_error)
+            if matches!(**http_error, matrix_sdk::HttpError::Reqwest(_)) =>
+        {
+            TimelineFailureKind::Network
+        }
+        _ => TimelineFailureKind::Sdk,
     }
 }
 
@@ -1282,6 +1322,21 @@ impl TimelineManagerActor {
                 if matches!(key.kind, TimelineKind::Room { .. }) {
                     self.handle_committed_room_selection(request_id, key, replay_existing, true)
                         .await;
+                } else if matches!(key.kind, TimelineKind::Thread { .. })
+                    && !self.timelines.contains_key(&key)
+                {
+                    // #1473: thread actors are built only by the Rust-owned
+                    // `OpenThread` subscribe, which owns the initial-hydration
+                    // gate. A renderer recovery that raced a failed open must
+                    // not leave an unhydrated actor whose replay would later
+                    // report a false success; it only replays a retained one.
+                    record_subscribe_stage("thread_recovery_without_actor", None);
+                    self.emit_failure(
+                        request_id,
+                        CoreFailure::TimelineOperationFailed {
+                            kind: TimelineFailureKind::NotSubscribed,
+                        },
+                    );
                 } else {
                     self.handle_subscribe(
                         request_id,
@@ -2589,7 +2644,7 @@ impl TimelineManagerActor {
         kind: TimelineFailureKind,
         emit_failure_terminal: bool,
     ) {
-        if let Some(action) = timeline_subscription_failed_action(key) {
+        if let Some(action) = timeline_subscription_failed_action(key, kind) {
             if emit_failure_terminal {
                 let _ = self.action_tx.send(vec![action]).await;
             } else {
@@ -2778,6 +2833,75 @@ mod tests {
                 |r| r.url.path().contains("/relations/") || r.url.path().ends_with("/messages")
             )
         );
+    }
+
+    /// #1473: a server answers the thread `/relations` request for a root the
+    /// account may not see with 403/404 (Synapse: 404 `M_UNKNOWN`). Hydration
+    /// must classify that as a withheld root, not a generic SDK failure.
+    #[tokio::test]
+    async fn initial_thread_classifies_withheld_root_relations_errors() {
+        use matrix_sdk::{
+            ruma::{event_id, room_id},
+            test_utils::mocks::MatrixMockServer,
+        };
+        use matrix_sdk_base::ThreadingSupport;
+        use matrix_sdk_ui::timeline::TimelineFocus;
+
+        for (status, errcode, expected) in [
+            (403, "M_FORBIDDEN", super::TimelineFailureKind::Forbidden),
+            (404, "M_NOT_FOUND", super::TimelineFailureKind::NotFound),
+            (404, "M_UNKNOWN", super::TimelineFailureKind::NotFound),
+            (500, "M_UNKNOWN", super::TimelineFailureKind::Sdk),
+        ] {
+            let server = MatrixMockServer::new().await;
+            let client = server
+                .client_builder()
+                .on_builder(|b| {
+                    b.with_threading_support(ThreadingSupport::Enabled {
+                        with_subscriptions: true,
+                    })
+                })
+                .build()
+                .await;
+            let room_id = room_id!("!withheld:example.test");
+            let room = server.sync_joined_room(&client, room_id).await;
+            let root = event_id!("$withheld-root:example.test");
+            server
+                .mock_room_relations()
+                .respond_with(
+                    wiremock::ResponseTemplate::new(status).set_body_json(
+                        serde_json::json!({ "errcode": errcode, "error": "withheld" }),
+                    ),
+                )
+                .mount()
+                .await;
+            server
+                .mock_room_event()
+                .respond_with(
+                    wiremock::ResponseTemplate::new(status).set_body_json(
+                        serde_json::json!({ "errcode": errcode, "error": "withheld" }),
+                    ),
+                )
+                .mount()
+                .await;
+            let timeline = super::koushi_timeline_builder(
+                &room,
+                TimelineFocus::Thread {
+                    root_event_id: root.to_owned(),
+                },
+            )
+            .build()
+            .await
+            .unwrap();
+
+            let outcome = tokio::time::timeout(
+                std::time::Duration::from_secs(5),
+                super::hydrate_initial_thread(&timeline, &client, room_id, root),
+            )
+            .await
+            .expect("a withheld root must fail before the opening deadline");
+            assert_eq!(outcome, Err(expected), "status {status}");
+        }
     }
 
     #[tokio::test]

@@ -141,7 +141,9 @@ timelineKeyRoomId
 } from "../domain/coreEvents";
 import type { TimelineForwardDestination } from "../domain/projectionTypes";
 import {
+clearsExternalTransitionFence,
 evaluateTimelineBackfill,
+externalTransitionAutoRetryDelayMs,
 type TimelineBackfillDemand,
 type TimelineBackfillEvaluationTrigger
 } from "../domain/timelineBackfillPolicy";
@@ -284,6 +286,43 @@ type TimelineBackfillRequestEpoch = {
 type TimelineBackfillRetryFence =
   | "external_transition"
   | "gap_repair_release";
+
+/** #1473: bounded automatic retries of an `external_transition` fence. */
+type TimelineBackfillFenceAutoRetry = {
+  attemptsUsed: number;
+  timer: ReturnType<typeof setTimeout> | null;
+};
+
+function cancelBackfillFenceAutoRetry(
+  state: TimelineBackfillFenceAutoRetry,
+  resetAttempts: boolean
+): void {
+  if (state.timer !== null) {
+    clearTimeout(state.timer);
+    state.timer = null;
+  }
+  if (resetAttempts) {
+    state.attemptsUsed = 0;
+  }
+}
+
+function armBackfillFenceAutoRetry(
+  state: TimelineBackfillFenceAutoRetry,
+  onElapsed: () => void
+): void {
+  if (state.timer !== null) {
+    return;
+  }
+  const delayMs = externalTransitionAutoRetryDelayMs(state.attemptsUsed);
+  if (delayMs === null) {
+    return;
+  }
+  state.timer = setTimeout(() => {
+    state.timer = null;
+    state.attemptsUsed += 1;
+    onElapsed();
+  }, delayMs);
+}
 
 type PendingTimelineBackfillEvaluation = {
   trigger: TimelineBackfillEvaluationTrigger;
@@ -594,6 +633,10 @@ export const TimelineView = memo(function TimelineView({
   const backfillRequestEpochRef = useRef<TimelineBackfillRequestEpoch | null>(null);
   /** A rejected request must wait for the transition that releases its owner. */
   const backfillRetryFenceRef = useRef<TimelineBackfillRetryFence | null>(null);
+  const backfillFenceAutoRetryRef = useRef<TimelineBackfillFenceAutoRetry>({
+    attemptsUsed: 0,
+    timer: null
+  });
   const nextBackfillRequestEpochRef = useRef(1);
   const pendingBackfillEvaluationRef = useRef<PendingTimelineBackfillEvaluation | null>(null);
   const previousAutoLoadOlderMessagesRef = useRef(autoLoadOlderMessages);
@@ -1261,15 +1304,29 @@ export const TimelineView = memo(function TimelineView({
       const retryFence = backfillRetryFenceRef.current;
       if (
         trigger === "gap_repair_released" ||
-        (retryFence === "external_transition" && trigger !== "pagination_terminal")
+        (retryFence === "external_transition" &&
+          clearsExternalTransitionFence(trigger, genuineUserScroll))
       ) {
         backfillRetryFenceRef.current = null;
+        cancelBackfillFenceAutoRetry(
+          backfillFenceAutoRetryRef.current,
+          trigger !== "retry_backoff_elapsed"
+        );
       }
       pendingBackfillEvaluationRef.current = { trigger, genuineUserScroll };
       setProjectionSettlementRevision((current) => current + 1);
     },
     []
   );
+
+  const armExternalTransitionFence = useCallback(() => {
+    backfillRetryFenceRef.current = "external_transition";
+    armBackfillFenceAutoRetry(backfillFenceAutoRetryRef.current, () => {
+      if (backfillRetryFenceRef.current === "external_transition") {
+        scheduleBackfillEvaluation("retry_backoff_elapsed");
+      }
+    });
+  }, [scheduleBackfillEvaluation]);
 
   useEffect(() => {
     scrollDiagnosticsRef.current = recordTimelineScrollCommit(scrollDiagnosticsRef.current);
@@ -1478,11 +1535,17 @@ export const TimelineView = memo(function TimelineView({
           event.PaginationStateChanged.state !== "EndReached" &&
           !acceptedIdle
         ) {
-          backfillRetryFenceRef.current =
+          if (
             event.PaginationStateChanged.state === "Idle" &&
             event.PaginationStateChanged.prepend_expected == null
-              ? "gap_repair_release"
-              : "external_transition";
+          ) {
+            backfillRetryFenceRef.current = "gap_repair_release";
+          } else {
+            armExternalTransitionFence();
+          }
+        } else if (acceptedIdle || ("PaginationStateChanged" in event &&
+          event.PaginationStateChanged.state === "EndReached")) {
+          cancelBackfillFenceAutoRetry(backfillFenceAutoRetryRef.current, true);
         }
         const shouldReevaluate =
           "ResyncRequired" in event ||
@@ -1566,6 +1629,7 @@ export const TimelineView = memo(function TimelineView({
       }
   }, [
     advanceViewportEpoch,
+    armExternalTransitionFence,
     captureStableAnchor,
     currentUserId,
     emitDiagnosticLog,
@@ -1627,6 +1691,7 @@ export const TimelineView = memo(function TimelineView({
     pendingScrollFrameUserInputRef.current = false;
     backfillRequestEpochRef.current = null;
     backfillRetryFenceRef.current = null;
+    cancelBackfillFenceAutoRetry(backfillFenceAutoRetryRef.current, true);
     pendingBackfillEvaluationRef.current = {
       trigger: "timeline_reset",
       genuineUserScroll: false
@@ -1707,6 +1772,7 @@ export const TimelineView = memo(function TimelineView({
       pendingScrollFrameUserInputRef.current = false;
       backfillRequestEpochRef.current = null;
       backfillRetryFenceRef.current = null;
+      cancelBackfillFenceAutoRetry(backfillFenceAutoRetryRef.current, true);
       pendingBackfillEvaluationRef.current = null;
       lastPersistedViewportAnchorSignatureRef.current = null;
       if (viewportIntentResizeFrameRef.current !== null) {
@@ -3097,7 +3163,7 @@ export const TimelineView = memo(function TimelineView({
           return;
         }
         backfillRequestEpochRef.current = null;
-        backfillRetryFenceRef.current = "external_transition";
+        armExternalTransitionFence();
         emitDiagnosticLog(
           "timeline.backfill",
           `stage=failed trigger=${trigger} reason=transport`
@@ -3106,6 +3172,7 @@ export const TimelineView = memo(function TimelineView({
       return true;
     },
     [
+      armExternalTransitionFence,
       autoLoadOlderMessages,
       backwardState,
       emitDiagnosticLog,
@@ -3219,6 +3286,7 @@ export const TimelineView = memo(function TimelineView({
     previousAutoLoadOlderMessagesRef.current = autoLoadOlderMessages;
     if (backfillRetryFenceRef.current === "external_transition") {
       backfillRetryFenceRef.current = null;
+      cancelBackfillFenceAutoRetry(backfillFenceAutoRetryRef.current, true);
     }
     pendingBackfillEvaluationRef.current = {
       trigger: "setting_changed",
@@ -3347,6 +3415,7 @@ export const TimelineView = memo(function TimelineView({
       if (isUserDrivenScroll) {
         if (backfillRetryFenceRef.current === "external_transition") {
           backfillRetryFenceRef.current = null;
+          cancelBackfillFenceAutoRetry(backfillFenceAutoRetryRef.current, true);
         }
       }
       evaluateAndMaybeRequestBackfillRef.current("user_scroll", isUserDrivenScroll);

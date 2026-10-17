@@ -141,6 +141,7 @@ export type TimelineFailureKind =
   | "InvalidSendState"
   | "UnsupportedSlashCommand"
   | "Forbidden"
+  | "NotFound"
   | "Network"
   | "Timeout"
   | "Sdk"
