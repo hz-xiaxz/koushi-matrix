@@ -35,6 +35,7 @@
     "test:ipc-contract": "cargo test -p koushi-desktop core_event_wire_format_matches_checked_in_contract_artifact",
     "test:ui-headless": "vitest run --reporter=verbose src/domain/timelineStore.test.ts && playwright test",
     "docs:screenshot": "playwright test --config=playwright.docs.config.ts",
+    "site:screenshots": "playwright test --config=playwright.site.config.ts",
     "typecheck": "tsc --noEmit",
     "tauri": "tauri",
     "qa:secret-scan": "node ../../scripts/desktop-secret-scan.mjs",

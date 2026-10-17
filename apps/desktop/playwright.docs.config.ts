@@ -4,6 +4,7 @@ const DOCS_SCREENSHOT_PORT = 5184;
 
 export default defineConfig({
   testDir: "./e2e-docs",
+  testIgnore: "site/**",
   fullyParallel: false,
   workers: 1,
   retries: 0,
