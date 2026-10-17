@@ -1650,6 +1650,13 @@ impl AppActor {
                             .reduce_app_action(AppAction::AppSettingsSynchronized { values })
                             .await;
                         self.handle_ui_event_effects(&effects).await;
+                        // #1497: another runtime wrote these, so its save owns any credential
+                        // retirement; reading them here keeps the next observation from sweeping.
+                        if self.state.settings.values.delivery
+                            != before_state.settings.values.delivery
+                        {
+                            self.adopt_notification_delivery_credentials().await;
+                        }
                         if self.state != before_state {
                             self.publish_state_change(&before_state);
                         }

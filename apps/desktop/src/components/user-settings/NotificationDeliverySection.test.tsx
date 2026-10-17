@@ -1096,12 +1096,27 @@ describe("NotificationDeliverySection outcome", () => {
     renderSection({ delivery: delivery({ sinks: [] }) });
     pickKind("resend");
     expect(screen.queryByTestId("notification-delivery-outcome")).toBeNull();
+    expect(screen.queryByTestId("notification-delivery-sink-delete")).toBeNull();
     expect(screen.queryByTestId("notification-delivery-sink-remove")).toBeNull();
   });
 
   test("removes a destination and releases the credential it was keyed by", async () => {
     const handlers = renderSection({ runtime: state({ sinks: [sinkState()] }) });
     openSink();
+    // Delete is a dialog-level action beside Cancel and Save, not part of the Status block.
+    const footer = screen.getByTestId("notification-delivery-footer");
+    const outcome = screen.getByTestId("notification-delivery-outcome");
+    expect(within(outcome).queryByTestId("notification-delivery-sink-delete")).toBeNull();
+    fireEvent.click(within(footer).getByTestId("notification-delivery-sink-delete"));
+    // It asks first, and backing out deletes nothing.
+    expect(handlers.clearSecret).not.toHaveBeenCalled();
+    fireEvent.click(screen.getByTestId("notification-delivery-sink-delete-keep"));
+    expect(screen.queryByTestId("notification-delivery-sink-delete-confirm")).toBeNull();
+    expect(handlers.clearSecret).not.toHaveBeenCalled();
+    fireEvent.click(within(footer).getByTestId("notification-delivery-sink-delete"));
+    expect(screen.getByTestId("notification-delivery-sink-delete-confirm").textContent).toContain(
+      "Delete this destination and the credential saved for it?"
+    );
     fireEvent.click(screen.getByTestId("notification-delivery-sink-remove"));
     expect(handlers.clearSecret).toHaveBeenCalledWith(SINK_ID);
     await waitFor(() => expect(lastUpdate(handlers).sinks).toEqual([]));
@@ -1111,6 +1126,7 @@ describe("NotificationDeliverySection outcome", () => {
     const handlers = renderSection({ runtime: state({ sinks: [sinkState()] }) });
     vi.mocked(handlers.clearSecret).mockRejectedValueOnce(new Error("store unavailable"));
     openSink();
+    fireEvent.click(screen.getByTestId("notification-delivery-sink-delete"));
     fireEvent.click(screen.getByTestId("notification-delivery-sink-remove"));
     await waitFor(() => expect(handlers.clearSecret).toHaveBeenCalledWith(SINK_ID));
     await act(async () => {});

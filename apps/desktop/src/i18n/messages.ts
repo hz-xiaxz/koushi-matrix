@@ -1034,6 +1034,9 @@ export type MessageId =
   | "settings.notificationDeliverySinkTest"
   | "settings.notificationDeliverySinkTestSending"
   | "settings.notificationDeliverySinkRemove"
+  | "settings.notificationDeliverySinkDelete"
+  | "settings.notificationDeliverySinkDeleteConfirm"
+  | "settings.notificationDeliverySinkDeleteAction"
   | "settings.notificationDeliveryNeverSent"
   | "settings.notificationDeliveryResultInvalidSecret"
   | "settings.notificationDeliveryResultNotPermitted"
@@ -3212,6 +3215,9 @@ const en: Catalog = {
   "settings.notificationDeliverySinkTest": "Send a test",
   "settings.notificationDeliverySinkTestSending": "Sending…",
   "settings.notificationDeliverySinkRemove": "Remove",
+  "settings.notificationDeliverySinkDelete": "Delete destination",
+  "settings.notificationDeliverySinkDeleteConfirm": "Delete this destination and the credential saved for it?",
+  "settings.notificationDeliverySinkDeleteAction": "Delete",
   "settings.notificationDeliveryNeverSent": "Not sent yet",
   "settings.notificationDeliveryResultInvalidSecret":
     "The service rejected the key. Enter it again.",
@@ -5370,6 +5376,9 @@ const ja: Catalog = {
   "settings.notificationDeliverySinkTest": "テスト送信",
   "settings.notificationDeliverySinkTestSending": "送信中…",
   "settings.notificationDeliverySinkRemove": "削除",
+  "settings.notificationDeliverySinkDelete": "送信先を削除",
+  "settings.notificationDeliverySinkDeleteConfirm": "この送信先と、保存した認証情報を削除しますか？",
+  "settings.notificationDeliverySinkDeleteAction": "削除する",
   "settings.notificationDeliveryNeverSent": "まだ送信していません",
   "settings.notificationDeliveryResultInvalidSecret":
     "サービスがキーを受け付けませんでした。もう一度入力してください。",

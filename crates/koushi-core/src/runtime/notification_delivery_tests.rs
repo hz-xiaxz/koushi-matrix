@@ -1331,3 +1331,84 @@ async fn a_save_beyond_the_destination_limit_is_refused() {
     );
     drop(runtime);
 }
+
+/// Write one delivery block to the shared settings file the way another account runtime's
+/// core does, binding included.
+fn write_shared_delivery(
+    settings: &crate::settings::SettingsStore,
+    sink: &NotificationSinkSettings,
+) {
+    settings
+        .save_patch(&SettingsPatch {
+            delivery: Some(NotificationDeliverySettings {
+                sinks: vec![sink.clone()],
+            }),
+            delivery_bindings_from_core: true,
+            ..SettingsPatch::default()
+        })
+        .expect("the shared settings file is written");
+}
+
+/// Every account runtime observes the one app-scoped settings file and the one credential
+/// store. A save in one runtime unbinds on disk, stores the new secret, and binds again, so
+/// another runtime can adopt the unbound sink after the new secret is already stored. That
+/// runtime did not unbind anything: it must not take the fresh credential for an orphan and
+/// delete it, which left the saved destination bound to a credential that was gone.
+#[tokio::test]
+async fn a_runtime_adopting_another_runtimes_save_keeps_the_new_credential() {
+    let stores = IsolatedStores::new();
+    let settings = crate::settings::SettingsStore::new(stores.data_dir());
+    let observer = CoreRuntime::start_with_shared_stores(
+        credential_store(&stores),
+        settings.clone(),
+        std::sync::Arc::new(crate::native_artifact::NativeArtifactRegistry::new()),
+        crate::account_work::AccountWorkScheduler::default().for_account("observer"),
+        None,
+    );
+    let mut connection = observer.attach();
+    let mut sink = fixture_sink("https://relay.example.invalid/emails");
+    sink.secret_binding = Some(sink.credential_binding("01d0"));
+    write_shared_delivery(&settings, &sink);
+    wait_for_runtime_snapshot(&mut connection, |state| {
+        state.notification_delivery.sinks.len() == 1
+            && state.settings.values.delivery.sinks[0]
+                .secret_binding
+                .is_some()
+    })
+    .await;
+
+    // The saving runtime's unbind and its store of the new secret, with no chance for the
+    // observer to run in between: the observer next sees an unbound sink beside a credential.
+    sink.secret_binding = None;
+    write_shared_delivery(&settings, &sink);
+    credential_store(&stores)
+        .save_notification_sink_secret(SINK, SECRET)
+        .expect("the new credential is stored");
+    wait_for_runtime_snapshot(&mut connection, |state| {
+        state.settings.values.delivery.sinks[0]
+            .secret_binding
+            .is_none()
+    })
+    .await;
+    // The observation that follows the adopted settings runs on the next actor iteration.
+    tokio::time::sleep(Duration::from_millis(200)).await;
+    assert!(
+        credential_store(&stores)
+            .load_notification_sink_secret(SINK)
+            .expect("the credential store is readable")
+            .is_some(),
+        "a runtime that only adopted another runtime's write deleted the credential it was saving"
+    );
+
+    // The saving runtime's bind: the observer agrees the destination is configured.
+    let binding = sink.credential_binding("f7e5");
+    sink.secret_binding = Some(binding.clone());
+    write_shared_delivery(&settings, &sink);
+    let state = wait_for_runtime_snapshot(&mut connection, |state| {
+        state.notification_delivery.sinks[0].secret_configured
+    })
+    .await;
+    assert!(!state.notification_delivery.sinks[0].secret_retired);
+    assert_eq!(snapshot_binding(&connection), Some(binding));
+    drop(observer);
+}

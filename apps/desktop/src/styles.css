@@ -10434,7 +10434,17 @@ kbd {
 .notification-delivery-preview-fields dt { color: var(--text-muted); }
 .notification-delivery-preview-fields dd { margin: 0; overflow-wrap: anywhere; }
 .notification-delivery-preview-body { white-space: pre-wrap; }
-.notification-delivery-remove { color: var(--danger); }
+.trust-action-button.secondary.notification-delivery-remove { color: var(--danger); }
+.trust-action-button.danger { color: #fff; border-color: var(--danger); background: var(--danger); }
+.notification-delivery-footer-confirm {
+  display: flex;
+  flex: 1 1 100%;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px 12px;
+}
+.notification-delivery-footer-confirm .notification-delivery-footer-status { color: var(--text); }
 .notification-delivery-footer {
   display: flex;
   flex: 0 0 auto;

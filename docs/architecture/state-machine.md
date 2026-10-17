@@ -6350,7 +6350,11 @@ transport or to one country's infrastructure. The app must be running to send.
   core holds, so it can neither restore a replaced revision nor the consent tied to
   it. A save unbinds on disk before the store receives the new value, and binds only
   once that is persisted; a failed write reports `StoreUnavailable` and leaves the
-  sink unconfigured rather than pairing a new value with an old binding. Removing a
+  sink unconfigured rather than pairing a new value with an old binding. Every account
+  runtime shares the settings file and the credential store, so only the runtime that
+  changed or loaded the settings deletes a credential no binding names; a runtime that
+  adopts another runtime's write only records the sink as unconfigured, because it can
+  read the store between that runtime's store and bind (#1497). Removing a
   sink clears its credential first and keeps the sink when that clear fails.
 - **Saving a destination (#1468).** The settings screen saves a destination as one
   command, `SaveNotificationSink`. It carries the non-secret sink, an optional secret,

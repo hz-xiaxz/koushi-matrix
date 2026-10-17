@@ -210,6 +210,24 @@ impl AppActor {
     /// collection, it is a credential that no longer belongs to any destination this sink has, and
     /// leaving it would let the next send offer the previous server's password to the new one.
     pub(super) async fn refresh_notification_delivery_configured(&mut self) -> bool {
+        self.refresh_notification_delivery_credentials(CredentialSweep::RetireUnbound)
+            .await
+    }
+
+    /// Read which sinks hold a usable credential after adopting settings another account
+    /// runtime wrote (#1497).
+    ///
+    /// Every account runtime shares the app-scoped settings file and the credential store, and a
+    /// save unbinds on disk before it stores the new secret. A runtime that adopts that unbound
+    /// write can read the store after the new secret landed, so only the runtime that changed the
+    /// settings retires a credential; this one records the sink as unconfigured and leaves the
+    /// store alone until the saving runtime's bind arrives.
+    pub(super) async fn adopt_notification_delivery_credentials(&mut self) -> bool {
+        self.refresh_notification_delivery_credentials(CredentialSweep::KeepUnbound)
+            .await
+    }
+
+    async fn refresh_notification_delivery_credentials(&mut self, sweep: CredentialSweep) -> bool {
         let settings = self.state.settings.values.delivery.clone();
         for sink in &settings.sinks {
             let store = self.composer_draft_store_actor.clone();
@@ -224,6 +242,9 @@ impl AppActor {
                     return (false, false);
                 }
                 if !bound {
+                    if sweep == CredentialSweep::KeepUnbound {
+                        return (false, false);
+                    }
                     let _ = store.delete_notification_sink_secret(&sink_id);
                     return (false, true);
                 }
@@ -776,4 +797,13 @@ fn spawn_notification_delivery_send(
         let result = send_notification_delivery(intent, sink, store).await;
         let _ = outcome_tx.send(result).await;
     }))
+}
+
+/// Whether a credential read may delete what no binding names.
+#[derive(Clone, Copy, Debug, PartialEq, Eq)]
+enum CredentialSweep {
+    /// This runtime changed or loaded the settings, so an unbound credential is retired.
+    RetireUnbound,
+    /// The settings came from another account runtime, which owns any retirement.
+    KeepUnbound,
 }

@@ -742,7 +742,7 @@ type SaveState = { kind: "idle" } | { kind: "saving" } | { kind: "failed" };
 
 /**
  * The detail screen of one destination (#1468): Connection, Targets, Content and Timing,
- * then Status with Test and Remove once it is saved. `sink` is the draft (or Rust's copy
+ * then Status with Test once it is saved; the footer holds Delete beside Cancel and Save. `sink` is the draft (or Rust's copy
  * when nothing is edited); `saved` is Rust's copy, `null` for a destination being added.
  *
  * The secret is DOM-owned: the field is never given a value, its text is read only when
@@ -786,6 +786,8 @@ function NotificationSinkDetail({
   const [consentChecked, setConsentChecked] = useState(false);
   const [problem, setProblem] = useState<SaveProblem | null>(null);
   const [saveState, setSaveState] = useState<SaveState>({ kind: "idle" });
+  // Deleting removes the whole destination and its stored credential, so it asks first.
+  const [confirmingDelete, setConfirmingDelete] = useState(false);
   // Bumped on Save and Discard so every field shows Rust's copy again.
   const [epoch, setEpoch] = useState(0);
   const syncScope = `${sink.id}:${epoch}`;
@@ -916,49 +918,49 @@ function NotificationSinkDetail({
         {config.kind === "serverChan" ? <ServerChanSetup /> : null}
         {config.kind === "smtp" ? (
           <>
-            <label className="profile-settings-field">
-              <span>{t("settings.notificationDeliverySinkPreset")}</span>
-              <select
-                data-testid="notification-delivery-sink-preset"
-                value={config.preset ?? ""}
-                onChange={(event) => {
-                  const preset = presets.find((candidate) => candidate.id === event.currentTarget.value);
-                  change({
-                    ...sink,
-                    config: preset
-                      ? notificationSmtpConfigFromPreset(preset, sink.from_address)
-                      : { ...config, preset: null }
-                  });
-                }}
-              >
-                <option value="">{t("settings.notificationDeliverySinkPresetCustom")}</option>
-                {presets.map((preset) => (
-                  <option key={preset.id} value={preset.id}>
-                    {preset.label}
-                  </option>
-                ))}
-              </select>
-            </label>
-            <p className="profile-settings-hint">{t("settings.notificationDeliverySinkPresetHint")}</p>
-            <SinkTextField
-              label={t("settings.notificationDeliverySinkFrom")}
-              type="email"
-              field="from"
-              value={sink.from_address}
-              syncScope={syncScope}
-              required
-              testId="notification-delivery-sink-from"
-              onChange={(from_address) => change({ ...sink, from_address })}
-            />
-            <SinkTextField
-              label={t("settings.notificationDeliverySinkName")}
-              field="name"
-              value={sink.sender_name}
-              syncScope={syncScope}
-              placeholder={DEFAULT_NOTIFICATION_SENDER_NAME}
-              testId="notification-delivery-sink-name"
-              onChange={(sender_name) => change({ ...sink, sender_name })}
-            />
+              <label className="profile-settings-field">
+                <span>{t("settings.notificationDeliverySinkPreset")}</span>
+                <select
+                  data-testid="notification-delivery-sink-preset"
+                  value={config.preset ?? ""}
+                  onChange={(event) => {
+                    const preset = presets.find((candidate) => candidate.id === event.currentTarget.value);
+                    change({
+                      ...sink,
+                      config: preset
+                        ? notificationSmtpConfigFromPreset(preset, sink.from_address)
+                        : { ...config, preset: null }
+                    });
+                  }}
+                >
+                  <option value="">{t("settings.notificationDeliverySinkPresetCustom")}</option>
+                  {presets.map((preset) => (
+                    <option key={preset.id} value={preset.id}>
+                      {preset.label}
+                    </option>
+                  ))}
+                </select>
+              </label>
+              <p className="profile-settings-hint">{t("settings.notificationDeliverySinkPresetHint")}</p>
+              <SinkTextField
+                label={t("settings.notificationDeliverySinkFrom")}
+                type="email"
+                field="from"
+                value={sink.from_address}
+                syncScope={syncScope}
+                required
+                testId="notification-delivery-sink-from"
+                onChange={(from_address) => change({ ...sink, from_address })}
+              />
+              <SinkTextField
+                label={t("settings.notificationDeliverySinkName")}
+                field="name"
+                value={sink.sender_name}
+                syncScope={syncScope}
+                placeholder={DEFAULT_NOTIFICATION_SENDER_NAME}
+                testId="notification-delivery-sink-name"
+                onChange={(sender_name) => change({ ...sink, sender_name })}
+              />
           </>
         ) : null}
         {config.kind !== "serverChan" ? (
@@ -1208,16 +1210,6 @@ function NotificationSinkDetail({
                   : t("settings.notificationDeliverySinkTest")}
               </span>
             </button>
-            <button
-              className="trust-action-button secondary notification-delivery-remove"
-              type="button"
-              data-testid="notification-delivery-sink-remove"
-              aria-label={`${t("settings.notificationDeliverySinkRemove")}: ${service}`}
-              onClick={onRemove}
-            >
-              <Trash2 size={14} aria-hidden="true" />
-              <span>{t("settings.notificationDeliverySinkRemove")}</span>
-            </button>
           </div>
           {!sinkState?.secret_configured ? (
             <p className="profile-settings-hint" data-testid="notification-delivery-sink-test-needs-secret">
@@ -1230,6 +1222,51 @@ function NotificationSinkDetail({
       </div>
 
       <div className="notification-delivery-footer" data-testid="notification-delivery-footer">
+        {saved && confirmingDelete ? (
+          <div
+            className="notification-delivery-footer-confirm"
+            role="group"
+            aria-label={t("settings.notificationDeliverySinkDelete")}
+            data-testid="notification-delivery-sink-delete-confirm"
+          >
+            <p className="notification-delivery-footer-status">
+              {t("settings.notificationDeliverySinkDeleteConfirm")}
+            </p>
+            <div className="notification-delivery-footer-actions">
+              <button
+                className="trust-action-button secondary"
+                type="button"
+                data-testid="notification-delivery-sink-delete-keep"
+                onClick={() => setConfirmingDelete(false)}
+              >
+                {t("action.cancel")}
+              </button>
+              <button
+                className="trust-action-button danger"
+                type="button"
+                data-testid="notification-delivery-sink-remove"
+                aria-label={`${t("settings.notificationDeliverySinkDeleteAction")}: ${service}`}
+                onClick={onRemove}
+              >
+                <Trash2 size={14} aria-hidden="true" />
+                <span>{t("settings.notificationDeliverySinkDeleteAction")}</span>
+              </button>
+            </div>
+          </div>
+        ) : (
+          <>
+        {saved ? (
+          <button
+            className="trust-action-button secondary notification-delivery-remove"
+            type="button"
+            data-testid="notification-delivery-sink-delete"
+            disabled={saving}
+            onClick={() => setConfirmingDelete(true)}
+          >
+            <Trash2 size={14} aria-hidden="true" />
+            <span>{t("settings.notificationDeliverySinkDelete")}</span>
+          </button>
+        ) : null}
         <p
           className="notification-delivery-footer-status"
           role="status"
@@ -1263,6 +1300,8 @@ function NotificationSinkDetail({
             {saving ? t("settings.notificationDeliverySaving") : t("settings.notificationDeliverySave")}
           </button>
         </div>
+          </>
+        )}
       </div>
     </article>
   );

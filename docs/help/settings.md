@@ -220,8 +220,9 @@ The credential field is write-only: Koushi never shows the saved value again, an
 the field is empty again once Save has taken it. It reports **Saved. Enter a new
 value to replace it.** or **Not set**; to replace the credential, type the new
 one and save. The value is kept in your operating system's credential store, not
-in Koushi's settings, and a diagnostics report never carries it. **Remove**
-deletes the destination together with its credential. Changing an SMTP relay's
+in Koushi's settings, and a diagnostics report never carries it. **Delete
+destination**, at the bottom of the window beside Cancel and Save, deletes the
+destination together with its credential after you confirm. Changing an SMTP relay's
 server, port, or username, or a service's endpoint, needs the password again,
 because it was entered for the previous server; the window then says so and Save
 waits for the new one.
