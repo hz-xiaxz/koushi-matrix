@@ -359,8 +359,10 @@ The website lane (`npm --prefix apps/desktop run site:screenshots`,
 settings as the README lane. It captures seven scenes for each of `en`, `ja`,
 `zh-Hans`, `zh-Hant`, and `ko` into the git-ignored `site/screenshots/`. Like
 the README lane, it is synthetic state, not native GUI or homeserver proof.
-Run it in the pinned container with `fonts-noto-cjk` installed. The spec
-fails when CJK characters render as the missing-glyph box. The search scenes
+Run it in the pinned container after `site/prepare-screenshot-fonts.sh`. The
+spec fails when CJK characters render as the missing-glyph box, or when a
+locale's text is drawn by another language's CJK font (the image's bundled
+WenQuanYi Zen Hei otherwise renders every CJK locale). The search scenes
 render the golden output of the `koushi-core` `search::site_scenes` test. The
 full procedure, publishing, and translation workflow are in
 [site/README.md](../../site/README.md).

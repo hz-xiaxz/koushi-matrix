@@ -79,13 +79,8 @@ jobs:
             exit 1
           fi
 
-      - name: Install CJK fonts
-        run: |
-          apt-get update -qq
-          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-noto-cjk
-          for lang in ja ko zh-cn zh-tw; do
-            fc-list ":lang=$lang" | grep -q . || { echo "No font for $lang" >&2; exit 1; }
-          done
+      - name: Prepare CJK fonts
+        run: bash site/prepare-screenshot-fonts.sh
 
       - name: Generate screenshots
         run: |
