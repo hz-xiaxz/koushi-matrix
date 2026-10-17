@@ -141,6 +141,8 @@ main > section {
 .other-platforms a { color: #cfe0f7; }
 
 .shot { margin: 0; }
+.shot a { display: block; }
+.shot.narrow { max-width: 760px; margin: 0 auto; }
 .shot img {
   border-radius: 12px;
   border: 1px solid var(--line);
@@ -180,7 +182,7 @@ main > section {
   border-top: 1px solid var(--line);
 }
 .pain.has-shot { grid-template-columns: minmax(0, 5fr) minmax(0, 7fr); align-items: center; }
-.pain.has-shot:nth-of-type(even) .pain-text { order: 2; }
+.pain.flip .pain-text { order: 2; }
 
 .pain-problem {
   margin: 0 0 0.5em;
@@ -252,7 +254,7 @@ main > section {
   .languages-section,
   .settings-body,
   .fineprint { grid-template-columns: 1fr; }
-  .pain.has-shot:nth-of-type(even) .pain-text { order: 0; }
+  .pain.flip .pain-text { order: 0; }
   .hero-shot { margin-bottom: -40px; }
   .matrix.card { margin-top: 64px; }
 }

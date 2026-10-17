@@ -77,8 +77,10 @@ export function renderPage({ locale, strings, staleKeys = [], englishStrings = s
     return escapeHtml(text);
   };
   const up = locale === "en" ? "" : "../";
-  const shot = (scene, altKey, cls = "") =>
-    `<figure class="shot ${cls}"><img src="${up}screenshots/${locale}/${scene}.png" alt="${t(altKey)}" loading="lazy" decoding="async"></figure>`;
+  const shot = (scene, altKey, cls = "") => {
+    const src = `${up}screenshots/${locale}/${scene}.png`;
+    return `<figure class="shot ${cls}"><a href="${src}"><img src="${src}" alt="${t(altKey)}" loading="lazy" decoding="async"></a></figure>`;
+  };
   const blog = (kind) => (locale === "ja" ? BLOG[kind].ja : BLOG[kind].other);
   const help = (page) => `${REPO_URL}/blob/${escapeHtml(release.tag)}/docs/help/${page}`;
 
@@ -91,9 +93,10 @@ export function renderPage({ locale, strings, staleKeys = [], englishStrings = s
       : `<li><a href="${up}${localePath(other) || "./"}" hreflang="${other}" lang="${other}">${LANGUAGE_NAMES[other]}</a></li>`
   ).join("");
 
+  let shotIndex = 0;
   const painItems = PAIN_POINTS.map(
     ({ id, shot: scene }) => `
-        <article class="pain${scene ? " has-shot" : ""}">
+        <article class="pain${scene ? ` has-shot${shotIndex++ % 2 === 1 ? " flip" : ""}` : ""}">
           <div class="pain-text">
             <p class="pain-problem">${t(`pain.${id}.problem`)}</p>
             <p class="pain-answer">${t(`pain.${id}.answer`)}</p>
@@ -165,7 +168,7 @@ export function renderPage({ locale, strings, staleKeys = [], englishStrings = s
         <ul class="feature-grid">
           ${FEATURES.map((id) => `<li>${t(`features.${id}`)}</li>`).join("\n          ")}
         </ul>
-        ${shot("rich", "shot.rich")}
+        ${shot("rich", "shot.rich", "narrow")}
       </section>
 
       <section class="languages-section" id="languages">

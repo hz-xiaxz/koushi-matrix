@@ -245,8 +245,10 @@ Claude Code to refresh the stale keys, then reviewing the diff).
   `needs: publish-release`. Do **not** reuse `release-desktop.yml`'s own
   `workflow_dispatch`, which starts a full release attempt.
 - Bootstrap: until a stable tag contains the site screenshot specs, the
-  manual run fails with a clear message rather than falling back to
-  `main`.
+  default manual run fails with a clear message rather than falling back to
+  `main`. The manual run takes an explicit `app_ref` input, so the first
+  publish can screenshot `main` when it matches the latest release apart
+  from this work.
 - **Constraint:** `release-desktop.yml` creates releases with `gh release
   create` using `GITHUB_TOKEN`, and events caused by `GITHUB_TOKEN` do
   **not** trigger other workflows. A separate `on: release: published`
