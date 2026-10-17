@@ -1,0 +1,334 @@
+{
+  "meta.title": {
+    "text": "Koushi — 面向多语言对话的桌面 Matrix 客户端",
+    "source_hash": "ba939fdc85ef"
+  },
+  "meta.description": {
+    "text": "让工作、个人和社区的 Matrix 账号在同一窗口中并排保持打开。加密聊天、擅长中日韩文字的本地全文搜索，以及从你自己的电脑发送的通知。",
+    "source_hash": "3bbef07d2b88"
+  },
+  "nav.download": {
+    "text": "下载",
+    "source_hash": "d6eafe823591"
+  },
+  "nav.why": {
+    "text": "为什么选择 Koushi",
+    "source_hash": "d5f210b70097"
+  },
+  "nav.settings": {
+    "text": "设置",
+    "source_hash": "74a883a037bc"
+  },
+  "nav.language": {
+    "text": "语言",
+    "source_hash": "a4fe65264ef7"
+  },
+  "hero.tagline": {
+    "text": "面向多语言对话的桌面 Matrix 客户端。",
+    "source_hash": "a1a07eb6026a"
+  },
+  "hero.lede": {
+    "text": "在同一个窗口中并排打开工作、个人和社区的 Matrix 账号。每个账号都有自己的标签页，保持登录并持续同步。",
+    "source_hash": "e21a91cbcefb"
+  },
+  "hero.download": {
+    "text": "下载 macOS 版（Apple 芯片）",
+    "source_hash": "d2b06e12c65c"
+  },
+  "hero.version": {
+    "text": "版本 {version}",
+    "source_hash": "a18745121bb8"
+  },
+  "hero.other": {
+    "text": "其他平台（未经测试）：",
+    "source_hash": "a13c0e1549de"
+  },
+  "hero.windows": {
+    "text": "Windows 安装程序",
+    "source_hash": "147cb2aad4c6"
+  },
+  "hero.appimage": {
+    "text": "Linux AppImage",
+    "source_hash": "869ed18033ca"
+  },
+  "hero.deb": {
+    "text": "Linux deb",
+    "source_hash": "29dca0def7de"
+  },
+  "hero.rpm": {
+    "text": "Linux RPM",
+    "source_hash": "06afa12d460e"
+  },
+  "hero.allReleases": {
+    "text": "所有版本与校验和",
+    "source_hash": "d5f31686ec8d"
+  },
+  "shot.main": {
+    "text": "Koushi 显示三个账号标签页，下方是三栏工作区：空间、房间，以及包含回复、表情回应和话题的对话。",
+    "source_hash": "469e2dce2411"
+  },
+  "matrix.heading": {
+    "text": "第一次接触 Matrix？",
+    "source_hash": "948ef3639a46"
+  },
+  "matrix.body": {
+    "text": "Matrix 是一个开放的聊天网络。和电子邮件一样，你可以为账号选择服务器，同时仍能与其他服务器上的人交流。对话可以端到端加密，整个网络不归任何一家公司所有。",
+    "source_hash": "19941888b05c"
+  },
+  "matrix.blog": {
+    "text": "为什么选择 Matrix？详细介绍（英文）",
+    "source_hash": "42041a1edb74"
+  },
+  "matrix.account": {
+    "text": "还没有账号？你可以在任意 Matrix 服务器上注册，matrix.org 是其中一个公共服务器。",
+    "source_hash": "fa8f0439c8c7"
+  },
+  "matrix.setup": {
+    "text": "新用户设置清单（英文）",
+    "source_hash": "19f7966e281b"
+  },
+  "pain.heading": {
+    "text": "已经在用 Matrix？这些情况是否很熟悉？",
+    "source_hash": "3dd860d7b227"
+  },
+  "pain.lede": {
+    "text": "Koushi 源于日常的小烦恼。如果其中某一条困扰着你，不妨试一试。",
+    "source_hash": "fc17ac383cf1"
+  },
+  "pain.accounts.problem": {
+    "text": "在工作账号和个人账号之间切换时，总要退出再重新登录。",
+    "source_hash": "c878b9e7b27f"
+  },
+  "pain.accounts.answer": {
+    "text": "把每个账号添加为一个标签页。每个标签页都保持登录、持续同步并显示各自的未读数，输入框也始终显示你正在用哪个账号发送。",
+    "source_hash": "3a990b479ec0"
+  },
+  "pain.email.problem": {
+    "text": "你的主服务器从不通过邮件提醒你错过的消息。matrix.org 不发送通知邮件。",
+    "source_hash": "e9cfad576324"
+  },
+  "pain.email.answer": {
+    "text": "Koushi 可以从你的电脑自行发送通知：通过 Resend 或 SMTP 中继发送邮件，或通过 Server酱（ServerChan）推送到微信。你可以选择触发通知的条件、包含多少消息内容，以及发送前等待多久。",
+    "source_hash": "22fa1c0d9c56"
+  },
+  "pain.email.shot": {
+    "text": "通知设置中列出的从本设备发送的目标：Resend、SMTP 中继和微信。",
+    "source_hash": "8838321d8af0"
+  },
+  "pain.utd.problem": {
+    "text": "经常出现“无法解密”。",
+    "source_hash": "4f1096139532"
+  },
+  "pain.utd.answer": {
+    "text": "Koushi 会在登录时、开始聊天之前先完成安全备份，并要求你先保存恢复密钥再继续。缺失的密钥稍后到达时，相关消息会自动显示。如果备份失败，诊断界面会告诉你问题出在网络还是服务器。任何地方都不存在的密钥无法恢复，但这种设计能让这个错误少得多。",
+    "source_hash": "ff01a7791f5c"
+  },
+  "pain.search.problem": {
+    "text": "在加密房间里找不到以前的消息。",
+    "source_hash": "ddb61b2ac340"
+  },
+  "pain.search.answer": {
+    "text": "Koushi 在你自己的电脑上为历史记录建立索引，包括加密房间，可以在所有房间、某个空间或某个对话中搜索。选择结果即可在上下文中跳转到该消息。",
+    "source_hash": "2da20081f61c"
+  },
+  "pain.search.shot": {
+    "text": "搜索“Koushi”的结果，来自日语房间、英语房间，以及混合使用中文、韩文和英文的房间。",
+    "source_hash": "b645e0e8b3ba"
+  },
+  "pain.multilingual.problem": {
+    "text": "不同房间使用不同语言，或者同一个房间里混着好几种语言。",
+    "source_hash": "240459d7414c"
+  },
+  "pain.multilingual.answer": {
+    "text": "搜索不需要知道语言。中文、日文、韩文和拉丁字母文字共用一个索引，词与词之间没有空格的文字也能找到，全角和半角字符可以互相匹配。",
+    "source_hash": "ab06c4032af6"
+  },
+  "pain.multilingual.shot": {
+    "text": "搜索全角的“リリース”（发布）也能找到半角的“ﾘﾘｰｽ”。",
+    "source_hash": "8d6a458c0517"
+  },
+  "pain.ime.problem": {
+    "text": "按 Enter 确认中文、日文或韩文输入法的候选词时，消息被提前发送了。",
+    "source_hash": "e9cd9ba84d98"
+  },
+  "pain.ime.answer": {
+    "text": "在 Koushi 中，确认输入法候选词与发送是分开的操作。你还可以选择用 Enter 还是 Ctrl/Cmd+Enter 发送。",
+    "source_hash": "6fbf4e13b762"
+  },
+  "pain.photos.problem": {
+    "text": "手机照片太大，分享起来很慢。",
+    "source_hash": "f185c39e3461"
+  },
+  "pain.photos.answer": {
+    "text": "附加大图片时，Koushi 允许你在发送前选择图片质量。",
+    "source_hash": "0c635cbbdd8c"
+  },
+  "pain.help.problem": {
+    "text": "在设置和帮助页面里迷路。",
+    "source_hash": "63e80ccb9f34"
+  },
+  "pain.help.answer": {
+    "text": "用你自己的语言去问 ChatGPT 或其他 AI 助手。Koushi 的用户指南是为 AI 助手阅读而编写的，应用中的“帮助与关于”会告诉你怎么问。",
+    "source_hash": "225ee33c413b"
+  },
+  "features.heading": {
+    "text": "日常功能",
+    "source_hash": "e844b2426dc5"
+  },
+  "features.e2ee": {
+    "text": "端到端加密聊天，通过浏览器登录（OIDC）",
+    "source_hash": "8ca507f3c856"
+  },
+  "features.layout": {
+    "text": "熟悉的三栏布局：空间、房间和私信",
+    "source_hash": "faa2d8c60dc7"
+  },
+  "features.timeline": {
+    "text": "话题、回复、表情回应、编辑和已读回执",
+    "source_hash": "267852b6d18d"
+  },
+  "features.rich": {
+    "text": "Markdown、代码块和 LaTeX 风格的数学公式",
+    "source_hash": "b63c9b02c9cf"
+  },
+  "features.files": {
+    "text": "带说明文字的图片和文件上传",
+    "source_hash": "9c1650cf5b20"
+  },
+  "features.desktop": {
+    "text": "系统托盘、关闭时隐藏、系统原生通知和键盘快捷键",
+    "source_hash": "55961aee7958"
+  },
+  "features.keywords": {
+    "text": "通知关键词",
+    "source_hash": "5ecf8915eefd"
+  },
+  "features.spaces": {
+    "text": "空间中的推荐房间，并可一次性全部加入",
+    "source_hash": "81beb98f3934"
+  },
+  "features.updates": {
+    "text": "macOS 上的应用内更新",
+    "source_hash": "5b0a078cd719"
+  },
+  "features.diagnostics": {
+    "text": "可保存和分享、不含消息内容的诊断报告",
+    "source_hash": "28802c543b05"
+  },
+  "shot.rich": {
+    "text": "包含 Markdown 格式、代码块和数学公式的对话。",
+    "source_hash": "855a49b180ae"
+  },
+  "languages.heading": {
+    "text": "五种界面语言",
+    "source_hash": "74d5de2afcfa"
+  },
+  "languages.body": {
+    "text": "应用提供 English、日本語、简体中文、繁體中文 和 한국어。在“应用设置 → 外观”中切换。",
+    "source_hash": "ab48c385d95e"
+  },
+  "shot.languages": {
+    "text": "可选择语言的外观设置。",
+    "source_hash": "eb6874b0d006"
+  },
+  "settings.heading": {
+    "text": "可以设置的内容",
+    "source_hash": "ffd7949ba233"
+  },
+  "settings.body": {
+    "text": "设置分为适用于所有账号标签页的“应用设置”，以及每个账号各自的“账号设置”。",
+    "source_hash": "b54d5daefdf9"
+  },
+  "settings.app.appearance": {
+    "text": "应用 → 外观：语言、主题、显示密度、界面字体和表情样式",
+    "source_hash": "61cbe5b3d7a0"
+  },
+  "settings.app.notifications": {
+    "text": "应用 → 通知：系统通知的声音和角标，以及从本设备发送的目标",
+    "source_hash": "6da1de54bb90"
+  },
+  "settings.app.preferences": {
+    "text": "应用 → 偏好设置：代码块换行、关闭到托盘、加载更早的消息、话题排列方式",
+    "source_hash": "ed8eef0149a8"
+  },
+  "settings.app.keyboard": {
+    "text": "应用 → 键盘：发送快捷键和快捷键列表",
+    "source_hash": "9f3fd8f2ef70"
+  },
+  "settings.app.search": {
+    "text": "应用 → 搜索历史：所有账号共享的后台索引速度",
+    "source_hash": "72cee36c1064"
+  },
+  "settings.account.account": {
+    "text": "账号 → 账号：显示名称、头像和密码",
+    "source_hash": "29e6c7de187e"
+  },
+  "settings.account.sessions": {
+    "text": "账号 → 会话：本设备、验证和退出登录",
+    "source_hash": "f5c6f2e6eeff"
+  },
+  "settings.account.notifications": {
+    "text": "账号 → 通知：桌面通知、消息预览、从本设备发送的通知和服务器规则",
+    "source_hash": "96b0c3db6290"
+  },
+  "settings.account.privacy": {
+    "text": "账号 → 安全与隐私：URL 预览、已读回执和输入状态提示",
+    "source_hash": "64e4885135e2"
+  },
+  "settings.account.encryption": {
+    "text": "账号 → 加密：验证、安全备份、恢复以及房间密钥的导入/导出",
+    "source_hash": "cd63b7e36f99"
+  },
+  "settings.account.search": {
+    "text": "账号 → 搜索历史：索引哪些内容以及各房间的进度",
+    "source_hash": "f7212f33a881"
+  },
+  "settings.ask": {
+    "text": "如需分步帮助，请询问 AI 助手或阅读用户指南。",
+    "source_hash": "d5e8de4992af"
+  },
+  "settings.guide": {
+    "text": "用户指南（英文）",
+    "source_hash": "86a2a9ba70bc"
+  },
+  "shot.settings": {
+    "text": "显示分类列表的应用设置对话框。",
+    "source_hash": "50e8f14579ea"
+  },
+  "missing.heading": {
+    "text": "暂不支持",
+    "source_hash": "92acde95eedd"
+  },
+  "missing.body": {
+    "text": "语音和视频通话、屏幕共享、机器人、小部件以及第三方应用集成。",
+    "source_hash": "bfed657cc891"
+  },
+  "platforms.heading": {
+    "text": "平台",
+    "source_hash": "ab9bd7584a62"
+  },
+  "platforms.body": {
+    "text": "正式支持 macOS（Apple 芯片），发布版本经过签名和公证。Windows 和 Linux 版本由 CI 构建，但尚未经过测试。如果你在使用并愿意帮忙，欢迎参与贡献。",
+    "source_hash": "521d52c076e6"
+  },
+  "footer.community": {
+    "text": "社区房间",
+    "source_hash": "b780447ae283"
+  },
+  "footer.source": {
+    "text": "GitHub 上的源代码",
+    "source_hash": "11506c59ef23"
+  },
+  "footer.license": {
+    "text": "MIT 或 Apache-2.0",
+    "source_hash": "10b6a2ae8a02"
+  },
+  "footer.translation": {
+    "text": "本页面提供五种语言版本。欢迎母语使用者提出修改意见。",
+    "source_hash": "2ae12df63494"
+  },
+  "translating.note": {
+    "text": "本页面的部分内容仍在翻译中，暂以英文显示。",
+    "source_hash": "3da72ca7c01a"
+  }
+}

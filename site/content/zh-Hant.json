@@ -1,0 +1,334 @@
+{
+  "meta.title": {
+    "text": "Koushi — 為多語言對話打造的桌面 Matrix 用戶端",
+    "source_hash": "ba939fdc85ef"
+  },
+  "meta.description": {
+    "text": "讓工作、個人與社群的 Matrix 帳號在同一個視窗中並排保持開啟。加密聊天、擅長中日韓文字的本機全文搜尋，以及從你自己的電腦送出的通知。",
+    "source_hash": "3bbef07d2b88"
+  },
+  "nav.download": {
+    "text": "下載",
+    "source_hash": "d6eafe823591"
+  },
+  "nav.why": {
+    "text": "為什麼選擇 Koushi",
+    "source_hash": "d5f210b70097"
+  },
+  "nav.settings": {
+    "text": "設定",
+    "source_hash": "74a883a037bc"
+  },
+  "nav.language": {
+    "text": "語言",
+    "source_hash": "a4fe65264ef7"
+  },
+  "hero.tagline": {
+    "text": "為多語言對話打造的桌面 Matrix 用戶端。",
+    "source_hash": "a1a07eb6026a"
+  },
+  "hero.lede": {
+    "text": "在同一個視窗中並排開啟工作、個人與社群的 Matrix 帳號。每個帳號都有自己的分頁，保持登入並持續同步。",
+    "source_hash": "e21a91cbcefb"
+  },
+  "hero.download": {
+    "text": "下載 macOS 版（Apple 晶片）",
+    "source_hash": "d2b06e12c65c"
+  },
+  "hero.version": {
+    "text": "版本 {version}",
+    "source_hash": "a18745121bb8"
+  },
+  "hero.other": {
+    "text": "其他平台（未經測試）：",
+    "source_hash": "a13c0e1549de"
+  },
+  "hero.windows": {
+    "text": "Windows 安裝程式",
+    "source_hash": "147cb2aad4c6"
+  },
+  "hero.appimage": {
+    "text": "Linux AppImage",
+    "source_hash": "869ed18033ca"
+  },
+  "hero.deb": {
+    "text": "Linux deb",
+    "source_hash": "29dca0def7de"
+  },
+  "hero.rpm": {
+    "text": "Linux RPM",
+    "source_hash": "06afa12d460e"
+  },
+  "hero.allReleases": {
+    "text": "所有版本與檢查碼",
+    "source_hash": "d5f31686ec8d"
+  },
+  "shot.main": {
+    "text": "Koushi 顯示三個帳號分頁，下方是三欄工作區：空間、聊天室，以及包含回覆、表情回應與討論串的對話。",
+    "source_hash": "469e2dce2411"
+  },
+  "matrix.heading": {
+    "text": "第一次接觸 Matrix？",
+    "source_hash": "948ef3639a46"
+  },
+  "matrix.body": {
+    "text": "Matrix 是一個開放的聊天網路。就像電子郵件一樣，你可以為帳號選擇伺服器，同時仍能與其他伺服器上的人交談。對話可以端對端加密，整個網路不屬於任何一家公司。",
+    "source_hash": "19941888b05c"
+  },
+  "matrix.blog": {
+    "text": "為什麼選擇 Matrix？詳細介紹（英文）",
+    "source_hash": "42041a1edb74"
+  },
+  "matrix.account": {
+    "text": "還沒有帳號？你可以在任何 Matrix 伺服器上註冊，matrix.org 是其中一個公開伺服器。",
+    "source_hash": "fa8f0439c8c7"
+  },
+  "matrix.setup": {
+    "text": "新使用者設定清單（英文）",
+    "source_hash": "19f7966e281b"
+  },
+  "pain.heading": {
+    "text": "已經在用 Matrix？這些情況是否很熟悉？",
+    "source_hash": "3dd860d7b227"
+  },
+  "pain.lede": {
+    "text": "Koushi 源自日常的小困擾。如果其中某一項讓你煩惱，不妨試試看。",
+    "source_hash": "fc17ac383cf1"
+  },
+  "pain.accounts.problem": {
+    "text": "在工作帳號與個人帳號之間切換時，總要登出再重新登入。",
+    "source_hash": "c878b9e7b27f"
+  },
+  "pain.accounts.answer": {
+    "text": "把每個帳號加入為一個分頁。每個分頁都保持登入、持續同步並顯示各自的未讀數，輸入框也會隨時顯示你正在以哪個帳號傳送。",
+    "source_hash": "3a990b479ec0"
+  },
+  "pain.email.problem": {
+    "text": "你的主伺服器從不以電子郵件提醒你錯過的訊息。matrix.org 不會寄送通知郵件。",
+    "source_hash": "e9cfad576324"
+  },
+  "pain.email.answer": {
+    "text": "Koushi 可以從你的電腦自行送出通知：透過 Resend 或 SMTP 轉送伺服器寄送電子郵件，或透過 ServerChan 推送到微信。你可以選擇觸發通知的條件、要包含多少訊息內容，以及送出前要等待多久。",
+    "source_hash": "22fa1c0d9c56"
+  },
+  "pain.email.shot": {
+    "text": "通知設定中列出從這台裝置送出的目的地：Resend、SMTP 轉送伺服器與微信。",
+    "source_hash": "8838321d8af0"
+  },
+  "pain.utd.problem": {
+    "text": "經常出現「無法解密」。",
+    "source_hash": "4f1096139532"
+  },
+  "pain.utd.answer": {
+    "text": "Koushi 會在登入時、開始聊天之前先完成安全備份，並要求你先儲存復原金鑰才能繼續。缺少的金鑰稍後送達時，相關訊息會自動顯示。若備份失敗，診斷畫面會告訴你問題出在網路還是伺服器。任何地方都不存在的金鑰無法復原，但這樣的設計能讓這個錯誤少很多。",
+    "source_hash": "ff01a7791f5c"
+  },
+  "pain.search.problem": {
+    "text": "在加密聊天室裡找不到以前的訊息。",
+    "source_hash": "ddb61b2ac340"
+  },
+  "pain.search.answer": {
+    "text": "Koushi 在你自己的電腦上為歷史紀錄建立索引，包含加密聊天室，可以在所有聊天室、某個空間或某段對話中搜尋。選擇結果即可在上下文中跳到該訊息。",
+    "source_hash": "2da20081f61c"
+  },
+  "pain.search.shot": {
+    "text": "搜尋「Koushi」的結果，來自日文聊天室、英文聊天室，以及混用中文、韓文與英文的聊天室。",
+    "source_hash": "b645e0e8b3ba"
+  },
+  "pain.multilingual.problem": {
+    "text": "不同聊天室使用不同語言，或是同一個聊天室裡混著好幾種語言。",
+    "source_hash": "240459d7414c"
+  },
+  "pain.multilingual.answer": {
+    "text": "搜尋不需要知道是哪種語言。中文、日文、韓文與拉丁字母文字共用一個索引，詞與詞之間沒有空格的文字也找得到，全形與半形字元可以互相比對。",
+    "source_hash": "ab06c4032af6"
+  },
+  "pain.multilingual.shot": {
+    "text": "搜尋全形的「リリース」（發佈）也能找到半形的「ﾘﾘｰｽ」。",
+    "source_hash": "8d6a458c0517"
+  },
+  "pain.ime.problem": {
+    "text": "按 Enter 確認中文、日文或韓文輸入法的候選字時，訊息就提早送出了。",
+    "source_hash": "e9cd9ba84d98"
+  },
+  "pain.ime.answer": {
+    "text": "在 Koushi 中，確認輸入法候選字與傳送是分開的操作。你也可以選擇用 Enter 或 Ctrl/Cmd+Enter 傳送。",
+    "source_hash": "6fbf4e13b762"
+  },
+  "pain.photos.problem": {
+    "text": "手機照片太大，分享起來很慢。",
+    "source_hash": "f185c39e3461"
+  },
+  "pain.photos.answer": {
+    "text": "附加大型圖片時，Koushi 讓你在傳送前選擇圖片品質。",
+    "source_hash": "0c635cbbdd8c"
+  },
+  "pain.help.problem": {
+    "text": "在設定與說明頁面裡迷路。",
+    "source_hash": "63e80ccb9f34"
+  },
+  "pain.help.answer": {
+    "text": "用你自己的語言詢問 ChatGPT 或其他 AI 助理。Koushi 的使用指南是為 AI 助理閱讀而撰寫的，應用程式中的「說明與關於」會告訴你如何詢問。",
+    "source_hash": "225ee33c413b"
+  },
+  "features.heading": {
+    "text": "日常功能",
+    "source_hash": "e844b2426dc5"
+  },
+  "features.e2ee": {
+    "text": "端對端加密聊天，透過瀏覽器登入（OIDC）",
+    "source_hash": "8ca507f3c856"
+  },
+  "features.layout": {
+    "text": "熟悉的三欄版面：空間、聊天室與私人訊息",
+    "source_hash": "faa2d8c60dc7"
+  },
+  "features.timeline": {
+    "text": "討論串、回覆、表情回應、編輯與已讀回條",
+    "source_hash": "267852b6d18d"
+  },
+  "features.rich": {
+    "text": "Markdown、程式碼區塊與 LaTeX 風格的數學式",
+    "source_hash": "b63c9b02c9cf"
+  },
+  "features.files": {
+    "text": "附說明文字的圖片與檔案上傳",
+    "source_hash": "9c1650cf5b20"
+  },
+  "features.desktop": {
+    "text": "系統匣、關閉時隱藏、系統原生通知與鍵盤快速鍵",
+    "source_hash": "55961aee7958"
+  },
+  "features.keywords": {
+    "text": "通知關鍵字",
+    "source_hash": "5ecf8915eefd"
+  },
+  "features.spaces": {
+    "text": "空間中的推薦聊天室，並可一次全部加入",
+    "source_hash": "81beb98f3934"
+  },
+  "features.updates": {
+    "text": "macOS 上的應用程式內更新",
+    "source_hash": "5b0a078cd719"
+  },
+  "features.diagnostics": {
+    "text": "可儲存與分享、不含訊息內容的診斷報告",
+    "source_hash": "28802c543b05"
+  },
+  "shot.rich": {
+    "text": "包含 Markdown 格式、程式碼區塊與數學式的對話。",
+    "source_hash": "855a49b180ae"
+  },
+  "languages.heading": {
+    "text": "五種介面語言",
+    "source_hash": "74d5de2afcfa"
+  },
+  "languages.body": {
+    "text": "應用程式提供 English、日本語、简体中文、繁體中文 與 한국어。在「應用程式設定 → 外觀」中切換。",
+    "source_hash": "ab48c385d95e"
+  },
+  "shot.languages": {
+    "text": "可選擇語言的外觀設定。",
+    "source_hash": "eb6874b0d006"
+  },
+  "settings.heading": {
+    "text": "可以設定的項目",
+    "source_hash": "ffd7949ba233"
+  },
+  "settings.body": {
+    "text": "設定分為適用於所有帳號分頁的「應用程式設定」，以及每個帳號各自的「帳號設定」。",
+    "source_hash": "b54d5daefdf9"
+  },
+  "settings.app.appearance": {
+    "text": "應用程式 → 外觀：語言、主題、顯示密度、介面字型與表情符號樣式",
+    "source_hash": "61cbe5b3d7a0"
+  },
+  "settings.app.notifications": {
+    "text": "應用程式 → 通知：系統通知的音效與徽章，以及從這台裝置送出的目的地",
+    "source_hash": "6da1de54bb90"
+  },
+  "settings.app.preferences": {
+    "text": "應用程式 → 偏好設定：程式碼區塊換行、關閉時縮到系統匣、載入較舊的訊息、討論串排列方式",
+    "source_hash": "ed8eef0149a8"
+  },
+  "settings.app.keyboard": {
+    "text": "應用程式 → 鍵盤：傳送快速鍵與快速鍵清單",
+    "source_hash": "9f3fd8f2ef70"
+  },
+  "settings.app.search": {
+    "text": "應用程式 → 搜尋紀錄：所有帳號共用的背景索引速度",
+    "source_hash": "72cee36c1064"
+  },
+  "settings.account.account": {
+    "text": "帳號 → 帳號：顯示名稱、大頭貼與密碼",
+    "source_hash": "29e6c7de187e"
+  },
+  "settings.account.sessions": {
+    "text": "帳號 → 工作階段：這台裝置、驗證與登出",
+    "source_hash": "f5c6f2e6eeff"
+  },
+  "settings.account.notifications": {
+    "text": "帳號 → 通知：桌面通知、訊息預覽、從這台裝置送出的通知與伺服器規則",
+    "source_hash": "96b0c3db6290"
+  },
+  "settings.account.privacy": {
+    "text": "帳號 → 安全性與隱私權：網址預覽、已讀回條與輸入中提示",
+    "source_hash": "64e4885135e2"
+  },
+  "settings.account.encryption": {
+    "text": "帳號 → 加密：驗證、安全備份、復原，以及聊天室金鑰的匯入/匯出",
+    "source_hash": "cd63b7e36f99"
+  },
+  "settings.account.search": {
+    "text": "帳號 → 搜尋紀錄：要索引哪些內容，以及各聊天室的進度",
+    "source_hash": "f7212f33a881"
+  },
+  "settings.ask": {
+    "text": "如需逐步說明，請詢問 AI 助理或閱讀使用指南。",
+    "source_hash": "d5e8de4992af"
+  },
+  "settings.guide": {
+    "text": "使用指南（英文）",
+    "source_hash": "86a2a9ba70bc"
+  },
+  "shot.settings": {
+    "text": "顯示分類清單的應用程式設定對話框。",
+    "source_hash": "50e8f14579ea"
+  },
+  "missing.heading": {
+    "text": "尚未支援",
+    "source_hash": "92acde95eedd"
+  },
+  "missing.body": {
+    "text": "語音與視訊通話、螢幕分享、機器人、小工具，以及第三方應用程式整合。",
+    "source_hash": "bfed657cc891"
+  },
+  "platforms.heading": {
+    "text": "平台",
+    "source_hash": "ab9bd7584a62"
+  },
+  "platforms.body": {
+    "text": "正式支援 macOS（Apple 晶片），發佈版本皆經過簽署與公證。Windows 與 Linux 版本由 CI 建置，但尚未經過測試。如果你正在使用並願意協助，歡迎參與貢獻。",
+    "source_hash": "521d52c076e6"
+  },
+  "footer.community": {
+    "text": "社群聊天室",
+    "source_hash": "b780447ae283"
+  },
+  "footer.source": {
+    "text": "GitHub 上的原始碼",
+    "source_hash": "11506c59ef23"
+  },
+  "footer.license": {
+    "text": "MIT 或 Apache-2.0",
+    "source_hash": "10b6a2ae8a02"
+  },
+  "footer.translation": {
+    "text": "本頁面提供五種語言版本。歡迎以該語言為母語的朋友提供修正。",
+    "source_hash": "2ae12df63494"
+  },
+  "translating.note": {
+    "text": "本頁面的部分內容仍在翻譯中，暫以英文顯示。",
+    "source_hash": "3da72ca7c01a"
+  }
+}
