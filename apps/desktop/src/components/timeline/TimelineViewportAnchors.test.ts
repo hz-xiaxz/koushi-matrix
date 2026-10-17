@@ -1,6 +1,6 @@
 // @vitest-environment jsdom
 import { describe, expect, it } from "vitest";
-import { captureAnchor } from "./TimelineViewportAnchors";
+import { captureAnchor, wholePixelScrollTop } from "./TimelineViewportAnchors";
 
 function viewport(tops: number[]) {
   const container = document.createElement("div");
@@ -24,5 +24,12 @@ describe("viewport anchor capture", () => {
   });
   it("excludes rows exactly beyond either edge", () => {
     expect(captureAnchor(viewport([-62, 210]))).toBeNull();
+  });
+});
+
+describe("whole-pixel anchor writes (#1507)", () => {
+  it("rounds to the nearest pixel instead of leaving truncation to the engine", () => {
+    expect(wholePixelScrollTop(20553.71875)).toBe(20554);
+    expect(wholePixelScrollTop(20724.40625)).toBe(20724);
   });
 });
