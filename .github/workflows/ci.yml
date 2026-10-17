@@ -126,10 +126,8 @@ jobs:
           test -s "$screenshot"
       # The website lane runs from release tags; exercising it here keeps a tag
       # from shipping a broken lane. The PNGs are discarded.
-      - name: Install CJK fonts
-        run: |
-          apt-get update -qq
-          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-noto-cjk
+      - name: Prepare CJK fonts
+        run: bash site/prepare-screenshot-fonts.sh
       - name: Generate website screenshots
         run: npm --prefix apps/desktop run site:screenshots
 
