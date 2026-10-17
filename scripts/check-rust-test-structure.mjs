@@ -14,7 +14,10 @@ export const ALLOWED_NON_RUST_TARGETS = new Set([
   "apps/desktop/src/domain/coreEvents.generated.json",
   // Synthetic Element-compatibility fixtures for the room-history export (#59).
   "crates/koushi-core/tests/fixtures/room_history_export/source_events.json",
-  "crates/koushi-core/tests/fixtures/room_history_export/element_expected.json"
+  "crates/koushi-core/tests/fixtures/room_history_export/element_expected.json",
+  // Synthetic website search corpus and its golden results.
+  "site/fixtures/search-corpus.json",
+  "site/generated/search-scenes.json"
 ]);
 
 const identifierStart = (character) => /[A-Za-z_]/u.test(character ?? "");
