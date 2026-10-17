@@ -55,6 +55,11 @@ export type MessageId =
   | "accountTabs.error"
   | "accountTabs.removeFromList"
   | "accountTabs.cancelAddAccount"
+  | "accountTabs.menuAccountSettings"
+  | "accountTabs.menuSignOut"
+  | "accountTabs.menuSignOutAndRemove"
+  | "accountTabs.menuSignInAgain"
+  | "accountTabs.menuRemoveTab"
 
   | "action.add"
   | "action.back"
@@ -104,6 +109,8 @@ export type MessageId =
   | "menu.appSettings"
   | "menu.aboutKoushi"
   | "menu.signOut"
+  | "accountMenu.signOutAccount"
+  | "accountMenu.accountSettingsFor"
   | "menu.toggleRightPanel"
   | "menu.koushiHelp"
   | "menu.checkForUpdates"
@@ -1186,13 +1193,34 @@ export type MessageId =
   | "settings.changePasswordMismatch"
   | "settings.passwordChanged"
   | "settings.deactivateAccount"
-  | "settings.deactivateAccountErase"
-  | "settings.deactivateAccountConfirm"
+  | "settings.dangerZone"
+  | "settings.deactivateAccountEntryHint"
+  | "settings.deactivateAccountTarget"
+  | "settings.deactivateAccountIntro"
+  | "settings.deactivateAccountConsequenceDisable"
+  | "settings.deactivateAccountConsequenceRooms"
+  | "settings.deactivateAccountConsequenceIdentity"
+  | "settings.deactivateAccountConsequenceMessages"
+  | "settings.deactivateAccountDeleteMessages"
+  | "settings.deactivateAccountDeleteMessagesNotice"
+  | "settings.deactivateAccountPassword"
+  | "settings.deactivateAccountFinalConfirmTitle"
+  | "settings.deactivateAccountFinalConfirm"
+  | "settings.deactivateAccountFinalAction"
+  | "settings.deactivateAccountWorking"
+  | "settings.deactivateAccountWrongPassword"
   | "settings.accountDeactivated"
   | "settings.accountManagementFailed"
   | "settings.signOut"
-  | "settings.signOutConfirm"
-  | "settings.signOutConfirmTitle"
+  | "settings.signOutAccount"
+  | "settings.signOutAccountTitle"
+  | "settings.signOutAndRemoveTitle"
+  | "settings.signOutTarget"
+  | "settings.signOutBody"
+  | "settings.signOutAndRemoveBody"
+  | "settings.signOutOthersStay"
+  | "settings.signOutConfirmAction"
+  | "settings.signOutAndRemoveAction"
   | "settings.keyManagement"
   | "settings.roomKeyExport"
   | "settings.roomKeyExportDestination"
@@ -1301,6 +1329,9 @@ export type MessageId =
   | "trust.keyBackup"
   | "trust.noDevices"
   | "trust.resetIdentity"
+  | "trust.resetIdentityConfirmTitle"
+  | "trust.resetIdentityConfirmBody"
+  | "trust.resetIdentityConfirmAction"
   | "trust.sasEmoji"
   | "trust.sasEmojiList"
   | "trust.setupCrossSigning"
@@ -2159,6 +2190,11 @@ const en: Catalog = {
   "accountTabs.error": "Account error",
   "accountTabs.removeFromList": "Remove {account} from list",
   "accountTabs.cancelAddAccount": "Cancel adding account",
+  "accountTabs.menuAccountSettings": "Account settings…",
+  "accountTabs.menuSignOut": "Sign out…",
+  "accountTabs.menuSignOutAndRemove": "Sign out and remove tab…",
+  "accountTabs.menuSignInAgain": "Sign in again",
+  "accountTabs.menuRemoveTab": "Remove tab",
 
   "action.add": "Add",
   "action.back": "Back",
@@ -2211,6 +2247,8 @@ const en: Catalog = {
   "menu.accountSettings": "Account Settings…",
   "menu.appSettings": "App Settings…",
   "menu.signOut": "Sign Out",
+  "accountMenu.signOutAccount": "Sign Out of {account}",
+  "accountMenu.accountSettingsFor": "Account Settings for {account}…",
   "menu.toggleRightPanel": "Toggle Right Panel",
   "menu.koushiHelp": "Koushi Help",
   "menu.checkForUpdates": "Check for Updates…",
@@ -3451,13 +3489,34 @@ const en: Catalog = {
   "settings.changePasswordMismatch": "Passwords do not match",
   "settings.passwordChanged": "Password changed",
   "settings.deactivateAccount": "Deactivate account",
-  "settings.deactivateAccountErase": "Erase all data",
-  "settings.deactivateAccountConfirm": "This cannot be undone. Confirm to proceed.",
+  "settings.dangerZone": "Danger zone",
+  "settings.deactivateAccountEntryHint": "Permanently disables {userId}. This is not the same as signing out.",
+  "settings.deactivateAccountTarget": "Account to deactivate",
+  "settings.deactivateAccountIntro": "Deactivating your account is irreversible. It will:",
+  "settings.deactivateAccountConsequenceDisable": "Permanently disable your account. You can't sign in again, and your user ID can't be reused.",
+  "settings.deactivateAccountConsequenceRooms": "Remove you from all rooms and chats.",
+  "settings.deactivateAccountConsequenceIdentity": "Delete your account information from the identity server.",
+  "settings.deactivateAccountConsequenceMessages": "Keep your messages visible to registered users, but hide them from new or unregistered users if you choose to delete them.",
+  "settings.deactivateAccountDeleteMessages": "Delete all my messages",
+  "settings.deactivateAccountDeleteMessagesNotice": "Future users may see incomplete conversations.",
+  "settings.deactivateAccountPassword": "Enter your password to continue",
+  "settings.deactivateAccountFinalConfirmTitle": "Deactivate {userId}?",
+  "settings.deactivateAccountFinalConfirm": "Please confirm that you want to deactivate this account. This action cannot be undone.",
+  "settings.deactivateAccountFinalAction": "Deactivate permanently",
+  "settings.deactivateAccountWorking": "Deactivating account…",
+  "settings.deactivateAccountWrongPassword": "Incorrect password. The account was not deactivated.",
   "settings.accountDeactivated": "Account deactivated",
   "settings.accountManagementFailed": "Account operation failed",
   "settings.signOut": "Sign out",
-  "settings.signOutConfirm": "Are you sure you want to sign out of Koushi on this device?",
-  "settings.signOutConfirmTitle": "Sign out?",
+  "settings.signOutAccount": "Sign out of {account}",
+  "settings.signOutAccountTitle": "Sign out of {account}?",
+  "settings.signOutAndRemoveTitle": "Sign out of {account} and remove its tab?",
+  "settings.signOutTarget": "Account: {userId}\nHomeserver: {homeserver}",
+  "settings.signOutBody": "Koushi will sign this account out on this device. You can sign in again later.",
+  "settings.signOutAndRemoveBody": "Koushi will sign this account out on this device and remove its tab.",
+  "settings.signOutOthersStay": "Your other accounts stay signed in.",
+  "settings.signOutConfirmAction": "Sign out",
+  "settings.signOutAndRemoveAction": "Sign out and remove",
   "settings.keyManagement": "Key management",
   "settings.roomKeyExport": "Room key export",
   "settings.roomKeyExportDestination": "Key export destination",
@@ -3566,6 +3625,9 @@ const en: Catalog = {
   "trust.keyBackup": "Key backup",
   "trust.noDevices": "No devices",
   "trust.resetIdentity": "Reset",
+  "trust.resetIdentityConfirmTitle": "Reset the identity of {account}?",
+  "trust.resetIdentityConfirmBody": "Only this account's cryptographic identity is reset. Your other sessions of this account will need to be verified again, and your contacts may see that your identity changed.",
+  "trust.resetIdentityConfirmAction": "Reset identity",
   "trust.sasEmoji": "SAS emoji {index}",
   "trust.sasEmojiList": "SAS emoji",
   "trust.setupCrossSigning": "Set up",
@@ -4326,6 +4388,11 @@ const ja: Catalog = {
   "accountTabs.error": "アカウントエラー",
   "accountTabs.removeFromList": "{account}を一覧から削除",
   "accountTabs.cancelAddAccount": "アカウントの追加をキャンセル",
+  "accountTabs.menuAccountSettings": "アカウント設定…",
+  "accountTabs.menuSignOut": "サインアウト…",
+  "accountTabs.menuSignOutAndRemove": "サインアウトしてタブを削除…",
+  "accountTabs.menuSignInAgain": "再度サインイン",
+  "accountTabs.menuRemoveTab": "タブを削除",
 
   "action.add": "追加",
   "action.back": "戻る",
@@ -4388,6 +4455,8 @@ const ja: Catalog = {
   "menu.accountSettings": "アカウント設定…",
   "menu.appSettings": "アプリ設定…",
   "menu.signOut": "サインアウト",
+  "accountMenu.signOutAccount": "{account} からサインアウト",
+  "accountMenu.accountSettingsFor": "{account} のアカウント設定…",
   "menu.toggleRightPanel": "右パネルを切り替え",
   "menu.koushiHelp": "Koushi ヘルプ",
   "menu.checkForUpdates": "更新を確認…",
@@ -5603,13 +5672,34 @@ const ja: Catalog = {
   "settings.changePasswordMismatch": "パスワードが一致しません",
   "settings.passwordChanged": "パスワードを変更しました",
   "settings.deactivateAccount": "アカウントを無効化",
-  "settings.deactivateAccountErase": "すべてのデータを消去",
-  "settings.deactivateAccountConfirm": "この操作は元に戻せません。続行するには確認してください。",
+  "settings.dangerZone": "危険な操作",
+  "settings.deactivateAccountEntryHint": "{userId} を永久に使えなくします。サインアウトとは異なります。",
+  "settings.deactivateAccountTarget": "無効化するアカウント",
+  "settings.deactivateAccountIntro": "アカウントの無効化は元に戻せません。次のようになります:",
+  "settings.deactivateAccountConsequenceDisable": "アカウントが永久に無効になります。再びサインインすることはできず、ユーザー ID も再利用できません。",
+  "settings.deactivateAccountConsequenceRooms": "すべてのルームとチャットから退出します。",
+  "settings.deactivateAccountConsequenceIdentity": "ID サーバーからアカウント情報が削除されます。",
+  "settings.deactivateAccountConsequenceMessages": "メッセージは登録済みユーザーには引き続き表示されますが、削除を選んだ場合は新規ユーザーや未登録ユーザーには表示されなくなります。",
+  "settings.deactivateAccountDeleteMessages": "自分のメッセージをすべて削除",
+  "settings.deactivateAccountDeleteMessagesNotice": "今後参加するユーザーには会話が不完全に見える場合があります。",
+  "settings.deactivateAccountPassword": "続行するにはパスワードを入力してください",
+  "settings.deactivateAccountFinalConfirmTitle": "{userId} を無効化しますか？",
+  "settings.deactivateAccountFinalConfirm": "このアカウントを無効化することを確認してください。この操作は元に戻せません。",
+  "settings.deactivateAccountFinalAction": "完全に無効化する",
+  "settings.deactivateAccountWorking": "アカウントを無効化しています…",
+  "settings.deactivateAccountWrongPassword": "パスワードが正しくありません。アカウントは無効化されていません。",
   "settings.accountDeactivated": "アカウントを無効化しました",
   "settings.accountManagementFailed": "アカウント操作に失敗しました",
   "settings.signOut": "サインアウト",
-  "settings.signOutConfirm": "このデバイスの Koushi からサインアウトしてもよろしいですか？",
-  "settings.signOutConfirmTitle": "サインアウトしますか？",
+  "settings.signOutAccount": "{account} からサインアウト",
+  "settings.signOutAccountTitle": "{account} からサインアウトしますか？",
+  "settings.signOutAndRemoveTitle": "{account} からサインアウトしてタブを削除しますか？",
+  "settings.signOutTarget": "アカウント: {userId}\nホームサーバー: {homeserver}",
+  "settings.signOutBody": "このデバイスの Koushi でこのアカウントからサインアウトします。後で再度サインインできます。",
+  "settings.signOutAndRemoveBody": "このデバイスの Koushi でこのアカウントからサインアウトし、タブを削除します。",
+  "settings.signOutOthersStay": "他のアカウントはサインインしたままです。",
+  "settings.signOutConfirmAction": "サインアウト",
+  "settings.signOutAndRemoveAction": "サインアウトして削除",
   "settings.keyManagement": "鍵管理",
   "settings.roomKeyExport": "ルーム鍵エクスポート",
   "settings.roomKeyExportDestination": "鍵エクスポート先",
@@ -5720,6 +5810,9 @@ const ja: Catalog = {
   "trust.keyBackup": "鍵バックアップ",
   "trust.noDevices": "デバイスなし",
   "trust.resetIdentity": "リセット",
+  "trust.resetIdentityConfirmTitle": "{account} の ID をリセットしますか？",
+  "trust.resetIdentityConfirmBody": "このアカウントの暗号 ID だけがリセットされます。このアカウントの他のセッションは再度検証が必要になり、連絡先には ID が変更されたことが表示される場合があります。",
+  "trust.resetIdentityConfirmAction": "ID をリセット",
   "trust.sasEmoji": "SAS絵文字 {index}",
   "trust.sasEmojiList": "SAS絵文字",
   "trust.setupCrossSigning": "セットアップ",

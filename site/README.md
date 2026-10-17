@@ -54,7 +54,10 @@ cargo test -p koushi-core --lib write_site_search_golden -- --ignored
 
 ## Build locally
 
-Screenshots come from the pinned Playwright container with CJK fonts (see
+Screenshots come from the pinned Playwright container after
+`site/prepare-screenshot-fonts.sh`, which installs Noto Sans CJK and removes the
+image's Chinese and Japanese fallback fonts so each locale renders in its own
+font (see
 [QA lanes](../docs/agents/qa-lanes.md#website-screenshot-lane)):
 
 ```bash
@@ -63,7 +66,7 @@ docker run -i --rm --init --shm-size=2g --user 0:0 \
   -v "$PWD:/work" -w /work mcr.microsoft.com/playwright:v1.60.0-noble \
   bash -e -u -o pipefail -s <<'SH'
 trap 'chown -R "$HOST_UID:$HOST_GID" /work/apps/desktop/node_modules /work/apps/desktop/test-results /work/site/screenshots 2>/dev/null || true' EXIT
-apt-get update -qq && DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-noto-cjk
+bash site/prepare-screenshot-fonts.sh
 npm --prefix apps/desktop ci
 npm --prefix apps/desktop run site:screenshots
 SH

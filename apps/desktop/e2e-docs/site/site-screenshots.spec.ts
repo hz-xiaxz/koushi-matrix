@@ -79,6 +79,39 @@ async function expectCjkGlyphs(page: Page): Promise<void> {
   expect(tofuLike, "CJK characters rendered as the missing-glyph box; install CJK fonts").toEqual([]);
 }
 
+const EXPECTED_CJK_FAMILY: Partial<Record<SiteLocale, string>> = {
+  ja: "Noto Sans CJK JP",
+  ko: "Noto Sans CJK KR",
+  "zh-Hans": "Noto Sans CJK SC",
+  "zh-Hant": "Noto Sans CJK TC"
+};
+
+/**
+ * Chromium picks a CJK fallback font per locale; the Playwright image's bundled
+ * Chinese font would otherwise render Japanese and Korean too. Asks DevTools which
+ * fonts actually drew the first message (site/prepare-screenshot-fonts.sh).
+ */
+async function expectLocaleCjkFont(page: Page, locale: SiteLocale, target: Locator): Promise<void> {
+  const expected = EXPECTED_CJK_FAMILY[locale];
+  if (!expected) {
+    return;
+  }
+  await target.evaluate((element) => element.setAttribute("data-site-font-probe", ""));
+  const cdp = await page.context().newCDPSession(page);
+  await cdp.send("DOM.enable");
+  await cdp.send("CSS.enable");
+  const { root } = await cdp.send("DOM.getDocument", { depth: -1 });
+  const { nodeId } = await cdp.send("DOM.querySelector", { nodeId: root.nodeId, selector: "[data-site-font-probe]" });
+  const { fonts } = await cdp.send("CSS.getPlatformFontsForNode", { nodeId });
+  await target.evaluate((element) => element.removeAttribute("data-site-font-probe"));
+  await cdp.detach();
+  const families = fonts.map((font) => font.familyName);
+  const message = `${locale} text must render in ${expected}, got ${families.join(", ")}; run site/prepare-screenshot-fonts.sh`;
+  expect(families, message).toContain(expected);
+  // Other CJK families mean some characters fell back to the wrong language's font.
+  expect(families.filter((family) => /CJK|WenQuanYi|IPA|Unifont|Droid Sans Fallback/.test(family) && family !== expected), message).toEqual([]);
+}
+
 function label(locale: SiteLocale, id: MessageId): string {
   return catalogs[locale][id];
 }
@@ -212,6 +245,11 @@ async function openWorkspace(page: Page, locale: SiteLocale, options: SceneOptio
     page.locator("article.message[data-event-id] .message-body").filter({ hasText: SITE_TEXT[locale].fixture.messages[0] })
   ).toHaveCount(1);
   await expectCjkGlyphs(page);
+  await expectLocaleCjkFont(
+    page,
+    locale,
+    page.locator("article.message[data-event-id] .message-body").filter({ hasText: SITE_TEXT[locale].fixture.messages[0] })
+  );
   return fixture;
 }
 

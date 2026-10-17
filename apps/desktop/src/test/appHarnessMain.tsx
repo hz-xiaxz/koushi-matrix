@@ -328,7 +328,7 @@ function readySnapshot(
           notification_delivery: { sinks: [], presets: defaultNotificationDeliveryPresets() },
           contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
           sender_device_advisories: { rooms: {} },
-          account_management_capabilities: { change_password: { kind: "unknown" } },
+          account_management_capabilities: { change_password: { kind: "unknown" }, deactivate_account: { kind: "unknown" } },
           soft_logout_reauth: { kind: "idle" }, qr_login: { kind: "idle" },
           directory: {
         query: { kind: "closed" },
@@ -862,7 +862,15 @@ function harnessAccountTabsSnapshot() {
 // Native confirmation dialogs are accepted by default in the unattended app
 // harness. Individual dialog behavior belongs in focused unit tests; existing
 // end-to-end flows should continue past an explicit destructive confirmation.
-mock.setCommandResponse("plugin:dialog|message", "Ok");
+// A confirmation with a named action (#1504) settles as accepted only when the
+// result is that action's label, so echo the requested OK label back.
+mock.setCommandResponse(
+  "plugin:dialog|message",
+  (args: { buttons?: { OkCancelCustom?: [string, string] } | string } | undefined) =>
+    typeof args?.buttons === "object" && args.buttons.OkCancelCustom
+      ? args.buttons.OkCancelCustom[0]
+      : "Ok"
+);
 mock.setCommandResponse("request_native_attention_notification_permission", true);
 let currentSnapshot = withSectionBounds(readySnapshot());
 let lastStateUpdateGeneration = currentSnapshot.state_generation ?? 0;
@@ -2296,7 +2304,7 @@ mock.setCommandResponse("load_account_management_capabilities", () =>
       domain: {
         ...currentSnapshot.state.domain,
       account_management_capabilities: {
-        change_password: { kind: "enabled" }
+        change_password: { kind: "enabled" }, deactivate_account: { kind: "enabled" }
       }
       },
     }
@@ -2478,8 +2486,9 @@ mock.setCommandResponse(
 );
 mock.setCommandResponse(
   "deactivate_account",
-  ({ eraseData }: { eraseData: boolean }) => {
+  ({ eraseData, password }: { eraseData: boolean; password: string }) => {
     void eraseData;
+    void password;
     return setCurrentSnapshot({
       ...currentSnapshot,
       state: {

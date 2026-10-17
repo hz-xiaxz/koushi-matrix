@@ -79,6 +79,17 @@ export function measureAnchorDelta(
   return currentOffset - anchor.offsetTop;
 }
 
+/**
+ * The scrollTop to write for an anchor correction. WebKit stores scrollTop in
+ * whole pixels and truncates a fractional write, which can leave up to 0.99 px
+ * of drift, above VIEWPORT_ANCHOR_TOLERANCE_PX. Stabilization then restarted
+ * every frame and overwrote the reader's wheel scrolling (#1507). Rounding
+ * ourselves keeps the leftover at most 0.5 px in every engine.
+ */
+export function wholePixelScrollTop(target: number): number {
+  return Math.round(target);
+}
+
 type CapturedTimelineScrollAnchor = {
   event_id: string;
   edge: "bottom";

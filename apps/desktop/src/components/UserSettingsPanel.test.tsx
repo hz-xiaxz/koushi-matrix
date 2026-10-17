@@ -169,7 +169,7 @@ describe("UserSettingsPanel", () => {
   };
   const idleAccountManagement: import("../domain/types").AccountManagementState = { kind: "idle" };
   const idleAccountManagementCapabilities: import("../domain/types").AccountManagementCapabilities =
-    { change_password: { kind: "unknown" } };
+    { change_password: { kind: "unknown" }, deactivate_account: { kind: "unknown" } };
 
   afterEach(() => {
     cleanup();
@@ -646,7 +646,9 @@ describe("UserSettingsPanel", () => {
     );
 
     fireEvent.click(screen.getByRole("tab", { name: "Sessions" }));
-    fireEvent.click(screen.getByRole("button", { name: "Sign out" }));
+    fireEvent.click(
+      screen.getByRole("button", { name: "Sign out of @demo-user:example.invalid" })
+    );
 
     expect(onLogout).toHaveBeenCalledTimes(1);
   });
@@ -1513,7 +1515,7 @@ describe("UserSettingsPanel", () => {
         platform="linux"
         accountManagement={idleAccountManagement}
         accountManagementCapabilities={{
-          change_password: { kind: "enabled" }
+          change_password: { kind: "enabled" }, deactivate_account: { kind: "enabled" }
         }}
         savedSessions={[]}
         profile={profile}
@@ -1540,7 +1542,7 @@ describe("UserSettingsPanel", () => {
         platform="linux"
         accountManagement={idleAccountManagement}
         accountManagementCapabilities={{
-          change_password: { kind: "disabled" }
+          change_password: { kind: "disabled" }, deactivate_account: { kind: "enabled" }
         }}
         savedSessions={[]}
         profile={profile}
@@ -1570,7 +1572,7 @@ describe("UserSettingsPanel", () => {
           operation: "changePassword"
         }}
         accountManagementCapabilities={{
-          change_password: { kind: "enabled" }
+          change_password: { kind: "enabled" }, deactivate_account: { kind: "enabled" }
         }}
         savedSessions={[]}
         profile={profile}
@@ -1599,7 +1601,7 @@ describe("UserSettingsPanel", () => {
           operation: "deactivateAccount"
         }}
         accountManagementCapabilities={{
-          change_password: { kind: "enabled" }
+          change_password: { kind: "enabled" }, deactivate_account: { kind: "enabled" }
         }}
         savedSessions={[]}
         profile={profile}
@@ -1630,7 +1632,7 @@ describe("UserSettingsPanel", () => {
           operation: "changePassword"
         }}
         accountManagementCapabilities={{
-          change_password: { kind: "enabled" }
+          change_password: { kind: "enabled" }, deactivate_account: { kind: "enabled" }
         }}
         savedSessions={[]}
         profile={profile}
@@ -1663,7 +1665,7 @@ describe("UserSettingsPanel", () => {
           operation: "changePassword"
         }}
         accountManagementCapabilities={{
-          change_password: { kind: "enabled" }
+          change_password: { kind: "enabled" }, deactivate_account: { kind: "enabled" }
         }}
         savedSessions={[]}
         profile={profile}

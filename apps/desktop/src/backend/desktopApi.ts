@@ -138,6 +138,11 @@ export interface DesktopApi {
   addAccountTab(): Promise<AccountTabsSnapshot>;
   removeSignedOutAccountTab(tabId: string): Promise<AccountTabsSnapshot>;
   cancelAddAccountTab(tabId: string): Promise<AccountTabsSnapshot>;
+  /**
+   * #1504: sign out the account bound to a specific tab, which need not be the
+   * selected one (account tab context menu).
+   */
+  logoutAccountTab(tabId: string): Promise<CommandSettlement>;
   getDesktopUpdateState(): Promise<DesktopUpdateState>;
   checkForDesktopUpdate(): Promise<void>;
   downloadDesktopUpdate(expectedGeneration: number): Promise<void>;
@@ -239,7 +244,7 @@ export interface DesktopApi {
     sample: NotificationDeliveryPreviewSample
   ): Promise<NotificationDeliveryPreview>;
   changePassword(newPassword: string): Promise<CommandAdmission>;
-  deactivateAccount(eraseData: boolean): Promise<CommandAdmission>;
+  deactivateAccount(eraseData: boolean, password: string): Promise<CommandAdmission>;
   probeLocalEncryptionHealth(): Promise<CommandAdmission>;
   resetLocalData(): Promise<CommandAdmission>;
   bootstrapCrossSigning(): Promise<CommandAdmission>;

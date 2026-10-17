@@ -37,6 +37,7 @@ import {
   captureRoomScrollAnchor,
   findTimelineEventNode,
   measureAnchorDelta,
+  wholePixelScrollTop,
   roomScrollAnchorSignature,
   roomScrollAnchorStableSignature,
   restoreRoomScrollAnchor,
@@ -2573,7 +2574,7 @@ export const TimelineView = memo(function TimelineView({
       if (estimatedMount) {
         viewportTransactionRef.current.markRangePrepared(current.id);
         if (shouldWrite) {
-          runWithScrollWriteReason("projectionCompensation", () => { container.scrollTop = target; }, current.id);
+          runWithScrollWriteReason("projectionCompensation", () => { container.scrollTop = wholePixelScrollTop(target); }, current.id);
         }
         const previousRange = virtualRangeRef.current;
         const nextRange = commitVirtualRangeForMetrics(readViewportMetrics());
@@ -2601,7 +2602,7 @@ export const TimelineView = memo(function TimelineView({
       const delta = target - container.scrollTop;
       viewportTransactionRef.current.markSettled(current.id);
       if (shouldWrite) {
-        runWithScrollWriteReason("projectionCompensation", () => { container.scrollTop = target; }, current.id);
+        runWithScrollWriteReason("projectionCompensation", () => { container.scrollTop = wholePixelScrollTop(target); }, current.id);
       }
       updateScrollDiagnostics((diagnostics) => recordTimelineScrollFrame(diagnostics, {
         scrollActivity: scrollActivityRef.current,
