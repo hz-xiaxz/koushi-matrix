@@ -51,6 +51,8 @@ mod attachment_admission;
 mod crawl_scheduling;
 #[cfg(test)]
 mod history_scale;
+#[cfg(test)]
+mod site_scenes;
 
 use std::collections::{HashMap, HashSet, VecDeque};
 use std::sync::Arc;

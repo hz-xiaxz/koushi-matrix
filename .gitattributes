@@ -1,1 +1,2 @@
 *.png binary
+site/**/*.json text eol=lf

@@ -1,0 +1,322 @@
+{
+  "meta.title": {
+    "text": "Koushi — 多言語の会話のためのデスクトップ Matrix クライアント",
+    "source_hash": "ba939fdc85ef"
+  },
+  "meta.description": {
+    "text": "仕事・個人・コミュニティの Matrix アカウントを並べて開いたまま使えます。暗号化チャット、日本語・中国語・韓国語に強いローカル全文検索、自分のパソコンから送る通知。",
+    "source_hash": "3bbef07d2b88"
+  },
+  "nav.language": {
+    "text": "言語",
+    "source_hash": "a4fe65264ef7"
+  },
+  "hero.tagline": {
+    "text": "多言語の会話のためのデスクトップ Matrix クライアント。",
+    "source_hash": "a1a07eb6026a"
+  },
+  "hero.lede": {
+    "text": "仕事・個人・コミュニティの Matrix アカウントを、1 つのウィンドウで並べて開いておけます。アカウントごとにタブがあり、どれもサインインしたまま同期を続けます。",
+    "source_hash": "e21a91cbcefb"
+  },
+  "hero.download": {
+    "text": "macOS 版をダウンロード（Apple シリコン）",
+    "source_hash": "d2b06e12c65c"
+  },
+  "hero.version": {
+    "text": "バージョン {version}",
+    "source_hash": "a18745121bb8"
+  },
+  "hero.other": {
+    "text": "その他のプラットフォーム（未検証）:",
+    "source_hash": "a13c0e1549de"
+  },
+  "hero.windows": {
+    "text": "Windows インストーラー",
+    "source_hash": "147cb2aad4c6"
+  },
+  "hero.appimage": {
+    "text": "Linux AppImage",
+    "source_hash": "869ed18033ca"
+  },
+  "hero.deb": {
+    "text": "Linux deb",
+    "source_hash": "29dca0def7de"
+  },
+  "hero.rpm": {
+    "text": "Linux RPM",
+    "source_hash": "06afa12d460e"
+  },
+  "hero.allReleases": {
+    "text": "すべてのリリースとチェックサム",
+    "source_hash": "d5f31686ec8d"
+  },
+  "shot.main": {
+    "text": "3 つのアカウントタブと、スペース・ルーム・会話（返信、リアクション、スレッド付き）の 3 ペイン画面を表示した Koushi。",
+    "source_hash": "469e2dce2411"
+  },
+  "matrix.heading": {
+    "text": "Matrix がはじめての方へ",
+    "source_hash": "948ef3639a46"
+  },
+  "matrix.body": {
+    "text": "Matrix はオープンなチャットのネットワークです。メールと同じように、アカウントを置くサーバーを自分で選び、別のサーバーの人とも会話できます。会話はエンドツーエンドで暗号化でき、ネットワーク全体を 1 つの会社が所有することはありません。",
+    "source_hash": "19941888b05c"
+  },
+  "matrix.blog": {
+    "text": "なぜ Matrix なのか（詳しい解説）",
+    "source_hash": "42041a1edb74"
+  },
+  "matrix.account": {
+    "text": "アカウントをまだお持ちでなければ、どの Matrix サーバーでも作れます。matrix.org は公開サーバーの一例です。",
+    "source_hash": "fa8f0439c8c7"
+  },
+  "matrix.setup": {
+    "text": "はじめての方向けの設定チェックリスト",
+    "source_hash": "19f7966e281b"
+  },
+  "pain.heading": {
+    "text": "もう Matrix を使っている方へ。こんなことで困っていませんか？",
+    "source_hash": "3dd860d7b227"
+  },
+  "pain.lede": {
+    "text": "Koushi は日々の小さな不満から生まれました。どれかに心当たりがあれば、試してみる価値があるかもしれません。",
+    "source_hash": "fc17ac383cf1"
+  },
+  "pain.accounts.problem": {
+    "text": "仕事用と個人用のアカウントを切り替えるたびに、サインインし直している。",
+    "source_hash": "c878b9e7b27f"
+  },
+  "pain.accounts.answer": {
+    "text": "アカウントごとにタブを追加できます。どのタブもサインインしたまま同期を続け、それぞれの未読数を表示します。入力欄には、どのアカウントで送るかが常に表示されます。",
+    "source_hash": "3a990b479ec0"
+  },
+  "pain.email.problem": {
+    "text": "ホームサーバーが、見逃したメッセージをメールで知らせてくれない。matrix.org は通知メールを送りません。",
+    "source_hash": "e9cfad576324"
+  },
+  "pain.email.answer": {
+    "text": "Koushi は、あなたのパソコンから自分で通知を送れます。Resend や SMTP リレー経由のメール、ServerChan 経由の WeChat に対応しています。何をきっかけに通知するか、本文をどこまで含めるか、送るまでどれだけ待つかを選べます。",
+    "source_hash": "22fa1c0d9c56"
+  },
+  "pain.email.shot": {
+    "text": "この端末から送る通知先（Resend、SMTP リレー、WeChat）を並べた通知設定。",
+    "source_hash": "8838321d8af0"
+  },
+  "pain.utd.problem": {
+    "text": "「復号できません」がよく出る。",
+    "source_hash": "4f1096139532"
+  },
+  "pain.utd.answer": {
+    "text": "Koushi では、サインイン時、チャットを始める前にセキュアバックアップを済ませ、リカバリーキーを保存してから先へ進みます。足りなかった鍵が後から届けば、該当するメッセージは自動で表示されます。バックアップに失敗したときは、ネットワークとサーバーのどちらの問題かを診断画面で確認できます。どこにも残っていない鍵は誰にも復元できませんが、この設計でエラーはぐっと起きにくくなります。",
+    "source_hash": "ff01a7791f5c"
+  },
+  "pain.search.problem": {
+    "text": "暗号化されたルームの昔のメッセージが見つからない。",
+    "source_hash": "ddb61b2ac340"
+  },
+  "pain.search.answer": {
+    "text": "Koushi は、暗号化されたルームも含めて履歴をあなたのパソコンの中で索引にし、すべてのルーム・1 つのスペース・1 つの会話を対象に検索できます。結果を選ぶと、前後の会話の中でそのメッセージを開きます。",
+    "source_hash": "2da20081f61c"
+  },
+  "pain.search.shot": {
+    "text": "「Koushi」の検索結果。日本語のルーム、英語のルーム、中国語・韓国語・英語が混ざったルームからヒットしています。",
+    "source_hash": "b645e0e8b3ba"
+  },
+  "pain.multilingual.problem": {
+    "text": "ルームごとに言語が違う、または 1 つのルームで複数の言語が混ざっている。",
+    "source_hash": "240459d7414c"
+  },
+  "pain.multilingual.answer": {
+    "text": "検索は言語を判別する必要がありません。日本語・中国語・韓国語・ラテン文字が 1 つの索引に入り、単語の間に空白がない文も見つかり、全角と半角は同じ文字として一致します。",
+    "source_hash": "ab06c4032af6"
+  },
+  "pain.multilingual.shot": {
+    "text": "「リリース」で検索すると、半角の「ﾘﾘｰｽ」も見つかります。",
+    "source_hash": "8d6a458c0517"
+  },
+  "pain.ime.problem": {
+    "text": "日本語・中国語・韓国語の変換を Enter で確定したら、そのまま送信されてしまう。",
+    "source_hash": "e9cd9ba84d98"
+  },
+  "pain.ime.answer": {
+    "text": "Koushi では、入力メソッドの候補の確定と送信は別の操作です。Enter と Ctrl/Cmd+Enter のどちらで送信するかも選べます。",
+    "source_hash": "6fbf4e13b762"
+  },
+  "pain.photos.problem": {
+    "text": "スマホの写真が重くて、共有に時間がかかる。",
+    "source_hash": "f185c39e3461"
+  },
+  "pain.photos.answer": {
+    "text": "大きな画像を添付すると、送る前に画質を選べます。",
+    "source_hash": "0c635cbbdd8c"
+  },
+  "pain.help.problem": {
+    "text": "設定画面やヘルプで迷ってしまう。",
+    "source_hash": "63e80ccb9f34"
+  },
+  "pain.help.answer": {
+    "text": "ChatGPT などの AI アシスタントに、あなたの言葉で聞いてください。Koushi のユーザーガイドは AI が読めるように書かれていて、アプリの「ヘルプと情報」に聞き方が載っています。",
+    "source_hash": "225ee33c413b"
+  },
+  "features.heading": {
+    "text": "ふだん使いの機能",
+    "source_hash": "e844b2426dc5"
+  },
+  "features.e2ee": {
+    "text": "エンドツーエンド暗号化チャット。ブラウザーでサインイン（OIDC）",
+    "source_hash": "8ca507f3c856"
+  },
+  "features.layout": {
+    "text": "スペース・ルーム・ダイレクトメッセージのおなじみの 3 ペイン画面",
+    "source_hash": "faa2d8c60dc7"
+  },
+  "features.timeline": {
+    "text": "スレッド、返信、リアクション、編集、既読表示",
+    "source_hash": "267852b6d18d"
+  },
+  "features.rich": {
+    "text": "Markdown、コードブロック、LaTeX 風の数式",
+    "source_hash": "b63c9b02c9cf"
+  },
+  "features.files": {
+    "text": "キャプション付きの画像・ファイル送信",
+    "source_hash": "9c1650cf5b20"
+  },
+  "features.desktop": {
+    "text": "システムトレイ、閉じても常駐、OS の通知、キーボードショートカット",
+    "source_hash": "55961aee7958"
+  },
+  "features.keywords": {
+    "text": "通知キーワード",
+    "source_hash": "5ecf8915eefd"
+  },
+  "features.spaces": {
+    "text": "スペースのおすすめルームと、まとめて参加する機能",
+    "source_hash": "81beb98f3934"
+  },
+  "features.updates": {
+    "text": "macOS でのアプリ内アップデート",
+    "source_hash": "5b0a078cd719"
+  },
+  "features.diagnostics": {
+    "text": "メッセージの内容を含まずに保存・共有できる診断レポート",
+    "source_hash": "28802c543b05"
+  },
+  "shot.rich": {
+    "text": "Markdown の書式、コードブロック、数式を含む会話。",
+    "source_hash": "855a49b180ae"
+  },
+  "languages.heading": {
+    "text": "5 つの表示言語",
+    "source_hash": "74d5de2afcfa"
+  },
+  "languages.body": {
+    "text": "アプリは English、日本語、简体中文、繁體中文、한국어 で使えます。「アプリ設定 → 外観」で切り替えます。",
+    "source_hash": "ab48c385d95e"
+  },
+  "shot.languages": {
+    "text": "言語を選べる外観の設定。",
+    "source_hash": "eb6874b0d006"
+  },
+  "settings.heading": {
+    "text": "設定できること",
+    "source_hash": "ffd7949ba233"
+  },
+  "settings.body": {
+    "text": "設定は、すべてのアカウントタブに共通の「アプリ設定」と、アカウントごとの「アカウント設定」に分かれています。",
+    "source_hash": "b54d5daefdf9"
+  },
+  "settings.app.appearance": {
+    "text": "アプリ → 外観: 言語、テーマ、表示密度、UI フォント、絵文字のスタイル",
+    "source_hash": "61cbe5b3d7a0"
+  },
+  "settings.app.notifications": {
+    "text": "アプリ → 通知: OS 通知の音とバッジ、この端末から送る通知先",
+    "source_hash": "6da1de54bb90"
+  },
+  "settings.app.preferences": {
+    "text": "アプリ → 環境設定: コードブロックの折り返し、トレイに常駐、古いメッセージの読み込み、スレッドの並び",
+    "source_hash": "ed8eef0149a8"
+  },
+  "settings.app.keyboard": {
+    "text": "アプリ → キーボード: 送信キーとショートカット一覧",
+    "source_hash": "9f3fd8f2ef70"
+  },
+  "settings.app.search": {
+    "text": "アプリ → 検索履歴: すべてのアカウントで共有する、バックグラウンド索引作成の速さ",
+    "source_hash": "72cee36c1064"
+  },
+  "settings.account.account": {
+    "text": "アカウント → アカウント: 表示名、アバター、パスワード",
+    "source_hash": "29e6c7de187e"
+  },
+  "settings.account.sessions": {
+    "text": "アカウント → セッション: この端末、検証、サインアウト",
+    "source_hash": "f5c6f2e6eeff"
+  },
+  "settings.account.notifications": {
+    "text": "アカウント → 通知: デスクトップ通知、本文のプレビュー、この端末から送る通知、サーバーの通知ルール",
+    "source_hash": "96b0c3db6290"
+  },
+  "settings.account.privacy": {
+    "text": "アカウント → セキュリティとプライバシー: URL プレビュー、既読通知、入力中通知",
+    "source_hash": "64e4885135e2"
+  },
+  "settings.account.encryption": {
+    "text": "アカウント → 暗号化: 検証、セキュアバックアップ、リカバリー、ルーム鍵のインポート・エクスポート",
+    "source_hash": "cd63b7e36f99"
+  },
+  "settings.account.search": {
+    "text": "アカウント → 検索履歴: 索引にする内容とルームごとの進み具合",
+    "source_hash": "f7212f33a881"
+  },
+  "settings.ask": {
+    "text": "詳しい手順は、AI アシスタントに聞くか、ユーザーガイドを読んでください。",
+    "source_hash": "d5e8de4992af"
+  },
+  "settings.guide": {
+    "text": "ユーザーガイド（英語）",
+    "source_hash": "86a2a9ba70bc"
+  },
+  "shot.settings": {
+    "text": "カテゴリー一覧を表示したアプリ設定のダイアログ。",
+    "source_hash": "50e8f14579ea"
+  },
+  "missing.heading": {
+    "text": "まだできないこと",
+    "source_hash": "92acde95eedd"
+  },
+  "missing.body": {
+    "text": "音声・ビデオ通話、画面共有、ボット、ウィジェット、外部アプリとの連携。",
+    "source_hash": "bfed657cc891"
+  },
+  "platforms.heading": {
+    "text": "対応プラットフォーム",
+    "source_hash": "ab9bd7584a62"
+  },
+  "platforms.body": {
+    "text": "macOS（Apple シリコン）を正式にサポートしています。リリースは署名・公証済みです。Windows 版と Linux 版は CI でビルドしていますが、動作は未検証です。お使いの方の協力を歓迎します。",
+    "source_hash": "521d52c076e6"
+  },
+  "footer.community": {
+    "text": "コミュニティルーム",
+    "source_hash": "b780447ae283"
+  },
+  "footer.source": {
+    "text": "GitHub のソースコード",
+    "source_hash": "11506c59ef23"
+  },
+  "footer.license": {
+    "text": "MIT または Apache-2.0",
+    "source_hash": "10b6a2ae8a02"
+  },
+  "footer.translation": {
+    "text": "このページは 5 つの言語で読めます。ネイティブスピーカーの方による修正を歓迎します。",
+    "source_hash": "2ae12df63494"
+  },
+  "translating.note": {
+    "text": "このページの一部はまだ翻訳中のため、英語で表示しています。",
+    "source_hash": "3da72ca7c01a"
+  }
+}

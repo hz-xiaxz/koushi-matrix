@@ -586,3 +586,17 @@ jobs:
               release-assets/Koushi-windows-x64-unsigned.exe.sig \
               release-assets/latest-beta.json
           fi
+
+  # Refresh the website after a stable release. It runs after the release is
+  # published, so a site failure never affects the release itself.
+  site:
+    name: Publish website
+    needs: [prepare, publish-release]
+    if: needs.prepare.outputs.prerelease != 'true'
+    permissions:
+      contents: read
+      pages: write
+      id-token: write
+    uses: ./.github/workflows/site.yml
+    with:
+      tag: ${{ needs.prepare.outputs.tag }}

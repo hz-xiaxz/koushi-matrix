@@ -178,6 +178,12 @@ The workflow:
 No public partial release is created when a platform build or verification gate
 fails.
 
+After a stable (non-pre-release) Release is published, the **Publish website**
+job rebuilds <https://shinaoka.github.io/koushi-matrix/> from that tag (see
+[site/README.md](../../site/README.md)). It runs after publication, so a failure
+there marks the workflow run red but does not affect the published Release; fix
+the site and rerun **Publish website** manually.
+
 ## Monitor and verify
 
 Find and follow the run:

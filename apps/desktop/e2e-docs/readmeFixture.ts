@@ -14,6 +14,36 @@ const AKI_ROOM_ID = "!aki:example.invalid";
 const AKI_USER_ID = "@aki:example.invalid";
 const DATE_START = Date.UTC(2026, 2, 10, 9, 0);
 
+/** Every human-readable string the fixture shows, so the website can localize it. */
+export interface FixtureText {
+  spaces: { lattice: string; photon: string; release: string };
+  rooms: { general: string; design: string; papers: string; random: string };
+  people: { aki: string; ren: string; sora: string; you: string };
+  /** Messages 0-8 of the General timeline, in order. */
+  messages: [string, string, string, string, string, string, string, string, string];
+  threadLatest: string;
+  accountTabs: { work: string; home: string; club: string };
+}
+
+export const ENGLISH_FIXTURE_TEXT: FixtureText = {
+  spaces: { lattice: "Lattice Lab", photon: "Photon Reading Group", release: "Release Crew" },
+  rooms: { general: "General", design: "Design", papers: "Papers", random: "Random" },
+  people: { aki: "Aki", ren: "Ren", sora: "Sora", you: "You (Koushi)" },
+  messages: [
+    "Welcome to the planning room.",
+    "I drafted a small outline for today.",
+    "The main flow should stay easy to scan.",
+    "I agree; the quiet layout helps.",
+    "Let's keep the first pass focused.",
+    "The room list reads clearly to me.",
+    "I will check the typography next.",
+    "I will share the final notes here.",
+    "Great, this is ready for a calm review."
+  ],
+  threadLatest: "I can review the edge cases.",
+  accountTabs: { work: "Work", home: "Home", club: "Club" }
+};
+
 export interface ReadmeFixture {
   accountTabs: AccountTabsSnapshot;
   snapshot: DesktopSnapshot;
@@ -71,7 +101,9 @@ function roomListItem(
     has_unread_content: room.unread_count > 0,
     is_attention_highlighted: false,
     has_unread_mention: false,
-    is_muted: false
+    is_muted: false,
+    // A settled access projection, so rows and headers do not read "Checking".
+    access_join_rule: "invite"
   };
 }
 
@@ -117,17 +149,20 @@ function message(
   };
 }
 
-export function createReadmeFixture(source: DesktopSnapshot): ReadmeFixture {
+export function createReadmeFixture(
+  source: DesktopSnapshot,
+  text: FixtureText = ENGLISH_FIXTURE_TEXT
+): ReadmeFixture {
   const session = source.state.domain.session;
   if (session.kind !== "ready") {
     throw new Error("README screenshot requires the ready harness session");
   }
 
-  const general = roomSummary(GENERAL_ROOM_ID, "General");
-  const design = roomSummary(DESIGN_ROOM_ID, "Design", { unreadCount: 3 });
-  const papers = roomSummary(PAPERS_ROOM_ID, "Papers", { favourite: true });
-  const random = roomSummary(RANDOM_ROOM_ID, "Random");
-  const aki = roomSummary(AKI_ROOM_ID, "Aki", {
+  const general = roomSummary(GENERAL_ROOM_ID, text.rooms.general);
+  const design = roomSummary(DESIGN_ROOM_ID, text.rooms.design, { unreadCount: 3 });
+  const papers = roomSummary(PAPERS_ROOM_ID, text.rooms.papers, { favourite: true });
+  const random = roomSummary(RANDOM_ROOM_ID, text.rooms.random);
+  const aki = roomSummary(AKI_ROOM_ID, text.people.aki, {
     isDm: true,
     dmUserIds: [AKI_USER_ID]
   });
@@ -150,12 +185,12 @@ export function createReadmeFixture(source: DesktopSnapshot): ReadmeFixture {
         spaces: [
           {
             space_id: LATTICE_SPACE_ID,
-            display_name: "Lattice Lab",
+            display_name: text.spaces.lattice,
             avatar: null,
             child_room_ids: [GENERAL_ROOM_ID, DESIGN_ROOM_ID, PAPERS_ROOM_ID, RANDOM_ROOM_ID]
           },
-          { space_id: PHOTON_SPACE_ID, display_name: "Photon Reading Group", avatar: null, child_room_ids: [] },
-          { space_id: RELEASE_SPACE_ID, display_name: "Release Crew", avatar: null, child_room_ids: [] }
+          { space_id: PHOTON_SPACE_ID, display_name: text.spaces.photon, avatar: null, child_room_ids: [] },
+          { space_id: RELEASE_SPACE_ID, display_name: text.spaces.release, avatar: null, child_room_ids: [] }
         ],
         rooms: [general, design, papers, random, aki],
         invites: [],
@@ -219,9 +254,9 @@ export function createReadmeFixture(source: DesktopSnapshot): ReadmeFixture {
       active_space_id: LATTICE_SPACE_ID,
       account_home: { ...source.sidebar.account_home, is_active: false, invite_count: 0, attention_count: 0 },
       space_rail: [
-        { space_id: LATTICE_SPACE_ID, display_name: "Lattice Lab", avatar: null, unread_count: 0, highlight_count: 0, is_active: true },
-        { space_id: PHOTON_SPACE_ID, display_name: "Photon Reading Group", avatar: null, unread_count: 0, highlight_count: 0, is_active: false },
-        { space_id: RELEASE_SPACE_ID, display_name: "Release Crew", avatar: null, unread_count: 0, highlight_count: 0, is_active: false }
+        { space_id: LATTICE_SPACE_ID, display_name: text.spaces.lattice, avatar: null, unread_count: 0, highlight_count: 0, is_active: true, access_join_rule: "invite" },
+        { space_id: PHOTON_SPACE_ID, display_name: text.spaces.photon, avatar: null, unread_count: 0, highlight_count: 0, is_active: false, access_join_rule: "invite" },
+        { space_id: RELEASE_SPACE_ID, display_name: text.spaces.release, avatar: null, unread_count: 0, highlight_count: 0, is_active: false, access_join_rule: "invite" }
       ],
       space_rooms: roomItems,
       not_joined_space_rooms: [],
@@ -261,28 +296,28 @@ export function createReadmeFixture(source: DesktopSnapshot): ReadmeFixture {
       can_edit: false,
       reactions: []
     },
-    message(session.user_id, 0, "@aki:example.invalid", "Aki", "Welcome to the planning room."),
-    message(session.user_id, 1, "@aki:example.invalid", "Aki", "I drafted a small outline for today."),
-    message(session.user_id, 2, "@ren:example.invalid", "Ren", "The main flow should stay easy to scan."),
-    message(session.user_id, 3, "@sora:example.invalid", "Sora", "I agree; the quiet layout helps.", {
+    message(session.user_id, 0, "@aki:example.invalid", text.people.aki, text.messages[0]),
+    message(session.user_id, 1, "@aki:example.invalid", text.people.aki, text.messages[1]),
+    message(session.user_id, 2, "@ren:example.invalid", text.people.ren, text.messages[2]),
+    message(session.user_id, 3, "@sora:example.invalid", text.people.sora, text.messages[3], {
       reply_quote: {
         event_id: "$readme-message-00:example.invalid",
         sender: "@aki:example.invalid",
-        sender_label: "Aki",
-        body_preview: "Welcome to the planning room.",
+        sender_label: text.people.aki,
+        body_preview: text.messages[0],
         state: "ready"
       },
       thread_summary: null,
       reactions: []
     }),
-    message(session.user_id, 4, session.user_id, "You (Koushi)", "Let's keep the first pass focused.", {
+    message(session.user_id, 4, session.user_id, text.people.you, text.messages[4], {
       reply_quote: null,
       thread_summary: {
         reply_count: 3,
         latest_event_id: "$readme-thread-latest:example.invalid",
         latest_sender: "@sora:example.invalid",
-        latest_sender_label: "Sora",
-        latest_body_preview: "I can review the edge cases.",
+        latest_sender_label: text.people.sora,
+        latest_body_preview: text.threadLatest,
         latest_timestamp_ms: DATE_START + 26 * 60_000
       },
       reactions: [
@@ -292,8 +327,8 @@ export function createReadmeFixture(source: DesktopSnapshot): ReadmeFixture {
           reacted_by_me: true,
           my_reaction_event_id: "$readme-reaction-thumb:example.invalid",
           sender_preview: [
-            { user_id: session.user_id, display_label: "You (Koushi)" },
-            { user_id: "@ren:example.invalid", display_label: "Ren" }
+            { user_id: session.user_id, display_label: text.people.you },
+            { user_id: "@ren:example.invalid", display_label: text.people.ren }
           ]
         },
         {
@@ -301,14 +336,14 @@ export function createReadmeFixture(source: DesktopSnapshot): ReadmeFixture {
           count: 1,
           reacted_by_me: false,
           my_reaction_event_id: null,
-          sender_preview: [{ user_id: "@aki:example.invalid", display_label: "Aki" }]
+          sender_preview: [{ user_id: "@aki:example.invalid", display_label: text.people.aki }]
         }
       ]
     }),
-    message(session.user_id, 5, session.user_id, "You (Koushi)", "The room list reads clearly to me."),
-    message(session.user_id, 6, session.user_id, "You (Koushi)", "I will check the typography next."),
-    message(session.user_id, 7, session.user_id, "You (Koushi)", "I will share the final notes here."),
-    message(session.user_id, 8, "@aki:example.invalid", "Aki", "Great, this is ready for a calm review.")
+    message(session.user_id, 5, session.user_id, text.people.you, text.messages[5]),
+    message(session.user_id, 6, session.user_id, text.people.you, text.messages[6]),
+    message(session.user_id, 7, session.user_id, text.people.you, text.messages[7]),
+    message(session.user_id, 8, "@aki:example.invalid", text.people.aki, text.messages[8])
   ];
   const key = roomTimelineKey(session.user_id, GENERAL_ROOM_ID);
   const stateUpdate: StateUpdateEnvelope = {
@@ -336,7 +371,7 @@ export function createReadmeFixture(source: DesktopSnapshot): ReadmeFixture {
         id: "harness-account-tab",
         accountKey: "@koushi:work.local",
         homeserver: "work.local",
-        displayName: "Work",
+        displayName: text.accountTabs.work,
         avatarSourceRef: null,
         status: "ready",
         unreadCount: 0
@@ -345,7 +380,7 @@ export function createReadmeFixture(source: DesktopSnapshot): ReadmeFixture {
         id: "readme-personal-tab",
         accountKey: "@koushi:home.local",
         homeserver: "home.local",
-        displayName: "Home",
+        displayName: text.accountTabs.home,
         avatarSourceRef: null,
         status: "ready",
         unreadCount: 4
@@ -354,7 +389,7 @@ export function createReadmeFixture(source: DesktopSnapshot): ReadmeFixture {
         id: "readme-community-tab",
         accountKey: "@koushi:club.local",
         homeserver: "club.local",
-        displayName: "Club",
+        displayName: text.accountTabs.club,
         avatarSourceRef: null,
         status: "ready",
         unreadCount: 12

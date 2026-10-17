@@ -51,6 +51,10 @@ history, not diagnostic information.
 4. If you have a room-key export from another client, select **Import room keys** under **Key management** in the security settings,
    choose the import file, supply its passphrase, and confirm **Import room keys**.
 
+When a missing key arrives later, from your backup or another device, Koushi
+shows the affected messages automatically and makes them searchable; you do not
+need to reopen the room.
+
 Recovery only helps when the needed keys are available from your backup, key
 file, or another eligible device. A verified session does not guarantee that
 all historical messages can be decrypted. Avoid resetting identity or erasing

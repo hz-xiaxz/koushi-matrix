@@ -1,0 +1,41 @@
+{
+  "rooms": [
+    {
+      "room_id": "!site-ja:example.invalid",
+      "messages": [
+        { "event_id": "$site-ja-01", "sender": "@aki:example.invalid", "origin_server_ts": 1773133200000, "body": "Koushi の検索で先月の議事録がすぐ見つかりました。" },
+        { "event_id": "$site-ja-02", "sender": "@ren:example.invalid", "origin_server_ts": 1773133500000, "body": "来週のリリース予定を共有します。" },
+        { "event_id": "$site-ja-03", "sender": "@sora:example.invalid", "origin_server_ts": 1773133800000, "body": "ﾘﾘｰｽﾉｰﾄの下書きは共有フォルダにあります。" }
+      ]
+    },
+    {
+      "room_id": "!site-en:example.invalid",
+      "messages": [
+        { "event_id": "$site-en-01", "sender": "@mia:example.invalid", "origin_server_ts": 1773134100000, "body": "Koushi keeps my work and home accounts open side by side." },
+        { "event_id": "$site-en-02", "sender": "@leo:example.invalid", "origin_server_ts": 1773134400000, "body": "The release checklist is pinned in this room." }
+      ]
+    },
+    {
+      "room_id": "!site-mixed:example.invalid",
+      "messages": [
+        { "event_id": "$site-mixed-01", "sender": "@lin:example.invalid", "origin_server_ts": 1773134700000, "body": "我用 Koushi 搜索加密房间里的旧消息。" },
+        { "event_id": "$site-mixed-02", "sender": "@minji:example.invalid", "origin_server_ts": 1773135000000, "body": "Koushi 덕분에 지난 회의 메모를 바로 찾았어요." },
+        { "event_id": "$site-mixed-03", "sender": "@lin:example.invalid", "origin_server_ts": 1773135300000, "body": "Release notes: 中文、한국어、English all in one room." }
+      ]
+    }
+  ],
+  "scenes": [
+    {
+      "id": "search-mixed",
+      "query": "Koushi",
+      "expect_rooms_min": 3,
+      "expect_event_ids": ["$site-ja-01", "$site-en-01", "$site-mixed-01", "$site-mixed-02"]
+    },
+    {
+      "id": "search-width",
+      "query": "リリース",
+      "expect_rooms_min": 1,
+      "expect_event_ids": ["$site-ja-02", "$site-ja-03"]
+    }
+  ]
+}

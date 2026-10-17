@@ -1,0 +1,119 @@
+name: Publish website
+
+# Builds the five-language site (site/) and deploys it to GitHub Pages.
+# Copy, template and translations come from main; the app and its screenshot lane
+# come from a release tag, so screenshots never show unreleased UI (site/README.md).
+on:
+  workflow_dispatch:
+    inputs:
+      app_ref:
+        description: "App ref to screenshot (default: the latest stable release tag)"
+        required: false
+        default: ""
+  workflow_call:
+    inputs:
+      tag:
+        description: "Stable release tag that was just published"
+        required: true
+        type: string
+
+concurrency:
+  group: pages
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    name: Build site
+    # The github-pages environment only accepts deployments from main.
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    container:
+      image: mcr.microsoft.com/playwright:v1.60.0-noble
+      options: --user 0:0
+    steps:
+      - name: Check out site sources (main)
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: main
+
+      - name: Check translations
+        run: node site/check-translations.mjs
+
+      - name: Resolve release tag and app ref
+        id: refs
+        env:
+          GH_TOKEN: ${{ github.token }}
+          CALL_TAG: ${{ inputs.tag }}
+          APP_REF: ${{ inputs.app_ref }}
+        run: |
+          tag="$CALL_TAG"
+          if [ -z "$tag" ]; then
+            tag="$(curl -fsSL -H "Authorization: Bearer $GH_TOKEN" \
+              "https://api.github.com/repos/$GITHUB_REPOSITORY/releases/latest" \
+              | node -e 'let s="";process.stdin.on("data",d=>s+=d).on("end",()=>console.log(JSON.parse(s).tag_name))')"
+          fi
+          if ! printf '%s' "$tag" | grep -Eq '^v[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "Could not resolve a stable release tag: '$tag'" >&2
+            exit 1
+          fi
+          echo "tag=$tag" >> "$GITHUB_OUTPUT"
+          echo "app_ref=${APP_REF:-$tag}" >> "$GITHUB_OUTPUT"
+          echo "Site version $tag, screenshots from ${APP_REF:-$tag}"
+
+      - name: Check out app (${{ steps.refs.outputs.app_ref }})
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          ref: ${{ steps.refs.outputs.app_ref }}
+          path: app
+
+      - name: Require the site screenshot lane in the app ref
+        env:
+          APP_REF: ${{ steps.refs.outputs.app_ref }}
+        run: |
+          if [ ! -f app/apps/desktop/e2e-docs/site/site-screenshots.spec.ts ]; then
+            echo "$APP_REF has no site screenshot lane; rerun with an app_ref that contains it." >&2
+            exit 1
+          fi
+
+      - name: Install CJK fonts
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-noto-cjk
+          for lang in ja ko zh-cn zh-tw; do
+            fc-list ":lang=$lang" | grep -q . || { echo "No font for $lang" >&2; exit 1; }
+          done
+
+      - name: Generate screenshots
+        run: |
+          npm --prefix app/apps/desktop ci
+          node -e 'const p=require("./app/apps/desktop/node_modules/@playwright/test/package.json"); if (p.version !== "1.60.0") throw new Error(`Unexpected @playwright/test ${p.version}`);'
+          npm --prefix app/apps/desktop run site:screenshots
+
+      - name: Build site
+        env:
+          SITE_TAG: ${{ steps.refs.outputs.tag }}
+        run: node site/build.mjs --tag "$SITE_TAG" --screenshots app/site/screenshots --out site/dist
+
+      - name: Upload Pages artifact
+        uses: actions/upload-pages-artifact@fc324d3547104276b827a68afc52ff2a11cc49c9 # v5.0.0
+        with:
+          path: site/dist
+
+  deploy:
+    name: Deploy to GitHub Pages
+    needs: build
+    runs-on: ubuntu-latest
+    permissions:
+      pages: write
+      id-token: write
+    environment:
+      name: github-pages
+      url: ${{ steps.deployment.outputs.page_url }}
+    steps:
+      - name: Deploy
+        id: deployment
+        uses: actions/deploy-pages@368f82528645a54fb793d4d04e342629a3f51346 # v5.0.1

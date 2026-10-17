@@ -37,6 +37,19 @@ jobs:
       - name: Check help navigation and llms.txt
         run: node scripts/user-help.mjs --check
 
+  website:
+    name: Website (generator / translations)
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: "22"
+      - name: Test the site generator
+        run: node --test site/lib/*.test.mjs
+      - name: Check site translations (stale entries only warn)
+        run: node site/check-translations.mjs
+
   frontend:
     name: Frontend (typecheck / vitest / build / secret-scan)
     runs-on: ubuntu-latest
@@ -111,6 +124,14 @@ jobs:
           after_mtime="$(stat -c %Y "$screenshot")"
           test "$after_mtime" -gt "$before_mtime"
           test -s "$screenshot"
+      # The website lane runs from release tags; exercising it here keeps a tag
+      # from shipping a broken lane. The PNGs are discarded.
+      - name: Install CJK fonts
+        run: |
+          apt-get update -qq
+          DEBIAN_FRONTEND=noninteractive apt-get install -y -qq fonts-noto-cjk
+      - name: Generate website screenshots
+        run: npm --prefix apps/desktop run site:screenshots
 
   browser-headless:
     name: Browser headless (Playwright DOM tier)

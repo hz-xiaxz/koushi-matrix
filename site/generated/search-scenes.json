@@ -1,0 +1,114 @@
+{
+  "search-mixed": {
+    "query": "Koushi",
+    "results": [
+      {
+        "room_id": "!site-mixed:example.invalid",
+        "event_id": "$site-mixed-02",
+        "context_label": null,
+        "sender": "@minji:example.invalid",
+        "timestamp_ms": 1773135000000,
+        "score_millis": 0,
+        "snippet": "Koushi 덕분에 지난 회의 메모를 바로 찾았어요.",
+        "match_field": "MessageBody",
+        "highlights": [
+          {
+            "start_utf16": 0,
+            "end_utf16": 6
+          }
+        ],
+        "match_kind": "Exact"
+      },
+      {
+        "room_id": "!site-mixed:example.invalid",
+        "event_id": "$site-mixed-01",
+        "context_label": null,
+        "sender": "@lin:example.invalid",
+        "timestamp_ms": 1773134700000,
+        "score_millis": 0,
+        "snippet": "我用 Koushi 搜索加密房间里的旧消息。",
+        "match_field": "MessageBody",
+        "highlights": [
+          {
+            "start_utf16": 3,
+            "end_utf16": 9
+          }
+        ],
+        "match_kind": "Exact"
+      },
+      {
+        "room_id": "!site-en:example.invalid",
+        "event_id": "$site-en-01",
+        "context_label": null,
+        "sender": "@mia:example.invalid",
+        "timestamp_ms": 1773134100000,
+        "score_millis": 0,
+        "snippet": "Koushi keeps my work and home accounts open side by side.",
+        "match_field": "MessageBody",
+        "highlights": [
+          {
+            "start_utf16": 0,
+            "end_utf16": 6
+          }
+        ],
+        "match_kind": "Exact"
+      },
+      {
+        "room_id": "!site-ja:example.invalid",
+        "event_id": "$site-ja-01",
+        "context_label": null,
+        "sender": "@aki:example.invalid",
+        "timestamp_ms": 1773133200000,
+        "score_millis": 0,
+        "snippet": "Koushi の検索で先月の議事録がすぐ見つかりました。",
+        "match_field": "MessageBody",
+        "highlights": [
+          {
+            "start_utf16": 0,
+            "end_utf16": 6
+          }
+        ],
+        "match_kind": "Exact"
+      }
+    ]
+  },
+  "search-width": {
+    "query": "リリース",
+    "results": [
+      {
+        "room_id": "!site-ja:example.invalid",
+        "event_id": "$site-ja-03",
+        "context_label": null,
+        "sender": "@sora:example.invalid",
+        "timestamp_ms": 1773133800000,
+        "score_millis": 0,
+        "snippet": "ﾘﾘｰｽﾉｰﾄの下書きは共有フォルダにあります。",
+        "match_field": "MessageBody",
+        "highlights": [
+          {
+            "start_utf16": 0,
+            "end_utf16": 4
+          }
+        ],
+        "match_kind": "Exact"
+      },
+      {
+        "room_id": "!site-ja:example.invalid",
+        "event_id": "$site-ja-02",
+        "context_label": null,
+        "sender": "@ren:example.invalid",
+        "timestamp_ms": 1773133500000,
+        "score_millis": 0,
+        "snippet": "来週のリリース予定を共有します。",
+        "match_field": "MessageBody",
+        "highlights": [
+          {
+            "start_utf16": 3,
+            "end_utf16": 7
+          }
+        ],
+        "match_kind": "Exact"
+      }
+    ]
+  }
+}

@@ -352,6 +352,19 @@ The focused config uses port 5184, one worker, UTC, light theme, and a 2x
 scale factor. The checked-in PNG is the only output under test; CI regenerates
 it and rejects any byte or git-status difference.
 
+## Website screenshot lane
+
+The website lane (`npm --prefix apps/desktop run site:screenshots`,
+`playwright.site.config.ts`, port 5185) uses the same harness and determinism
+settings as the README lane. It captures seven scenes for each of `en`, `ja`,
+`zh-Hans`, `zh-Hant`, and `ko` into the git-ignored `site/screenshots/`. Like
+the README lane, it is synthetic state, not native GUI or homeserver proof.
+Run it in the pinned container with `fonts-noto-cjk` installed. The spec
+fails when CJK characters render as the missing-glyph box. The search scenes
+render the golden output of the `koushi-core` `search::site_scenes` test. The
+full procedure, publishing, and translation workflow are in
+[site/README.md](../../site/README.md).
+
 ## Real-account lanes
 
 Retired. Automated QA must not log in to matrix.org or another external
