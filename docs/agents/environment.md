@@ -273,7 +273,7 @@ node scripts/desktop-linux-gui-qa.mjs --list
 ```
 
 For a direct release-binary launch check under WSLg, use the
-[Linux/WSL release and GUI procedure in the README](../../README.md#build-on-linux--wsl-ubuntu-2404).
+[Linux/WSL release and GUI procedure](../development.md#build-on-linux--wsl-ubuntu-2404).
 
 Reuse the existing Cargo, npm, and GUI target caches during the inner loop.
 

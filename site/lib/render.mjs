@@ -24,6 +24,8 @@ const BLOG = {
 
 const DOWNLOAD = `${REPO_URL}/releases/latest/download`;
 
+const GITHUB_ICON = '<svg viewBox="0 0 16 16" width="18" height="18" aria-hidden="true" fill="currentColor"><path d="M8 0C3.58 0 0 3.58 0 8c0 3.54 2.29 6.53 5.47 7.59.4.07.55-.17.55-.38 0-.19-.01-.82-.01-1.49-2.01.37-2.53-.49-2.69-.94-.09-.23-.48-.94-.82-1.13-.28-.15-.68-.52-.01-.53.63-.01 1.08.58 1.23.82.72 1.21 1.87.87 2.33.66.07-.52.28-.87.51-1.07-1.78-.2-3.64-.89-3.64-3.95 0-.87.31-1.59.82-2.15-.08-.2-.36-1.02.08-2.12 0 0 .67-.21 2.2.82.64-.18 1.32-.27 2-.27.68 0 1.36.09 2 .27 1.53-1.04 2.2-.82 2.2-.82.44 1.1.16 1.92.08 2.12.51.56.82 1.27.82 2.15 0 3.07-1.87 3.75-3.65 3.95.29.25.54.73.54 1.48 0 1.07-.01 1.93-.01 2.2 0 .21.15.46.55.38A8.013 8.013 0 0016 8c0-4.42-3.58-8-8-8z"/></svg>';
+
 const PAIN_POINTS = [
   { id: "accounts" },
   { id: "email", shot: "notifications" },
@@ -79,7 +81,9 @@ export function renderPage({ locale, strings, staleKeys = [], englishStrings = s
   const up = locale === "en" ? "" : "../";
   const shot = (scene, altKey, cls = "") => {
     const src = `${up}screenshots/${locale}/${scene}.png`;
-    return `<figure class="shot ${cls}"><a href="${src}"><img src="${src}" alt="${t(altKey)}" loading="lazy" decoding="async"></a></figure>`;
+    // The hero image is above the fold, so it loads eagerly; the rest wait for scroll.
+    const loading = cls === "hero-shot" ? "eager" : "lazy";
+    return `<figure class="shot ${cls}"><a href="${src}"><img src="${src}" alt="${t(altKey)}" loading="${loading}" decoding="async"></a></figure>`;
   };
   const blog = (kind) => (locale === "ja" ? BLOG[kind].ja : BLOG[kind].other);
   const help = (page) => `${REPO_URL}/blob/${escapeHtml(release.tag)}/docs/help/${page}`;
@@ -124,7 +128,10 @@ export function renderPage({ locale, strings, staleKeys = [], englishStrings = s
   <body>
     <header class="site-header">
       <a class="brand" href="${up}${localePath(locale) || "./"}"><img src="${up}koushi-photon.svg" alt="" width="32" height="32"><span>Koushi</span></a>
-      <nav aria-label="${t("nav.language")}"><ul class="languages">${switcher}</ul></nav>
+      <div class="header-end">
+        <nav aria-label="${t("nav.language")}"><ul class="languages">${switcher}</ul></nav>
+        <a class="github-link" href="${REPO_URL}">${GITHUB_ICON}<span>GitHub</span></a>
+      </div>
     </header>
     ${stale.size > 0 ? `<p class="translating-note" role="note">${t("translating.note")}</p>` : ""}
     <main>
@@ -134,6 +141,7 @@ export function renderPage({ locale, strings, staleKeys = [], englishStrings = s
           <p class="lede">${t("hero.lede")}</p>
           <p class="cta">
             <a class="button" href="${DOWNLOAD}/Koushi-macos-arm64.dmg">${t("hero.download")}</a>
+            <a class="button secondary" href="${REPO_URL}">${GITHUB_ICON}${t("hero.github")}</a>
             <span class="version">${t("hero.version", { version: release.version })}</span>
           </p>
           <p class="other-platforms">${t("hero.other")}

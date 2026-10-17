@@ -13,6 +13,11 @@ the conflict must be resolved by amending one of them explicitly.
   regenerate llms.txt, and check links. Design proposals and worklogs do not
   establish which features a released version supports.
 
+## Development
+
+- [Develop Koushi](development.md) — building, testing, and packaging from
+  source on macOS, Linux/WSL, and Windows.
+
 ## Normative (long-term, kept current)
 
 These documents describe what the product and codebase must look like. They are

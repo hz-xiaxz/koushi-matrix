@@ -23,6 +23,10 @@
     "text": "macOS용 다운로드 (Apple 실리콘)",
     "source_hash": "d2b06e12c65c"
   },
+  "hero.github": {
+    "text": "GitHub에서 보기",
+    "source_hash": "20672423d716"
+  },
   "hero.version": {
     "text": "버전 {version}",
     "source_hash": "a18745121bb8"

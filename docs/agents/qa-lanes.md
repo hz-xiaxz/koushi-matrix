@@ -342,7 +342,7 @@ browser harness with synthetic state only. It is not native GUI, Tauri IPC, or
 homeserver proof, and it must not be used as a substitute for those lanes.
 
 Run the deterministic generator from the repository root in the pinned
-Playwright container documented in `README.md`:
+Playwright container documented in [Develop Koushi](../development.md#deterministic-readme-screenshot):
 
 ```bash
 npm --prefix apps/desktop run docs:screenshot

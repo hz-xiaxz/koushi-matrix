@@ -46,7 +46,7 @@ if (process.argv[1] && resolve(process.argv[1]) === fileURLToPath(import.meta.ur
     const missing = checkLinuxBuildDeps();
     if (missing.length) {
       console.error(`Missing Linux build dependencies:\n  ${missing.join("\n  ")}`);
-      console.error("See README.md: Build on Linux / WSL (Ubuntu 24.04). Install the system packages, then rerun this check.");
+      console.error("See docs/development.md: Build on Linux / WSL (Ubuntu 24.04). Install the system packages, then rerun this check.");
       process.exitCode = 1;
     } else {
       console.log("Linux compiler, packaging tool, and pkg-config dependencies are available.");
