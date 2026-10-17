@@ -30,6 +30,15 @@ ignore = [
     # (crates/matrix-sdk/src/event_handler/mod.rs), which is upstream-owned,
     # and there is no available fix.
     "RUSTSEC-2026-0319",
+    # RUSTSEC-2026-0367/0368/0369: zip < 9 extraction can keep SUID/SGID bits
+    # and follow symlinks outside the destination. zip 4 enters only through
+    # tauri-plugin-updater (2.14.0 still requires zip ^4), which extracts on
+    # Windows only, and only an update archive that already passed the
+    # minisign verify_signature check against our pinned public key. Drop
+    # these once the updater moves to zip >= 9.
+    "RUSTSEC-2026-0367",
+    "RUSTSEC-2026-0368",
+    "RUSTSEC-2026-0369",
 ]
 
 [licenses]
