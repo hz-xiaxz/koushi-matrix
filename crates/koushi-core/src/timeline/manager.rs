@@ -1793,6 +1793,13 @@ impl TimelineManagerActor {
         // the SDK Timeline handle — no dedicated success event per spec.
         if matches!(key.kind, TimelineKind::Room { .. }) {
             self.clear_thread_root_projections_for_room(key).await;
+            // #1494: the generation is invalidated, so the retired observer
+            // cannot project after this.
+            let _ = self
+                .emit_action_reliable(AppAction::SenderDeviceAdvisoriesCleared {
+                    room_id: key.room_id().to_owned(),
+                })
+                .await;
         } else {
             self.timeline_actor_generations
                 .invalidate_and_quiesce(key)

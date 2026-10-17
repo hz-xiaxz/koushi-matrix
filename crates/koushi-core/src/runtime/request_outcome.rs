@@ -263,6 +263,12 @@ pub enum RequestOutcome {
         room_id: String,
         generation: u64,
     },
+    /// #1494: `StartDirectMessage { missing: Report }` found no direct chat;
+    /// a benign no-op.
+    DirectMessageMissing {
+        request_id: RequestId,
+        generation: u64,
+    },
     RoomJoined {
         request_id: RequestId,
         room_id: String,
@@ -432,6 +438,7 @@ impl fmt::Debug for RequestOutcome {
             Self::RoomCreated { .. } => "RoomCreated",
             Self::SpaceCreated { .. } => "SpaceCreated",
             Self::DirectMessageStarted { .. } => "DirectMessageStarted",
+            Self::DirectMessageMissing { .. } => "DirectMessageMissing",
             Self::RoomJoined { .. } => "RoomJoined",
             Self::InviteWorkflow { .. } => "InviteWorkflow",
             Self::Directory { .. } => "Directory",
@@ -663,6 +670,9 @@ enum EventProgress {
         request_id: RequestId,
         room_id: String,
     },
+    DirectMessageMissing {
+        request_id: RequestId,
+    },
     RoomJoined {
         request_id: RequestId,
         room_id: String,
@@ -846,6 +856,7 @@ impl EventProgress {
             | Self::RoomCreated { request_id, .. }
             | Self::SpaceCreated { request_id, .. }
             | Self::DirectMessageStarted { request_id, .. }
+            | Self::DirectMessageMissing { request_id }
             | Self::RoomJoined { request_id, .. }
             | Self::Authenticated { request_id, .. }
             | Self::SignedOut { request_id, .. }
@@ -1163,6 +1174,15 @@ fn room_event_progress(
                 request_id,
                 room_id,
             }))
+        }
+        RoomEvent::DirectMessageMissing {
+            request_id: event_request_id,
+        } if matches!(
+            expectation,
+            RequestOutcomeExpectation::DirectMessageStarted { .. }
+        ) && event_request_id == request_id =>
+        {
+            Ok(Some(EventProgress::DirectMessageMissing { request_id }))
         }
         RoomEvent::RoomJoined {
             request_id: event_request_id,
@@ -1994,6 +2014,18 @@ fn snapshot_outcome_for_progress(
             Some(RequestOutcome::DirectMessageStarted {
                 request_id: *request_id,
                 room_id: room_id.clone(),
+                generation: snapshot.generation,
+            })
+        }
+        (
+            EventProgress::DirectMessageMissing { .. },
+            RequestOutcomeExpectation::DirectMessageStarted {
+                request_id,
+                account_key,
+            },
+        ) if account_matches(&snapshot.state, Some(account_key)) => {
+            Some(RequestOutcome::DirectMessageMissing {
+                request_id: *request_id,
                 generation: snapshot.generation,
             })
         }

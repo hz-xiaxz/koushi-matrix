@@ -164,6 +164,17 @@ impl fmt::Debug for CreateRoomParentSpace {
     }
 }
 
+/// What `StartDirectMessage` does when the user has no reusable direct chat
+/// with the target (#1494).
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq)]
+pub enum DirectMessageMissingPolicy {
+    /// Create one (the SDK's get-or-create).
+    #[default]
+    Create,
+    /// Create nothing and report `RoomEvent::DirectMessageMissing`.
+    Report,
+}
+
 pub enum RoomCommand {
     CreateRoom {
         request_id: RequestId,
@@ -264,6 +275,7 @@ pub enum RoomCommand {
     StartDirectMessage {
         request_id: RequestId,
         user_id: String,
+        missing: DirectMessageMissingPolicy,
     },
     JoinRoom {
         request_id: RequestId,
@@ -563,10 +575,15 @@ impl fmt::Debug for RoomCommand {
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
                 .finish(),
-            Self::StartDirectMessage { request_id, .. } => formatter
+            Self::StartDirectMessage {
+                request_id,
+                missing,
+                ..
+            } => formatter
                 .debug_struct("StartDirectMessage")
                 .field("request_id", request_id)
                 .field("user_id", &"UserId(..)")
+                .field("missing", missing)
                 .finish(),
             Self::JoinRoom { request_id, .. } => formatter
                 .debug_struct("JoinRoom")

@@ -942,8 +942,10 @@ impl RoomActor {
             RoomCommand::StartDirectMessage {
                 request_id,
                 user_id,
+                missing,
             } => {
-                self.handle_start_direct_message(request_id, user_id).await;
+                self.handle_start_direct_message(request_id, user_id, missing)
+                    .await;
             }
             RoomCommand::JoinRoom {
                 request_id,

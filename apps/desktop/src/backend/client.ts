@@ -54,6 +54,7 @@ import type {
   AttachmentFilter,
   AttachmentSort,
   CreateRoomRequest,
+  AdvisoryDirectMessageSettlement,
   CreateRoomSettlement,
   RoomAddressPreview,
   HistoryExportLabels,
@@ -1395,6 +1396,20 @@ export class TauriDesktopApi implements DesktopApi {
 
   async startDirectMessage(userId: string): Promise<CommandSettlement> {
     return this.invokeCommand<CommandSettlement>("start_direct_message", { userId });
+  }
+
+  async startAdvisoryDirectMessage(
+    userId: string,
+    document: ComposerDocument,
+    createIfMissing: boolean,
+    occupiedEditorRoomId: string | null
+  ): Promise<AdvisoryDirectMessageSettlement> {
+    return this.invokeCommand<AdvisoryDirectMessageSettlement>("start_advisory_direct_message", {
+      userId,
+      document,
+      createIfMissing,
+      occupiedEditorRoomId
+    });
   }
 
   async inviteUser(roomId: string, userId: string): Promise<CommandSettlement> {

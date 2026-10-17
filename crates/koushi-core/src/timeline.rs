@@ -68,6 +68,7 @@ mod relay;
 mod reply_quote_hydration;
 mod residency;
 mod room_key_recovery;
+mod sender_device_advisories;
 #[cfg(test)]
 mod test_support;
 mod thread_projection;

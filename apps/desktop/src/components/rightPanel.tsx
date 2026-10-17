@@ -56,6 +56,7 @@ import {
 import { RecoveryPanel } from "./auth";
 import {
   TimelineView,
+  type OpenSenderDeviceAdvisory,
   type TimelineDiagnosticLogEntry,
   type TimelineRowActionHandlers,
   type TimelineTransport
@@ -178,6 +179,7 @@ export function ContextualRightPanel({
   onSetLocalUserAlias = () => undefined,
   onSetRoomNotificationMode = () => undefined,
   onOpenSenderProfile,
+  onOpenSenderDeviceAdvisory,
   onStartDirectMessage = () => undefined,
   onUpdateMemberRole = () => undefined,
   onUpdateSpaceMemberRole = () => undefined,
@@ -351,6 +353,8 @@ export function ContextualRightPanel({
   onAcceptInvite?: (roomId: string) => void;
   onJoinRoom?: (roomId: string) => void;
   onOpenSenderProfile?: TimelineRowActionHandlers["onOpenSenderProfile"];
+  /** #1494: thread and focused rows read the room's sender device advisories. */
+  onOpenSenderDeviceAdvisory?: OpenSenderDeviceAdvisory;
   onStartDirectMessage?: (userId: string) => void;
   onUpdateMemberRole?: (
     roomId: string,
@@ -503,6 +507,9 @@ export function ContextualRightPanel({
       onOpenSenderProfile?.(...args)
   );
   const threadStartDirectMessageStable = useStableEvent(onStartDirectMessage);
+  const threadOpenSenderDeviceAdvisoryStable = useStableEvent(
+    onOpenSenderDeviceAdvisory ?? (() => undefined)
+  );
   const threadResolveComposerKeyActionStable = useStableEvent(onResolveComposerKeyAction);
   const threadSetLocalUserAliasStable = useStableEvent(onSetLocalUserAlias);
   const threadTimelineDiagnosticLogEntryStable = useStableEvent(
@@ -1074,6 +1081,12 @@ export function ContextualRightPanel({
               accountTabId={selectedAccountTabId ?? undefined}
               transport={focusedTimelineTransport}
               suppressPaginationUi={true}
+              senderDeviceAdvisoryUserIds={
+                snapshot.state.domain.sender_device_advisories.rooms[focusedRoomId]
+              }
+              onOpenSenderDeviceAdvisory={
+                onOpenSenderDeviceAdvisory ? threadOpenSenderDeviceAdvisoryStable : undefined
+              }
               onReply={onReply}
               onOpenMatrixTarget={onOpenMatrixTarget}
               resolveComposerKeyAction={onResolveComposerKeyAction}
@@ -1181,6 +1194,12 @@ export function ContextualRightPanel({
             ignoredUserIds={snapshot.state.domain.profile.ignored_user_ids}
             onOpenMatrixTarget={onOpenMatrixTarget ? threadOpenMatrixTargetStable : undefined}
             onOpenSenderProfile={onOpenSenderProfile ? threadOpenSenderProfileStable : undefined}
+            senderDeviceAdvisoryUserIds={
+              snapshot.state.domain.sender_device_advisories.rooms[threadRoomId]
+            }
+            onOpenSenderDeviceAdvisory={
+              onOpenSenderDeviceAdvisory ? threadOpenSenderDeviceAdvisoryStable : undefined
+            }
             onStartDirectMessage={threadStartDirectMessageStable}
             onOpenThread={ignoreOpenThread}
             resolveComposerKeyAction={threadResolveComposerKeyActionStable}

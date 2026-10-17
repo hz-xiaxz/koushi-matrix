@@ -698,6 +698,12 @@ describe("TauriDesktopApi", () => {
     await api.declineInvite("!decline:example.invalid");
     await api.joinRoom("!child:example.invalid");
     await api.startDirectMessage("@target:example.invalid");
+    await api.startAdvisoryDirectMessage(
+      "@target:example.invalid",
+      documentFromText("advice"),
+      false,
+      "!open:example.invalid"
+    );
     await api.inviteUser("!room:example.invalid", "@target:example.invalid");
 
     expect(invoke).toHaveBeenCalledWith("accept_invite", {
@@ -711,6 +717,12 @@ describe("TauriDesktopApi", () => {
     });
     expect(invoke).toHaveBeenCalledWith("start_direct_message", {
       userId: "@target:example.invalid"
+    });
+    expect(invoke).toHaveBeenCalledWith("start_advisory_direct_message", {
+      userId: "@target:example.invalid",
+      document: documentFromText("advice"),
+      createIfMissing: false,
+      occupiedEditorRoomId: "!open:example.invalid"
     });
     expect(invoke).toHaveBeenCalledWith("invite_user", {
       roomId: "!room:example.invalid",

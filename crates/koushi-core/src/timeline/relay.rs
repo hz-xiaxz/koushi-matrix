@@ -716,6 +716,7 @@ impl TimelineActor {
             ]);
         }
         drop(activity_commit_lease);
+        self.publish_sender_device_window();
 
         if emitted
             && matches!(self.key.kind, TimelineKind::Thread { .. })
@@ -1156,6 +1157,7 @@ impl TimelineActor {
             ]);
         }
         drop(activity_commit_lease);
+        self.publish_sender_device_window();
         if let Some(receipt_observation) = receipt_observation
             && !emit_receipt_observation_actions(
                 self.session.as_ref(),

@@ -64,6 +64,7 @@ import {
   roomLatestDisplayEventId,
   type TimelineDiagnosticLogEntry,
   type TimelineDiagnostics,
+  type OpenSenderDeviceAdvisory,
   type TimelineRowActionHandlers,
   type TimelineThreadAttention,
   type TimelineTransport,
@@ -731,6 +732,7 @@ export function TimelinePane({
   onOpenMatrixTarget,
   onOpenSenderProfile,
   onStartDirectMessage,
+  onOpenSenderDeviceAdvisory,
   onRescheduleScheduledSend,
   onResultSelect,
   onScheduleSend,
@@ -788,6 +790,7 @@ export function TimelinePane({
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];
   onOpenSenderProfile?: TimelineRowActionHandlers["onOpenSenderProfile"];
   onStartDirectMessage?: (userId: string) => void;
+  onOpenSenderDeviceAdvisory?: OpenSenderDeviceAdvisory;
   onRescheduleScheduledSend: (scheduledId: string, body: string, sendAtMs: number) => void;
   onResultSelect: (roomId: string, eventId: string) => void;
   onScheduleSend: (sendAtMs: number, document: ComposerDocument) => void;
@@ -956,6 +959,9 @@ export function TimelinePane({
   );
   const onOpenSenderProfileStable = useStableEvent(
     onOpenSenderProfile ?? (() => undefined)
+  );
+  const onOpenSenderDeviceAdvisoryStable = useStableEvent(
+    onOpenSenderDeviceAdvisory ?? (() => undefined)
   );
   const onStartDirectMessageStable = useStableEvent(
     onStartDirectMessage ?? (() => undefined)
@@ -1189,6 +1195,12 @@ export function TimelinePane({
               }
               onStartDirectMessage={
                 onStartDirectMessage ? onStartDirectMessageStable : undefined
+              }
+              senderDeviceAdvisoryUserIds={
+                snapshot.state.domain.sender_device_advisories.rooms[timelineRoomId]
+              }
+              onOpenSenderDeviceAdvisory={
+                onOpenSenderDeviceAdvisory ? onOpenSenderDeviceAdvisoryStable : undefined
               }
               onOpenThread={onOpenThreadStable}
               resolveComposerKeyAction={resolveComposerKeyActionStable}

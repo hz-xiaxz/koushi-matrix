@@ -73,6 +73,7 @@ pub struct StateDeltaChangedSlices {
     pub account_management_capabilities: Option<AccountManagementCapabilities>,
     pub account_notifications: Option<koushi_state::AccountNotificationsState>,
     pub contact_security: Option<koushi_state::ContactSecurityState>,
+    pub sender_device_advisories: Option<koushi_state::SenderDeviceAdvisoriesState>,
     pub soft_logout_reauth: Option<SoftLogoutReauthState>,
     pub qr_login: Option<QrLoginState>,
     pub settings: Option<SettingsState>,

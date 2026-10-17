@@ -3,6 +3,7 @@ import {
 ThreadRootStatusPlaceholder,
 TimelineItemRow,
 aliasTargetIsActive,
+type OpenSenderDeviceAdvisory,
 type TimelineAliasTarget,
 type TimelineRowActionHandlers,
 type TimelineThreadAttention
@@ -69,7 +70,7 @@ import {
 } from "./timeline/TimelineViewportScheduler";
 import { createTimelineViewportTransactionController, VIEWPORT_ANCHOR_TOLERANCE_PX } from "./timeline/TimelineViewportTransaction";
 export { TimelineItemRow };
-export type { TimelineRowActionHandlers,TimelineThreadAttention };
+export type { OpenSenderDeviceAdvisory, TimelineRowActionHandlers, TimelineThreadAttention };
 export type { TimelineTransport } from "./timeline/TimelineTransport";
 
 /**
@@ -322,6 +323,8 @@ export const TimelineView = memo(function TimelineView({
   onOpenMatrixTarget,
   onOpenSenderProfile,
   onStartDirectMessage,
+  senderDeviceAdvisoryUserIds,
+  onOpenSenderDeviceAdvisory,
   onOpenThread = () => undefined,
   resolveComposerKeyAction = ignoreComposerKeyAction,
   liveSignals,
@@ -373,6 +376,9 @@ export const TimelineView = memo(function TimelineView({
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];
   onOpenSenderProfile?: TimelineRowActionHandlers["onOpenSenderProfile"];
   onStartDirectMessage?: (userId: string) => void;
+  /** #1494: `sender_device_advisories.rooms[roomId]`, rendered as-is. */
+  senderDeviceAdvisoryUserIds?: readonly string[];
+  onOpenSenderDeviceAdvisory?: OpenSenderDeviceAdvisory;
   onOpenThread?: TimelineRowActionHandlers["onOpenThread"];
   resolveComposerKeyAction?: ResolveComposerKeyAction;
   liveSignals?: LiveSignalsState;
@@ -3672,6 +3678,10 @@ export const TimelineView = memo(function TimelineView({
                 onOpenMatrixTarget={onOpenMatrixTarget}
                 onOpenSenderProfile={onOpenSenderProfile}
                 onStartDirectMessage={onStartDirectMessage}
+                senderHasUnconfirmedDevices={Boolean(
+                  item.sender && senderDeviceAdvisoryUserIds?.includes(item.sender)
+                )}
+                onOpenSenderDeviceAdvisory={onOpenSenderDeviceAdvisory}
                 density={density}
                 onRequestAvatarThumbnail={
                   enableAvatarThumbnailDownloads ? onRequestAvatarThumbnail : undefined

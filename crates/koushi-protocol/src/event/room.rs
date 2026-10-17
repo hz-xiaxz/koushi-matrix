@@ -74,6 +74,11 @@ pub enum RoomEvent {
         request_id: RequestId,
         room_id: String,
     },
+    /// #1494: `StartDirectMessage { missing: Report }` found no reusable
+    /// direct chat and created nothing.
+    DirectMessageMissing {
+        request_id: RequestId,
+    },
     RoomJoined {
         request_id: RequestId,
         room_id: String,
@@ -279,6 +284,10 @@ impl fmt::Debug for RoomEvent {
                 .debug_struct("DirectMessageStarted")
                 .field("request_id", request_id)
                 .field("room_id", &"RoomId(..)")
+                .finish(),
+            Self::DirectMessageMissing { request_id } => formatter
+                .debug_struct("DirectMessageMissing")
+                .field("request_id", request_id)
                 .finish(),
             Self::RoomJoined { request_id, .. } => formatter
                 .debug_struct("RoomJoined")

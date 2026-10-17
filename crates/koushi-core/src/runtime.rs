@@ -2889,6 +2889,24 @@ impl AppActor {
                             self.handle_app_effects(request_id, effects).await;
                             true
                         }
+                        AppCommand::SeedComposerDraft {
+                            request_id,
+                            expected_account,
+                            room_id,
+                            document,
+                        } => {
+                            if !composer_draft_account_matches(&self.state, &expected_account) {
+                                return false;
+                            }
+                            let effects = self
+                                .reduce_app_action(AppAction::ComposerDraftSeeded {
+                                    room_id,
+                                    document,
+                                })
+                                .await;
+                            self.handle_app_effects(request_id, effects).await;
+                            true
+                        }
                         AppCommand::SetThreadComposerDraft {
                             request_id,
                             expected_account,

@@ -26,6 +26,7 @@ impl CoreCommand {
                 | AppCommand::SetComposerReplyTarget { request_id, .. }
                 | AppCommand::CancelComposerReply { request_id }
                 | AppCommand::SetComposerDraft { request_id, .. }
+                | AppCommand::SeedComposerDraft { request_id, .. }
                 | AppCommand::SetThreadComposerDraft { request_id, .. }
                 | AppCommand::AcceptComposerDraft { request_id, .. }
                 | AppCommand::SetUploadStaging { request_id, .. }
@@ -267,8 +268,8 @@ pub use account::{
 };
 pub use app::{AppCommand, EventNavigationMissingTargetPolicy};
 pub use room::{
-    CreateRoomOptions, CreateRoomParentSpace, CreateRoomVisibility, RoomAccessDraftCommand,
-    RoomCommand,
+    CreateRoomOptions, CreateRoomParentSpace, CreateRoomVisibility, DirectMessageMissingPolicy,
+    RoomAccessDraftCommand, RoomCommand,
 };
 pub use search::{SearchCommand, SearchScope, ThreadsListCommand};
 pub use timeline::{

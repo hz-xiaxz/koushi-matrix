@@ -207,6 +207,16 @@ pub enum AppAction {
     },
     /// User info closed; stop showing and refreshing the contact's details.
     ContactSecurityClosed,
+    /// The Room timeline actor re-classified its window's senders from the
+    /// crypto store (#1494). An empty set removes the room's entry.
+    SenderDeviceAdvisoriesUpdated {
+        room_id: String,
+        user_ids: std::collections::BTreeSet<String>,
+    },
+    /// The Room timeline actor stopped observing this room.
+    SenderDeviceAdvisoriesCleared {
+        room_id: String,
+    },
     AccountManagementCapabilitiesLoaded {
         change_password: bool,
     },
@@ -1450,6 +1460,12 @@ pub enum AppAction {
         room_id: String,
         document: crate::ComposerDocument,
         revision: ComposerDraftRevision,
+    },
+    /// The advisory direct message seeds its draft (#1494). Core chooses the
+    /// revision; only an empty stored draft is written.
+    ComposerDraftSeeded {
+        room_id: String,
+        document: crate::ComposerDocument,
     },
     SendTextSubmitted {
         room_id: String,

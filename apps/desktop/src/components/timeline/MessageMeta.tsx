@@ -1,9 +1,10 @@
-import { Check } from "lucide-react";
+import { Check, Info } from "lucide-react";
 import type { ReactNode } from "react";
 
 import { t } from "../../i18n/messages";
 import type { PresenceKind } from "../../domain/types";
 import { uiDateTimeFormat } from "../../domain/intlFormatCache";
+import { Tooltip } from "../Tooltip";
 
 function formatMessageTimestamp(timestampMs: number | null): string | null {
   if (timestampMs === null) {
@@ -41,7 +42,8 @@ export function MessageMeta({
   isRedacted,
   sendStateKind,
   presence,
-  onOpenSenderProfile
+  onOpenSenderProfile,
+  onOpenSenderDeviceAdvisory
 }: {
   senderDisplayLabel: string;
   timestampMs: number | null;
@@ -50,6 +52,11 @@ export function MessageMeta({
   sendStateKind: string | null;
   presence?: import("../../domain/types").PresenceKind;
   onOpenSenderProfile?: () => void;
+  /**
+   * #1494: present only when Rust lists this sender in
+   * `sender_device_advisories.rooms[roomId]`; renders the muted mark.
+   */
+  onOpenSenderDeviceAdvisory?: () => void;
 }): ReactNode {
   const messageTimestamp = formatMessageTimestamp(timestampMs);
   const sendStateLabel =
@@ -96,6 +103,27 @@ export function MessageMeta({
       ) : (
         <span className="sender" dir="auto">{senderDisplayLabel}</span>
       )}
+      {onOpenSenderDeviceAdvisory ? (
+        <Tooltip
+          label={t("people.unverifiedDevices.tooltipBody", { name: senderDisplayLabel })}
+          placement="above"
+        >
+          {(tooltipProps) => (
+            <button
+              className="sender-device-advisory"
+              type="button"
+              aria-label={t("people.unverifiedDevices.badgeLabel", { name: senderDisplayLabel })}
+              {...tooltipProps}
+              onClick={(event) => {
+                event.stopPropagation();
+                onOpenSenderDeviceAdvisory();
+              }}
+            >
+              <Info size={11} aria-hidden="true" />
+            </button>
+          )}
+        </Tooltip>
+      ) : null}
       {messageTimestamp ? (
         <time className="message-timestamp" dateTime={new Date(timestampMs!).toISOString()}>
           {messageTimestamp}

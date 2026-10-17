@@ -308,6 +308,7 @@ impl CoreCommandPolicy for CoreCommand {
                         | AppCommand::RescheduleScheduledSend { .. }
                         | AppCommand::SetUploadStaging { .. }
                         | AppCommand::AcceptComposerDraft { .. }
+                        | AppCommand::SeedComposerDraft { .. }
                         | AppCommand::UpdateStagedUploadCaption { .. }
                         | AppCommand::UpdateStagedUploadCompression { .. }
                         | AppCommand::SelectStagedUploadOutput { .. }

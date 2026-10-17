@@ -4,9 +4,9 @@ use super::directory::{
     build_decline_invite_command, build_invite_targets_command, build_invite_user_command,
     build_invite_user_to_space_command, build_join_room_command,
     build_open_invite_workflow_command, build_remove_invite_target_command,
-    build_search_invite_targets_command, build_select_invite_target_command,
-    build_set_invite_scope_command, build_set_space_child_command,
-    build_start_direct_message_command,
+    build_search_invite_targets_command, build_seed_composer_draft_command,
+    build_select_invite_target_command, build_set_invite_scope_command,
+    build_set_space_child_command, build_start_direct_message_command,
 };
 use super::navigation::SELECT_ROOM_EVENT_TIMEOUT;
 use super::*;
@@ -1119,7 +1119,11 @@ pub async fn start_direct_message(
     let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
     event_conn
-        .command(build_start_direct_message_command(request_id, user_id))
+        .command(build_start_direct_message_command(
+            request_id,
+            user_id,
+            koushi_protocol::command::DirectMessageMissingPolicy::Create,
+        ))
         .await
         .map_err(|e| format!("command submit failed: {e}"))?;
     // Core settles the event payload and the same-account room projection as
@@ -1145,6 +1149,103 @@ pub async fn start_direct_message(
         .map_err(super::navigation::invoke_error_from_select_room_error)?;
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(command_settlement(selected_generation))
+}
+
+/// #1494: open (or, only when `create_if_missing`, create) the direct chat
+/// with `user_id` and seed the advisory draft before selecting it. Without
+/// `create_if_missing`, a missing direct chat settles as a benign no-op with
+/// `status = "missing"` and nothing is created. The renderer passes
+/// `occupied_editor_room_id` when the open timeline's editor shows text.
+#[tauri::command]
+pub async fn start_advisory_direct_message(
+    account_tab_id: Option<String>,
+    user_id: String,
+    document: koushi_state::ComposerDocument,
+    create_if_missing: bool,
+    occupied_editor_room_id: Option<String>,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendAdvisoryDirectMessageSettlement, String> {
+    let mut event_conn = account_connection(state.inner(), account_tab_id.as_deref()).await?;
+    let baseline = event_conn.versioned_snapshot();
+    let account_key = account_key_from_app_state(&baseline.state);
+    let koushi_state::SessionState::Ready(info) = &baseline.state.session else {
+        return Err("advisory direct message: session required".to_owned());
+    };
+    let expected_account = koushi_core::store::session_key_id_from_info(info);
+    let missing = if create_if_missing {
+        koushi_protocol::command::DirectMessageMissingPolicy::Create
+    } else {
+        koushi_protocol::command::DirectMessageMissingPolicy::Report
+    };
+    let request_id = event_conn.next_request_id();
+    event_conn
+        .command(build_start_direct_message_command(
+            request_id, user_id, missing,
+        ))
+        .await
+        .map_err(|e| format!("command submit failed: {e}"))?;
+    let outcome = event_conn
+        .wait_for_request_outcome(
+            OutcomeCorrelation::Request(request_id),
+            RequestOutcomeExpectation::DirectMessageStarted {
+                request_id,
+                account_key,
+            },
+            baseline.generation,
+            tokio::time::Instant::now() + ROOM_OPERATION_EVENT_TIMEOUT,
+        )
+        .await
+        .map_err(|error| invoke_error_from_request_outcome("advisory direct message", error))?;
+    let room_id = match outcome {
+        RequestOutcome::DirectMessageMissing { generation, .. } => {
+            return Ok(FrontendAdvisoryDirectMessageSettlement {
+                settlement: command_settlement(generation),
+                status: FrontendAdvisoryDirectMessageStatus::Missing,
+                draft: None,
+            });
+        }
+        RequestOutcome::DirectMessageStarted { room_id, .. } => room_id,
+        _ => return Err("advisory direct message returned an invalid outcome".to_owned()),
+    };
+    // The renderer names the room whose mounted editor already shows text; it
+    // never decides which room is the direct chat. A stored draft is never
+    // replaced either (the reducer enforces it; this decides the report).
+    let keep_existing = occupied_editor_room_id.as_deref() == Some(room_id.as_str())
+        || !event_conn
+            .versioned_snapshot()
+            .state
+            .composer_drafts
+            .composer_for_room(&room_id)
+            .document
+            .is_empty();
+    // The seed runs on the same FIFO command lane before the selection, so
+    // the selected room hydrates the seeded draft.
+    if !keep_existing {
+        event_conn
+            .command(build_seed_composer_draft_command(
+                event_conn.next_request_id(),
+                expected_account,
+                room_id.clone(),
+                document,
+            ))
+            .await
+            .map_err(|e| format!("command submit failed: {e}"))?;
+    }
+    let selected_generation = event_conn
+        .select_room_and_wait(room_id.clone(), SELECT_ROOM_EVENT_TIMEOUT)
+        .await
+        .map_err(super::navigation::invoke_error_from_select_room_error)?;
+    update_qa_window_title_from_state(&app, state.inner()).await;
+    Ok(FrontendAdvisoryDirectMessageSettlement {
+        settlement: command_settlement(selected_generation),
+        status: FrontendAdvisoryDirectMessageStatus::Opened,
+        draft: Some(if keep_existing {
+            FrontendAdvisoryDraft::KeptExisting
+        } else {
+            FrontendAdvisoryDraft::Seeded
+        }),
+    })
 }
 
 #[tauri::command]

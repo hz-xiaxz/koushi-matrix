@@ -244,10 +244,26 @@ pub(super) fn build_decline_invite_command(
 pub(super) fn build_start_direct_message_command(
     request_id: koushi_protocol::RequestId,
     user_id: String,
+    missing: koushi_protocol::command::DirectMessageMissingPolicy,
 ) -> CoreCommand {
     CoreCommand::Room(RoomCommand::StartDirectMessage {
         request_id,
         user_id,
+        missing,
+    })
+}
+
+pub(super) fn build_seed_composer_draft_command(
+    request_id: koushi_protocol::RequestId,
+    expected_account: koushi_protocol::SessionKeyId,
+    room_id: String,
+    document: koushi_state::ComposerDocument,
+) -> CoreCommand {
+    CoreCommand::App(koushi_protocol::command::AppCommand::SeedComposerDraft {
+        request_id,
+        expected_account,
+        room_id,
+        document,
     })
 }
 

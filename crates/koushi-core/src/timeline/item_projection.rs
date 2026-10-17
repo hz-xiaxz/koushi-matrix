@@ -596,6 +596,7 @@ impl TimelineActor {
                         .expect("room visibility-change Activity action"),
                 ]);
             }
+            self.publish_sender_device_window();
             self.emit_navigation_if_changed();
         }
         drop(activity_commit_lease);

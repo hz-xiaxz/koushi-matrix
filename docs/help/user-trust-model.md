@@ -78,3 +78,19 @@ device list. Opening the details changes nothing. **Status unavailable** means
 Koushi could not retrieve the person's keys; it is not a confirmation. These
 details are about the person's keys, not about whether a conversation is
 encrypted.
+
+## Let someone know about unconfirmed devices
+
+In a conversation, a small muted **ⓘ** next to a sender's name means that
+person has not confirmed every device signed in to their account. It is a
+hint, not an alarm: their messages still arrive as usual. Your own messages
+and people you ignore never show it.
+
+Choose the **ⓘ** to see what it means. From there you can choose **View in
+User info** for the details, or **Let them know** to open your direct chat
+with them with a short, editable advice message already in the composer.
+Pick the message language first; Koushi has drafts in every language it
+supports. Nothing is sent until you send it yourself. If you have no direct
+chat with them yet, Koushi asks before creating one. If you already have
+unsent text in that chat, Koushi keeps your text and does not add the advice
+message.

@@ -13,6 +13,7 @@ import type {
   AttachmentSort,
   CommandAdmission,
   CommandSettlement,
+  AdvisoryDirectMessageSettlement,
   CreateRoomSettlement,
   ComposerDocument,
   ComposerDraftAcceptanceResponse,
@@ -542,6 +543,12 @@ export interface DesktopApi {
   acceptInvite(roomId: string): Promise<CommandSettlement>;
   declineInvite(roomId: string): Promise<CommandSettlement>;
   startDirectMessage(userId: string): Promise<CommandSettlement>;
+  startAdvisoryDirectMessage(
+    userId: string,
+    document: ComposerDocument,
+    createIfMissing: boolean,
+    occupiedEditorRoomId: string | null
+  ): Promise<AdvisoryDirectMessageSettlement>;
   inviteUser(roomId: string, userId: string): Promise<CommandSettlement>;
   openInviteWorkflow(roomId: string): Promise<CommandSettlement>;
   closeInviteWorkflow(): Promise<CommandSettlement>;

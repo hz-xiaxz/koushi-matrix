@@ -137,6 +137,32 @@ pub struct FrontendCreateRoomSettlement {
     pub space_link_failure: Option<koushi_state::OperationFailureKind>,
 }
 
+/// #1494: whether the advisory flow opened a direct chat or found none.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrontendAdvisoryDirectMessageStatus {
+    Opened,
+    Missing,
+}
+
+/// #1494: whether the opened direct chat's draft is the advisory text or the
+/// user's existing draft, which a seed never replaces.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize)]
+#[serde(rename_all = "snake_case")]
+pub enum FrontendAdvisoryDraft {
+    Seeded,
+    KeptExisting,
+}
+
+#[derive(Clone, Copy, Debug, Serialize)]
+#[serde(rename_all = "camelCase")]
+pub struct FrontendAdvisoryDirectMessageSettlement {
+    #[serde(flatten)]
+    pub settlement: FrontendCommandSettlement,
+    pub status: FrontendAdvisoryDirectMessageStatus,
+    pub draft: Option<FrontendAdvisoryDraft>,
+}
+
 #[derive(Clone, Copy, Debug, Serialize)]
 #[serde(rename_all = "lowercase")]
 pub enum StateUpdateSnapshotReason {
@@ -249,6 +275,8 @@ pub struct FrontendDomainStateChangedSlices {
     pub account_notifications: Option<koushi_state::AccountNotificationsState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub contact_security: Option<koushi_state::ContactSecurityState>,
+    #[serde(skip_serializing_if = "Option::is_none")]
+    pub sender_device_advisories: Option<koushi_state::SenderDeviceAdvisoriesState>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub soft_logout_reauth: Option<SoftLogoutReauthState>,
     #[serde(skip_serializing_if = "Option::is_none")]
@@ -370,6 +398,7 @@ impl FrontendDomainStateChangedSlices {
             && self.account_management_capabilities.is_none()
             && self.account_notifications.is_none()
             && self.contact_security.is_none()
+            && self.sender_device_advisories.is_none()
             && self.soft_logout_reauth.is_none()
             && self.qr_login.is_none()
             && self.settings.is_none()
@@ -487,6 +516,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         domain.account_management_capabilities = changed.account_management_capabilities;
         domain.account_notifications = changed.account_notifications;
         domain.contact_security = changed.contact_security;
+        domain.sender_device_advisories = changed.sender_device_advisories;
         domain.soft_logout_reauth = changed.soft_logout_reauth;
         domain.qr_login = changed.qr_login;
         if let Some(settings) = changed.settings {
@@ -616,6 +646,8 @@ pub struct FrontendDomainState {
     pub account_notifications: koushi_state::AccountNotificationsState,
     /// Security details of the contact whose User info is open (#1024).
     pub contact_security: koushi_state::ContactSecurityState,
+    /// Senders with devices they never confirmed, per open room (#1494).
+    pub sender_device_advisories: koushi_state::SenderDeviceAdvisoriesState,
     pub soft_logout_reauth: SoftLogoutReauthState,
     pub qr_login: QrLoginState,
     pub settings: SettingsState,
@@ -697,6 +729,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
             account_management_capabilities: state.account_management_capabilities,
             account_notifications: state.account_notifications,
             contact_security: state.contact_security,
+            sender_device_advisories: state.sender_device_advisories,
             soft_logout_reauth: state.soft_logout_reauth,
             qr_login: state.qr_login,
             settings: state.settings,

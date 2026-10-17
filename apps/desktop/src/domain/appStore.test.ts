@@ -1579,6 +1579,7 @@ function makeSnapshot(): DesktopSnapshot {
         },
         notification_delivery: { sinks: [], presets: [] },
         contact_security: { user_id: null, load: { kind: "idle" }, summary: null, verification_busy: false },
+        sender_device_advisories: { rooms: {} },
         account_management_capabilities: { change_password: { kind: "unknown" } },
         soft_logout_reauth: { kind: "idle" },
         qr_login: { kind: "idle" },

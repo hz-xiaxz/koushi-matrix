@@ -6,7 +6,9 @@ use crate::timeline::{
 };
 use crate::unread_trace;
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
-use koushi_protocol::command::{CreateRoomOptions, CreateRoomVisibility};
+use koushi_protocol::command::{
+    CreateRoomOptions, CreateRoomVisibility, DirectMessageMissingPolicy,
+};
 use koushi_protocol::event::{CoreEvent, ReportKind, RoomEvent};
 use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
 use koushi_protocol::ids::RequestId;
@@ -1000,11 +1002,34 @@ impl RoomActor {
         }
     }
 
-    pub(super) async fn handle_start_direct_message(&self, request_id: RequestId, user_id: String) {
+    pub(super) async fn handle_start_direct_message(
+        &self,
+        request_id: RequestId,
+        user_id: String,
+        missing: DirectMessageMissingPolicy,
+    ) {
         let Some(session) = &self.session else {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
+        // #1494: Core, not the renderer, decides whether a reusable direct
+        // chat exists. `Report` creates nothing when none does.
+        if missing == DirectMessageMissingPolicy::Report {
+            match koushi_sdk::find_direct_message(session, &user_id) {
+                Ok(Some(_)) => {}
+                Ok(None) => {
+                    self.emit(CoreEvent::Room(RoomEvent::DirectMessageMissing {
+                        request_id,
+                    }));
+                    return;
+                }
+                Err(error) => {
+                    let kind = classify_room_error(&error);
+                    self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
+                    return;
+                }
+            }
+        }
         match koushi_sdk::start_direct_message(session, &user_id).await {
             Ok(room_id) => {
                 koushi_diagnostics::record_and_stderr(DiagnosticEvent::new(

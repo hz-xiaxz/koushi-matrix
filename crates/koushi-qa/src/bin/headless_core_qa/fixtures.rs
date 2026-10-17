@@ -157,6 +157,7 @@ pub(super) async fn start_direct_message_for_qa(
     conn.command(CoreCommand::Room(RoomCommand::StartDirectMessage {
         request_id,
         user_id: user_id.to_owned(),
+        missing: koushi_protocol::command::DirectMessageMissingPolicy::Create,
     }))
     .await
     .map_err(|e| format!("{label}: submit start DM failed: {e}"))?;
