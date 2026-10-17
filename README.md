@@ -30,8 +30,8 @@ Join our public Matrix room:
   finding messages, with special care for Japanese, Chinese, and Korean text.
   IME candidate confirmation is separate from sending;
   history search supports text without spaces between words and folds
-  full-width and half-width variants. The interface is available in English
-  and Japanese.
+  full-width and half-width variants. The interface is available in English,
+  Japanese, Simplified Chinese, Traditional Chinese, and Korean.
 - **Rich messages.** Use Markdown and code blocks, write LaTeX-style math
   when you need it, share images and files, and follow discussions in
   threads.
@@ -53,10 +53,13 @@ can use it with a compatible Matrix homeserver of your choice.
 - A familiar three-pane layout: Spaces, rooms, and direct messages
 - Room timelines with threads, replies, reactions, edits, and read receipts
 - Markdown, code blocks, and LaTeX-style math rendering
-- Image and file uploads with captions
+- Image and file uploads with captions, with a choice of image quality before
+  sending large photos
 - Full-text search across your encrypted history, including Japanese, Chinese,
   and Korean text
 - Desktop conveniences: system tray, close-to-hide, and native notifications
+- Notifications sent from this device by email (Resend or an SMTP relay) or
+  WeChat (ServerChan), even when your homeserver sends no notification email
 
 Not included yet: voice and video calls, screen sharing, bots, widgets, and
 third-party app integrations.

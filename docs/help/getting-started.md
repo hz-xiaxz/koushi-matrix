@@ -13,7 +13,9 @@
 3. Use the checksum alongside the release asset when checking a download.
 
 Koushi is a client for an existing Matrix account. Have your Matrix ID and the
-sign-in method supplied by your account provider ready.
+sign-in method supplied by your account provider ready. If you do not have an
+account yet, you can create one with any Matrix server; matrix.org is one
+public option.
 
 ## Sign in
 
