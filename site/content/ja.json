@@ -23,6 +23,10 @@
     "text": "macOS 版をダウンロード（Apple シリコン）",
     "source_hash": "d2b06e12c65c"
   },
+  "hero.github": {
+    "text": "GitHub で見る",
+    "source_hash": "20672423d716"
+  },
   "hero.version": {
     "text": "バージョン {version}",
     "source_hash": "a18745121bb8"

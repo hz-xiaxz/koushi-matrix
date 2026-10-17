@@ -12,7 +12,9 @@
 4. Select a result to open the matching message in context.
 
 If the app reports **Search term is too short**, enter a longer term. Search
-supports Japanese and other CJK text as well as Latin text. **Explore** is a
+supports Japanese and other CJK text as well as Latin text: text without
+spaces between words is found, and full-width and half-width characters match
+each other. **Explore** is a
 separate public room directory, not message search.
 
 ## Why older messages may be missing

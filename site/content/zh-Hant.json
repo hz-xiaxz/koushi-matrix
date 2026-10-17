@@ -23,6 +23,10 @@
     "text": "下載 macOS 版（Apple 晶片）",
     "source_hash": "d2b06e12c65c"
   },
+  "hero.github": {
+    "text": "在 GitHub 上查看",
+    "source_hash": "20672423d716"
+  },
   "hero.version": {
     "text": "版本 {version}",
     "source_hash": "a18745121bb8"

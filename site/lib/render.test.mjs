@@ -75,3 +75,10 @@ test("a missing string throws instead of rendering a blank", () => {
   delete partial["pain.utd.answer"];
   assert.throws(() => renderPage({ locale: "en", strings: partial, staleKeys: [], release }), /pain\.utd\.answer/);
 });
+
+test("the header and hero link prominently to the GitHub repository", () => {
+  const html = renderPage({ locale: "ja", strings: strings(), staleKeys: [], release });
+  assert.match(html, /<a class="github-link" href="https:\/\/github\.com\/shinaoka\/koushi-matrix"/);
+  assert.match(html, /<a class="button secondary" href="https:\/\/github\.com\/shinaoka\/koushi-matrix">/);
+  assert.ok(html.includes(en["hero.github"]));
+});

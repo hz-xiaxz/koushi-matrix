@@ -5,6 +5,7 @@
   "hero.tagline": "A desktop Matrix client for conversations in many languages.",
   "hero.lede": "Keep your work, personal, and community Matrix accounts open side by side in one window. Each account has its own tab, stays signed in, and keeps syncing.",
   "hero.download": "Download for macOS (Apple Silicon)",
+  "hero.github": "View on GitHub",
   "hero.version": "Version {version}",
   "hero.other": "Other platforms (untested):",
   "hero.windows": "Windows installer",

@@ -35,5 +35,5 @@ test("CLI exits unsuccessfully with actionable setup guidance when tools are abs
   assert.equal(result.status, 1);
   assert.match(result.stderr, /cc \(build-essential\)/);
   assert.match(result.stderr, /pkg-config/);
-  assert.match(result.stderr, /README\.md/);
+  assert.match(result.stderr, /docs\/development\.md/);
 });
