@@ -1939,6 +1939,66 @@ candidate-changed boolean, and scheduler phase. Neither source may include room,
 event, transaction, or user identifiers, message content, or raw SDK errors.
 Repeated Core evaluations with the same coarse signature are deduplicated.
 
+## External MCP Bridge (local IPC)
+
+Koushi exposes a running instance to external MCP clients (Claude Code, Codex)
+through a stdio launcher backed by authenticated local IPC. The bridge gives an
+assistant the encrypted history Koushi can already decrypt and the sending path
+Koushi already owns; it never gives the assistant a Matrix client, session
+token, device key, SDK store, or search index key.
+
+Ownership:
+
+- `crates/koushi-mcp` is a stdio adapter and launcher. It owns JSON-RPC
+  translation only: no Matrix semantics, no crypto, no message storage. It
+  reads the endpoint file, presents the connection token, and relays requests.
+- `apps/desktop/src-tauri` hosts the socket listener, the endpoint file, and
+  the consent surface. It is a transport adapter: it resolves every request to
+  a `CoreConnection` for the requested account and dispatches typed
+  `koushi-protocol` commands. It owns no product state beyond the live
+  connection registry.
+- `koushi-core` remains the only production runtime owner. Search, send,
+  attachment preparation, encryption, and projection stay in the existing
+  actors; the bridge adds no alternate runtime and opens no crypto store.
+- Connection grants persist as Rust-owned settings
+  (`SettingsValues.mcp.connections`): permitted accounts, room scope,
+  read/write, attachment send, and poll limits. A live connection resolves its
+  grant on every call.
+
+Invariants:
+
+- **One owner per session.** The bridge attaches a `CoreConnection` to the
+  account runtime the app already runs. It never signs in, restores, or
+  verifies on its own, and never opens an SDK or crypto store.
+- **Explicit account, no fallback.** Every account-scoped request carries an
+  `account_id` resolved to that account's live runtime. The selected UI tab is
+  never an input. A missing, signed-out, locked, or replaced account fails the
+  request; it never falls through to another account.
+- **Server-side authorization.** Each call is checked against the connection's
+  grant and the account's room membership. Rejections are typed outcomes, not
+  adapter instructions. Read-only tools are marked read-only; sends are marked
+  as writes.
+- **Credentials stay inside.** The connection token authenticates the local
+  launcher to the app and is generated per app launch, held in a `0600`
+  endpoint file, and never written to argv, logs, or events. Matrix
+  credentials, store keys, and index keys never cross the socket.
+- **Attachments follow existing policy.** Sending passes local paths to Core,
+  which reads and encrypts them through the staged-upload path. Receiving
+  writes through the `media_save` containment policy into an app-managed
+  directory. No caller-chosen destination is accepted.
+- **Polling, not push.** MCP cannot wake a host that is not calling. New
+  messages surface through an account-bound, monotonic cursor consumed by a
+  user-configured `wait_for_events` long-poll; the cursor cannot replay
+  another account's events. The connection's poll limits are settings, not
+  constants.
+- **Shutdown is visible.** On app shutdown the socket is removed and the token
+  invalidated. `initialize` and `tools/list` still answer while Koushi is
+  unavailable; account-scoped calls fail with a closed error code, and the
+  next call re-reads the endpoint file.
+- **No content telemetry.** Message bodies, queries, attachment bytes, tokens,
+  and identifiers never appear in logs or diagnostics; only counts and closed
+  error codes do.
+
 ## Security Model
 
 Historical-key recovery follows the guarded, Rust-owned contract in
