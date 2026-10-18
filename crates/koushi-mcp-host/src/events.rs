@@ -13,7 +13,7 @@ use std::time::Duration;
 use serde_json::{json, Value};
 use tokio::sync::Notify;
 
-use koushi_core::account_runtime_manager::AccountRuntimeManager;
+use crate::BridgeAccounts;
 
 /// How many records to retain before dropping the oldest.
 const MAX_RECORDS: usize = 500;
@@ -164,7 +164,7 @@ pub(crate) fn parse_cursor(cursor: &str) -> Option<u64> {
 
 /// Polls every account's room summaries and feeds the log.
 pub(crate) fn spawn_poller(
-    runtime: std::sync::Arc<AccountRuntimeManager>,
+    accounts: std::sync::Arc<dyn BridgeAccounts>,
     log: std::sync::Arc<EventLog>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
@@ -179,8 +179,8 @@ pub(crate) fn spawn_poller(
                     }
                 }
                 _ = ticker.tick() => {
-                    for (descriptor, connection) in runtime.tab_connections() {
-                        log.observe(descriptor.id.as_str(), &connection.snapshot().rooms);
+                    for account in accounts.accounts() {
+                        log.observe(&account.id, &account.connection.snapshot().rooms);
                     }
                 }
             }

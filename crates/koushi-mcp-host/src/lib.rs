@@ -14,3 +14,41 @@ mod handlers;
 mod server;
 
 pub use server::{start, BridgeHandle};
+
+use std::path::PathBuf;
+
+use koushi_core::account_runtime_manager::AccountRuntimeManager;
+use koushi_core::CoreConnection;
+
+/// One account the bridge may talk to. The desktop app builds these from its
+/// runtime manager; the headless QA harness builds a single one.
+pub struct BridgeAccount {
+    pub id: String,
+    pub homeserver: Option<String>,
+    pub connection: CoreConnection,
+    pub media_cache_dir: PathBuf,
+}
+
+/// The accounts a host exposes to MCP clients.
+pub trait BridgeAccounts: Send + Sync + 'static {
+    fn accounts(&self) -> Vec<BridgeAccount>;
+}
+
+impl BridgeAccounts for AccountRuntimeManager {
+    fn accounts(&self) -> Vec<BridgeAccount> {
+        self.tab_descriptors()
+            .into_iter()
+            .filter(|tab| tab.id.is_account())
+            .filter_map(|tab| {
+                let connection = self.tab_connection(&tab.id)?;
+                let media_cache_dir = self.media_cache_dir_for_tab(&tab.id)?;
+                Some(BridgeAccount {
+                    id: tab.id.as_str().to_owned(),
+                    homeserver: tab.homeserver.clone(),
+                    connection,
+                    media_cache_dir,
+                })
+            })
+            .collect()
+    }
+}

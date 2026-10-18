@@ -10,7 +10,7 @@ use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::watch;
 
-use koushi_core::account_runtime_manager::AccountRuntimeManager;
+use crate::BridgeAccounts;
 use koushi_mcp::wire::{
     decode_line, encode_line, ClientMessage, ErrorCode, ServerMessage, WireError, MAX_FRAME_BYTES,
     PROTOCOL_VERSION,
@@ -54,7 +54,7 @@ impl Drop for BridgeHandle {
 /// Starts the bridge: binds the socket, writes `endpoint.json`, and accepts
 /// connections until shutdown.
 pub fn start(
-    runtime: std::sync::Arc<AccountRuntimeManager>,
+    accounts: std::sync::Arc<dyn BridgeAccounts>,
     data_dir: PathBuf,
 ) -> Result<BridgeHandle, &'static str> {
     endpoint::ensure_dir(&data_dir).map_err(|_| "mcp_dir")?;
@@ -75,13 +75,13 @@ pub fn start(
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let log = std::sync::Arc::new(super::events::EventLog::new());
         super::events::spawn_poller(
-            std::sync::Arc::clone(&runtime),
+            std::sync::Arc::clone(&accounts),
             std::sync::Arc::clone(&log),
             shutdown_rx.clone(),
         );
         tokio::spawn(accept_loop(
             listener,
-            runtime,
+            accounts,
             log,
             token,
             shutdown_rx,
@@ -102,13 +102,13 @@ pub fn start(
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let log = std::sync::Arc::new(super::events::EventLog::new());
         super::events::spawn_poller(
-            std::sync::Arc::clone(&runtime),
+            std::sync::Arc::clone(&accounts),
             std::sync::Arc::clone(&log),
             shutdown_rx.clone(),
         );
         tokio::spawn(accept_loop(
             listener,
-            runtime,
+            accounts,
             log,
             token,
             shutdown_rx,
@@ -125,7 +125,7 @@ pub fn start(
 #[cfg(unix)]
 async fn accept_loop(
     listener: Listener,
-    runtime: std::sync::Arc<AccountRuntimeManager>,
+    accounts: std::sync::Arc<dyn BridgeAccounts>,
     log: std::sync::Arc<events::EventLog>,
     token: String,
     mut shutdown: watch::Receiver<bool>,
@@ -141,12 +141,12 @@ async fn accept_loop(
             accepted = listener.accept() => {
                 match accepted {
                     Ok((stream, _addr)) => {
-                        let runtime = runtime.clone();
+                        let accounts = accounts.clone();
                         let log = log.clone();
                         let token = token.clone();
                         let data_dir = data_dir.clone();
                         tokio::spawn(async move {
-                            let _ = serve_connection(stream, runtime, log, token, data_dir).await;
+                            let _ = serve_connection(stream, accounts, log, token, data_dir).await;
                         });
                     }
                     Err(_) => {
@@ -163,7 +163,7 @@ async fn accept_loop(
 #[cfg(windows)]
 async fn accept_loop(
     mut listener: Listener,
-    runtime: std::sync::Arc<AccountRuntimeManager>,
+    accounts: std::sync::Arc<dyn BridgeAccounts>,
     log: std::sync::Arc<events::EventLog>,
     token: String,
     mut shutdown: watch::Receiver<bool>,
@@ -179,12 +179,12 @@ async fn accept_loop(
             accepted = listener.accept() => {
                 match accepted {
                     Ok(stream) => {
-                        let runtime = runtime.clone();
+                        let accounts = accounts.clone();
                         let log = log.clone();
                         let token = token.clone();
                         let data_dir = data_dir.clone();
                         tokio::spawn(async move {
-                            let _ = serve_connection(stream, runtime, log, token, data_dir).await;
+                            let _ = serve_connection(stream, accounts, log, token, data_dir).await;
                         });
                     }
                     Err(_) => {
@@ -198,7 +198,7 @@ async fn accept_loop(
 
 async fn serve_connection(
     stream: Stream,
-    runtime: std::sync::Arc<AccountRuntimeManager>,
+    accounts: std::sync::Arc<dyn BridgeAccounts>,
     log: std::sync::Arc<events::EventLog>,
     token: String,
     data_dir: PathBuf,
@@ -259,7 +259,8 @@ async fn serve_connection(
         let response = match decode_line::<ClientMessage>(&line) {
             Ok(ClientMessage::Request { id, method, params }) => {
                 let result =
-                    dispatch_method(&runtime, &log, &client.name, &data_dir, &method, params).await;
+                    dispatch_method(&accounts, &log, &client.name, &data_dir, &method, params)
+                        .await;
                 match result {
                     Ok(value) => ServerMessage::success(id, value),
                     Err(error) => ServerMessage::failure(id, error),
@@ -365,7 +366,7 @@ impl NamedPipeListener {
 /// Dispatches one IPC request. Reads are the only tools implemented so far;
 /// everything else answers `unsupported` rather than pretending to work.
 async fn dispatch_method(
-    runtime: &std::sync::Arc<AccountRuntimeManager>,
+    accounts: &std::sync::Arc<dyn BridgeAccounts>,
     log: &std::sync::Arc<events::EventLog>,
     client_name: &str,
     data_dir: &std::path::Path,
@@ -374,7 +375,7 @@ async fn dispatch_method(
 ) -> Result<Value, WireError> {
     match method {
         "tools/call" => {
-            handlers::dispatch_tool_call(runtime, log, client_name, data_dir, params).await
+            handlers::dispatch_tool_call(accounts, log, client_name, data_dir, params).await
         }
         "status" => Ok(serde_json::json!({
             "protocol": PROTOCOL_VERSION,

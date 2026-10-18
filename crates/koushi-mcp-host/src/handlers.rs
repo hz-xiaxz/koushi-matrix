@@ -9,7 +9,7 @@ use std::path::Path;
 use serde_json::{json, Value};
 use std::sync::Arc;
 
-use koushi_core::account_runtime_manager::AccountRuntimeManager;
+use crate::BridgeAccounts;
 
 use koushi_mcp::wire::{ErrorCode, WireError};
 use koushi_protocol::command::{CoreCommand, TimelineCommand};
@@ -22,7 +22,7 @@ use super::grants::{self, Need};
 
 /// One `tools/call` request.
 pub(crate) async fn dispatch_tool_call(
-    runtime: &Arc<AccountRuntimeManager>,
+    accounts: &Arc<dyn BridgeAccounts>,
     log: &Arc<events::EventLog>,
     client_name: &str,
     data_dir: &Path,
@@ -40,12 +40,14 @@ pub(crate) async fn dispatch_tool_call(
         .unwrap_or_else(|| json!({}));
 
     let result = match name {
-        "list_accounts" => list_accounts(runtime, client_name, data_dir),
-        "list_rooms" => list_rooms(runtime, client_name, data_dir, &arguments),
-        "search_messages" => search_messages(runtime, client_name, data_dir, &arguments).await,
-        "send_message" => send_message(runtime, client_name, data_dir, &arguments).await,
-        "wait_for_events" => wait_for_events(runtime, log, client_name, data_dir, &arguments).await,
-        "get_attachment" => get_attachment(runtime, client_name, data_dir, &arguments).await,
+        "list_accounts" => list_accounts(accounts, client_name, data_dir),
+        "list_rooms" => list_rooms(accounts, client_name, data_dir, &arguments),
+        "search_messages" => search_messages(accounts, client_name, data_dir, &arguments).await,
+        "send_message" => send_message(accounts, client_name, data_dir, &arguments).await,
+        "wait_for_events" => {
+            wait_for_events(accounts, log, client_name, data_dir, &arguments).await
+        }
+        "get_attachment" => get_attachment(accounts, client_name, data_dir, &arguments).await,
         other => Err(WireError::new(
             ErrorCode::Unsupported,
             format!("unknown tool: {other}"),
@@ -67,7 +69,7 @@ pub(crate) async fn dispatch_tool_call(
 /// Every account is listed so a first-time client can be granted access, but
 /// identity fields appear only once a grant exists.
 fn list_accounts(
-    runtime: &Arc<AccountRuntimeManager>,
+    accounts: &Arc<dyn BridgeAccounts>,
     client_name: &str,
     data_dir: &Path,
 ) -> Result<Value, WireError> {
@@ -77,23 +79,17 @@ fn list_accounts(
         .filter(|grant| grant.client_name == client_name)
         .flat_map(|grant| grant.accounts.iter().map(String::as_str))
         .collect();
-    let mut accounts = Vec::new();
-    for tab in runtime.tab_descriptors() {
-        if !tab.id.is_account() {
-            continue;
-        }
-        let Some(connection) = runtime.tab_connection(&tab.id) else {
-            continue;
-        };
-        let snapshot = connection.snapshot();
+    let mut listed = Vec::new();
+    for account in accounts.accounts() {
+        let snapshot = account.connection.snapshot();
         let (status, session) = session_status(&snapshot.session);
-        if granted.contains(&tab.id.as_str()) {
+        if granted.contains(&account.id.as_str()) {
             let user_id = session.map(|info| info.user_id.clone());
             let homeserver = session
                 .map(|info| info.homeserver.clone())
-                .or_else(|| tab.homeserver.clone());
-            accounts.push(json!({
-                "account_id": tab.id.as_str(),
+                .or_else(|| account.homeserver.clone());
+            listed.push(json!({
+                "account_id": account.id,
                 "user_id": user_id,
                 "homeserver": homeserver,
                 "display_name": session.map(display_name_from_user_id),
@@ -101,14 +97,14 @@ fn list_accounts(
                 "consent": "granted",
             }));
         } else {
-            accounts.push(json!({
-                "account_id": tab.id.as_str(),
+            listed.push(json!({
+                "account_id": account.id,
                 "status": status,
                 "consent": "required",
             }));
         }
     }
-    Ok(json!({ "accounts": accounts }))
+    Ok(json!({ "accounts": listed }))
 }
 
 fn session_status(session: &SessionState) -> (&'static str, Option<&SessionInfo>) {
@@ -131,7 +127,7 @@ fn display_name_from_user_id(info: &SessionInfo) -> String {
 }
 
 fn list_rooms(
-    runtime: &Arc<AccountRuntimeManager>,
+    accounts: &Arc<dyn BridgeAccounts>,
     client_name: &str,
     data_dir: &Path,
     arguments: &Value,
@@ -154,7 +150,7 @@ fn list_rooms(
         .and_then(|cursor| cursor.parse::<usize>().ok())
         .unwrap_or(0);
 
-    let connection = account_connection(runtime, &account_id)?;
+    let connection = account_connection(accounts, &account_id)?;
     let snapshot = connection.snapshot();
     let mut rooms: Vec<Value> = snapshot
         .rooms
@@ -196,7 +192,7 @@ fn direct_search_failure(failure: koushi_core::search::DirectSearchFailure) -> W
 }
 
 async fn search_messages(
-    runtime: &Arc<AccountRuntimeManager>,
+    accounts: &Arc<dyn BridgeAccounts>,
     client_name: &str,
     data_dir: &Path,
     arguments: &Value,
@@ -234,7 +230,7 @@ async fn search_messages(
         })
         .unwrap_or_default();
 
-    let connection = account_connection(runtime, &account_id)?;
+    let connection = account_connection(accounts, &account_id)?;
     let room_names: std::collections::HashMap<String, String> = connection
         .snapshot()
         .rooms
@@ -268,7 +264,7 @@ async fn search_messages(
 }
 
 async fn send_message(
-    runtime: &Arc<AccountRuntimeManager>,
+    accounts: &Arc<dyn BridgeAccounts>,
     client_name: &str,
     data_dir: &Path,
     arguments: &Value,
@@ -304,7 +300,7 @@ async fn send_message(
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty());
 
-    let mut connection = account_connection(runtime, &account_id)?;
+    let mut connection = account_connection(accounts, &account_id)?;
     let snapshot = connection.snapshot();
     let account_key = account_key_from_snapshot(&snapshot);
     if account_key.0.is_empty() {
@@ -379,7 +375,7 @@ async fn send_message(
 }
 
 async fn wait_for_events(
-    _runtime: &Arc<AccountRuntimeManager>,
+    _accounts: &Arc<dyn BridgeAccounts>,
     log: &Arc<events::EventLog>,
     client_name: &str,
     data_dir: &Path,
@@ -405,7 +401,7 @@ async fn wait_for_events(
 /// returns its absolute path. Koushi chooses the destination; the caller never
 /// does.
 async fn get_attachment(
-    runtime: &Arc<AccountRuntimeManager>,
+    accounts: &Arc<dyn BridgeAccounts>,
     client_name: &str,
     data_dir: &Path,
     arguments: &Value,
@@ -434,12 +430,12 @@ async fn get_attachment(
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    let connection = account_connection(runtime, &account_id)?;
+    let connection = account_connection(accounts, &account_id)?;
     let attachment = connection
         .fetch_attachment(room_id.clone(), event_id.clone(), thumbnail)
         .await
         .map_err(attachment_failure)?;
-    ensure_cache_containment(runtime, &account_id, &attachment.path)?;
+    ensure_cache_containment(accounts, &account_id, &attachment.path)?;
     Ok(json!({
         "room_id": room_id,
         "event_id": event_id,
@@ -466,14 +462,15 @@ fn attachment_failure(failure: koushi_core::AttachmentFetchFailure) -> WireError
 
 /// Refuse any returned path that leaves the account's media cache.
 fn ensure_cache_containment(
-    runtime: &Arc<AccountRuntimeManager>,
+    accounts: &Arc<dyn BridgeAccounts>,
     account_id: &str,
     path: &std::path::Path,
 ) -> Result<(), WireError> {
-    let tab_id =
-        koushi_core::account_runtime_manager::AccountTabId::from_string(account_id.to_owned());
-    let cache = runtime
-        .media_cache_dir_for_tab(&tab_id)
+    let cache = accounts
+        .accounts()
+        .into_iter()
+        .find(|account| account.id == account_id)
+        .map(|account| account.media_cache_dir)
         .ok_or_else(|| WireError::new(ErrorCode::Internal, "unknown account cache"))?;
     let canonical_cache = cache
         .canonicalize()
@@ -492,13 +489,14 @@ fn ensure_cache_containment(
 }
 
 fn account_connection(
-    runtime: &Arc<AccountRuntimeManager>,
+    accounts: &Arc<dyn BridgeAccounts>,
     account_id: &str,
 ) -> Result<koushi_core::CoreConnection, WireError> {
-    let tab_id =
-        koushi_core::account_runtime_manager::AccountTabId::from_string(account_id.to_owned());
-    runtime
-        .tab_connection(&tab_id)
+    accounts
+        .accounts()
+        .into_iter()
+        .find(|account| account.id == account_id)
+        .map(|account| account.connection)
         .ok_or_else(|| WireError::new(ErrorCode::AccountUnavailable, "unknown account"))
 }
 
