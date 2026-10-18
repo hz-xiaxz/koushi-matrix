@@ -150,15 +150,16 @@ impl TimelineSendTerminalIngress {
 #[derive(Clone)]
 pub(super) struct MatrixTimelineSendEnqueueContext {
     pub(super) key: TimelineKey,
-    pub(super) timeline: Arc<Timeline>,
+    pub(super) room: matrix_sdk::Room,
+    pub(super) timeline: Option<Arc<Timeline>>,
     pub(super) session: Arc<MatrixClientSession>,
-    pub(super) cleanup: TimelineActorCleanupIngress,
+    pub(super) cleanup: Option<TimelineActorCleanupIngress>,
     pub(super) diagnostic_trace: Option<SendLifecycleTrace>,
 }
 
 #[derive(Clone)]
 pub(super) enum TimelineSendEnqueueContext {
-    Matrix(MatrixTimelineSendEnqueueContext),
+    Matrix(Box<MatrixTimelineSendEnqueueContext>),
     #[cfg(test)]
     Synthetic {
         requests: mpsc::UnboundedSender<SyntheticSendEnqueueRequest>,
@@ -228,7 +229,7 @@ struct EncryptedSendDiagnosticSnapshot {
 async fn encrypted_send_diagnostic_snapshot(
     context: &MatrixTimelineSendEnqueueContext,
 ) -> EncryptedSendDiagnosticSnapshot {
-    let room_encryption = match context.timeline.room().encryption_state() {
+    let room_encryption = match context.room.encryption_state() {
         state if state.is_encrypted() => RoomEncryptionDiagnosticState::Encrypted,
         state if state.is_unknown() => RoomEncryptionDiagnosticState::Unknown,
         _ => RoomEncryptionDiagnosticState::NotEncrypted,
@@ -590,7 +591,8 @@ async fn enqueue_document_send(
     )?;
     make_offline_thread_content(&mut content, &context.key)?;
     context
-        .timeline
+        .room
+        .send_queue()
         .send(content.into())
         .await
         .map(|handle| SendEnqueueSuccess {
@@ -598,7 +600,7 @@ async fn enqueue_document_send(
             handle: Some(handle),
             media_queued: None,
         })
-        .map_err(|error| classify_timeline_send_error(&error))
+        .map_err(|error| classify_send_queue_error(&error))
 }
 
 fn make_offline_thread_content(
@@ -628,13 +630,17 @@ async fn enqueue_document_reply_send(
         document,
         formatting_options,
     )?;
-    let source = context.timeline.items().await.iter().find_map(|item| {
-        let TimelineItemKind::Event(event) = item.kind() else {
-            return None;
-        };
-        (event.event_id() == Some(reply_event_id.as_ref()))
-            .then(|| (event.sender().to_owned(), event.content().thread_root()))
-    });
+    let source = if let Some(timeline) = &context.timeline {
+        timeline.items().await.iter().find_map(|item| {
+            let TimelineItemKind::Event(event) = item.kind() else {
+                return None;
+            };
+            (event.event_id() == Some(reply_event_id.as_ref()))
+                .then(|| (event.sender().to_owned(), event.content().thread_root()))
+        })
+    } else {
+        None
+    };
     let content = make_offline_reply_content(
         content,
         reply_event_id,
@@ -643,7 +649,8 @@ async fn enqueue_document_reply_send(
         context.session.client().user_id(),
     )?;
     context
-        .timeline
+        .room
+        .send_queue()
         .send(content.into())
         .await
         .map(|handle| SendEnqueueSuccess {
@@ -651,7 +658,7 @@ async fn enqueue_document_reply_send(
             handle: Some(handle),
             media_queued: None,
         })
-        .map_err(|error| classify_timeline_send_error(&error))
+        .map_err(|error| classify_send_queue_error(&error))
 }
 
 fn make_offline_reply_content(
@@ -742,6 +749,7 @@ async fn enqueue_timeline_send(
 ) -> Result<SendEnqueueSuccess, TimelineFailureKind> {
     match context {
         TimelineSendEnqueueContext::Matrix(context) => {
+            let context = *context;
             let diagnostic_context = context.clone();
             let diagnostic_trace = context.diagnostic_trace.clone();
             let diagnostic = async move {
@@ -1232,6 +1240,52 @@ impl TimelineManagerActor {
             self.spawn_pending_send_hydration(hydration);
         }
     }
+    /// Sending owns room resources independently of presentation subscriptions.
+    fn room_send_context(
+        &self,
+        key: &TimelineKey,
+    ) -> Result<TimelineSendEnqueueContext, TimelineFailureKind> {
+        let existing = self
+            .timelines
+            .get(key)
+            .and_then(|handle| handle.enqueue_context.clone());
+        #[cfg(test)]
+        if self.session.is_none()
+            && let Some(context) = existing
+        {
+            return Ok(context);
+        }
+        let session = self
+            .session
+            .as_ref()
+            .ok_or(TimelineFailureKind::NotSubscribed)?;
+        if key.account_key != crate::store::account_key_from_info(&session.info) {
+            return Err(TimelineFailureKind::InvalidSendTarget);
+        }
+        let room_id = matrix_sdk::ruma::RoomId::parse(key.room_id())
+            .map_err(|_| TimelineFailureKind::InvalidSendTarget)?;
+        if self.room_leave_states.contains_key(&room_id) {
+            return Err(TimelineFailureKind::Forbidden);
+        }
+        let room = session
+            .client()
+            .get_room(&room_id)
+            .ok_or(TimelineFailureKind::NotFound)?;
+        if room.state() != matrix_sdk::RoomState::Joined {
+            return Err(TimelineFailureKind::Forbidden);
+        }
+        Ok(existing.unwrap_or_else(|| {
+            TimelineSendEnqueueContext::Matrix(Box::new(MatrixTimelineSendEnqueueContext {
+                key: key.clone(),
+                room,
+                timeline: None,
+                session: Arc::clone(session),
+                cleanup: None,
+                diagnostic_trace: None,
+            }))
+        }))
+    }
+
     pub(super) async fn route_send_to_worker_or_fail(
         &mut self,
         request_id: RequestId,
@@ -1241,18 +1295,12 @@ impl TimelineManagerActor {
         projection: SendComposerProjection,
         payload: TimelineSendEnqueuePayload,
     ) {
-        let Some(context) = self
-            .timelines
-            .get(key)
-            .and_then(|handle| handle.enqueue_context.clone())
-        else {
-            self.emit_failure(
-                request_id,
-                CoreFailure::TimelineOperationFailed {
-                    kind: TimelineFailureKind::NotSubscribed,
-                },
-            );
-            return;
+        let context = match self.room_send_context(key) {
+            Ok(context) => context,
+            Err(kind) => {
+                self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
+                return;
+            }
         };
 
         if self
@@ -1314,7 +1362,7 @@ impl TimelineManagerActor {
             transaction_id,
             None,
             request_id,
-            true,
+            !matches!(projection, SendComposerProjection::None),
             Some(PendingSendProjection {
                 key: key.clone(),
                 sequence: 0,
@@ -1344,18 +1392,12 @@ impl TimelineManagerActor {
         transaction_id: String,
         payload: TimelineSendEnqueuePayload,
     ) {
-        let Some(context) = self
-            .timelines
-            .get(key)
-            .and_then(|handle| handle.enqueue_context.clone())
-        else {
-            self.emit_failure(
-                request_id,
-                CoreFailure::TimelineOperationFailed {
-                    kind: TimelineFailureKind::NotSubscribed,
-                },
-            );
-            return;
+        let context = match self.room_send_context(key) {
+            Ok(context) => context,
+            Err(kind) => {
+                self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
+                return;
+            }
         };
         let mut registration = SendCompletionRegistration::begin(
             Arc::clone(&self.send_completion),
@@ -1407,18 +1449,17 @@ impl TimelineManagerActor {
             }));
             return;
         }
-        let Some(context) = self
-            .timelines
-            .get(key)
-            .and_then(|handle| handle.enqueue_context.clone())
-        else {
-            self.emit(CoreEvent::Timeline(TimelineEvent::SubmissionRejected {
-                request_id,
-                key: key.clone(),
-                submission_id,
-                kind: TimelineFailureKind::NotSubscribed,
-            }));
-            return;
+        let context = match self.room_send_context(key) {
+            Ok(context) => context,
+            Err(kind) => {
+                self.emit(CoreEvent::Timeline(TimelineEvent::SubmissionRejected {
+                    request_id,
+                    key: key.clone(),
+                    submission_id,
+                    kind,
+                }));
+                return;
+            }
         };
         if self
             .send_completion
@@ -2335,15 +2376,6 @@ pub(super) async fn run_send_queue_monitor(
                 break;
             }
         }
-    }
-}
-
-fn classify_timeline_send_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFailureKind {
-    match err {
-        matrix_sdk_ui::timeline::Error::SendQueueError(send_queue_error) => {
-            classify_send_queue_error(send_queue_error)
-        }
-        _ => TimelineFailureKind::Sdk,
     }
 }
 
@@ -3710,3 +3742,6 @@ fn timeline_send_failure_handoff(
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod unviewed_tests;

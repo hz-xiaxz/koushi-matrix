@@ -109,7 +109,9 @@ Ask in normal language, for example:
 - "Download the attachment on that message."
 
 Sending is a normal message from your account. Koushi does not mark it as
-written by an assistant.
+written by an assistant. Sending and replying work even when the target room
+is not open in Koushi. They do not switch your selected room or change a message
+you are drafting.
 
 ## New-message notification
 

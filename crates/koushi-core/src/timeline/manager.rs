@@ -1435,7 +1435,7 @@ impl TimelineManagerActor {
                     &key,
                     transaction_id.clone(),
                     body.clone(),
-                    SendComposerProjection::for_send_text(&key),
+                    SendComposerProjection::None,
                     TimelineSendEnqueuePayload::Text {
                         document,
                         formatting_options: self.composer_formatting_options,
@@ -1495,7 +1495,7 @@ impl TimelineManagerActor {
                     &key,
                     transaction_id.clone(),
                     body.clone(),
-                    SendComposerProjection::for_send_reply(&key),
+                    SendComposerProjection::None,
                     TimelineSendEnqueuePayload::Reply {
                         in_reply_to_event_id,
                         document,

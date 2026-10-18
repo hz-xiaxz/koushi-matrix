@@ -62,7 +62,7 @@ use super::{
     TimelineSendTerminalAdmission, TimelineSendTerminalHandoff, TimelineSendTerminalIngress,
     apply_send_completion_observation_and_handoff,
     apply_send_completion_observation_loss_and_handoff, await_submission_admission,
-    classify_timeline_send_error, make_offline_reply_content, make_offline_thread_content,
+    classify_send_queue_error, make_offline_reply_content, make_offline_thread_content,
     media_upload_progress_identity, pending_send_item, run_global_send_completion_observer,
     send_retry_delay,
 };
@@ -3640,13 +3640,11 @@ fn media_pending_send_does_not_settle_text_composer() {
 }
 
 #[test]
-fn timeline_send_error_classifies_not_joined_as_forbidden() {
-    let error = matrix_sdk_ui::timeline::Error::SendQueueError(
-        matrix_sdk::send_queue::RoomSendQueueError::RoomNotJoined,
-    );
+fn room_queue_send_error_classifies_not_joined_as_forbidden() {
+    let error = matrix_sdk::send_queue::RoomSendQueueError::RoomNotJoined;
 
     assert_eq!(
-        classify_timeline_send_error(&error),
+        classify_send_queue_error(&error),
         TimelineFailureKind::Forbidden
     );
 }

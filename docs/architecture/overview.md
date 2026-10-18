@@ -1176,11 +1176,15 @@ relay that model, not fight it.
    terminal correlation. Room switching policy
    (drop immediately vs. keep-warm) is decided by the UI through these
    commands; the runtime never leaks timeline state in an unbounded map.
-8. **Sends go through the SDK timeline/send queue path.** Local echo, offline
+8. **Sends use the account-owned SDK room send queue.** Local echo, offline
    persistence, strict FIFO retry, retry-after-reconnect, and remote-echo
-   matching come from the SDK send queue, reached through the SDK UI timeline
-   handle for visible timeline sends. The Rust runtime owns the product state
-   projection. `TimelineManager` supervises every accepted text, reply, and
+   matching come from the SDK send queue. Core resolves the explicit account
+   and joined room independently of display subscriptions; an existing timeline
+   is only an optional cache for reply metadata. No send selects a room or
+   builds a presentation timeline. The Rust runtime owns the product state
+   projection. Direct `SendText`/`SendReply` operations never acquire, clear,
+   or settle a GUI composer; GUI submissions retain their draft lease contract.
+   `TimelineManager` supervises every accepted text, reply, and
    media enqueue future, observes client-global queue terminals, and preserves
    request/submission correlation across timeline unsubscribe and actor
    replacement. Per-timeline actors own only the presentation subscription and
