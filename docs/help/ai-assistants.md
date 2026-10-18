@@ -1,7 +1,8 @@
 # Connect an AI assistant (MCP)
 
 Koushi can act as a local [Model Context Protocol](https://modelcontextprotocol.io)
-server for Claude Code and Codex. The assistant runs on the same computer and
+server for Claude Code, Codex, and any other stdio MCP client. The assistant
+runs on the same computer and
 talks to the Koushi app you already have open, so it can search your messages
 and send replies without ever holding your encryption keys.
 
@@ -137,6 +138,38 @@ Tool calls run inside Koushi's own runtime, but they are not GUI actions:
 - `send_message` sends without touching a draft or the composer. The message
   appears in an open room through normal sync; the assistant's request and its
   errors stay with the assistant.
+
+## Checking a connection
+
+`initialize` and `tools/list` are answered by the launcher itself: they succeed
+whether or not Koushi is running, so they do not show that the app is reachable.
+Only a tool call crosses the socket. Confirm a connection with the read-only
+`list_accounts` before reporting success or failure.
+
+- If the execution environment already exposes Koushi's tools, use them rather
+  than starting a second launcher.
+- `koushi-mcp --client-name <name>` started by hand prints nothing until a
+  request arrives on stdin. Silence is the waiting state, not a crash.
+
+## Sandboxes and approvals
+
+Two failures look similar and mean different things:
+
+| Symptom | Likely cause | Next step |
+| --- | --- | --- |
+| `koushi_unavailable` | Koushi is closed, its socket is gone, or the endpoint file is unreadable. | Open Koushi and retry. On macOS the socket is `~/Library/Application Support/koushi-desktop/mcp/mcp.sock`. |
+| `Operation not permitted` | The assistant's execution environment refused the local connection; Koushi was never asked. | Use the environment's own escalated execution for this call. |
+
+- Request escalation through the mechanism the environment documents, for
+  example `require_escalated` where it is supported. Name the exact operation and
+  keep the scope to the socket access that call needs.
+- Do not route the same call through another assistant or process to get around a
+  refusal, and do not disable a sandbox or approval prompt wholesale to make the
+  tools reachable.
+- Koushi's grant, the environment's permission, and the user's request are three
+  separate decisions. A working connection does not authorize sending, editing,
+  or changing settings, and one successful test call is not ongoing access.
+
 ## Limitations
 
 - Search results carry the room, the event id, and a snippet. The search index
@@ -154,6 +187,7 @@ Tool calls run inside Koushi's own runtime, but they are not GUI actions:
 | Message | Meaning | Fix |
 | --- | --- | --- |
 | `koushi_unavailable` | Koushi is not running or has not written its endpoint file. | Open Koushi and retry. |
+| `Operation not permitted` | The execution environment blocked the local socket connection before Koushi saw it. | Ask the environment for its escalated execution on that call; do not disable its sandbox. |
 | `consent_required` | No grant exists for the assistant's client name. | Add an entry to `connections.json` with the same `client_name`. |
 | `not_permitted` | The account is not listed, or the needed flag is `false`. | Add the account id or turn on the flag. |
 | `account_unavailable` | The account is signed out or still restoring. | Sign in or wait for restore to finish. |
