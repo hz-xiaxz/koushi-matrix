@@ -22,6 +22,7 @@ mod causal_projection;
 mod command_policy;
 pub mod composer_draft_lifecycle;
 mod direct_message_classification;
+pub mod direct_operations;
 mod event_projection;
 pub mod executor;
 pub mod link_preview;
@@ -67,6 +68,7 @@ mod view_scope_lifecycle;
 
 pub use command_policy::CoreCommandPolicy;
 pub use direct_message_classification::DirectAccountDataSource;
+pub use direct_operations::{AttachmentFetchFailure, FetchedAttachment};
 pub use koushi_protocol::command::*;
 pub use koushi_protocol::event::*;
 pub use koushi_protocol::failure::*;
@@ -83,11 +85,11 @@ pub use native_artifact::{
 };
 pub use native_image_decoder::{NativeImageDecodeError, NativeStillImageDecoder};
 pub use runtime::{
-    AttachmentFetchFailure, COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle,
-    CoreConnection, CoreRuntime, CoreShutdownError, EVENT_QUEUE_CAPACITY, EventNavigationError,
-    EventStreamLag, FetchedAttachment, OutcomeCorrelation, ReaderSubscription,
-    ReaderSubscriptionCloser, ReaderSubscriptionControl, RequestOutcome, RequestOutcomeError,
-    RequestOutcomeExpectation, RoomOperationKind, SelectRoomError,
+    COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle, CoreConnection, CoreRuntime,
+    CoreShutdownError, EVENT_QUEUE_CAPACITY, EventNavigationError, EventStreamLag,
+    OutcomeCorrelation, ReaderSubscription, ReaderSubscriptionCloser, ReaderSubscriptionControl,
+    RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation, RoomOperationKind,
+    SelectRoomError,
 };
 pub use sliding_sync_diagnostics::{
     DiagnosticAgeBucket, SlidingSyncDiagnostics, SlidingSyncDiagnosticsSnapshot,

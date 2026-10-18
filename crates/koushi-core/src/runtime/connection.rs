@@ -5,6 +5,7 @@ use crate::composer_draft_lifecycle::{
     ComposerDraftLeaseFailure, ComposerDraftLeaseId, ComposerDraftLeaseRegistry,
     ComposerDraftScope, ComposerRendererGeneration,
 };
+use crate::direct_operations::{AttachmentFetchFailure, FetchedAttachment};
 use crate::event_projection::{
     project_room_event_display_labels, project_timeline_event_display_labels,
 };
@@ -619,30 +620,6 @@ impl CoreConnectionTestControl {
     pub fn send_snapshot(&self, snapshot: VersionedAppStateSnapshot) {
         let _ = self.snapshot_tx.send(snapshot);
     }
-}
-
-/// One attachment written into an account's managed media cache (#1524).
-#[derive(Clone, Debug, Eq, PartialEq)]
-pub struct FetchedAttachment {
-    /// Absolute path inside Koushi's per-account media cache.
-    pub path: std::path::PathBuf,
-    pub mime_type: Option<String>,
-    pub size_bytes: u64,
-}
-
-/// Failure classes for a direct (non-GUI) attachment fetch (#1524).
-#[derive(Clone, Copy, Debug, Eq, PartialEq)]
-pub enum AttachmentFetchFailure {
-    /// The account has no ready session.
-    AccountInactive,
-    /// The room is unknown to this account or not joined.
-    RoomNotFound,
-    /// The event is unknown to the room.
-    EventNotFound,
-    /// The event carries no downloadable media.
-    Unsupported,
-    /// The download itself failed (network, key, or write).
-    DownloadFailed,
 }
 
 impl CoreConnection {

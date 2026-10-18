@@ -141,7 +141,10 @@ pub(crate) enum AccountMessage {
         event_id: String,
         thumbnail: bool,
         response: tokio::sync::oneshot::Sender<
-            Result<crate::runtime::FetchedAttachment, crate::runtime::AttachmentFetchFailure>,
+            Result<
+                crate::direct_operations::FetchedAttachment,
+                crate::direct_operations::AttachmentFetchFailure,
+            >,
         >,
     },
     DirectSearch {
@@ -2990,11 +2993,16 @@ impl AccountActor {
         event_id: String,
         thumbnail: bool,
         mut response: tokio::sync::oneshot::Sender<
-            Result<crate::runtime::FetchedAttachment, crate::runtime::AttachmentFetchFailure>,
+            Result<
+                crate::direct_operations::FetchedAttachment,
+                crate::direct_operations::AttachmentFetchFailure,
+            >,
         >,
     ) {
         let Some(session) = self.session.clone() else {
-            let _ = response.send(Err(crate::runtime::AttachmentFetchFailure::AccountInactive));
+            let _ = response.send(Err(
+                crate::direct_operations::AttachmentFetchFailure::AccountInactive,
+            ));
             return;
         };
         let data_dir = self.data_dir.clone();
@@ -3021,22 +3029,22 @@ impl AccountActor {
                 tokio::select! {
                     outcome = &mut fetch => {
                         if !response.is_closed() {
-                            let _ = response.send(outcome.map(|cached| crate::runtime::FetchedAttachment {
+                            let _ = response.send(outcome.map(|cached| crate::direct_operations::FetchedAttachment {
                                 path: cached.path,
                                 mime_type: cached.mime_type,
                                 size_bytes: cached.size_bytes,
                             }).map_err(|failure| match failure {
                                 crate::timeline::AttachmentFailure::RoomNotFound => {
-                                    crate::runtime::AttachmentFetchFailure::RoomNotFound
+                                    crate::direct_operations::AttachmentFetchFailure::RoomNotFound
                                 }
                                 crate::timeline::AttachmentFailure::EventNotFound => {
-                                    crate::runtime::AttachmentFetchFailure::EventNotFound
+                                    crate::direct_operations::AttachmentFetchFailure::EventNotFound
                                 }
                                 crate::timeline::AttachmentFailure::Unsupported => {
-                                    crate::runtime::AttachmentFetchFailure::Unsupported
+                                    crate::direct_operations::AttachmentFetchFailure::Unsupported
                                 }
                                 crate::timeline::AttachmentFailure::DownloadFailed => {
-                                    crate::runtime::AttachmentFetchFailure::DownloadFailed
+                                    crate::direct_operations::AttachmentFetchFailure::DownloadFailed
                                 }
                             }));
                         }

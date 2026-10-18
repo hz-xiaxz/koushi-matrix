@@ -1999,6 +1999,16 @@ Invariants:
   invalidated. `initialize` and `tools/list` still answer while Koushi is
   unavailable; account-scoped calls fail with a closed error code, and the
   next call re-reads the endpoint file.
+- **No GUI coupling.** Every tool call is an in-process Core request that
+  reduces no `AppAction` and emits no `CoreEvent` the Tauri adapter forwards to
+  the WebView. `search_messages` runs its own request with the caller's
+  joined-room filter under a per-account concurrency bound, so the GUI search
+  pane, its latest-query lifetime, and other callers are unaffected.
+  `get_attachment` resolves the room and event from the account session and
+  reuses the download and managed-cache path, so an unviewed room needs no
+  timeline actor or projected media entry. Progress, cancellation, and errors
+  reach only the calling client. A sent message appearing through normal sync
+  is the expected exception, not a GUI operation.
 - **No content telemetry.** Message bodies, queries, attachment bytes, tokens,
   and identifiers never appear in logs or diagnostics; only counts and closed
   error codes do.

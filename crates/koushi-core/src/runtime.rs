@@ -85,13 +85,13 @@ use crate::command_policy::{
     timeline_composer_account_fence,
 };
 use crate::composer_draft_lifecycle::{ComposerDraftCommandPermit, ComposerDraftLeaseRegistry};
+use crate::direct_operations::{AttachmentFetchFailure, FetchedAttachment};
 pub use activity::ACTIVITY_RECENT_MAX_ROWS;
 use activity::{
     ActivityProjection, activity_tab_token, cap_activity_resolution_requests,
     guard_activity_resolution_completion, normalize_activity_resolution_action,
     record_activity_transition,
 };
-pub use connection::{AttachmentFetchFailure, FetchedAttachment};
 use koushi_protocol::command::{
     AccountCommand, AppCommand, CoreCommand, SearchCommand, SearchScope, SyncCommand,
     TimelineCommand,

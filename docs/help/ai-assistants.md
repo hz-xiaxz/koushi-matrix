@@ -124,6 +124,19 @@ returns immediately when something is waiting, otherwise it blocks up to
 The cursor is valid for the current Koushi run only. After restarting Koushi,
 ask for events without a cursor to start from the newest position.
 
+## What assistant calls never change
+
+Tool calls run inside Koushi's own runtime, but they are not GUI actions:
+
+- `search_messages` does not open the search pane, replace its query or
+  results, or cancel a search you are typing. Each call runs its own search
+  with the room filter you passed and returns only to that caller.
+- `get_attachment` reads the message from the account, not from an open
+  timeline, so it works for rooms you have never opened. Files land in Koushi's
+  media cache.
+- `send_message` sends without touching a draft or the composer. The message
+  appears in an open room through normal sync; the assistant's request and its
+  errors stay with the assistant.
 ## Limitations
 
 - Search results carry the room, the event id, and a snippet. The search index
@@ -144,6 +157,9 @@ ask for events without a cursor to start from the newest position.
 | `consent_required` | No grant exists for the assistant's client name. | Add an entry to `connections.json` with the same `client_name`. |
 | `not_permitted` | The account is not listed, or the needed flag is `false`. | Add the account id or turn on the flag. |
 | `account_unavailable` | The account is signed out or still restoring. | Sign in or wait for restore to finish. |
+| `room_not_found` | The room is unknown to that account or you have left it. | List rooms again and use a room id the account is joined to. |
+| `event_not_found` | The event id is unknown to the room. | Re-run `search_messages` for a current event id. |
+| `busy` | This account already runs the maximum number of concurrent searches from assistants. | Wait for an earlier call to finish and retry. |
 | `unsupported` | The assistant asked for a tool this build does not implement. | Update Koushi. |
 
 If the launcher reports it cannot locate the endpoint file, pass
