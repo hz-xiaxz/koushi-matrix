@@ -35,6 +35,8 @@ pub enum ErrorCode {
     EventNotFound,
     /// The attachment exceeds the configured size limit.
     AttachmentTooLarge,
+    /// The account already runs the maximum number of concurrent operations.
+    Busy,
     /// The tool or argument shape is not supported by this build.
     Unsupported,
     /// An unexpected internal failure; no detail crosses the boundary.
@@ -52,6 +54,7 @@ impl ErrorCode {
             Self::RoomNotFound => "room_not_found",
             Self::EventNotFound => "event_not_found",
             Self::AttachmentTooLarge => "attachment_too_large",
+            Self::Busy => "busy",
             Self::Unsupported => "unsupported",
             Self::Internal => "internal",
         }

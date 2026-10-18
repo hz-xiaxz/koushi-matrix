@@ -5437,3 +5437,73 @@ mod anchored_send;
 mod navigation_network;
 mod search_navigation_owner;
 mod settings_loading;
+
+/// #1524: a direct search may not reach the GUI's search state. It is
+/// forwarded to the account runtime with the caller's own room filter and
+/// content policy, and no `AppAction` is reduced, so a GUI search in flight
+/// keeps its query, results and owner.
+#[tokio::test]
+async fn a_direct_search_never_reduces_gui_search_state() {
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let session = SessionInfo {
+        homeserver: "https://example.invalid".to_owned(),
+        user_id: "@synthetic:example.invalid".to_owned(),
+        device_id: "SYNTHETIC".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    let state = AppState {
+        session: SessionState::Ready(session),
+        ..AppState::default()
+    };
+    let (mut actor, _command_tx, _action_tx, mut account_rx, _event_rx, ..) =
+        app_actor_event_navigation_fixture(data_dir.path(), state);
+
+    // Seed the GUI's own search state and owner, as a user typing in the
+    // search pane would.
+    let gui_request = RequestId {
+        connection_id: RuntimeConnectionId(5),
+        sequence: 7,
+    };
+    actor.active_search_request = Some(ActiveSearchRequest::dispatched(gui_request));
+    actor.reduce_app_action_state(AppAction::SearchSubmitted {
+        request_id: gui_request.sequence,
+        connection_id: gui_request.connection_id.0,
+        query: "gui query".to_owned(),
+        scope: koushi_state::SearchScope::AllRooms,
+    });
+    let gui_search = actor.state.search.clone();
+
+    let (response, _result) = oneshot::channel();
+    actor
+        .handle_direct_search(
+            "mcp query".to_owned(),
+            vec!["!caller:example.invalid".to_owned()],
+            response,
+        )
+        .await;
+
+    let forwarded = account_rx.recv().await.expect("a forwarded request");
+    match forwarded {
+        AccountMessage::DirectSearch {
+            query,
+            room_ids,
+            content_policy,
+            ..
+        } => {
+            assert_eq!(query, "mcp query");
+            assert_eq!(room_ids, vec!["!caller:example.invalid".to_owned()]);
+            assert_eq!(
+                content_policy.include_filenames,
+                actor.state.settings.values.search_crawler.include_filenames,
+                "the account's content policy travels with the request"
+            );
+        }
+        _ => panic!("unexpected account message"),
+    }
+    assert_eq!(actor.state.search, gui_search, "GUI search state unchanged");
+    assert_eq!(
+        actor.active_search_request.map(|owner| owner.request_id),
+        Some(gui_request),
+        "the GUI owner keeps its request"
+    );
+}

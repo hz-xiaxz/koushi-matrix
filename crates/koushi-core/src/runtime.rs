@@ -332,6 +332,18 @@ enum CoreCommandEnvelope {
     TimelineResidencyDiagnostics(
         oneshot::Sender<Option<crate::timeline::TimelineResidencyDiagnostics>>,
     ),
+    /// A search for an out-of-band caller (#1524). Answered on the reply
+    /// channel only; no app action or GUI event is produced.
+    DirectSearch {
+        query: String,
+        room_ids: Vec<String>,
+        response: oneshot::Sender<
+            Result<
+                Vec<koushi_protocol::event::SearchResultItem>,
+                crate::search::DirectSearchFailure,
+            >,
+        >,
+    },
 }
 
 #[cfg(test)]
@@ -343,6 +355,7 @@ impl CoreCommandEnvelope {
                 panic!("expected public command envelope")
             }
             Self::RetentionDiagnostics(_) => panic!("expected public command envelope"),
+            Self::DirectSearch { .. } => panic!("expected public command envelope"),
             Self::TimelineResidencyDiagnostics(_) => panic!("expected public command envelope"),
             #[cfg(test)]
             Self::ResolveReceiptWindow { .. } => {
@@ -2593,6 +2606,11 @@ impl AppActor {
             CoreCommandEnvelope::TimelineResidencyDiagnostics(response) => {
                 Box::pin(self.handle_timeline_residency_diagnostics(response)).await
             }
+            CoreCommandEnvelope::DirectSearch {
+                query,
+                room_ids,
+                response,
+            } => Box::pin(self.handle_direct_search(query, room_ids, response)).await,
             envelope => Box::pin(self.handle_public_command(envelope)).await,
         }
     }
@@ -2678,6 +2696,42 @@ impl AppActor {
         false
     }
 
+    /// Route one direct (non-GUI) search to the account runtime (#1524).
+    ///
+    /// The runtime only decides session readiness and carries the account's
+    /// search content policy; the account actor owns the bounded execution and
+    /// the reply. No app action is reduced, so GUI search state cannot change.
+    async fn handle_direct_search(
+        &mut self,
+        query: String,
+        room_ids: Vec<String>,
+        response: oneshot::Sender<
+            Result<
+                Vec<koushi_protocol::event::SearchResultItem>,
+                crate::search::DirectSearchFailure,
+            >,
+        >,
+    ) -> bool {
+        if response.is_closed() {
+            return false;
+        }
+        if is_ready_session_for_commands(&self.state.session) {
+            let content_policy = self.state.settings.values.search_crawler.clone();
+            let _ = self
+                .account_actor
+                .send(AccountMessage::DirectSearch {
+                    query,
+                    room_ids,
+                    content_policy,
+                    response,
+                })
+                .await;
+        } else {
+            let _ = response.send(Err(crate::search::DirectSearchFailure::AccountInactive));
+        }
+        false
+    }
+
     async fn handle_read_receipt_window(
         &mut self,
         source: koushi_protocol::view::ReceiptSourceRef,
@@ -2725,6 +2779,9 @@ impl AppActor {
                 unreachable!("internal command routed to public handler")
             }
             CoreCommandEnvelope::TimelineResidencyDiagnostics(_) => {
+                unreachable!("internal command routed to public handler")
+            }
+            CoreCommandEnvelope::DirectSearch { .. } => {
                 unreachable!("internal command routed to public handler")
             }
             #[cfg(test)]

@@ -483,7 +483,8 @@ impl CoreCommandHandle {
                 admission: _,
             } => (command, composer_permit),
             CoreCommandEnvelope::ReadReceiptWindow { .. }
-            | CoreCommandEnvelope::ReaderPrepared(_) => {
+            | CoreCommandEnvelope::ReaderPrepared(_)
+            | CoreCommandEnvelope::DirectSearch { .. } => {
                 unreachable!("composer admission creates a public command")
             }
             #[cfg(test)]
@@ -574,6 +575,9 @@ impl CoreConnectionTestControl {
     #[doc(hidden)]
     pub async fn recv_command(&mut self) -> Option<CoreCommand> {
         self.command_rx.recv().await.map(|envelope| match envelope {
+            CoreCommandEnvelope::DirectSearch { .. } => {
+                unreachable!("direct searches are not public commands")
+            }
             CoreCommandEnvelope::Public {
                 command, admission, ..
             } => {
@@ -656,6 +660,31 @@ impl CoreConnection {
             return Err(crate::view_scope_lifecycle::ScopeError::NotOwned);
         }
         consumer.resource(scope, revision, source_ref)
+    }
+
+    /// Run one search for an out-of-band caller (#1524).
+    ///
+    /// The reply carries only this caller's results. No app action is reduced
+    /// and no `CoreEvent` is emitted, so GUI search state, its latest-query
+    /// lifetime, and any concurrent GUI or MCP search are unaffected.
+    pub async fn direct_search(
+        &self,
+        query: String,
+        room_ids: Vec<String>,
+    ) -> Result<Vec<koushi_protocol::event::SearchResultItem>, crate::search::DirectSearchFailure>
+    {
+        let (response, result) = oneshot::channel();
+        self.command_tx
+            .send(CoreCommandEnvelope::DirectSearch {
+                query,
+                room_ids,
+                response,
+            })
+            .await
+            .map_err(|_| crate::search::DirectSearchFailure::AccountInactive)?;
+        result
+            .await
+            .map_err(|_| crate::search::DirectSearchFailure::AccountInactive)?
     }
 
     #[cfg(test)]

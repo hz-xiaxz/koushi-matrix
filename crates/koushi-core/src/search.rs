@@ -2357,6 +2357,79 @@ async fn abort_and_await_task<T>(task: executor::JoinHandle<T>) {
     let _ = task.await;
 }
 
+/// Failure classes for a direct (non-GUI) search request.
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum DirectSearchFailure {
+    /// The account has no ready session to search.
+    AccountInactive,
+    /// The account already runs the maximum number of direct searches.
+    Capacity,
+    /// A requested room is not joined by this account.
+    ForbiddenRoom,
+    /// The encrypted index could not answer.
+    Search(SearchFailureKind),
+}
+
+/// Run one search for a direct caller (#1524).
+///
+/// Shares the account's encrypted index and candidate verification with the GUI
+/// search path, but owns no app state: the caller receives the compacted result
+/// set directly and no `AppAction` is reduced, so a GUI search pane is never
+/// touched and concurrent callers cannot supersede each other.
+pub(crate) async fn run_direct_search(
+    session: Arc<MatrixClientSession>,
+    query: String,
+    room_ids: Vec<String>,
+    settings: SearchCrawlerSettings,
+) -> Result<Vec<SearchResultItem>, DirectSearchFailure> {
+    let room_filter = if room_ids.is_empty() {
+        SearchRoomFilter::AllRooms
+    } else {
+        for room_id in &room_ids {
+            let Ok(parsed) = matrix_sdk::ruma::RoomId::parse(room_id) else {
+                return Err(DirectSearchFailure::ForbiddenRoom);
+            };
+            match session.client().get_room(&parsed) {
+                Some(room) if room.state() == matrix_sdk::RoomState::Joined => {}
+                _ => return Err(DirectSearchFailure::ForbiddenRoom),
+            }
+        }
+        SearchRoomFilter::OnlyRooms(room_ids)
+    };
+    let query = query.trim().to_owned();
+    if query.is_empty() {
+        return Ok(Vec::new());
+    }
+    let scope = SearchScope::AllRooms;
+    let sdk_scope = matrix_sdk_search_scope(&scope, &room_filter);
+    let mut verified_by_identity: HashMap<(String, String), VerifiedCandidate> = HashMap::new();
+    for variant in cjk_search_query_variants(&query) {
+        let outcome =
+            verify_literal_candidates(&session, &variant, &sdk_scope, &room_filter, &settings)
+                .await
+                .map_err(DirectSearchFailure::Search)?;
+        for candidate in outcome.results {
+            let identity = (
+                candidate.result.room_id.clone(),
+                candidate.result.event_id.clone(),
+            );
+            match verified_by_identity.entry(identity) {
+                std::collections::hash_map::Entry::Occupied(mut entry) => {
+                    if entry.get().index_key < candidate.index_key {
+                        entry.insert(candidate);
+                    }
+                }
+                std::collections::hash_map::Entry::Vacant(entry) => {
+                    entry.insert(candidate);
+                }
+            }
+        }
+    }
+    Ok(compact_search_results(&select_newest(
+        verified_by_identity.into_values().collect(),
+    )))
+}
+
 pub(crate) fn compact_search_results(
     results: &[koushi_state::SearchResult],
 ) -> Vec<SearchResultItem> {

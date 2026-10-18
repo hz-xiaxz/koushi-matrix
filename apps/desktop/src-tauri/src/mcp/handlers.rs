@@ -10,10 +10,8 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
 
 use koushi_mcp::wire::{ErrorCode, WireError};
-use koushi_protocol::command::{
-    CoreCommand, MediaDownloadSelection, SearchCommand, SearchScope, TimelineCommand,
-};
-use koushi_protocol::event::{CoreEvent, SearchEvent, TimelineEvent};
+use koushi_protocol::command::{CoreCommand, MediaDownloadSelection, TimelineCommand};
+use koushi_protocol::event::{CoreEvent, TimelineEvent};
 use koushi_protocol::ids::TimelineKey;
 use koushi_state::{ComposerDocument, SessionInfo, SessionState};
 
@@ -176,6 +174,23 @@ fn list_rooms(
     }))
 }
 
+fn direct_search_failure(failure: koushi_core::search::DirectSearchFailure) -> WireError {
+    use koushi_core::search::DirectSearchFailure as Failure;
+    let (code, message) = match failure {
+        Failure::AccountInactive => (ErrorCode::AccountUnavailable, "account is not signed in"),
+        Failure::Capacity => (
+            ErrorCode::Busy,
+            "too many concurrent searches for this account",
+        ),
+        Failure::ForbiddenRoom => (ErrorCode::RoomNotFound, "a requested room is not joined"),
+        Failure::Search(koushi_protocol::failure::SearchFailureKind::IndexUnavailable) => {
+            (ErrorCode::Internal, "the search index is unavailable")
+        }
+        Failure::Search(_) => (ErrorCode::Internal, "search failed"),
+    };
+    WireError::new(code, message)
+}
+
 async fn search_messages(
     app: &AppHandle,
     client_name: &str,
@@ -215,7 +230,7 @@ async fn search_messages(
         })
         .unwrap_or_default();
 
-    let mut connection = account_connection(app, &account_id)?;
+    let connection = account_connection(app, &account_id)?;
     let room_names: std::collections::HashMap<String, String> = connection
         .snapshot()
         .rooms
@@ -223,60 +238,29 @@ async fn search_messages(
         .map(|room| (room.room_id.clone(), room.display_label.clone()))
         .collect();
 
-    let request_id = connection.next_request_id();
-    let room_filter = if room_ids.is_empty() {
-        koushi_state::SearchRoomFilter::AllRooms
-    } else {
-        koushi_state::SearchRoomFilter::OnlyRooms(room_ids)
-    };
-    connection
-        .command(CoreCommand::Search(SearchCommand::Query {
-            request_id,
-            query,
-            scope: SearchScope::AllRooms,
-            room_filter,
-        }))
+    let results = connection
+        .direct_search(query, room_ids)
         .await
-        .map_err(|_| WireError::new(ErrorCode::Internal, "search could not be submitted"))?;
+        .map_err(direct_search_failure)?;
 
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(20);
-    loop {
-        let event = tokio::time::timeout_at(deadline, connection.recv_event())
-            .await
-            .map_err(|_| WireError::new(ErrorCode::Internal, "search timed out"))?;
-        match event {
-            Ok(CoreEvent::Search(SearchEvent::Results {
-                request_id: completed,
-                results,
-            })) if completed == request_id => {
-                let total = results.len();
-                let items: Vec<Value> = results
-                    .into_iter()
-                    .take(limit)
-                    .map(|item| {
-                        let room_name = room_names
-                            .get(&item.room_id)
-                            .cloned()
-                            .unwrap_or_else(|| item.room_id.clone());
-                        json!({
-                            "room_id": item.room_id,
-                            "room_name": room_name,
-                            "event_id": item.event_id,
-                            "snippet": item.snippet,
-                        })
-                    })
-                    .collect();
-                return Ok(json!({ "results": items, "total": total }));
-            }
-            Ok(_) => continue,
-            Err(_) => {
-                return Err(WireError::new(
-                    ErrorCode::Internal,
-                    "event stream lagged during search",
-                ));
-            }
-        }
-    }
+    let total = results.len();
+    let items: Vec<Value> = results
+        .into_iter()
+        .take(limit)
+        .map(|item| {
+            let room_name = room_names
+                .get(&item.room_id)
+                .cloned()
+                .unwrap_or_else(|| item.room_id.clone());
+            json!({
+                "room_id": item.room_id,
+                "room_name": room_name,
+                "event_id": item.event_id,
+                "snippet": item.snippet,
+            })
+        })
+        .collect();
+    Ok(json!({ "results": items, "total": total }))
 }
 
 async fn send_message(
