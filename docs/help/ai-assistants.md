@@ -60,6 +60,71 @@ Both commands also accept an explicit endpoint file with
 `--endpoint /path/to/endpoint.json`; the default location is discovered
 automatically.
 
+## Register another MCP client
+
+Any client that can start a stdio server works. The entry is the launcher's
+absolute path plus the client name you will grant:
+
+```json
+{
+  "mcpServers": {
+    "koushi": {
+      "command": "/Users/you/bin/koushi-mcp",
+      "args": ["--client-name", "my-client"]
+    }
+  }
+}
+```
+
+Clients launched from the Dock often do not inherit your shell `PATH`, so give
+the full path. If the client runs under a different home directory, pass
+`--endpoint` explicitly.
+
+## Clients that can only reach a URL
+
+Some assistants accept nothing but an `https://` MCP URL: hosted connectors such
+as ChatGPT's, and chat surfaces that never run a process on your machine. They
+cannot start the launcher and cannot open Koushi's socket. Bridge the gap with
+a tunnel instead of exposing the socket:
+
+```text
+remote assistant -> OpenAI-hosted tunnel endpoint -> tunnel-client (your Mac)
+                 -> koushi-mcp --client-name <name> -> Koushi
+```
+
+1. Create a tunnel in [Platform tunnel settings](https://platform.openai.com/settings/organization/tunnels)
+   and note the `tunnel_id`. Associate it with the ChatGPT workspace and the
+   Platform organization the assistant uses; a tunnel tied to only one of them
+   does not appear in the connector.
+2. Install `tunnel-client` from that page or from
+   [openai/tunnel-client releases](https://github.com/openai/tunnel-client/releases/latest),
+   with a runtime API key that has Tunnels **Read + Use**.
+3. Point a profile at the launcher and keep it running while the assistant
+   discovers and calls the tools:
+
+   ```bash
+   tunnel-client init --sample sample_mcp_stdio_local --profile koushi \
+     --tunnel-id tunnel_0123456789abcdef0123456789abcdef \
+     --mcp-command "/Users/you/bin/koushi-mcp --client-name my-client"
+   tunnel-client doctor --profile koushi --explain
+   tunnel-client run --profile koushi
+   ```
+
+4. Register the assistant against the tunnel. In ChatGPT that is
+   **Plugins → Add custom MCP server → Connection: Tunnel**. A client that
+   only takes a URL and a header needs the endpoint the tunnel exposes; use
+   header authentication, because connectors that only support OAuth servers
+   cannot reach Koushi.
+5. Grant the same `client_name` in `connections.json`, starting with
+   `allow_send` and `allow_attachments` set to `false`.
+
+The tunnel opens no inbound port, but everything it exposes stays reachable
+while `tunnel-client run` is alive: stop it when you are done. Each request has
+a 120-second deadline and a 10 MiB payload limit, and the assistant's vendor can
+call the tools for as long as the connector is authorized. Not every hosted
+connector accepts a tunnel endpoint; one that only takes a public `https://`
+URL cannot reach Koushi, and no local workaround makes it reachable.
+
 ## Step 2: grant access
 
 Until you grant access, the assistant can only list account ids and their
