@@ -804,6 +804,7 @@ async fn application_shutdown_releases_cached_account_connections() {
             scope: Some(koushi_state::SettingsPatchScope::App),
             window: Some(koushi_state::WindowSettings {
                 close_to_tray: false,
+                ..Default::default()
             }),
             ..Default::default()
         })

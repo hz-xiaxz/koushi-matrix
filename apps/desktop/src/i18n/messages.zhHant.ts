@@ -176,6 +176,8 @@ export const zhHant: Catalog = {
   "composer.code": "程式碼",
   "composer.dropFiles": "拖放檔案以附加",
   "composer.emoji": "表情符號",
+  "composer.emojiResize": "調整表情選擇器大小",
+  "composer.emojiSizeSaveFailed": "無法儲存大小。請再次調整大小重試。",
   "composer.emojiSearch": "搜尋表情符號",
   "composer.emojiRecent": "常用",
   "composer.italic": "斜體",

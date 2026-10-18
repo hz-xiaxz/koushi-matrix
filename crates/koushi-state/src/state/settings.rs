@@ -961,6 +961,9 @@ impl Default for DisplaySettings {
 /// on can never make the only window unreachable.
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct WindowSettings {
+    /// Preferred emoji panel width/height in CSS pixels, shared by all pickers.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub emoji_picker_size: Option<[u16; 2]>,
     #[serde(default = "default_close_to_tray")]
     pub close_to_tray: bool,
 }
@@ -973,6 +976,7 @@ impl Default for WindowSettings {
     fn default() -> Self {
         Self {
             close_to_tray: default_close_to_tray(),
+            emoji_picker_size: None,
         }
     }
 }

@@ -191,8 +191,8 @@ test("a surface that already owned its dismissal still closes on an outside pres
   // The emoji picker owns its own outside-press dismissal (EmojiPicker.tsx).
   // It is the green control: the shared contract must not take that over, and
   // the new document-level listener must not swallow the press before it.
-  await page.getByRole("button", { name: t("composer.emoji") }).click();
-  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  await page.getByRole("button", { name: t("composer.emoji"), exact: true }).click();
+  const picker = page.getByRole("dialog", { name: t("composer.emoji"), exact: true });
   await expect(picker).toBeVisible();
 
   await section(page, labels.rooms)

@@ -31,10 +31,10 @@ async function gotoReadyShell(page: import("@playwright/test").Page): Promise<vo
 }
 
 async function openEmojiPicker(page: import("@playwright/test").Page): Promise<void> {
-  const emojiButton = page.getByRole("button", { name: t("composer.emoji") });
+  const emojiButton = page.getByRole("button", { name: t("composer.emoji"), exact: true });
   await expect(emojiButton).toBeVisible();
   await emojiButton.click();
-  await expect(page.getByRole("dialog", { name: t("composer.emoji") })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: t("composer.emoji"), exact: true })).toBeVisible();
 }
 
 test("a failed picker chunk closes the picker without unmounting the shell (#1035)", async ({
@@ -43,19 +43,19 @@ test("a failed picker chunk closes the picker without unmounting the shell (#103
   await page.route(/\/src\/components\/EmojiPicker\.tsx(\?.*)?$/, (route) => route.abort());
   await gotoReadyShell(page);
 
-  const emojiButton = page.getByRole("button", { name: t("composer.emoji") });
+  const emojiButton = page.getByRole("button", { name: t("composer.emoji"), exact: true });
   await emojiButton.click();
   // The rejected lazy import is contained: the picker closes instead of
   // unmounting the shell, and the trigger is usable again.
   await expect(emojiButton).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByRole("main", { name: t("timeline.conversation") })).toBeVisible();
-  await expect(page.getByRole("dialog", { name: t("composer.emoji") })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: t("composer.emoji"), exact: true })).toHaveCount(0);
 
   // Opening again fails the same way and closes again.
   await emojiButton.click();
   await expect(emojiButton).toHaveAttribute("aria-expanded", "false");
   await expect(page.getByRole("main", { name: t("timeline.conversation") })).toBeVisible();
-  await expect(page.getByRole("dialog", { name: t("composer.emoji") })).toHaveCount(0);
+  await expect(page.getByRole("dialog", { name: t("composer.emoji"), exact: true })).toHaveCount(0);
 });
 
 async function openThreadPane(page: import("@playwright/test").Page): Promise<void> {
@@ -65,15 +65,15 @@ async function openThreadPane(page: import("@playwright/test").Page): Promise<vo
 
 async function openThreadEmojiPicker(page: import("@playwright/test").Page): Promise<void> {
   const threadPane = page.locator('aside[aria-label="Context panel"]');
-  const emojiButton = threadPane.getByRole("button", { name: t("composer.emoji") });
+  const emojiButton = threadPane.getByRole("button", { name: t("composer.emoji"), exact: true });
   await expect(emojiButton).toBeVisible();
   await emojiButton.click();
-  await expect(page.getByRole("dialog", { name: t("composer.emoji") })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: t("composer.emoji"), exact: true })).toBeVisible();
 }
 
 /** Viewport-relative geometry of the open picker. */
 async function pickerViewportMetrics(page: import("@playwright/test").Page) {
-  return page.getByRole("dialog", { name: t("composer.emoji") }).evaluate((element) => {
+  return page.getByRole("dialog", { name: t("composer.emoji"), exact: true }).evaluate((element) => {
     const rect = element.getBoundingClientRect();
     return {
       bottom: rect.bottom,
@@ -90,23 +90,23 @@ async function pickerViewportMetrics(page: import("@playwright/test").Page) {
 
 test("emoji button opens and closes the picker", async ({ page }) => {
   await gotoReadyShell(page);
-  const emojiButton = page.getByRole("button", { name: t("composer.emoji") });
+  const emojiButton = page.getByRole("button", { name: t("composer.emoji"), exact: true });
   await expect(emojiButton).toBeVisible();
 
   // Opens
   await emojiButton.click();
-  await expect(page.getByRole("dialog", { name: t("composer.emoji") })).toBeVisible();
+  await expect(page.getByRole("dialog", { name: t("composer.emoji"), exact: true })).toBeVisible();
 
   // Toggle closes
   await emojiButton.click();
-  await expect(page.getByRole("dialog", { name: t("composer.emoji") })).not.toBeVisible();
+  await expect(page.getByRole("dialog", { name: t("composer.emoji"), exact: true })).not.toBeVisible();
 });
 
 test("selecting an emoji by mouse inserts it into the composer draft", async ({ page }) => {
   await gotoReadyShell(page);
   await openEmojiPicker(page);
 
-  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji"), exact: true });
   // Click the first emoji button in the grid
   const firstEmoji = picker.locator(".emoji-picker-item").first();
   await expect(firstEmoji).toBeVisible();
@@ -125,7 +125,7 @@ test("selecting an emoji by mouse inserts it into the composer draft", async ({ 
 test("recent emoji selection is projected through Rust-owned composer settings", async ({ page }) => {
   await gotoReadyShell(page);
   await openEmojiPicker(page);
-  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji"), exact: true });
   const selected = await picker.locator(".emoji-picker-item").first().textContent();
   await picker.locator(".emoji-picker-item").first().click();
 
@@ -176,7 +176,7 @@ test("composer and remote-message reaction pickers share Rust-owned recent emoji
   const row = page.locator('[data-event-id="$remote-reaction:example.invalid"]');
   await row.hover();
   await row.getByRole("button", { name: t("timeline.addReaction") }).click();
-  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji"), exact: true });
   await expect(picker.getByRole("heading", { name: t("composer.emojiRecent") })).toBeVisible();
 
   await page.evaluate(() => window.__harness.clearInvocations());
@@ -219,7 +219,7 @@ test("lazily loaded reaction picker owns focus, Escape, and outside-click dismis
   ]);
   const row = page.locator('[data-event-id="$lazy-reaction:example.invalid"]');
   const trigger = row.getByRole("button", { name: t("timeline.addReaction") });
-  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji"), exact: true });
 
   await row.hover();
   await trigger.click();
@@ -271,7 +271,7 @@ test("Escape dismisses the picker", async ({ page }) => {
   await openEmojiPicker(page);
 
   await page.keyboard.press("Escape");
-  await expect(page.getByRole("dialog", { name: t("composer.emoji") })).not.toBeVisible();
+  await expect(page.getByRole("dialog", { name: t("composer.emoji"), exact: true })).not.toBeVisible();
 });
 
 test("clicking outside the picker dismisses it", async ({ page }) => {
@@ -280,7 +280,7 @@ test("clicking outside the picker dismisses it", async ({ page }) => {
 
   // Click somewhere outside the picker — the room list sidebar is always present
   await page.locator(".sidebar").click();
-  await expect(page.getByRole("dialog", { name: t("composer.emoji") })).not.toBeVisible();
+  await expect(page.getByRole("dialog", { name: t("composer.emoji"), exact: true })).not.toBeVisible();
 });
 
 test("picker does not make any network fetch request", async ({ page }) => {
@@ -314,7 +314,7 @@ test("send button and emoji picker are simultaneously visible", async ({ page })
   await openEmojiPicker(page);
 
   const sendButton = page.getByRole("button", { name: t("action.send"), exact: true });
-  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji"), exact: true });
   await expect(sendButton).toBeVisible();
   await expect(picker).toBeVisible();
 });
@@ -324,7 +324,7 @@ test("picker uses available room without horizontal scrolling", async ({ page })
   await gotoReadyShell(page);
   await openEmojiPicker(page);
 
-  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji"), exact: true });
   const metrics = await picker.evaluate((element) => {
     const rect = element.getBoundingClientRect();
     const tabs = element.querySelector<HTMLElement>(".emoji-picker-tabs");
@@ -389,7 +389,7 @@ test("grid density matches the keyboard column step", async ({ page }) => {
   await gotoReadyShell(page);
   await openEmojiPicker(page);
 
-  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji"), exact: true });
   const grid = picker.locator(".emoji-picker-grid").first();
   const columns = await grid.evaluate(
     (element) => getComputedStyle(element).gridTemplateColumns.split(" ").filter(Boolean).length
@@ -415,7 +415,7 @@ test("arrow key navigation then Enter inserts the highlighted emoji", async ({ p
   await gotoReadyShell(page);
   await openEmojiPicker(page);
 
-  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji"), exact: true });
 
   // Read what the first and third emoji in the grid are before interacting
   const firstItem = picker.locator(".emoji-picker-item").nth(0);

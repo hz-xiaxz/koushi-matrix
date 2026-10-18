@@ -6101,6 +6101,10 @@ stateDiagram-v2
   section preferences. An absent `low_priority` entry inherits the legacy
   device-global `SidebarCollapsedSections.low_priority` flag and the scope's
   Rooms sort, so an older persisted settings file keeps its collapse choice.
+- `WindowSettings.emoji_picker_size` is an optional device-wide width/height
+  preference. Every emoji picker reads it on opening and submits an app-scoped
+  `UpdateSettings` when a resize finishes. Drag measurements are transient React
+  presentation state; viewport clamping never overwrites the saved preference.
 - Settings values are non-secret by construction. They must never include
   access tokens, refresh tokens, passwords, recovery material, SDK store keys,
   search index keys, local unlock secrets, raw homeserver credentials, raw

@@ -176,6 +176,8 @@ export const ko: Catalog = {
   "composer.code": "코드",
   "composer.dropFiles": "파일을 끌어다 놓아 첨부",
   "composer.emoji": "이모지",
+  "composer.emojiResize": "이모지 선택기 크기 조절",
+  "composer.emojiSizeSaveFailed": "크기를 저장할 수 없습니다. 다시 조절해 주세요.",
   "composer.emojiSearch": "이모지 검색",
   "composer.emojiRecent": "자주 사용",
   "composer.italic": "기울임꼴",

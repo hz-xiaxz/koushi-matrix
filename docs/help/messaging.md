@@ -15,6 +15,14 @@ are **Enter sends** and the platform modifier plus Enter. The keyboard page
 lists the current platform's shortcuts. Confirming an IME candidate is separate
 from sending the composed message.
 
+## Resize the emoji picker
+
+Open **Emoji** in a composer or reaction menu and drag the marked outer corner
+of the picker. The corner follows the side on which the picker opens. You can
+also focus the resize handle with Tab and use the arrow keys. The size is shared
+across pickers on this device and restored after restarting Koushi. In a smaller
+window the picker fits the available space without replacing your saved size.
+
 ## Schedule a message
 
 Use **Send later** in the message composer to send the message at a chosen

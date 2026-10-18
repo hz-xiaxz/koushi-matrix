@@ -178,6 +178,8 @@ export type MessageId =
   | "composer.code"
   | "composer.dropFiles"
   | "composer.emoji"
+  | "composer.emojiResize"
+  | "composer.emojiSizeSaveFailed"
   | "composer.emojiSearch"
   | "composer.emojiRecent"
   | "composer.italic"
@@ -2330,6 +2332,8 @@ const en: Catalog = {
   "composer.code": "Code",
   "composer.dropFiles": "Drop files to attach",
   "composer.emoji": "Emoji",
+  "composer.emojiResize": "Resize emoji picker",
+  "composer.emojiSizeSaveFailed": "Could not save picker size. Resize to retry.",
   "composer.emojiSearch": "Search emoji",
   "composer.emojiRecent": "Frequently used",
   "composer.italic": "Italic",
@@ -4536,6 +4540,8 @@ const ja: Catalog = {
   "composer.code": "コード",
   "composer.dropFiles": "ファイルをドロップして添付",
   "composer.emoji": "絵文字",
+  "composer.emojiResize": "絵文字ピッカーのサイズを変更",
+  "composer.emojiSizeSaveFailed": "サイズを保存できませんでした。再度サイズを変更してください。",
   "composer.emojiSearch": "絵文字を検索",
   "composer.emojiRecent": "よく使う",
   "composer.italic": "斜体",

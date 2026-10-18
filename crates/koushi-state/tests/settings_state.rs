@@ -1019,6 +1019,7 @@ fn close_to_tray_defaults_on_persists_and_backfills_for_legacy_stores() {
             patch: SettingsPatch {
                 window: Some(WindowSettings {
                     close_to_tray: false,
+                    ..Default::default()
                 }),
                 ..SettingsPatch::default()
             },
