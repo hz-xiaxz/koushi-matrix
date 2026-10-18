@@ -51,8 +51,9 @@ Claude Code / Codex (host)
                  └─ CoreConnection per account (koushi-core)
 ```
 
-- `koushi-mcp` (new `crates/koushi-mcp`, bin) translates MCP JSON-RPC to the
-  local IPC protocol and back. It holds no Matrix credentials, opens no crypto
+- `koushi-mcp` (new `crates/koushi-mcp`, lib + bin) translates MCP JSON-RPC to
+  the local IPC protocol and back, and owns the tool schemas so `tools/list`
+  answers while Koushi is down. It holds no Matrix credentials, opens no crypto
   store, and knows nothing about accounts beyond what the app returns.
 - The socket listener lives in `apps/desktop/src-tauri` because it is a
   transport adapter, and because the endpoint file, consent UI, and app
