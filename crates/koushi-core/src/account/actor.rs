@@ -133,6 +133,17 @@ const DIRECT_SEARCH_LIMIT: usize = 4;
 pub(crate) enum AccountMessage {
     /// A search issued by an out-of-band caller (MCP). Answered on the reply
     /// channel only: no app action and no GUI event is produced.
+    /// An attachment fetch for an out-of-band caller (MCP). Answered on the
+    /// reply channel only and resolved from the session, so it needs neither a
+    /// resident timeline nor a cached media source.
+    DirectAttachment {
+        room_id: String,
+        event_id: String,
+        thumbnail: bool,
+        response: tokio::sync::oneshot::Sender<
+            Result<crate::runtime::FetchedAttachment, crate::runtime::AttachmentFetchFailure>,
+        >,
+    },
     DirectSearch {
         query: String,
         room_ids: Vec<String>,
@@ -1096,6 +1107,7 @@ pub struct AccountActor {
     /// shutdown so no operation outlives the account (#1524).
     pub(super) direct_search_slots: Arc<tokio::sync::Semaphore>,
     pub(super) direct_search_tasks: Vec<crate::executor::JoinHandle<()>>,
+    pub(super) direct_attachment_tasks: Vec<crate::executor::JoinHandle<()>>,
     pub(super) session_promoted: bool,
     pub(super) trust_generation: u64,
     pub(super) trust_observer: Option<crate::executor::JoinHandle<()>>,
@@ -1454,6 +1466,7 @@ impl AccountActor {
             native_artifacts: Arc::clone(&native_artifacts),
             direct_search_slots: Arc::new(tokio::sync::Semaphore::new(DIRECT_SEARCH_LIMIT)),
             direct_search_tasks: Vec::new(),
+            direct_attachment_tasks: Vec::new(),
             session_promoted: false,
             trust_generation: 0,
             trust_observer: None,
@@ -1670,10 +1683,12 @@ impl AccountActor {
                 #[cfg(test)]
                 AccountMessage::Shutdown => {
                     self.abort_direct_searches().await;
+                    self.abort_direct_attachments().await;
                     break;
                 }
                 AccountMessage::ShutdownWithAck { acknowledged } => {
                     self.abort_direct_searches().await;
+                    self.abort_direct_attachments().await;
                     shutdown_ack = Some(acknowledged);
                     break;
                 }
@@ -1800,6 +1815,15 @@ impl AccountActor {
                             limit,
                             response,
                         })
+                        .await;
+                }
+                AccountMessage::DirectAttachment {
+                    room_id,
+                    event_id,
+                    thumbnail,
+                    response,
+                } => {
+                    self.handle_direct_attachment(room_id, event_id, thumbnail, response)
                         .await;
                 }
                 AccountMessage::DirectSearch {
@@ -2956,6 +2980,76 @@ impl AccountActor {
         let room_ok = self.stop_room_actor().await;
         if let Some(acknowledged) = shutdown_ack {
             let _ = acknowledged.send(runtime_ok && room_ok);
+        }
+    }
+
+    /// Start one direct (non-GUI) attachment fetch (#1524).
+    async fn handle_direct_attachment(
+        &mut self,
+        room_id: String,
+        event_id: String,
+        thumbnail: bool,
+        mut response: tokio::sync::oneshot::Sender<
+            Result<crate::runtime::FetchedAttachment, crate::runtime::AttachmentFetchFailure>,
+        >,
+    ) {
+        let Some(session) = self.session.clone() else {
+            let _ = response.send(Err(crate::runtime::AttachmentFetchFailure::AccountInactive));
+            return;
+        };
+        let data_dir = self.data_dir.clone();
+        let selection = if thumbnail {
+            koushi_protocol::command::MediaDownloadSelection::Thumbnail {
+                width: 800,
+                height: 800,
+            }
+        } else {
+            koushi_protocol::command::MediaDownloadSelection::File
+        };
+        self.direct_attachment_tasks
+            .retain(|task| !task.is_finished());
+        self.direct_attachment_tasks
+            .push(crate::executor::spawn(async move {
+                let fetch = crate::timeline::fetch_attachment(
+                    session,
+                    data_dir,
+                    &room_id,
+                    &event_id,
+                    selection,
+                );
+                tokio::pin!(fetch);
+                tokio::select! {
+                    outcome = &mut fetch => {
+                        if !response.is_closed() {
+                            let _ = response.send(outcome.map(|cached| crate::runtime::FetchedAttachment {
+                                path: cached.path,
+                                mime_type: cached.mime_type,
+                                size_bytes: cached.size_bytes,
+                            }).map_err(|failure| match failure {
+                                crate::timeline::AttachmentFailure::RoomNotFound => {
+                                    crate::runtime::AttachmentFetchFailure::RoomNotFound
+                                }
+                                crate::timeline::AttachmentFailure::EventNotFound => {
+                                    crate::runtime::AttachmentFetchFailure::EventNotFound
+                                }
+                                crate::timeline::AttachmentFailure::Unsupported => {
+                                    crate::runtime::AttachmentFetchFailure::Unsupported
+                                }
+                                crate::timeline::AttachmentFailure::DownloadFailed => {
+                                    crate::runtime::AttachmentFetchFailure::DownloadFailed
+                                }
+                            }));
+                        }
+                    }
+                    _ = response.closed() => {}
+                }
+            }));
+    }
+
+    async fn abort_direct_attachments(&mut self) {
+        for task in self.direct_attachment_tasks.drain(..) {
+            task.abort();
+            let _ = task.await;
         }
     }
 

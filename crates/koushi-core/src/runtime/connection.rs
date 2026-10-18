@@ -484,7 +484,8 @@ impl CoreCommandHandle {
             } => (command, composer_permit),
             CoreCommandEnvelope::ReadReceiptWindow { .. }
             | CoreCommandEnvelope::ReaderPrepared(_)
-            | CoreCommandEnvelope::DirectSearch { .. } => {
+            | CoreCommandEnvelope::DirectSearch { .. }
+            | CoreCommandEnvelope::DirectAttachment { .. } => {
                 unreachable!("composer admission creates a public command")
             }
             #[cfg(test)]
@@ -575,8 +576,9 @@ impl CoreConnectionTestControl {
     #[doc(hidden)]
     pub async fn recv_command(&mut self) -> Option<CoreCommand> {
         self.command_rx.recv().await.map(|envelope| match envelope {
-            CoreCommandEnvelope::DirectSearch { .. } => {
-                unreachable!("direct searches are not public commands")
+            CoreCommandEnvelope::DirectSearch { .. }
+            | CoreCommandEnvelope::DirectAttachment { .. } => {
+                unreachable!("direct operations are not public commands")
             }
             CoreCommandEnvelope::Public {
                 command, admission, ..
@@ -617,6 +619,30 @@ impl CoreConnectionTestControl {
     pub fn send_snapshot(&self, snapshot: VersionedAppStateSnapshot) {
         let _ = self.snapshot_tx.send(snapshot);
     }
+}
+
+/// One attachment written into an account's managed media cache (#1524).
+#[derive(Clone, Debug, Eq, PartialEq)]
+pub struct FetchedAttachment {
+    /// Absolute path inside Koushi's per-account media cache.
+    pub path: std::path::PathBuf,
+    pub mime_type: Option<String>,
+    pub size_bytes: u64,
+}
+
+/// Failure classes for a direct (non-GUI) attachment fetch (#1524).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum AttachmentFetchFailure {
+    /// The account has no ready session.
+    AccountInactive,
+    /// The room is unknown to this account or not joined.
+    RoomNotFound,
+    /// The event is unknown to the room.
+    EventNotFound,
+    /// The event carries no downloadable media.
+    Unsupported,
+    /// The download itself failed (network, key, or write).
+    DownloadFailed,
 }
 
 impl CoreConnection {
@@ -660,6 +686,33 @@ impl CoreConnection {
             return Err(crate::view_scope_lifecycle::ScopeError::NotOwned);
         }
         consumer.resource(scope, revision, source_ref)
+    }
+
+    /// Fetch one attachment for an out-of-band caller (#1524).
+    ///
+    /// Resolves the room and event from the account's session, so neither a
+    /// resident timeline nor a cached media source is required. The file lands
+    /// in the account's managed media cache and the reply carries only this
+    /// caller's result.
+    pub async fn fetch_attachment(
+        &self,
+        room_id: String,
+        event_id: String,
+        thumbnail: bool,
+    ) -> Result<FetchedAttachment, AttachmentFetchFailure> {
+        let (response, result) = oneshot::channel();
+        self.command_tx
+            .send(CoreCommandEnvelope::DirectAttachment {
+                room_id,
+                event_id,
+                thumbnail,
+                response,
+            })
+            .await
+            .map_err(|_| AttachmentFetchFailure::AccountInactive)?;
+        result
+            .await
+            .map_err(|_| AttachmentFetchFailure::AccountInactive)?
     }
 
     /// Run one search for an out-of-band caller (#1524).

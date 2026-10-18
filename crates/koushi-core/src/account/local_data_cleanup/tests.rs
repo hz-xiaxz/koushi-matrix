@@ -410,6 +410,7 @@ async fn reset_local_data_clears_current_account_persistence_and_signs_out_local
         native_artifacts: Arc::new(crate::native_artifact::RejectingNativeArtifactPort),
         direct_search_slots: Arc::new(tokio::sync::Semaphore::new(4)),
         direct_search_tasks: Vec::new(),
+        direct_attachment_tasks: Vec::new(),
         session_promoted: false,
         trust_generation: 0,
         trust_observer: None,

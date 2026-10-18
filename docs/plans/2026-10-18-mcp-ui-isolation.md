@@ -68,9 +68,18 @@ validation stay in the adapter.
 
 1. Display-independent send — done (`2bd9c639`), verified by the focused
    outbound suite and the full Core library suite.
-2. Direct search in Core plus adapter switch, with RED-first behavioral tests.
-3. Direct attachment in Core plus adapter switch, with RED-first behavioral
-   tests.
+2. Direct search in Core plus adapter switch — done. `search_messages` now
+   calls `CoreConnection::direct_search`; the runtime forwards each request with
+   the account's content policy, the account actor runs it under a four-permit
+   bound with the caller's joined-room filter, and the reply is the caller's
+   own. Tests: the GUI search state and owner survive an MCP search, an unjoined
+   room fails closed, and a blank query answers empty without an SDK call.
+3. Direct attachment in Core plus adapter switch — done. `get_attachment` no
+   longer emits a timeline command; `koushi_core::timeline::fetch_attachment`
+   resolves the joined room and event from the session, reuses the GUI download
+   and managed-cache path, and the adapter re-checks containment. Tests: an
+   unjoined room fails closed, a failed fetch writes nothing, and the runtime
+   publishes no GUI event and changes no navigation state.
 4. Isolation matrix, architecture canon and user help, integrated review, PR.
 
 ## Verification

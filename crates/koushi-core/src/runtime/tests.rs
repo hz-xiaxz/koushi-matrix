@@ -5507,3 +5507,54 @@ async fn a_direct_search_never_reduces_gui_search_state() {
         "the GUI owner keeps its request"
     );
 }
+
+/// #1524: an attachment fetch is forwarded straight to the account runtime
+/// with the caller's own target. No timeline subscription is created and no
+/// GUI event is published, so the fetch cannot depend on presentation state.
+#[tokio::test]
+async fn a_direct_attachment_does_not_touch_gui_state_or_events() {
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let session = SessionInfo {
+        homeserver: "https://example.invalid".to_owned(),
+        user_id: "@synthetic:example.invalid".to_owned(),
+        device_id: "SYNTHETIC".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    let state = AppState {
+        session: SessionState::Ready(session),
+        ..AppState::default()
+    };
+    let (mut actor, _command_tx, _action_tx, mut account_rx, mut event_rx, ..) =
+        app_actor_event_navigation_fixture(data_dir.path(), state);
+    let navigation_before = actor.state.navigation.active_room_id.clone();
+
+    let (response, _result) = oneshot::channel();
+    actor
+        .handle_direct_attachment(
+            "!target:example.invalid".to_owned(),
+            "$target:example.invalid".to_owned(),
+            true,
+            response,
+        )
+        .await;
+
+    let forwarded = account_rx.recv().await.expect("a forwarded request");
+    match forwarded {
+        AccountMessage::DirectAttachment {
+            room_id,
+            event_id,
+            thumbnail,
+            ..
+        } => {
+            assert_eq!(room_id, "!target:example.invalid");
+            assert_eq!(event_id, "$target:example.invalid");
+            assert!(thumbnail, "the caller's thumbnail choice travels");
+        }
+        _ => panic!("unexpected account message"),
+    }
+    assert_eq!(actor.state.navigation.active_room_id, navigation_before);
+    assert!(
+        event_rx.try_recv().is_err(),
+        "no GUI event may be published"
+    );
+}

@@ -631,6 +631,39 @@ impl TimelineActor {
     }
 }
 
+/// Download one media event into the account's managed cache, without a
+/// resident timeline (#1524). Returns the cache path of the written file.
+pub(super) async fn download_media_to_cache(
+    session: Arc<MatrixClientSession>,
+    data_dir: std::path::PathBuf,
+    room_id: String,
+    event_id: String,
+    entry: PrivateMediaEntry,
+    selection: &MediaDownloadSelection,
+) -> Result<(std::path::PathBuf, u64, Option<String>), TimelineFailureKind> {
+    let Some(request) = super::item_projection::media_request_for_download(&entry, selection)
+    else {
+        return Err(TimelineFailureKind::Sdk);
+    };
+    let outcome = TimelineActor::download_media_for(
+        session,
+        Some(data_dir),
+        room_id,
+        event_id,
+        entry,
+        request,
+    )
+    .await;
+    match outcome {
+        MediaDownloadOutcome::Ready(ready) => Ok((
+            std::path::PathBuf::from(ready.source_url),
+            ready.byte_count,
+            ready.mimetype,
+        )),
+        MediaDownloadOutcome::Failed(kind) => Err(kind),
+    }
+}
+
 pub(super) fn media_gallery_updated_action(
     key: &TimelineKey,
     items: Vec<TimelineMediaGalleryItem>,

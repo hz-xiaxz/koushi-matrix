@@ -91,6 +91,7 @@ use activity::{
     guard_activity_resolution_completion, normalize_activity_resolution_action,
     record_activity_transition,
 };
+pub use connection::{AttachmentFetchFailure, FetchedAttachment};
 use koushi_protocol::command::{
     AccountCommand, AppCommand, CoreCommand, SearchCommand, SearchScope, SyncCommand,
     TimelineCommand,
@@ -332,6 +333,14 @@ enum CoreCommandEnvelope {
     TimelineResidencyDiagnostics(
         oneshot::Sender<Option<crate::timeline::TimelineResidencyDiagnostics>>,
     ),
+    /// An attachment fetch for an out-of-band caller (#1524). Answered on the
+    /// reply channel only; no timeline subscription or GUI event is produced.
+    DirectAttachment {
+        room_id: String,
+        event_id: String,
+        thumbnail: bool,
+        response: oneshot::Sender<Result<FetchedAttachment, AttachmentFetchFailure>>,
+    },
     /// A search for an out-of-band caller (#1524). Answered on the reply
     /// channel only; no app action or GUI event is produced.
     DirectSearch {
@@ -356,6 +365,7 @@ impl CoreCommandEnvelope {
             }
             Self::RetentionDiagnostics(_) => panic!("expected public command envelope"),
             Self::DirectSearch { .. } => panic!("expected public command envelope"),
+            Self::DirectAttachment { .. } => panic!("expected public command envelope"),
             Self::TimelineResidencyDiagnostics(_) => panic!("expected public command envelope"),
             #[cfg(test)]
             Self::ResolveReceiptWindow { .. } => {
@@ -2611,6 +2621,15 @@ impl AppActor {
                 room_ids,
                 response,
             } => Box::pin(self.handle_direct_search(query, room_ids, response)).await,
+            CoreCommandEnvelope::DirectAttachment {
+                room_id,
+                event_id,
+                thumbnail,
+                response,
+            } => {
+                Box::pin(self.handle_direct_attachment(room_id, event_id, thumbnail, response))
+                    .await
+            }
             envelope => Box::pin(self.handle_public_command(envelope)).await,
         }
     }
@@ -2693,6 +2712,36 @@ impl AppActor {
         let _ = self
             .account_actor
             .try_send(AccountMessage::TimelineResidencyDiagnostics { response });
+        false
+    }
+
+    /// Route one direct (non-GUI) attachment fetch to the account runtime
+    /// (#1524). Only session readiness and the reply live here: the account
+    /// actor resolves the room and event from its session, so no timeline
+    /// subscription or cached media entry is involved.
+    async fn handle_direct_attachment(
+        &mut self,
+        room_id: String,
+        event_id: String,
+        thumbnail: bool,
+        response: oneshot::Sender<Result<FetchedAttachment, AttachmentFetchFailure>>,
+    ) -> bool {
+        if response.is_closed() {
+            return false;
+        }
+        if is_ready_session_for_commands(&self.state.session) {
+            let _ = self
+                .account_actor
+                .send(AccountMessage::DirectAttachment {
+                    room_id,
+                    event_id,
+                    thumbnail,
+                    response,
+                })
+                .await;
+        } else {
+            let _ = response.send(Err(AttachmentFetchFailure::AccountInactive));
+        }
         false
     }
 
@@ -2781,7 +2830,8 @@ impl AppActor {
             CoreCommandEnvelope::TimelineResidencyDiagnostics(_) => {
                 unreachable!("internal command routed to public handler")
             }
-            CoreCommandEnvelope::DirectSearch { .. } => {
+            CoreCommandEnvelope::DirectSearch { .. }
+            | CoreCommandEnvelope::DirectAttachment { .. } => {
                 unreachable!("internal command routed to public handler")
             }
             #[cfg(test)]

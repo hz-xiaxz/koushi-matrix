@@ -50,6 +50,7 @@
 mod actor;
 pub(crate) mod composer;
 mod diagnostics;
+mod direct_attachment;
 mod display_projection;
 mod focused_build;
 mod gap_repair;
@@ -57,6 +58,7 @@ pub(crate) mod html_sanitize;
 mod item_projection;
 mod manager;
 mod media;
+pub(crate) use direct_attachment::{AttachmentFailure, fetch_attachment};
 mod navigation;
 mod outbound_send;
 mod read_state;

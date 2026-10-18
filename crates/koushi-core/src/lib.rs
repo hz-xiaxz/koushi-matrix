@@ -83,11 +83,11 @@ pub use native_artifact::{
 };
 pub use native_image_decoder::{NativeImageDecodeError, NativeStillImageDecoder};
 pub use runtime::{
-    COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle, CoreConnection, CoreRuntime,
-    CoreShutdownError, EVENT_QUEUE_CAPACITY, EventNavigationError, EventStreamLag,
-    OutcomeCorrelation, ReaderSubscription, ReaderSubscriptionCloser, ReaderSubscriptionControl,
-    RequestOutcome, RequestOutcomeError, RequestOutcomeExpectation, RoomOperationKind,
-    SelectRoomError,
+    AttachmentFetchFailure, COMMAND_INBOX_CAPACITY, CommandSubmitError, CoreCommandHandle,
+    CoreConnection, CoreRuntime, CoreShutdownError, EVENT_QUEUE_CAPACITY, EventNavigationError,
+    EventStreamLag, FetchedAttachment, OutcomeCorrelation, ReaderSubscription,
+    ReaderSubscriptionCloser, ReaderSubscriptionControl, RequestOutcome, RequestOutcomeError,
+    RequestOutcomeExpectation, RoomOperationKind, SelectRoomError,
 };
 pub use sliding_sync_diagnostics::{
     DiagnosticAgeBucket, SlidingSyncDiagnostics, SlidingSyncDiagnosticsSnapshot,

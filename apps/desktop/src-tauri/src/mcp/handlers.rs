@@ -10,7 +10,7 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
 
 use koushi_mcp::wire::{ErrorCode, WireError};
-use koushi_protocol::command::{CoreCommand, MediaDownloadSelection, TimelineCommand};
+use koushi_protocol::command::{CoreCommand, TimelineCommand};
 use koushi_protocol::event::{CoreEvent, TimelineEvent};
 use koushi_protocol::ids::TimelineKey;
 use koushi_state::{ComposerDocument, SessionInfo, SessionState};
@@ -429,99 +429,63 @@ async fn get_attachment(
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    let mut connection = account_connection(app, &account_id)?;
-    let snapshot = connection.snapshot();
-    let account_key = commands::account_key_from_app_state(&snapshot);
-    if account_key.0.is_empty() {
-        return Err(WireError::new(
-            ErrorCode::AccountUnavailable,
-            "account is not signed in",
-        ));
-    }
-    let key = TimelineKey::room(account_key, room_id.clone());
-    let request_id = connection.next_request_id();
-    let selection = if thumbnail {
-        MediaDownloadSelection::Thumbnail {
-            width: 800,
-            height: 800,
-        }
-    } else {
-        MediaDownloadSelection::File
-    };
-    connection
-        .command(CoreCommand::Timeline(TimelineCommand::DownloadMedia {
-            request_id,
-            key: key.clone(),
-            event_id: event_id.clone(),
-            selection,
-        }))
+    let connection = account_connection(app, &account_id)?;
+    let attachment = connection
+        .fetch_attachment(room_id.clone(), event_id.clone(), thumbnail)
         .await
-        .map_err(|_| WireError::new(ErrorCode::Internal, "download could not be submitted"))?;
-
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
-    loop {
-        let event = tokio::time::timeout_at(deadline, connection.recv_event())
-            .await
-            .map_err(|_| WireError::new(ErrorCode::Internal, "download timed out"))?;
-        match event {
-            Ok(CoreEvent::Timeline(TimelineEvent::MediaDownloadCompleted {
-                request_id: completed,
-                event_id: completed_event,
-                source_url,
-                byte_count,
-                mimetype,
-                ..
-            })) if completed == request_id && completed_event == event_id => {
-                let path =
-                    resolve_download_path(app, &account_id, &source_url).ok_or_else(|| {
-                        WireError::new(
-                            ErrorCode::Internal,
-                            "download finished without a path inside Koushi's media cache",
-                        )
-                    })?;
-                return Ok(json!({
-                    "room_id": room_id,
-                    "event_id": event_id,
-                    "path": path.to_string_lossy(),
-                    "mime_type": mimetype,
-                    "size_bytes": byte_count,
-                }));
-            }
-            Ok(CoreEvent::Timeline(TimelineEvent::MediaDownloadFailed {
-                request_id: completed,
-                ..
-            })) if completed == request_id => {
-                return Err(WireError::new(
-                    ErrorCode::Internal,
-                    "Koushi could not download this attachment",
-                ));
-            }
-            Ok(_) => continue,
-            Err(_) => {
-                return Err(WireError::new(
-                    ErrorCode::Internal,
-                    "event stream lagged during download",
-                ));
-            }
-        }
-    }
+        .map_err(attachment_failure)?;
+    ensure_cache_containment(app, &account_id, &attachment.path)?;
+    Ok(json!({
+        "room_id": room_id,
+        "event_id": event_id,
+        "path": attachment.path.to_string_lossy(),
+        "mime_type": attachment.mime_type,
+        "size_bytes": attachment.size_bytes,
+    }))
 }
 
-/// Maps a downloaded asset URL onto the per-account media cache, refusing any
-/// path that leaves it.
-fn resolve_download_path(
+fn attachment_failure(failure: koushi_core::AttachmentFetchFailure) -> WireError {
+    use koushi_core::AttachmentFetchFailure as Failure;
+    let (code, message) = match failure {
+        Failure::AccountInactive => (ErrorCode::AccountUnavailable, "account is not signed in"),
+        Failure::RoomNotFound => (ErrorCode::RoomNotFound, "the room is not joined"),
+        Failure::EventNotFound => (ErrorCode::EventNotFound, "the event is unknown to the room"),
+        Failure::Unsupported => (ErrorCode::Unsupported, "the event carries no attachment"),
+        Failure::DownloadFailed => (
+            ErrorCode::Internal,
+            "Koushi could not download this attachment",
+        ),
+    };
+    WireError::new(code, message)
+}
+
+/// Refuse any returned path that leaves the account's media cache.
+fn ensure_cache_containment(
     app: &AppHandle,
     account_id: &str,
-    source_url: &str,
-) -> Option<std::path::PathBuf> {
+    path: &std::path::Path,
+) -> Result<(), WireError> {
     let state = app.state::<CoreRuntimeState>();
     let tab_id =
         koushi_core::account_runtime_manager::AccountTabId::from_string(account_id.to_owned());
-    let cache = state.runtime.media_cache_dir_for_tab(&tab_id)?;
-    let relative = source_url.split("media-downloads/").nth(1)?;
-    let canonical_cache = cache.canonicalize().ok()?;
-    let candidate = cache.join(relative).canonicalize().ok()?;
-    candidate.starts_with(&canonical_cache).then_some(candidate)
+    let cache = state
+        .runtime
+        .media_cache_dir_for_tab(&tab_id)
+        .ok_or_else(|| WireError::new(ErrorCode::Internal, "unknown account cache"))?;
+    let canonical_cache = cache
+        .canonicalize()
+        .map_err(|_| WireError::new(ErrorCode::Internal, "unknown account cache"))?;
+    let canonical_path = path
+        .canonicalize()
+        .map_err(|_| WireError::new(ErrorCode::Internal, "attachment path is unavailable"))?;
+    if canonical_path.starts_with(&canonical_cache) {
+        Ok(())
+    } else {
+        Err(WireError::new(
+            ErrorCode::Internal,
+            "download finished outside Koushi's media cache",
+        ))
+    }
 }
 
 fn account_connection(
