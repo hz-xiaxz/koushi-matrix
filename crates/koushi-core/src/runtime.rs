@@ -85,6 +85,7 @@ use crate::command_policy::{
     timeline_composer_account_fence,
 };
 use crate::composer_draft_lifecycle::{ComposerDraftCommandPermit, ComposerDraftLeaseRegistry};
+use crate::direct_operations::{AttachmentFetchFailure, FetchedAttachment};
 pub use activity::ACTIVITY_RECENT_MAX_ROWS;
 use activity::{
     ActivityProjection, activity_tab_token, cap_activity_resolution_requests,
@@ -332,6 +333,26 @@ enum CoreCommandEnvelope {
     TimelineResidencyDiagnostics(
         oneshot::Sender<Option<crate::timeline::TimelineResidencyDiagnostics>>,
     ),
+    /// An attachment fetch for an out-of-band caller (#1524). Answered on the
+    /// reply channel only; no timeline subscription or GUI event is produced.
+    DirectAttachment {
+        room_id: String,
+        event_id: String,
+        thumbnail: bool,
+        response: oneshot::Sender<Result<FetchedAttachment, AttachmentFetchFailure>>,
+    },
+    /// A search for an out-of-band caller (#1524). Answered on the reply
+    /// channel only; no app action or GUI event is produced.
+    DirectSearch {
+        query: String,
+        room_ids: Vec<String>,
+        response: oneshot::Sender<
+            Result<
+                Vec<koushi_protocol::event::SearchResultItem>,
+                crate::search::DirectSearchFailure,
+            >,
+        >,
+    },
 }
 
 #[cfg(test)]
@@ -343,6 +364,8 @@ impl CoreCommandEnvelope {
                 panic!("expected public command envelope")
             }
             Self::RetentionDiagnostics(_) => panic!("expected public command envelope"),
+            Self::DirectSearch { .. } => panic!("expected public command envelope"),
+            Self::DirectAttachment { .. } => panic!("expected public command envelope"),
             Self::TimelineResidencyDiagnostics(_) => panic!("expected public command envelope"),
             #[cfg(test)]
             Self::ResolveReceiptWindow { .. } => {
@@ -2593,6 +2616,20 @@ impl AppActor {
             CoreCommandEnvelope::TimelineResidencyDiagnostics(response) => {
                 Box::pin(self.handle_timeline_residency_diagnostics(response)).await
             }
+            CoreCommandEnvelope::DirectSearch {
+                query,
+                room_ids,
+                response,
+            } => Box::pin(self.handle_direct_search(query, room_ids, response)).await,
+            CoreCommandEnvelope::DirectAttachment {
+                room_id,
+                event_id,
+                thumbnail,
+                response,
+            } => {
+                Box::pin(self.handle_direct_attachment(room_id, event_id, thumbnail, response))
+                    .await
+            }
             envelope => Box::pin(self.handle_public_command(envelope)).await,
         }
     }
@@ -2678,6 +2715,72 @@ impl AppActor {
         false
     }
 
+    /// Route one direct (non-GUI) attachment fetch to the account runtime
+    /// (#1524). Only session readiness and the reply live here: the account
+    /// actor resolves the room and event from its session, so no timeline
+    /// subscription or cached media entry is involved.
+    async fn handle_direct_attachment(
+        &mut self,
+        room_id: String,
+        event_id: String,
+        thumbnail: bool,
+        response: oneshot::Sender<Result<FetchedAttachment, AttachmentFetchFailure>>,
+    ) -> bool {
+        if response.is_closed() {
+            return false;
+        }
+        if is_ready_session_for_commands(&self.state.session) {
+            let _ = self
+                .account_actor
+                .send(AccountMessage::DirectAttachment {
+                    room_id,
+                    event_id,
+                    thumbnail,
+                    response,
+                })
+                .await;
+        } else {
+            let _ = response.send(Err(AttachmentFetchFailure::AccountInactive));
+        }
+        false
+    }
+
+    /// Route one direct (non-GUI) search to the account runtime (#1524).
+    ///
+    /// The runtime only decides session readiness and carries the account's
+    /// search content policy; the account actor owns the bounded execution and
+    /// the reply. No app action is reduced, so GUI search state cannot change.
+    async fn handle_direct_search(
+        &mut self,
+        query: String,
+        room_ids: Vec<String>,
+        response: oneshot::Sender<
+            Result<
+                Vec<koushi_protocol::event::SearchResultItem>,
+                crate::search::DirectSearchFailure,
+            >,
+        >,
+    ) -> bool {
+        if response.is_closed() {
+            return false;
+        }
+        if is_ready_session_for_commands(&self.state.session) {
+            let content_policy = self.state.settings.values.search_crawler.clone();
+            let _ = self
+                .account_actor
+                .send(AccountMessage::DirectSearch {
+                    query,
+                    room_ids,
+                    content_policy,
+                    response,
+                })
+                .await;
+        } else {
+            let _ = response.send(Err(crate::search::DirectSearchFailure::AccountInactive));
+        }
+        false
+    }
+
     async fn handle_read_receipt_window(
         &mut self,
         source: koushi_protocol::view::ReceiptSourceRef,
@@ -2725,6 +2828,10 @@ impl AppActor {
                 unreachable!("internal command routed to public handler")
             }
             CoreCommandEnvelope::TimelineResidencyDiagnostics(_) => {
+                unreachable!("internal command routed to public handler")
+            }
+            CoreCommandEnvelope::DirectSearch { .. }
+            | CoreCommandEnvelope::DirectAttachment { .. } => {
                 unreachable!("internal command routed to public handler")
             }
             #[cfg(test)]

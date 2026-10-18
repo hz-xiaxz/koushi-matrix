@@ -6,6 +6,12 @@ use koushi_store::{CredentialStoreBackend, FileCredentialStore};
 
 use super::*;
 
+#[test]
+fn only_account_tabs_are_accounts() {
+    assert!(AccountTabId::from_string("account:@user:example.invalid".to_owned()).is_account());
+    assert!(!AccountTabId::from_string("add:1".to_owned()).is_account());
+}
+
 fn session(user_id: &str) -> SessionInfo {
     SessionInfo {
         homeserver: "https://example.invalid".to_owned(),

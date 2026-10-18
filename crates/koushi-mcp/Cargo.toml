@@ -1,0 +1,22 @@
+[package]
+name = "koushi-mcp"
+version = "0.1.0"
+edition = "2024"
+license.workspace = true
+description = "stdio MCP adapter for a running Koushi instance"
+
+[lib]
+name = "koushi_mcp"
+path = "src/lib.rs"
+
+[[bin]]
+name = "koushi-mcp"
+path = "src/main.rs"
+
+[dependencies]
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+tokio = { version = "1", features = ["io-std", "io-util", "macros", "net", "rt-multi-thread", "sync", "time"] }
+
+[dev-dependencies]
+tempfile = "3"

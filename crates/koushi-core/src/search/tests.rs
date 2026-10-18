@@ -1447,3 +1447,54 @@ async fn a_saved_record_is_loaded_and_skips_the_crawl() {
     }
     assert!(started.is_empty(), "no crawl starts: {started:?}");
 }
+
+/// #1524: a direct search fails closed on a room the account has not joined,
+/// rather than answering from the index or from another account's rooms.
+#[tokio::test]
+async fn a_direct_search_rejects_a_room_that_is_not_joined() {
+    let server = matrix_sdk::test_utils::mocks::MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let session = Arc::new(MatrixClientSession::from_client_for_testing(
+        client.clone(),
+        koushi_state::SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client.user_id().expect("user id").to_string(),
+            device_id: client.device_id().expect("device id").to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        },
+    ));
+    let failure = run_direct_search(
+        Arc::clone(&session),
+        "needle".to_owned(),
+        vec!["!not-joined:example.invalid".to_owned()],
+        SearchCrawlerSettings::default(),
+    )
+    .await
+    .expect_err("an unjoined room must fail closed");
+    assert_eq!(failure, DirectSearchFailure::ForbiddenRoom);
+}
+
+/// #1524: a blank query answers empty without touching the SDK index.
+#[tokio::test]
+async fn a_direct_search_with_a_blank_query_answers_empty() {
+    let server = matrix_sdk::test_utils::mocks::MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let session = Arc::new(MatrixClientSession::from_client_for_testing(
+        client.clone(),
+        koushi_state::SessionInfo {
+            homeserver: server.server().uri(),
+            user_id: client.user_id().expect("user id").to_string(),
+            device_id: client.device_id().expect("device id").to_string(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        },
+    ));
+    let results = run_direct_search(
+        Arc::clone(&session),
+        "   ".to_owned(),
+        Vec::new(),
+        SearchCrawlerSettings::default(),
+    )
+    .await
+    .expect("a blank query is not a failure");
+    assert!(results.is_empty());
+}

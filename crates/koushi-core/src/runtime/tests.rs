@@ -5437,3 +5437,205 @@ mod anchored_send;
 mod navigation_network;
 mod search_navigation_owner;
 mod settings_loading;
+
+/// #1524: a direct search may not reach the GUI's search state. It is
+/// forwarded to the account runtime with the caller's own room filter and
+/// content policy, and no `AppAction` is reduced, so a GUI search in flight
+/// keeps its query, results and owner.
+#[tokio::test]
+async fn a_direct_search_never_reduces_gui_search_state() {
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let session = SessionInfo {
+        homeserver: "https://example.invalid".to_owned(),
+        user_id: "@synthetic:example.invalid".to_owned(),
+        device_id: "SYNTHETIC".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    let state = AppState {
+        session: SessionState::Ready(session),
+        ..AppState::default()
+    };
+    let (mut actor, _command_tx, _action_tx, mut account_rx, _event_rx, ..) =
+        app_actor_event_navigation_fixture(data_dir.path(), state);
+
+    // Seed the GUI's own search state and owner, as a user typing in the
+    // search pane would.
+    let gui_request = RequestId {
+        connection_id: RuntimeConnectionId(5),
+        sequence: 7,
+    };
+    actor.active_search_request = Some(ActiveSearchRequest::dispatched(gui_request));
+    actor.reduce_app_action_state(AppAction::SearchSubmitted {
+        request_id: gui_request.sequence,
+        connection_id: gui_request.connection_id.0,
+        query: "gui query".to_owned(),
+        scope: koushi_state::SearchScope::AllRooms,
+    });
+    let gui_search = actor.state.search.clone();
+
+    let (response, _result) = oneshot::channel();
+    actor
+        .handle_direct_search(
+            "mcp query".to_owned(),
+            vec!["!caller:example.invalid".to_owned()],
+            response,
+        )
+        .await;
+
+    let forwarded = account_rx.recv().await.expect("a forwarded request");
+    match forwarded {
+        AccountMessage::DirectSearch {
+            query,
+            room_ids,
+            content_policy,
+            ..
+        } => {
+            assert_eq!(query, "mcp query");
+            assert_eq!(room_ids, vec!["!caller:example.invalid".to_owned()]);
+            assert_eq!(
+                content_policy.include_filenames,
+                actor.state.settings.values.search_crawler.include_filenames,
+                "the account's content policy travels with the request"
+            );
+        }
+        _ => panic!("unexpected account message"),
+    }
+    assert_eq!(actor.state.search, gui_search, "GUI search state unchanged");
+    assert_eq!(
+        actor.active_search_request.map(|owner| owner.request_id),
+        Some(gui_request),
+        "the GUI owner keeps its request"
+    );
+}
+
+/// #1524: an attachment fetch is forwarded straight to the account runtime
+/// with the caller's own target. No timeline subscription is created and no
+/// GUI event is published, so the fetch cannot depend on presentation state.
+#[tokio::test]
+async fn a_direct_attachment_does_not_touch_gui_state_or_events() {
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let session = SessionInfo {
+        homeserver: "https://example.invalid".to_owned(),
+        user_id: "@synthetic:example.invalid".to_owned(),
+        device_id: "SYNTHETIC".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    let state = AppState {
+        session: SessionState::Ready(session),
+        ..AppState::default()
+    };
+    let (mut actor, _command_tx, _action_tx, mut account_rx, mut event_rx, ..) =
+        app_actor_event_navigation_fixture(data_dir.path(), state);
+    let navigation_before = actor.state.navigation.active_room_id.clone();
+
+    let (response, _result) = oneshot::channel();
+    actor
+        .handle_direct_attachment(
+            "!target:example.invalid".to_owned(),
+            "$target:example.invalid".to_owned(),
+            true,
+            response,
+        )
+        .await;
+
+    let forwarded = account_rx.recv().await.expect("a forwarded request");
+    match forwarded {
+        AccountMessage::DirectAttachment {
+            room_id,
+            event_id,
+            thumbnail,
+            ..
+        } => {
+            assert_eq!(room_id, "!target:example.invalid");
+            assert_eq!(event_id, "$target:example.invalid");
+            assert!(thumbnail, "the caller's thumbnail choice travels");
+        }
+        _ => panic!("unexpected account message"),
+    }
+    assert_eq!(actor.state.navigation.active_room_id, navigation_before);
+    assert!(
+        event_rx.try_recv().is_err(),
+        "no GUI event may be published"
+    );
+}
+
+/// #1524: two assistant searches in flight keep separate identities and
+/// filters. Neither forwards over the other's reply, so one caller's result
+/// can never be delivered to another.
+#[tokio::test]
+async fn two_direct_searches_keep_their_own_identity_and_filter() {
+    let data_dir = tempfile::tempdir().expect("runtime data directory");
+    let session = SessionInfo {
+        homeserver: "https://example.invalid".to_owned(),
+        user_id: "@synthetic:example.invalid".to_owned(),
+        device_id: "SYNTHETIC".to_owned(),
+        authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+    };
+    let state = AppState {
+        session: SessionState::Ready(session),
+        ..AppState::default()
+    };
+    let (mut actor, _command_tx, _action_tx, mut account_rx, _event_rx, ..) =
+        app_actor_event_navigation_fixture(data_dir.path(), state);
+
+    let (response_a, result_a) = oneshot::channel();
+    let (response_b, result_b) = oneshot::channel();
+    actor
+        .handle_direct_search(
+            "alpha".to_owned(),
+            vec!["!a:example.invalid".to_owned()],
+            response_a,
+        )
+        .await;
+    actor
+        .handle_direct_search(
+            "beta".to_owned(),
+            vec!["!b:example.invalid".to_owned()],
+            response_b,
+        )
+        .await;
+
+    let (query_a, filter_a, reply_a) = match account_rx.recv().await.expect("first request") {
+        AccountMessage::DirectSearch {
+            query,
+            room_ids,
+            response,
+            ..
+        } => (query, room_ids, response),
+        _ => panic!("unexpected account message"),
+    };
+    let (query_b, filter_b, reply_b) = match account_rx.recv().await.expect("second request") {
+        AccountMessage::DirectSearch {
+            query,
+            room_ids,
+            response,
+            ..
+        } => (query, room_ids, response),
+        _ => panic!("unexpected account message"),
+    };
+    assert_eq!(
+        (query_a.as_str(), filter_a),
+        ("alpha", vec!["!a:example.invalid".to_owned()])
+    );
+    assert_eq!(
+        (query_b.as_str(), filter_b),
+        ("beta", vec!["!b:example.invalid".to_owned()])
+    );
+
+    let _ = reply_a.send(Ok(vec![koushi_protocol::event::SearchResultItem {
+        room_id: "!a:example.invalid".to_owned(),
+        event_id: "$a:example.invalid".to_owned(),
+        snippet: "alpha".to_owned(),
+    }]));
+    let _ = reply_b.send(Ok(Vec::new()));
+
+    let results_a = result_a.await.expect("first reply").expect("first result");
+    let results_b = result_b
+        .await
+        .expect("second reply")
+        .expect("second result");
+    assert_eq!(results_a.len(), 1);
+    assert_eq!(results_a[0].snippet, "alpha");
+    assert!(results_b.is_empty());
+    assert_eq!(actor.state.search, koushi_state::SearchState::Closed);
+}

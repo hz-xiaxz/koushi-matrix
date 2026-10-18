@@ -41,6 +41,12 @@ impl AccountTabId {
     pub fn as_str(&self) -> &str {
         &self.0
     }
+
+    /// Whether this tab is a real account. Pending sign-in tabs (`add:N`) are
+    /// not accounts and never appear in account listings.
+    pub fn is_account(&self) -> bool {
+        self.0.starts_with("account:")
+    }
 }
 
 #[derive(Clone, Debug, Eq, PartialEq, serde::Serialize, serde::Deserialize)]

@@ -22,6 +22,7 @@ mod causal_projection;
 mod command_policy;
 pub mod composer_draft_lifecycle;
 mod direct_message_classification;
+pub mod direct_operations;
 mod event_projection;
 pub mod executor;
 pub mod link_preview;
@@ -67,6 +68,7 @@ mod view_scope_lifecycle;
 
 pub use command_policy::CoreCommandPolicy;
 pub use direct_message_classification::DirectAccountDataSource;
+pub use direct_operations::{AttachmentFetchFailure, FetchedAttachment};
 pub use koushi_protocol::command::*;
 pub use koushi_protocol::event::*;
 pub use koushi_protocol::failure::*;

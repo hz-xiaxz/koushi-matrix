@@ -3398,6 +3398,7 @@ dependencies = [
  "koushi-core",
  "koushi-diagnostics",
  "koushi-key",
+ "koushi-mcp",
  "koushi-protocol",
  "koushi-state",
  "libc",
@@ -3448,6 +3449,16 @@ dependencies = [
  "sha2 0.10.9",
  "thiserror 2.0.20",
  "zeroize",
+]
+
+[[package]]
+name = "koushi-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
 ]
 
 [[package]]

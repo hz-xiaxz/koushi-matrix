@@ -1,0 +1,94 @@
+//! `koushi-mcp` is the stdio adapter that lets Claude Code and Codex use a
+//! running Koushi instance.
+//!
+//! It speaks MCP on stdout/stdin and the Koushi local socket on the other side.
+//! It holds no Matrix credentials, opens no crypto store, and never prints
+//! anything but MCP messages on stdout.
+
+use std::process::ExitCode;
+use std::sync::Arc;
+
+use koushi_mcp::server::{AppBackend, serve};
+use koushi_mcp::wire::ClientInfo;
+
+const USAGE: &str = "\
+koushi-mcp - MCP server for a running Koushi instance
+
+Usage:
+  koushi-mcp [--endpoint <path>] [--client-name <name>]
+
+Options:
+  --endpoint <path>     Path to Koushi's endpoint.json (default: platform location)
+  --client-name <name>  Name shown in Koushi's consent surface (default: koushi-mcp)
+  -h, --help            Print this help
+
+The server needs a running Koushi. It stays alive when Koushi is down and
+reports `koushi_unavailable` on tool calls until Koushi returns.
+";
+
+fn main() -> ExitCode {
+    let runtime = match tokio::runtime::Builder::new_current_thread()
+        .enable_all()
+        .build()
+    {
+        Ok(runtime) => runtime,
+        Err(error) => {
+            eprintln!("koushi-mcp: failed to start runtime: {error}");
+            return ExitCode::FAILURE;
+        }
+    };
+    runtime.block_on(async_main())
+}
+
+async fn async_main() -> ExitCode {
+    let mut endpoint_path = None;
+    let mut client_name = "koushi-mcp".to_owned();
+    let mut args = std::env::args().skip(1);
+    while let Some(arg) = args.next() {
+        match arg.as_str() {
+            "--endpoint" => match args.next() {
+                Some(value) => endpoint_path = Some(std::path::PathBuf::from(value)),
+                None => {
+                    eprintln!("koushi-mcp: --endpoint requires a path");
+                    return ExitCode::from(2);
+                }
+            },
+            "--client-name" => match args.next() {
+                Some(value) => client_name = value,
+                None => {
+                    eprintln!("koushi-mcp: --client-name requires a value");
+                    return ExitCode::from(2);
+                }
+            },
+            "--help" | "-h" => {
+                eprintln!("{USAGE}");
+                return ExitCode::SUCCESS;
+            }
+            other => {
+                eprintln!("koushi-mcp: unknown argument: {other}\n\n{USAGE}");
+                return ExitCode::from(2);
+            }
+        }
+    }
+
+    let Some(endpoint_path) = endpoint_path.or_else(koushi_mcp::endpoint::default_path) else {
+        eprintln!("koushi-mcp: cannot locate Koushi's endpoint file; pass --endpoint");
+        return ExitCode::FAILURE;
+    };
+
+    let backend = Arc::new(AppBackend::new(
+        endpoint_path,
+        ClientInfo {
+            name: client_name,
+            version: env!("CARGO_PKG_VERSION").to_owned(),
+        },
+    ));
+
+    match serve(tokio::io::stdin(), tokio::io::stdout(), backend).await {
+        Ok(()) => ExitCode::SUCCESS,
+        Err(error) => {
+            eprintln!("koushi-mcp: stdio failure: {error}");
+            ExitCode::FAILURE
+        }
+    }
+}

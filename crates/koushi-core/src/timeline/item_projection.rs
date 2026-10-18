@@ -3772,7 +3772,7 @@ pub(super) fn remember_local_echo(
     }
 }
 
-fn private_media_entry_from_msgtype(msgtype: &MessageType) -> Option<PrivateMediaEntry> {
+pub(super) fn private_media_entry_from_msgtype(msgtype: &MessageType) -> Option<PrivateMediaEntry> {
     match msgtype {
         MessageType::Image(content) => {
             let info = content.info.as_deref();

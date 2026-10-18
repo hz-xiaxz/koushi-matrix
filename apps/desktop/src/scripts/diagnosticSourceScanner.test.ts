@@ -10,7 +10,10 @@ scanDiagnosticSources
 describe("diagnostic source scanner", () => {
   test(
     "always-on diagnostic collection rejects trace-only producers and accepts stderr mirrors",
-    { timeout: 60_000 },
+    // The runtime scan compiles a regex per call site and grows with the
+    // runtime sources; the slower CI Node takes just over a minute with the
+    // bridge module present.
+    { timeout: 120_000 },
     () => {
     const badFixture = `
 fn gated_only() {

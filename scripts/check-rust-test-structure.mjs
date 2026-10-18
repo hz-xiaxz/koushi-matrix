@@ -2497,7 +2497,7 @@ export function checkCoreTimelineSendCompletionGuard() {
 export function checkCoreTimelineSendSubmissionRoute() {
   const rule = "core.timeline.send_submission_route";
   const helper = timelineItemBody("outbound_send.rs", "async fn route_send_to_worker_or_fail");
-  const lookup = helper?.indexOf("handle.enqueue_context.clone()") ?? -1;
+  const lookup = helper?.indexOf("self.room_send_context(key)") ?? -1;
   const submitted = helper?.indexOf("send_submitted_action") ?? -1;
   const worker = helper?.indexOf("self.spawn_send_enqueue") ?? -1;
   const failures = [];
@@ -2509,7 +2509,7 @@ export function checkCoreTimelineSendSubmissionRoute() {
 export function checkCoreTimelineThreadReplySubmissionRoute() {
   const rule = "core.timeline.thread_reply_submission_route";
   const helper = timelineItemBody("outbound_send.rs", "async fn route_send_to_worker_or_fail");
-  const lookup = helper?.indexOf("handle.enqueue_context.clone()") ?? -1;
+  const lookup = helper?.indexOf("self.room_send_context(key)") ?? -1;
   const submitted = helper?.indexOf("send_submitted_action") ?? -1;
   const source = timelineSource("outbound_send.rs");
   const failures = [];

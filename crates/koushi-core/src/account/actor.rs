@@ -126,8 +126,38 @@ pub(crate) type ResidencyInstallGapSessions = (
     Option<Arc<MatrixClientSession>>,
 );
 
+/// Maximum number of concurrent direct (non-GUI) searches per account (#1524).
+const DIRECT_SEARCH_LIMIT: usize = 4;
+
 /// Messages routed to the AccountActor task.
 pub(crate) enum AccountMessage {
+    /// A search issued by an out-of-band caller (MCP). Answered on the reply
+    /// channel only: no app action and no GUI event is produced.
+    /// An attachment fetch for an out-of-band caller (MCP). Answered on the
+    /// reply channel only and resolved from the session, so it needs neither a
+    /// resident timeline nor a cached media source.
+    DirectAttachment {
+        room_id: String,
+        event_id: String,
+        thumbnail: bool,
+        response: tokio::sync::oneshot::Sender<
+            Result<
+                crate::direct_operations::FetchedAttachment,
+                crate::direct_operations::AttachmentFetchFailure,
+            >,
+        >,
+    },
+    DirectSearch {
+        query: String,
+        room_ids: Vec<String>,
+        content_policy: koushi_state::SearchCrawlerSettings,
+        response: tokio::sync::oneshot::Sender<
+            Result<
+                Vec<koushi_protocol::event::SearchResultItem>,
+                crate::search::DirectSearchFailure,
+            >,
+        >,
+    },
     #[cfg(any(test, feature = "test-hooks"))]
     PauseHistoryKeyImport {
         disclosure: bool,
@@ -1076,6 +1106,11 @@ pub struct AccountActor {
     pub(super) sliding_sync_revalidation_request: Option<(u64, u64)>,
     pub(super) sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
     pub(super) native_artifacts: Arc<dyn NativeArtifactPort>,
+    /// Bounds concurrent direct (non-GUI) searches; their tasks are aborted on
+    /// shutdown so no operation outlives the account (#1524).
+    pub(super) direct_search_slots: Arc<tokio::sync::Semaphore>,
+    pub(super) direct_search_tasks: Vec<crate::executor::JoinHandle<()>>,
+    pub(super) direct_attachment_tasks: Vec<crate::executor::JoinHandle<()>>,
     pub(super) session_promoted: bool,
     pub(super) trust_generation: u64,
     pub(super) trust_observer: Option<crate::executor::JoinHandle<()>>,
@@ -1432,6 +1467,9 @@ impl AccountActor {
             sliding_sync_revalidation_request: None,
             sliding_sync_diagnostics,
             native_artifacts: Arc::clone(&native_artifacts),
+            direct_search_slots: Arc::new(tokio::sync::Semaphore::new(DIRECT_SEARCH_LIMIT)),
+            direct_search_tasks: Vec::new(),
+            direct_attachment_tasks: Vec::new(),
             session_promoted: false,
             trust_generation: 0,
             trust_observer: None,
@@ -1646,8 +1684,14 @@ impl AccountActor {
                     shutdown_gate = Some((entered, release));
                 }
                 #[cfg(test)]
-                AccountMessage::Shutdown => break,
+                AccountMessage::Shutdown => {
+                    self.abort_direct_searches().await;
+                    self.abort_direct_attachments().await;
+                    break;
+                }
                 AccountMessage::ShutdownWithAck { acknowledged } => {
+                    self.abort_direct_searches().await;
+                    self.abort_direct_attachments().await;
                     shutdown_ack = Some(acknowledged);
                     break;
                 }
@@ -1774,6 +1818,24 @@ impl AccountActor {
                             limit,
                             response,
                         })
+                        .await;
+                }
+                AccountMessage::DirectAttachment {
+                    room_id,
+                    event_id,
+                    thumbnail,
+                    response,
+                } => {
+                    self.handle_direct_attachment(room_id, event_id, thumbnail, response)
+                        .await;
+                }
+                AccountMessage::DirectSearch {
+                    query,
+                    room_ids,
+                    content_policy,
+                    response,
+                } => {
+                    self.handle_direct_search(query, room_ids, content_policy, response)
                         .await;
                 }
                 AccountMessage::TimelineCommand(timeline_command) => {
@@ -2921,6 +2983,137 @@ impl AccountActor {
         let room_ok = self.stop_room_actor().await;
         if let Some(acknowledged) = shutdown_ack {
             let _ = acknowledged.send(runtime_ok && room_ok);
+        }
+    }
+
+    /// Start one direct (non-GUI) attachment fetch (#1524).
+    async fn handle_direct_attachment(
+        &mut self,
+        room_id: String,
+        event_id: String,
+        thumbnail: bool,
+        mut response: tokio::sync::oneshot::Sender<
+            Result<
+                crate::direct_operations::FetchedAttachment,
+                crate::direct_operations::AttachmentFetchFailure,
+            >,
+        >,
+    ) {
+        let Some(session) = self.session.clone() else {
+            let _ = response.send(Err(
+                crate::direct_operations::AttachmentFetchFailure::AccountInactive,
+            ));
+            return;
+        };
+        // Downloads belong to the account's own cache, the same directory the
+        // GUI's media cache maps for this tab. The app-level data dir would
+        // write outside it.
+        let data_dir = match &self.session_key_id {
+            Some(key_id) => self.store.account_local_data_dir(key_id),
+            None => self.data_dir.clone(),
+        };
+        let selection = if thumbnail {
+            koushi_protocol::command::MediaDownloadSelection::Thumbnail {
+                width: 800,
+                height: 800,
+            }
+        } else {
+            koushi_protocol::command::MediaDownloadSelection::File
+        };
+        self.direct_attachment_tasks
+            .retain(|task| !task.is_finished());
+        self.direct_attachment_tasks
+            .push(crate::executor::spawn(async move {
+                let fetch = crate::timeline::fetch_attachment(
+                    session,
+                    data_dir,
+                    &room_id,
+                    &event_id,
+                    selection,
+                );
+                tokio::pin!(fetch);
+                tokio::select! {
+                    outcome = &mut fetch => {
+                        if !response.is_closed() {
+                            let _ = response.send(outcome.map(|cached| crate::direct_operations::FetchedAttachment {
+                                path: cached.path,
+                                mime_type: cached.mime_type,
+                                size_bytes: cached.size_bytes,
+                            }).map_err(|failure| match failure {
+                                crate::timeline::AttachmentFailure::RoomNotFound => {
+                                    crate::direct_operations::AttachmentFetchFailure::RoomNotFound
+                                }
+                                crate::timeline::AttachmentFailure::EventNotFound => {
+                                    crate::direct_operations::AttachmentFetchFailure::EventNotFound
+                                }
+                                crate::timeline::AttachmentFailure::Unsupported => {
+                                    crate::direct_operations::AttachmentFetchFailure::Unsupported
+                                }
+                                crate::timeline::AttachmentFailure::DownloadFailed => {
+                                    crate::direct_operations::AttachmentFetchFailure::DownloadFailed
+                                }
+                            }));
+                        }
+                    }
+                    _ = response.closed() => {}
+                }
+            }));
+    }
+
+    async fn abort_direct_attachments(&mut self) {
+        for task in self.direct_attachment_tasks.drain(..) {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    /// Start one direct (non-GUI) search (#1524).
+    ///
+    /// The result travels only on the caller's reply channel: no `AppAction` is
+    /// reduced and no `CoreEvent` is emitted, so the GUI search pane and the
+    /// GUI's own query lifetime are untouched.
+    async fn handle_direct_search(
+        &mut self,
+        query: String,
+        room_ids: Vec<String>,
+        content_policy: koushi_state::SearchCrawlerSettings,
+        mut response: tokio::sync::oneshot::Sender<
+            Result<
+                Vec<koushi_protocol::event::SearchResultItem>,
+                crate::search::DirectSearchFailure,
+            >,
+        >,
+    ) {
+        let Ok(permit) = Arc::clone(&self.direct_search_slots).try_acquire_owned() else {
+            let _ = response.send(Err(crate::search::DirectSearchFailure::Capacity));
+            return;
+        };
+        let Some(session) = self.session.clone() else {
+            let _ = response.send(Err(crate::search::DirectSearchFailure::AccountInactive));
+            return;
+        };
+        self.direct_search_tasks.retain(|task| !task.is_finished());
+        self.direct_search_tasks
+            .push(crate::executor::spawn(async move {
+                let _permit = permit;
+                let search =
+                    crate::search::run_direct_search(session, query, room_ids, content_policy);
+                tokio::pin!(search);
+                tokio::select! {
+                    outcome = &mut search => {
+                        if !response.is_closed() {
+                            let _ = response.send(outcome);
+                        }
+                    }
+                    _ = response.closed() => {}
+                }
+            }));
+    }
+
+    async fn abort_direct_searches(&mut self) {
+        for task in self.direct_search_tasks.drain(..) {
+            task.abort();
+            let _ = task.await;
         }
     }
 

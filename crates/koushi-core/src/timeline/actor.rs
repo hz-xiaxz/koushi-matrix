@@ -766,7 +766,7 @@ impl TimelineActorHandle {
 
     fn cleanup_ingress(&self) -> Option<&TimelineActorCleanupIngress> {
         match self.enqueue_context.as_ref() {
-            Some(TimelineSendEnqueueContext::Matrix(context)) => Some(&context.cleanup),
+            Some(TimelineSendEnqueueContext::Matrix(context)) => context.cleanup.as_ref(),
             #[cfg(test)]
             Some(TimelineSendEnqueueContext::Synthetic { .. }) => None,
             #[cfg(test)]
@@ -2005,13 +2005,14 @@ impl TimelineActor {
             gap_repair.observe_live_edge_target(rendered_live_edge_target(&navigation_items));
         }
         let enqueue_context =
-            TimelineSendEnqueueContext::Matrix(MatrixTimelineSendEnqueueContext {
+            TimelineSendEnqueueContext::Matrix(Box::new(MatrixTimelineSendEnqueueContext {
                 key: key.clone(),
-                timeline: Arc::clone(&timeline),
+                room: timeline.room().clone(),
+                timeline: Some(Arc::clone(&timeline)),
                 session: Arc::clone(&session),
-                cleanup: actor_cleanup_tx,
+                cleanup: Some(actor_cleanup_tx),
                 diagnostic_trace: None,
-            });
+            }));
         let (position_tx, position_rx) = watch::channel(Arc::new(
             TimelinePositionIndex::from_items(actor_generation, generation, &navigation_items),
         ));
