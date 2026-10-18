@@ -77,6 +77,9 @@ fn list_accounts(app: &AppHandle, client_name: &str, data_dir: &Path) -> Result<
     let runtime = std::sync::Arc::clone(&state.runtime);
     let mut accounts = Vec::new();
     for tab in runtime.tab_descriptors() {
+        if !tab.id.is_account() {
+            continue;
+        }
         let Some(connection) = runtime.tab_connection(&tab.id) else {
             continue;
         };
