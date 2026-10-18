@@ -11,6 +11,7 @@
 
 use std::path::{Path, PathBuf};
 
+use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
 use koushi_mcp::wire::{ErrorCode, WireError};
 use serde::Deserialize;
 
@@ -45,6 +46,15 @@ struct GrantFile {
     connections: Vec<Grant>,
 }
 
+/// Records a grant-file problem as a token event. Paths and parse errors stay
+/// out of diagnostics: they name user data.
+fn record(reason: &'static str) {
+    koushi_diagnostics::record(
+        DiagnosticEvent::new(DiagnosticLevel::Warn, "mcp.grants", "configuration")
+            .field(DiagnosticField::token("reason", reason)),
+    );
+}
+
 pub(crate) fn grants_path(data_dir: &Path) -> PathBuf {
     data_dir.join("mcp").join(FILE_NAME)
 }
@@ -56,8 +66,8 @@ pub(crate) fn load(data_dir: &Path) -> Vec<Grant> {
     let bytes = match std::fs::read(&path) {
         Ok(bytes) => bytes,
         Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Vec::new(),
-        Err(error) => {
-            eprintln!("mcp grants: cannot read {}: {error}", path.display());
+        Err(_) => {
+            record("grants_read_failed");
             return Vec::new();
         }
     };
@@ -68,16 +78,13 @@ pub(crate) fn load(data_dir: &Path) -> Vec<Grant> {
             .filter(|grant| {
                 let usable = !grant.client_name.trim().is_empty() && !grant.accounts.is_empty();
                 if !usable {
-                    eprintln!(
-                        "mcp grants: ignoring entry for {:?} with no client name or accounts",
-                        grant.client_name
-                    );
+                    record("grants_entry_ignored");
                 }
                 usable
             })
             .collect(),
-        Err(error) => {
-            eprintln!("mcp grants: cannot parse {}: {error}", path.display());
+        Err(_) => {
+            record("grants_parse_failed");
             Vec::new()
         }
     }

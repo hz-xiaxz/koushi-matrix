@@ -29,8 +29,15 @@ pub(crate) struct McpBridge(pub(crate) std::sync::Mutex<Option<BridgeHandle>>);
 pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Option<BridgeHandle> {
     match server::start(app, data_dir) {
         Ok(handle) => Some(handle),
-        Err(error) => {
-            eprintln!("mcp bridge unavailable: {error}");
+        Err(reason) => {
+            koushi_diagnostics::record(
+                koushi_diagnostics::DiagnosticEvent::new(
+                    koushi_diagnostics::DiagnosticLevel::Warn,
+                    "mcp.bridge",
+                    "start_failed",
+                )
+                .field(koushi_diagnostics::DiagnosticField::token("reason", reason)),
+            );
             None
         }
     }

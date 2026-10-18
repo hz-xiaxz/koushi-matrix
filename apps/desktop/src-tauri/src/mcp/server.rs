@@ -54,23 +54,22 @@ impl Drop for BridgeHandle {
 
 /// Starts the bridge: binds the socket, writes `endpoint.json`, and accepts
 /// connections until shutdown.
-pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, String> {
-    endpoint::ensure_dir(&data_dir).map_err(|error| format!("mcp dir: {error}"))?;
+pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, &'static str> {
+    endpoint::ensure_dir(&data_dir).map_err(|_| "mcp_dir")?;
     let transport = endpoint::transport_path(&data_dir);
-    let token = endpoint::new_token().map_err(|error| format!("mcp token: {error}"))?;
+    let token = endpoint::new_token().map_err(|_| "mcp_token")?;
     let socket_path = PathBuf::from(&transport);
 
     #[cfg(unix)]
     {
         // A stale socket from a crashed run must not block binding.
         let _ = std::fs::remove_file(&socket_path);
-        let listener =
-            Listener::bind(&socket_path).map_err(|error| format!("mcp bind: {error}"))?;
+        let listener = Listener::bind(&socket_path).map_err(|_| "mcp_bind")?;
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
-            .map_err(|error| format!("mcp socket mode: {error}"))?;
+            .map_err(|_| "mcp_socket_mode")?;
         endpoint::write(&data_dir, &transport, &token, env!("CARGO_PKG_VERSION"))
-            .map_err(|error| format!("mcp endpoint file: {error}"))?;
+            .map_err(|_| "mcp_endpoint_file")?;
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let log = std::sync::Arc::new(super::events::EventLog::new());
         app.manage(super::events::McpEventLog(std::sync::Arc::clone(&log)));
@@ -91,9 +90,9 @@ pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, S
 
     #[cfg(windows)]
     {
-        let listener = NamedPipeListener::bind(&transport, true)?;
+        let listener = NamedPipeListener::bind(&transport, true).map_err(|_| "mcp_pipe")?;
         endpoint::write(&data_dir, &transport, &token, env!("CARGO_PKG_VERSION"))
-            .map_err(|error| format!("mcp endpoint file: {error}"))?;
+            .map_err(|_| "mcp_endpoint_file")?;
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let log = std::sync::Arc::new(super::events::EventLog::new());
         app.manage(super::events::McpEventLog(std::sync::Arc::clone(&log)));
@@ -189,7 +188,7 @@ async fn serve_connection(
     token: String,
     data_dir: PathBuf,
 ) -> std::io::Result<()> {
-    let (read_half, mut write_half) = stream.into_split();
+    let (read_half, mut write_half) = tokio::io::split(stream);
     let mut reader = BufReader::new(read_half);
 
     let Some(client) = read_hello(&mut reader, &token).await? else {
