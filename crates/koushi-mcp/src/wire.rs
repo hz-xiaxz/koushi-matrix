@@ -214,6 +214,39 @@ mod tests {
         assert!(!failure.contains("\"result\""));
     }
 
+    /// Every published error code keeps a stable wire spelling, so a client can
+    /// branch on it without parsing messages (#1524 adds `busy`).
+    #[test]
+    fn error_codes_have_distinct_and_stable_spellings() {
+        let codes = [
+            ErrorCode::KoushiUnavailable,
+            ErrorCode::Unauthorized,
+            ErrorCode::ConsentRequired,
+            ErrorCode::NotPermitted,
+            ErrorCode::AccountUnavailable,
+            ErrorCode::RoomNotFound,
+            ErrorCode::EventNotFound,
+            ErrorCode::AttachmentTooLarge,
+            ErrorCode::Busy,
+            ErrorCode::Unsupported,
+            ErrorCode::Internal,
+        ];
+        let mut seen = std::collections::HashSet::new();
+        for code in codes {
+            assert!(
+                seen.insert(code.as_str()),
+                "duplicate spelling: {}",
+                code.as_str()
+            );
+            assert!(
+                code.as_str()
+                    .chars()
+                    .all(|c| c.is_ascii_lowercase() || c == '_')
+            );
+        }
+        assert_eq!(ErrorCode::Busy.as_str(), "busy");
+    }
+
     #[test]
     fn unknown_error_code_is_rejected() {
         let result: Result<ServerMessage, _> =
