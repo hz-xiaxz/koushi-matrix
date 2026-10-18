@@ -17,7 +17,7 @@ pub use account::{
 };
 pub use attention::{ActivityEvent, NativeAttentionEvent};
 pub use live_signals::LiveSignalsEvent;
-pub use room::RoomEvent;
+pub use room::{RoomEvent, RoomMessageItem, RoomMessageKind, RoomMessagesPage};
 pub use search::{SearchEvent, SearchResultItem};
 pub use timeline::{
     CjkTextPolicyEvent, LinkPreview, LinkPreviewImage, LinkPreviewState, PaginationDirection,

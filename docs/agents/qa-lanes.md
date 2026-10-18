@@ -235,7 +235,7 @@ about 104 bytes; Koushi's data, credentials, and logs stay under
 The lane calls a paid model, so `.github/workflows/agent-scenarios.yml` runs it
 on `workflow_dispatch` and nightly rather than per pull request. The model is
 `deepseek-flash` through pi's `deepseek` provider; `DEEPSEEK_API_KEY` is the
-repository secret. `pi mcp list` must report the six Koushi tools before the
+repository secret. `pi mcp list` must report every Koushi tool before the
 agent runs, so a transport or grant failure never looks like a model failure.
 
 ## Linux virtual-display GUI lane

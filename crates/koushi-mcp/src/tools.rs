@@ -48,13 +48,14 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "list_rooms",
-            description: "List rooms and direct messages the account can see, with encryption state and display name. Requires account_id.",
+            description: "List rooms and direct messages the account can see, with encryption state, display name, unread counts, and the latest event's sender and timestamp. unread_only restricts the list to rooms with something unread. Requires account_id.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "account_id": account_id_property(),
                     "limit": limit_property(200),
-                    "cursor": { "type": "string", "description": "Opaque cursor from the previous page." }
+                    "cursor": { "type": "string", "description": "Opaque cursor from the previous page." },
+                    "unread_only": { "type": "boolean", "description": "Return only rooms with unread messages, notifications, mentions, or a manual unread mark. Defaults to false." }
                 },
                 "required": ["account_id"],
                 "additionalProperties": false
@@ -63,7 +64,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "search_messages",
-            description: "Search decrypted message history through Koushi's existing encrypted index. Results carry account provenance, room id, event id, and a snippet. Requires account_id.",
+            description: "Search decrypted message history through Koushi's existing encrypted index. Results carry account provenance, room id, event id, sender, timestamp, and a snippet. Requires account_id.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
@@ -77,6 +78,22 @@ pub fn definitions() -> Vec<ToolDefinition> {
                     "limit": limit_property(100)
                 },
                 "required": ["account_id", "query"],
+                "additionalProperties": false
+            }),
+            read_only: true,
+        },
+        ToolDefinition {
+            name: "read_room_messages",
+            description: "Read a room's most recent messages, newest first, with sender, timestamp, and text. Works for a room nobody has opened and never changes the GUI. Pass next from a previous page as from to read older messages. Requires account_id and room_id.",
+            input_schema: json!({
+                "type": "object",
+                "properties": {
+                    "account_id": account_id_property(),
+                    "room_id": { "type": "string" },
+                    "limit": limit_property(100),
+                    "from": { "type": "string", "description": "Opaque token from the previous page's next value." }
+                },
+                "required": ["account_id", "room_id"],
                 "additionalProperties": false
             }),
             read_only: true,
@@ -182,6 +199,7 @@ pub fn validate_arguments(name: &str, arguments: &Value) -> Result<(), String> {
                 Some("integer") => value.is_i64() || value.is_u64(),
                 Some("array") => value.is_array(),
                 Some("object") => value.is_object(),
+                Some("boolean") => value.is_boolean(),
                 _ => true,
             };
             if !matches {
@@ -207,7 +225,7 @@ mod tests {
     #[test]
     fn definitions_are_unique_and_valid() {
         let tools = definitions();
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
         let mut names: Vec<&str> = tools.iter().map(|tool| tool.name).collect();
         names.sort_unstable();
         names.dedup();
@@ -220,7 +238,12 @@ mod tests {
 
     #[test]
     fn account_scoped_tools_require_account_id() {
-        for name in ["list_rooms", "search_messages", "wait_for_events"] {
+        for name in [
+            "list_rooms",
+            "search_messages",
+            "wait_for_events",
+            "read_room_messages",
+        ] {
             let tool = find(name).expect("tool");
             let required = tool.input_schema["required"].as_array().expect("required");
             assert!(required.iter().any(|value| value == "account_id"), "{name}");

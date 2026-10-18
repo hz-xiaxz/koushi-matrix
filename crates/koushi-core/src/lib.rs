@@ -68,7 +68,7 @@ mod view_scope_lifecycle;
 
 pub use command_policy::CoreCommandPolicy;
 pub use direct_message_classification::DirectAccountDataSource;
-pub use direct_operations::{AttachmentFetchFailure, FetchedAttachment};
+pub use direct_operations::{AttachmentFetchFailure, FetchedAttachment, RoomMessagesFailure};
 pub use koushi_protocol::command::*;
 pub use koushi_protocol::event::*;
 pub use koushi_protocol::failure::*;

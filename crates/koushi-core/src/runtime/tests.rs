@@ -5626,6 +5626,8 @@ async fn two_direct_searches_keep_their_own_identity_and_filter() {
         room_id: "!a:example.invalid".to_owned(),
         event_id: "$a:example.invalid".to_owned(),
         snippet: "alpha".to_owned(),
+        sender_id: "@a:example.invalid".to_owned(),
+        timestamp_ms: 1_700_000_000_000,
     }]));
     let _ = reply_b.send(Ok(Vec::new()));
 

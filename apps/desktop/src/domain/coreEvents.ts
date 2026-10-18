@@ -983,6 +983,10 @@ export interface SearchResultItem {
   room_id: string;
   event_id: string;
   snippet: string;
+  /** Who sent the matching event. */
+  sender_id: string;
+  /** When the matching event was sent, in milliseconds since the epoch. */
+  timestamp_ms: number;
 }
 
 export type SearchEvent = {

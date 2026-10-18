@@ -452,6 +452,66 @@ impl fmt::Debug for RoomEvent {
     }
 }
 
+/// One page of a room's recent timeline for a caller outside the GUI (#1530).
+///
+/// The page is read straight from the account's session, so it works for a room
+/// that is not open and never becomes an app state update.
+#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RoomMessagesPage {
+    pub messages: Vec<RoomMessageItem>,
+    /// Opaque token for the next older page. Absent at the start of history.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub next: Option<String>,
+}
+
+/// One message-like event from a room's timeline.
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
+pub struct RoomMessageItem {
+    pub event_id: String,
+    pub sender_id: String,
+    pub timestamp_ms: u64,
+    /// The message text, when this device could read it.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub body: Option<String>,
+    #[serde(default)]
+    pub kind: RoomMessageKind,
+    /// The event arrived encrypted, whichever way it was decrypted.
+    #[serde(default)]
+    pub is_encrypted: bool,
+    #[serde(default)]
+    pub is_redacted: bool,
+}
+
+impl fmt::Debug for RoomMessageItem {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        formatter
+            .debug_struct("RoomMessageItem")
+            .field("event_id", &"EventId(..)")
+            .field("sender_id", &"UserId(..)")
+            .field("timestamp_ms", &self.timestamp_ms)
+            .field("has_body", &self.body.is_some())
+            .field("kind", &self.kind)
+            .field("is_encrypted", &self.is_encrypted)
+            .field("is_redacted", &self.is_redacted)
+            .finish()
+    }
+}
+
+/// The message type of one timeline event, reduced to what a reader needs.
+#[derive(Clone, Copy, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum RoomMessageKind {
+    #[default]
+    Other,
+    Text,
+    Emote,
+    Notice,
+    Image,
+    Video,
+    Audio,
+    File,
+}
+
 #[cfg(test)]
 mod tests {
     use super::*;

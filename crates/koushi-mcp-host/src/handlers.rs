@@ -48,6 +48,9 @@ pub(crate) async fn dispatch_tool_call(
             wait_for_events(accounts, log, client_name, data_dir, &arguments).await
         }
         "get_attachment" => get_attachment(accounts, client_name, data_dir, &arguments).await,
+        "read_room_messages" => {
+            read_room_messages(accounts, client_name, data_dir, &arguments).await
+        }
         other => Err(WireError::new(
             ErrorCode::Unsupported,
             format!("unknown tool: {other}"),
@@ -150,17 +153,43 @@ fn list_rooms(
         .and_then(|cursor| cursor.parse::<usize>().ok())
         .unwrap_or(0);
 
+    let unread_only = arguments
+        .get("unread_only")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
     let connection = account_connection(accounts, &account_id)?;
     let snapshot = connection.snapshot();
     let mut rooms: Vec<Value> = snapshot
         .rooms
         .iter()
+        .filter(|room| {
+            !unread_only
+                || room.unread_count > 0
+                || room.notification_count > 0
+                || room.highlight_count > 0
+                || room.thread_unread_count > 0
+                || room.marked_unread
+        })
         .map(|room| {
             json!({
                 "room_id": room.room_id,
                 "name": room.display_label,
                 "is_dm": room.is_dm,
                 "is_encrypted": room.is_encrypted,
+                "unread_messages": room.unread_count,
+                "unread_notifications": room.notification_count,
+                "unread_mentions": room.highlight_count,
+                "thread_unread_messages": room.thread_unread_count,
+                "thread_unread_mentions": room.thread_highlight_count,
+                "marked_unread": room.marked_unread,
+                "last_activity_ms": room.recency_stamp,
+                "last_event": room.latest_event.as_ref().map(|event| json!({
+                    "event_id": event.event_id,
+                    "sender_id": event.sender_id,
+                    "timestamp_ms": event.timestamp_ms,
+                    "preview": event.preview,
+                })),
             })
         })
         .collect();
@@ -257,10 +286,86 @@ async fn search_messages(
                 "room_name": room_name,
                 "event_id": item.event_id,
                 "snippet": item.snippet,
+                "sender_id": item.sender_id,
+                "timestamp_ms": item.timestamp_ms,
             })
         })
         .collect();
     Ok(json!({ "results": items, "total": total }))
+}
+
+/// Reads one page of a room's recent messages for the agent (#1530).
+///
+/// Koushi reads it from the account session, so a room nobody opened still
+/// answers and the GUI's open room, scroll position, and pagination stay put.
+async fn read_room_messages(
+    accounts: &Arc<dyn BridgeAccounts>,
+    client_name: &str,
+    data_dir: &Path,
+    arguments: &Value,
+) -> Result<Value, WireError> {
+    let account_id = required_account_id(arguments)?;
+    grants::authorize(
+        &grants::load(data_dir),
+        client_name,
+        &account_id,
+        Need::Read,
+    )?;
+    let room_id = arguments
+        .get("room_id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| WireError::new(ErrorCode::Unsupported, "room_id is required"))?
+        .to_owned();
+    let limit = arguments
+        .get("limit")
+        .and_then(Value::as_u64)
+        .unwrap_or(30)
+        .clamp(1, 100) as u32;
+    let from = arguments
+        .get("from")
+        .and_then(Value::as_str)
+        .filter(|token| !token.is_empty())
+        .map(str::to_owned);
+
+    let connection = account_connection(accounts, &account_id)?;
+    let page = connection
+        .read_room_messages(room_id.clone(), limit, from)
+        .await
+        .map_err(room_messages_failure)?;
+    let messages: Vec<Value> = page
+        .messages
+        .into_iter()
+        .map(|message| {
+            json!({
+                "event_id": message.event_id,
+                "sender_id": message.sender_id,
+                "timestamp_ms": message.timestamp_ms,
+                "body": message.body,
+                "kind": message.kind,
+                "is_encrypted": message.is_encrypted,
+                "is_redacted": message.is_redacted,
+            })
+        })
+        .collect();
+    Ok(json!({
+        "room_id": room_id,
+        "messages": messages,
+        "next": page.next,
+    }))
+}
+
+fn room_messages_failure(failure: koushi_core::RoomMessagesFailure) -> WireError {
+    use koushi_core::RoomMessagesFailure as Failure;
+    let (code, message) = match failure {
+        Failure::AccountInactive => (ErrorCode::AccountUnavailable, "account is not signed in"),
+        Failure::RoomNotFound => (ErrorCode::RoomNotFound, "the room is not joined"),
+        Failure::Unavailable => (
+            ErrorCode::Internal,
+            "Koushi could not read this room's messages",
+        ),
+    };
+    WireError::new(code, message)
 }
 
 async fn send_message(

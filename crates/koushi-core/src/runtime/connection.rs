@@ -486,7 +486,8 @@ impl CoreCommandHandle {
             CoreCommandEnvelope::ReadReceiptWindow { .. }
             | CoreCommandEnvelope::ReaderPrepared(_)
             | CoreCommandEnvelope::DirectSearch { .. }
-            | CoreCommandEnvelope::DirectAttachment { .. } => {
+            | CoreCommandEnvelope::DirectAttachment { .. }
+            | CoreCommandEnvelope::DirectRoomMessages { .. } => {
                 unreachable!("composer admission creates a public command")
             }
             #[cfg(test)]
@@ -578,7 +579,8 @@ impl CoreConnectionTestControl {
     pub async fn recv_command(&mut self) -> Option<CoreCommand> {
         self.command_rx.recv().await.map(|envelope| match envelope {
             CoreCommandEnvelope::DirectSearch { .. }
-            | CoreCommandEnvelope::DirectAttachment { .. } => {
+            | CoreCommandEnvelope::DirectAttachment { .. }
+            | CoreCommandEnvelope::DirectRoomMessages { .. } => {
                 unreachable!("direct operations are not public commands")
             }
             CoreCommandEnvelope::Public {
@@ -690,6 +692,36 @@ impl CoreConnection {
         result
             .await
             .map_err(|_| AttachmentFetchFailure::AccountInactive)?
+    }
+
+    /// Read one page of a room's recent messages for an out-of-band caller
+    /// (#1530).
+    ///
+    /// The page comes from the account's session: no timeline actor is mounted,
+    /// no app action is reduced, and no `CoreEvent` is emitted, so the GUI's
+    /// selected room, scroll position, and pagination state are unaffected.
+    pub async fn read_room_messages(
+        &self,
+        room_id: String,
+        limit: u32,
+        from: Option<String>,
+    ) -> Result<
+        koushi_protocol::event::RoomMessagesPage,
+        crate::direct_operations::RoomMessagesFailure,
+    > {
+        let (response, result) = oneshot::channel();
+        self.command_tx
+            .send(CoreCommandEnvelope::DirectRoomMessages {
+                room_id,
+                limit,
+                from,
+                response,
+            })
+            .await
+            .map_err(|_| crate::direct_operations::RoomMessagesFailure::AccountInactive)?;
+        result
+            .await
+            .map_err(|_| crate::direct_operations::RoomMessagesFailure::AccountInactive)?
     }
 
     /// Run one search for an out-of-band caller (#1524).

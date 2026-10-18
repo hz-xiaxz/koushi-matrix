@@ -28,3 +28,14 @@ pub enum AttachmentFetchFailure {
     /// The download itself failed (network, key, or write).
     DownloadFailed,
 }
+
+/// Failure classes for a direct (non-GUI) room timeline read (#1530).
+#[derive(Clone, Copy, Debug, Eq, PartialEq)]
+pub enum RoomMessagesFailure {
+    /// The account has no ready session.
+    AccountInactive,
+    /// The room is unknown to this account or not joined.
+    RoomNotFound,
+    /// The read did not complete (network, server, or timeout).
+    Unavailable,
+}
