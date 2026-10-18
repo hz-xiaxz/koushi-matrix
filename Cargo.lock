@@ -3398,7 +3398,7 @@ dependencies = [
  "koushi-core",
  "koushi-diagnostics",
  "koushi-key",
- "koushi-mcp",
+ "koushi-mcp-host",
  "koushi-protocol",
  "koushi-state",
  "libc",
@@ -3462,6 +3462,21 @@ dependencies = [
 ]
 
 [[package]]
+name = "koushi-mcp-host"
+version = "0.1.0"
+dependencies = [
+ "koushi-core",
+ "koushi-diagnostics",
+ "koushi-mcp",
+ "koushi-protocol",
+ "koushi-state",
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "koushi-media"
 version = "0.1.0"
 dependencies = [
@@ -3502,6 +3517,7 @@ dependencies = [
  "getrandom 0.3.4",
  "koushi-core",
  "koushi-diagnostics",
+ "koushi-mcp-host",
  "koushi-protocol",
  "koushi-sdk",
  "koushi-state",
@@ -7413,6 +7429,7 @@ dependencies = [
  "libc",
  "mio",
  "pin-project-lite",
+ "signal-hook-registry",
  "socket2",
  "tokio-macros",
  "windows-sys 0.61.2",

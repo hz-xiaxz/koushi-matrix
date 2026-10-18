@@ -94,6 +94,8 @@ mod diagnostics;
 mod event_wait;
 #[path = "headless_core_qa/fixtures.rs"]
 mod fixtures;
+#[path = "headless_core_qa/mcp_host.rs"]
+mod mcp_host;
 #[path = "headless_core_qa/orchestrator.rs"]
 mod orchestrator;
 #[path = "common/pagination_waiter.rs"]
@@ -167,12 +169,18 @@ fn init_headless_qa_tracing_from_env() {
 }
 
 fn run() -> Result<String, String> {
-    let scenario = QaScenario::from_env()?;
-    scenario_preflight_error(scenario)?;
-
     // Hard guard BEFORE any login: unattended QA must never touch the OS
     // keychain, even if env wiring regresses.
     assert_file_credential_store_active()?;
+
+    // Agent scenarios need a live bridge rather than a one-shot scenario run,
+    // so this mode comes first and reuses the same guarded login below.
+    if mcp_host::requested() {
+        return mcp_host::run();
+    }
+
+    let scenario = QaScenario::from_env()?;
+    scenario_preflight_error(scenario)?;
 
     let config = QaConfig::from_env()?;
     let runtime = tokio::runtime::Builder::new_multi_thread()

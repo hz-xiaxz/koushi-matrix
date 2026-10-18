@@ -1,14 +1,14 @@
 use super::Duration;
 
-const ENV_HOMESERVER: &str = "KOUSHI_LOCAL_QA_HOMESERVER";
+pub(super) const ENV_HOMESERVER: &str = "KOUSHI_LOCAL_QA_HOMESERVER";
 
 const ENV_SERVER_NAME: &str = "KOUSHI_LOCAL_QA_SERVER_NAME";
 
 const ENV_SERVER_KIND: &str = "KOUSHI_LOCAL_QA_SERVER_KIND";
 
-const ENV_USER_A: &str = "KOUSHI_LOCAL_QA_USER_A";
+pub(super) const ENV_USER_A: &str = "KOUSHI_LOCAL_QA_USER_A";
 
-const ENV_PASSWORD_A: &str = "KOUSHI_LOCAL_QA_PASSWORD_A";
+pub(super) const ENV_PASSWORD_A: &str = "KOUSHI_LOCAL_QA_PASSWORD_A";
 
 const ENV_USER_B: &str = "KOUSHI_LOCAL_QA_USER_B";
 

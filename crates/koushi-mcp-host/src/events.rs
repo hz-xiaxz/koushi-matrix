@@ -11,10 +11,9 @@ use std::sync::Mutex;
 use std::time::Duration;
 
 use serde_json::{Value, json};
-use tauri::{AppHandle, Manager};
 use tokio::sync::Notify;
 
-use crate::CoreRuntimeState;
+use crate::BridgeAccounts;
 
 /// How many records to retain before dropping the oldest.
 const MAX_RECORDS: usize = 500;
@@ -163,16 +162,13 @@ pub(crate) fn parse_cursor(cursor: &str) -> Option<u64> {
         .ok()
 }
 
-/// Tauri-managed handle so tool handlers can reach the feed.
-pub(crate) struct McpEventLog(pub(crate) std::sync::Arc<EventLog>);
-
 /// Polls every account's room summaries and feeds the log.
 pub(crate) fn spawn_poller(
-    app: AppHandle,
+    accounts: std::sync::Arc<dyn BridgeAccounts>,
     log: std::sync::Arc<EventLog>,
     mut shutdown: tokio::sync::watch::Receiver<bool>,
 ) {
-    tauri::async_runtime::spawn(async move {
+    tokio::spawn(async move {
         let mut ticker = tokio::time::interval(POLL_INTERVAL);
         ticker.set_missed_tick_behavior(tokio::time::MissedTickBehavior::Skip);
         loop {
@@ -183,12 +179,8 @@ pub(crate) fn spawn_poller(
                     }
                 }
                 _ = ticker.tick() => {
-                    let Some(state) = app.try_state::<CoreRuntimeState>() else {
-                        continue;
-                    };
-                    let runtime = std::sync::Arc::clone(&state.runtime);
-                    for (descriptor, connection) in runtime.tab_connections() {
-                        log.observe(descriptor.id.as_str(), &connection.snapshot().rooms);
+                    for account in accounts.accounts() {
+                        log.observe(&account.id, &account.connection.snapshot().rooms);
                     }
                 }
             }

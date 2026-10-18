@@ -1,22 +1,11 @@
-//! Local MCP bridge: a stdio launcher (`koushi-mcp`) talks to this module over
-//! a private local socket.
-//!
-//! The module is a transport adapter. It publishes `endpoint.json`, verifies
-//! the per-launch token, and dispatches tool calls to the account runtime the
-//! app already owns. It never opens a crypto store and never reads Matrix
-//! credentials.
-
-pub(crate) mod endpoint;
-mod events;
-mod grants;
-mod handlers;
-mod server;
+//! Desktop ownership of the MCP bridge. The bridge itself lives in
+//! `koushi-mcp-host`, so the headless QA harness can host the same code.
 
 use std::path::PathBuf;
+use std::sync::Arc;
 
-use tauri::AppHandle;
-
-pub(crate) use server::BridgeHandle;
+use koushi_core::account_runtime_manager::AccountRuntimeManager;
+use koushi_mcp_host::BridgeHandle;
 
 /// Tauri-managed slot for the running bridge. Stopping it removes the endpoint
 /// file and the socket before the process exits.
@@ -26,8 +15,11 @@ pub(crate) struct McpBridge(pub(crate) std::sync::Mutex<Option<BridgeHandle>>);
 ///
 /// Failure is logged and non-fatal: a desktop client that cannot bind a socket
 /// must still run.
-pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Option<BridgeHandle> {
-    match server::start(app, data_dir) {
+pub(crate) fn start(
+    runtime: Arc<AccountRuntimeManager>,
+    data_dir: PathBuf,
+) -> Option<BridgeHandle> {
+    match koushi_mcp_host::start(runtime, data_dir) {
         Ok(handle) => Some(handle),
         Err(reason) => {
             koushi_diagnostics::record(

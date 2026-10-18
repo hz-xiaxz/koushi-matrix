@@ -1465,7 +1465,7 @@ pub fn run() {
                 reader_subscriptions: TokioMutex::new(HashMap::new()),
             };
             app.manage(core_state);
-            let bridge = mcp::start(app.handle().clone(), mcp_data_dir);
+            let bridge = mcp::start(std::sync::Arc::clone(&runtime), mcp_data_dir);
             app.manage(mcp::McpBridge(std::sync::Mutex::new(bridge)));
             app.manage(app_updates::DesktopUpdateManager::new());
             app.manage(commands::dropped_files::DroppedFileLedger::default());
