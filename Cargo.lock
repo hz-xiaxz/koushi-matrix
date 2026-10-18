@@ -3451,6 +3451,16 @@ dependencies = [
 ]
 
 [[package]]
+name = "koushi-mcp"
+version = "0.1.0"
+dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
 name = "koushi-media"
 version = "0.1.0"
 dependencies = [
