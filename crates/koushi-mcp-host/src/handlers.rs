@@ -183,7 +183,7 @@ fn list_rooms(
                 "thread_unread_messages": room.thread_unread_count,
                 "thread_unread_mentions": room.thread_highlight_count,
                 "marked_unread": room.marked_unread,
-                "last_activity_ms": room.recency_stamp,
+                "recency_stamp": room.recency_stamp,
                 "last_event": room.latest_event.as_ref().map(|event| json!({
                     "event_id": event.event_id,
                     "sender_id": event.sender_id,
