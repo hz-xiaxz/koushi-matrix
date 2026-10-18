@@ -374,6 +374,7 @@ async function main() {
 
   let homeserverChild = null;
   let hostChild = null;
+  let passed = false;
   try {
     log("starting a disposable homeserver");
     homeserverChild = startHomeserver("tuwunel", configPath, join(runRoot, "homeserver.log"));
@@ -522,6 +523,7 @@ async function main() {
       throw new Error("the seeded PNG never reached Koushi's media cache");
     }
 
+    passed = true;
     log(
       `agent scenario search_attachment_reply=ok mcp_tools=${tools.length} ` +
         `reply_events=1 attachment_cached=1`
@@ -531,11 +533,14 @@ async function main() {
     await stopProcess(homeserverChild);
     logStream?.end();
     hostLog.end();
-    if (options.keep) {
-      console.log(`[agent-scenario] kept the run directory for inspection: ${runRoot}`);
+    // A passing run leaves nothing behind; a failing one keeps its logs so CI
+    // can upload them and a local run can be inspected with --keep.
+    if (!options.keep && passed) {
+      rmSync(runRoot, { recursive: true, force: true });
     } else {
-      rmSync(bridgeDir, { recursive: true, force: true });
+      console.log(`[agent-scenario] kept the run directory for inspection: ${runRoot}`);
     }
+    rmSync(bridgeDir, { recursive: true, force: true });
   }
 }
 
