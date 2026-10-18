@@ -434,7 +434,7 @@ async fn account_key_from_snapshot(
     Ok(account_key_from_app_state(&connection.snapshot()))
 }
 
-fn account_key_from_app_state(snapshot: &koushi_state::AppState) -> AccountKey {
+pub(crate) fn account_key_from_app_state(snapshot: &koushi_state::AppState) -> AccountKey {
     match &snapshot.session {
         koushi_state::SessionState::Ready(info)
         | koushi_state::SessionState::Provisional { info, .. }

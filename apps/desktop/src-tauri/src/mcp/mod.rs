@@ -7,6 +7,7 @@
 //! credentials.
 
 pub(crate) mod endpoint;
+mod grants;
 mod handlers;
 mod server;
 

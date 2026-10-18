@@ -72,7 +72,13 @@ pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, S
         endpoint::write(&data_dir, &transport, &token, env!("CARGO_PKG_VERSION"))
             .map_err(|error| format!("mcp endpoint file: {error}"))?;
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        tauri::async_runtime::spawn(accept_loop(listener, app, token, shutdown_rx));
+        tauri::async_runtime::spawn(accept_loop(
+            listener,
+            app,
+            token,
+            shutdown_rx,
+            data_dir.clone(),
+        ));
         Ok(BridgeHandle {
             shutdown: shutdown_tx,
             data_dir,
@@ -86,7 +92,13 @@ pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, S
         endpoint::write(&data_dir, &transport, &token, env!("CARGO_PKG_VERSION"))
             .map_err(|error| format!("mcp endpoint file: {error}"))?;
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        tauri::async_runtime::spawn(accept_loop(listener, app, token, shutdown_rx));
+        tauri::async_runtime::spawn(accept_loop(
+            listener,
+            app,
+            token,
+            shutdown_rx,
+            data_dir.clone(),
+        ));
         Ok(BridgeHandle {
             shutdown: shutdown_tx,
             data_dir,
@@ -101,6 +113,7 @@ async fn accept_loop(
     app: AppHandle,
     token: String,
     mut shutdown: watch::Receiver<bool>,
+    data_dir: PathBuf,
 ) {
     loop {
         tokio::select! {
@@ -114,8 +127,9 @@ async fn accept_loop(
                     Ok((stream, _addr)) => {
                         let app = app.clone();
                         let token = token.clone();
+                        let data_dir = data_dir.clone();
                         tauri::async_runtime::spawn(async move {
-                            let _ = serve_connection(stream, app, token).await;
+                            let _ = serve_connection(stream, app, token, data_dir).await;
                         });
                     }
                     Err(_) => {
@@ -135,6 +149,7 @@ async fn accept_loop(
     app: AppHandle,
     token: String,
     mut shutdown: watch::Receiver<bool>,
+    data_dir: PathBuf,
 ) {
     loop {
         tokio::select! {
@@ -148,8 +163,9 @@ async fn accept_loop(
                     Ok(stream) => {
                         let app = app.clone();
                         let token = token.clone();
+                        let data_dir = data_dir.clone();
                         tauri::async_runtime::spawn(async move {
-                            let _ = serve_connection(stream, app, token).await;
+                            let _ = serve_connection(stream, app, token, data_dir).await;
                         });
                     }
                     Err(_) => {
@@ -161,7 +177,12 @@ async fn accept_loop(
     }
 }
 
-async fn serve_connection(stream: Stream, app: AppHandle, token: String) -> std::io::Result<()> {
+async fn serve_connection(
+    stream: Stream,
+    app: AppHandle,
+    token: String,
+    data_dir: PathBuf,
+) -> std::io::Result<()> {
     let (read_half, mut write_half) = stream.into_split();
     let mut reader = BufReader::new(read_half);
 
@@ -217,7 +238,7 @@ async fn serve_connection(stream: Stream, app: AppHandle, token: String) -> std:
         }
         let response = match decode_line::<ClientMessage>(&line) {
             Ok(ClientMessage::Request { id, method, params }) => {
-                let result = dispatch_method(&app, &method, params).await;
+                let result = dispatch_method(&app, &client.name, &data_dir, &method, params).await;
                 match result {
                     Ok(value) => ServerMessage::success(id, value),
                     Err(error) => ServerMessage::failure(id, error),
@@ -322,11 +343,13 @@ impl NamedPipeListener {
 /// everything else answers `unsupported` rather than pretending to work.
 pub(crate) async fn dispatch_method(
     app: &AppHandle,
+    client_name: &str,
+    data_dir: &std::path::Path,
     method: &str,
     params: Value,
 ) -> Result<Value, WireError> {
     match method {
-        "tools/call" => handlers::dispatch_tool_call(app, params).await,
+        "tools/call" => handlers::dispatch_tool_call(app, client_name, data_dir, params).await,
         "status" => Ok(serde_json::json!({
             "protocol": PROTOCOL_VERSION,
             "app_version": env!("CARGO_PKG_VERSION")
