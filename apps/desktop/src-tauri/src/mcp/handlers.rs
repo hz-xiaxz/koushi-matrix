@@ -41,12 +41,11 @@ pub(crate) async fn dispatch_tool_call(
         "list_rooms" => list_rooms(app, client_name, data_dir, &arguments),
         "search_messages" => search_messages(app, client_name, data_dir, &arguments).await,
         "send_message" => send_message(app, client_name, data_dir, &arguments).await,
-        "get_messages" | "get_message_context" | "get_attachment" | "wait_for_events" => {
-            Err(WireError::new(
-                ErrorCode::Unsupported,
-                format!("{name} is not implemented yet"),
-            ))
-        }
+        "wait_for_events" => wait_for_events(app, client_name, data_dir, &arguments).await,
+        "get_attachment" => Err(WireError::new(
+            ErrorCode::Unsupported,
+            format!("{name} is not implemented yet"),
+        )),
         other => Err(WireError::new(
             ErrorCode::Unsupported,
             format!("unknown tool: {other}"),
@@ -387,6 +386,28 @@ async fn send_message(
             }
         }
     }
+}
+
+async fn wait_for_events(
+    app: &AppHandle,
+    client_name: &str,
+    data_dir: &Path,
+    arguments: &Value,
+) -> Result<Value, WireError> {
+    let account_id = required_account_id(arguments)?;
+    grants::authorize(
+        &grants::load(data_dir),
+        client_name,
+        &account_id,
+        Need::Read,
+    )?;
+    let cursor = arguments.get("cursor").and_then(Value::as_str);
+    let timeout_s = arguments
+        .get("timeout_s")
+        .and_then(Value::as_u64)
+        .unwrap_or(25);
+    let log = app.state::<super::events::McpEventLog>();
+    super::events::wait_for_events(&log.0, &account_id, cursor, timeout_s).await
 }
 
 fn account_connection(

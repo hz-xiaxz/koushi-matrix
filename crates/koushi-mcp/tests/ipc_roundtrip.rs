@@ -42,7 +42,10 @@ async fn accept_once(
             message: "nope".to_owned(),
         })
         .expect("encode");
-        write_half.write_all(encoded.as_bytes()).await.expect("write");
+        write_half
+            .write_all(encoded.as_bytes())
+            .await
+            .expect("write");
         return;
     }
     let hello_ok = encode_line(&ServerMessage::HelloOk {
@@ -57,7 +60,10 @@ async fn accept_once(
         .expect("write hello_ok");
 
     let mut request_line = String::new();
-    reader.read_line(&mut request_line).await.expect("read request");
+    reader
+        .read_line(&mut request_line)
+        .await
+        .expect("read request");
     let ClientMessage::Request { id, .. } = decode_line(&request_line).expect("request") else {
         panic!("expected request");
     };

@@ -7,7 +7,7 @@
 use std::path::PathBuf;
 
 use serde_json::Value;
-use tauri::AppHandle;
+use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::watch;
 
@@ -72,6 +72,9 @@ pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, S
         endpoint::write(&data_dir, &transport, &token, env!("CARGO_PKG_VERSION"))
             .map_err(|error| format!("mcp endpoint file: {error}"))?;
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let log = std::sync::Arc::new(super::events::EventLog::new());
+        app.manage(super::events::McpEventLog(std::sync::Arc::clone(&log)));
+        super::events::spawn_poller(app.clone(), log, shutdown_rx.clone());
         tauri::async_runtime::spawn(accept_loop(
             listener,
             app,
@@ -92,6 +95,9 @@ pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, S
         endpoint::write(&data_dir, &transport, &token, env!("CARGO_PKG_VERSION"))
             .map_err(|error| format!("mcp endpoint file: {error}"))?;
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
+        let log = std::sync::Arc::new(super::events::EventLog::new());
+        app.manage(super::events::McpEventLog(std::sync::Arc::clone(&log)));
+        super::events::spawn_poller(app.clone(), log, shutdown_rx.clone());
         tauri::async_runtime::spawn(accept_loop(
             listener,
             app,

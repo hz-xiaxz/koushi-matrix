@@ -26,8 +26,7 @@ instead of promising push.
 
 In v1:
 
-- `list_accounts`, `list_rooms`, `search_messages`, `get_messages`,
-  `get_message_context`, `get_attachment`
+- `list_accounts`, `list_rooms`, `search_messages`, `get_attachment`
 - `send_message` with text, reply relation, and staged attachments
 - `wait_for_events` (long-poll) with an opaque cursor, for `new_message` and
   `room_invite`
@@ -115,16 +114,15 @@ missing, signed out, or locked fails with `account_unavailable`.
 | `list_accounts` | read | — |
 | `list_rooms` | read | `account_id`, `limit?`, `cursor?` |
 | `search_messages` | read | `account_id`, `query`, `room_ids?`, `limit?` |
-| `get_messages` | read | `account_id`, `room_id`, `before_event_id?`, `limit?` |
-| `get_message_context` | read | `account_id`, `room_id`, `event_id`, `before?`, `after?` |
 | `get_attachment` | read | `account_id`, `event_id`, `attachment_index?` |
 | `send_message` | write | `account_id`, `room_id`, `body?`, `reply_to_event_id?`, `attachments?`, `client_request_id` |
 | `wait_for_events` | read | `account_id`, `cursor?`, `timeout_s?` |
 
 `list_rooms` and `search_messages` return only rooms the connection may see.
-Search results carry account provenance, room, sender, timestamp, event id, a
-body excerpt, and a decryption state; rooms whose keys are missing are
-reported as such rather than omitted silently.
+A search hit carries the room id, the room's display label, the event id, and
+the core's snippet. `SearchResultItem` has no sender, timestamp, or account
+provenance field, so those are a known gap for a later DTO change rather than
+something this bridge can invent.
 
 ### Search mapping
 

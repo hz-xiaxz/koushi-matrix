@@ -82,39 +82,6 @@ pub fn definitions() -> Vec<ToolDefinition> {
             read_only: true,
         },
         ToolDefinition {
-            name: "get_messages",
-            description: "Read a page of room history, newest first. Requires account_id and room_id.",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "account_id": account_id_property(),
-                    "room_id": { "type": "string" },
-                    "before_event_id": { "type": "string", "description": "Page backwards from this event; omit for the live edge." },
-                    "limit": limit_property(100)
-                },
-                "required": ["account_id", "room_id"],
-                "additionalProperties": false
-            }),
-            read_only: true,
-        },
-        ToolDefinition {
-            name: "get_message_context",
-            description: "Read the events surrounding one message. Requires account_id, room_id, and event_id.",
-            input_schema: json!({
-                "type": "object",
-                "properties": {
-                    "account_id": account_id_property(),
-                    "room_id": { "type": "string" },
-                    "event_id": { "type": "string" },
-                    "before": { "type": "integer", "minimum": 0, "maximum": 50 },
-                    "after": { "type": "integer", "minimum": 0, "maximum": 50 }
-                },
-                "required": ["account_id", "room_id", "event_id"],
-                "additionalProperties": false
-            }),
-            read_only: true,
-        },
-        ToolDefinition {
             name: "get_attachment",
             description: "Save one attachment of a message into Koushi's managed attachment cache and return its path, mime type, and size. Requires account_id and event_id.",
             input_schema: json!({
@@ -239,7 +206,7 @@ mod tests {
     #[test]
     fn definitions_are_unique_and_valid() {
         let tools = definitions();
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 6);
         let mut names: Vec<&str> = tools.iter().map(|tool| tool.name).collect();
         names.sort_unstable();
         names.dedup();

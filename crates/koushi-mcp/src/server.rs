@@ -305,7 +305,7 @@ mod tests {
             false
         );
         let tools = output[1]["result"]["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 8);
+        assert_eq!(tools.len(), 6);
         let send = tools
             .iter()
             .find(|tool| tool["name"] == "send_message")
