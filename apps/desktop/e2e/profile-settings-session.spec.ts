@@ -1611,6 +1611,25 @@ test("remote device management is delegated to the active server", async ({ page
   await expect(page.getByRole("button", { name: "Sign out all other sessions" })).toHaveCount(0);
 });
 
+test("account management opens the browser from Account and current Session actions", async ({ page }) => {
+  await gotoReadyShell(page);
+  await page.getByRole("button", { name: "Account Settings", exact: true }).click();
+  await page.evaluate(() => window.__harness.clearInvocations());
+  for (const category of ["Account", "Sessions"]) {
+    await page.getByRole("tab", { name: category, exact: true }).click();
+    const section = category === "Sessions"
+      ? page.locator("#settings-session")
+      : page.getByRole("region", { name: "Account management", exact: true });
+    await section.getByRole("button", { name: "Manage account & devices", exact: true }).click();
+  }
+  await expect.poll(() => invocationCount(page, "plugin:opener|open_url")).toBe(2);
+  expect(await page.evaluate(() => window.__harness.invocationsOf("plugin:opener|open_url").map(call => call.args)))
+    .toEqual([
+      { url: "https://account.example.test/devices" },
+      { url: "https://account.example.test/devices" }
+    ]);
+});
+
 test("per-room notification mode dispatches set_room_notification_mode from room info", async ({
   page
 }) => {
