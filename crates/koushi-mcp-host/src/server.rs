@@ -12,8 +12,8 @@ use tokio::sync::watch;
 
 use crate::BridgeAccounts;
 use koushi_mcp::wire::{
-    decode_line, encode_line, ClientMessage, ErrorCode, ServerMessage, WireError, MAX_FRAME_BYTES,
-    PROTOCOL_VERSION,
+    ClientMessage, ErrorCode, MAX_FRAME_BYTES, PROTOCOL_VERSION, ServerMessage, WireError,
+    decode_line, encode_line,
 };
 
 use super::{endpoint, events, handlers};

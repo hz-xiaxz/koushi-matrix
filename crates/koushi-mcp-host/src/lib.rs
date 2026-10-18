@@ -13,12 +13,12 @@ mod grants;
 mod handlers;
 mod server;
 
-pub use server::{start, BridgeHandle};
+pub use server::{BridgeHandle, start};
 
 use std::path::PathBuf;
 
-use koushi_core::account_runtime_manager::AccountRuntimeManager;
 use koushi_core::CoreConnection;
+use koushi_core::account_runtime_manager::AccountRuntimeManager;
 
 /// One account the bridge may talk to. The desktop app builds these from its
 /// runtime manager; the headless QA harness builds a single one.
