@@ -91,7 +91,7 @@ pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, S
 
     #[cfg(windows)]
     {
-        let listener = NamedPipeListener::bind(&transport)?;
+        let listener = NamedPipeListener::bind(&transport, true)?;
         endpoint::write(&data_dir, &transport, &token, env!("CARGO_PKG_VERSION"))
             .map_err(|error| format!("mcp endpoint file: {error}"))?;
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -323,10 +323,12 @@ struct NamedPipeListener {
 
 #[cfg(windows)]
 impl NamedPipeListener {
-    fn bind(name: &str) -> Result<Self, String> {
+    /// `first` is true only for the very first instance; a later instance may
+    /// not claim `first_pipe_instance`, or Windows rejects the bind.
+    fn bind(name: &str, first: bool) -> Result<Self, String> {
         use tokio::net::windows::named_pipe::ServerOptions;
         let server = ServerOptions::new()
-            .first_pipe_instance(true)
+            .first_pipe_instance(first)
             .create(name)
             .map_err(|error| format!("mcp pipe: {error}"))?;
         Ok(Self {
@@ -339,7 +341,7 @@ impl NamedPipeListener {
         self.server.connect().await?;
         // Install the next instance before handing this one to a connection
         // task, so a client that connects immediately still finds a pipe.
-        let next = Self::bind(&self.name)?;
+        let next = Self::bind(&self.name, false).map_err(std::io::Error::other)?;
         let connected = std::mem::replace(&mut self.server, next.server);
         Ok(connected)
     }
