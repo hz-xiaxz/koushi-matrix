@@ -7,16 +7,16 @@
 use std::path::PathBuf;
 
 use serde_json::Value;
-use tauri::{AppHandle, Manager};
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::watch;
 
+use koushi_core::account_runtime_manager::AccountRuntimeManager;
 use koushi_mcp::wire::{
-    ClientMessage, ErrorCode, MAX_FRAME_BYTES, PROTOCOL_VERSION, ServerMessage, WireError,
-    decode_line, encode_line,
+    decode_line, encode_line, ClientMessage, ErrorCode, ServerMessage, WireError, MAX_FRAME_BYTES,
+    PROTOCOL_VERSION,
 };
 
-use super::{endpoint, handlers};
+use super::{endpoint, events, handlers};
 
 #[cfg(unix)]
 type Listener = tokio::net::UnixListener;
@@ -28,7 +28,7 @@ type Listener = NamedPipeListener;
 type Stream = tokio::net::windows::named_pipe::NamedPipeServer;
 
 /// Owns the listener task and the files it published.
-pub(crate) struct BridgeHandle {
+pub struct BridgeHandle {
     shutdown: watch::Sender<bool>,
     data_dir: PathBuf,
     socket_path: PathBuf,
@@ -36,7 +36,7 @@ pub(crate) struct BridgeHandle {
 
 impl BridgeHandle {
     /// Signals the listener to stop and removes the published files.
-    pub(crate) fn stop(&self) {
+    pub fn stop(&self) {
         let _ = self.shutdown.send(true);
         endpoint::remove(&self.data_dir);
         // Harmless on Windows: the pipe vanishes with the process, and the
@@ -53,7 +53,10 @@ impl Drop for BridgeHandle {
 
 /// Starts the bridge: binds the socket, writes `endpoint.json`, and accepts
 /// connections until shutdown.
-pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, &'static str> {
+pub fn start(
+    runtime: std::sync::Arc<AccountRuntimeManager>,
+    data_dir: PathBuf,
+) -> Result<BridgeHandle, &'static str> {
     endpoint::ensure_dir(&data_dir).map_err(|_| "mcp_dir")?;
     let transport = endpoint::transport_path(&data_dir);
     let token = endpoint::new_token().map_err(|_| "mcp_token")?;
@@ -71,11 +74,15 @@ pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, &
             .map_err(|_| "mcp_endpoint_file")?;
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let log = std::sync::Arc::new(super::events::EventLog::new());
-        app.manage(super::events::McpEventLog(std::sync::Arc::clone(&log)));
-        super::events::spawn_poller(app.clone(), log, shutdown_rx.clone());
-        tauri::async_runtime::spawn(accept_loop(
+        super::events::spawn_poller(
+            std::sync::Arc::clone(&runtime),
+            std::sync::Arc::clone(&log),
+            shutdown_rx.clone(),
+        );
+        tokio::spawn(accept_loop(
             listener,
-            app,
+            runtime,
+            log,
             token,
             shutdown_rx,
             data_dir.clone(),
@@ -94,11 +101,15 @@ pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, &
             .map_err(|_| "mcp_endpoint_file")?;
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
         let log = std::sync::Arc::new(super::events::EventLog::new());
-        app.manage(super::events::McpEventLog(std::sync::Arc::clone(&log)));
-        super::events::spawn_poller(app.clone(), log, shutdown_rx.clone());
-        tauri::async_runtime::spawn(accept_loop(
+        super::events::spawn_poller(
+            std::sync::Arc::clone(&runtime),
+            std::sync::Arc::clone(&log),
+            shutdown_rx.clone(),
+        );
+        tokio::spawn(accept_loop(
             listener,
-            app,
+            runtime,
+            log,
             token,
             shutdown_rx,
             data_dir.clone(),
@@ -114,7 +125,8 @@ pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, &
 #[cfg(unix)]
 async fn accept_loop(
     listener: Listener,
-    app: AppHandle,
+    runtime: std::sync::Arc<AccountRuntimeManager>,
+    log: std::sync::Arc<events::EventLog>,
     token: String,
     mut shutdown: watch::Receiver<bool>,
     data_dir: PathBuf,
@@ -129,11 +141,12 @@ async fn accept_loop(
             accepted = listener.accept() => {
                 match accepted {
                     Ok((stream, _addr)) => {
-                        let app = app.clone();
+                        let runtime = runtime.clone();
+                        let log = log.clone();
                         let token = token.clone();
                         let data_dir = data_dir.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let _ = serve_connection(stream, app, token, data_dir).await;
+                        tokio::spawn(async move {
+                            let _ = serve_connection(stream, runtime, log, token, data_dir).await;
                         });
                     }
                     Err(_) => {
@@ -150,7 +163,8 @@ async fn accept_loop(
 #[cfg(windows)]
 async fn accept_loop(
     mut listener: Listener,
-    app: AppHandle,
+    runtime: std::sync::Arc<AccountRuntimeManager>,
+    log: std::sync::Arc<events::EventLog>,
     token: String,
     mut shutdown: watch::Receiver<bool>,
     data_dir: PathBuf,
@@ -165,11 +179,12 @@ async fn accept_loop(
             accepted = listener.accept() => {
                 match accepted {
                     Ok(stream) => {
-                        let app = app.clone();
+                        let runtime = runtime.clone();
+                        let log = log.clone();
                         let token = token.clone();
                         let data_dir = data_dir.clone();
-                        tauri::async_runtime::spawn(async move {
-                            let _ = serve_connection(stream, app, token, data_dir).await;
+                        tokio::spawn(async move {
+                            let _ = serve_connection(stream, runtime, log, token, data_dir).await;
                         });
                     }
                     Err(_) => {
@@ -183,7 +198,8 @@ async fn accept_loop(
 
 async fn serve_connection(
     stream: Stream,
-    app: AppHandle,
+    runtime: std::sync::Arc<AccountRuntimeManager>,
+    log: std::sync::Arc<events::EventLog>,
     token: String,
     data_dir: PathBuf,
 ) -> std::io::Result<()> {
@@ -242,7 +258,8 @@ async fn serve_connection(
         }
         let response = match decode_line::<ClientMessage>(&line) {
             Ok(ClientMessage::Request { id, method, params }) => {
-                let result = dispatch_method(&app, &client.name, &data_dir, &method, params).await;
+                let result =
+                    dispatch_method(&runtime, &log, &client.name, &data_dir, &method, params).await;
                 match result {
                     Ok(value) => ServerMessage::success(id, value),
                     Err(error) => ServerMessage::failure(id, error),
@@ -347,15 +364,18 @@ impl NamedPipeListener {
 
 /// Dispatches one IPC request. Reads are the only tools implemented so far;
 /// everything else answers `unsupported` rather than pretending to work.
-pub(crate) async fn dispatch_method(
-    app: &AppHandle,
+async fn dispatch_method(
+    runtime: &std::sync::Arc<AccountRuntimeManager>,
+    log: &std::sync::Arc<events::EventLog>,
     client_name: &str,
     data_dir: &std::path::Path,
     method: &str,
     params: Value,
 ) -> Result<Value, WireError> {
     match method {
-        "tools/call" => handlers::dispatch_tool_call(app, client_name, data_dir, params).await,
+        "tools/call" => {
+            handlers::dispatch_tool_call(runtime, log, client_name, data_dir, params).await
+        }
         "status" => Ok(serde_json::json!({
             "protocol": PROTOCOL_VERSION,
             "app_version": env!("CARGO_PKG_VERSION")

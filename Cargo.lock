@@ -3399,6 +3399,7 @@ dependencies = [
  "koushi-diagnostics",
  "koushi-key",
  "koushi-mcp",
+ "koushi-mcp-host",
  "koushi-protocol",
  "koushi-state",
  "libc",
@@ -3455,6 +3456,21 @@ dependencies = [
 name = "koushi-mcp"
 version = "0.1.0"
 dependencies = [
+ "serde",
+ "serde_json",
+ "tempfile",
+ "tokio",
+]
+
+[[package]]
+name = "koushi-mcp-host"
+version = "0.1.0"
+dependencies = [
+ "koushi-core",
+ "koushi-diagnostics",
+ "koushi-mcp",
+ "koushi-protocol",
+ "koushi-state",
  "serde",
  "serde_json",
  "tempfile",

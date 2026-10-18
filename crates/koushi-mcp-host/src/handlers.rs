@@ -6,8 +6,10 @@
 
 use std::path::Path;
 
-use serde_json::{Value, json};
-use tauri::{AppHandle, Manager};
+use serde_json::{json, Value};
+use std::sync::Arc;
+
+use koushi_core::account_runtime_manager::AccountRuntimeManager;
 
 use koushi_mcp::wire::{ErrorCode, WireError};
 use koushi_protocol::command::{CoreCommand, TimelineCommand};
@@ -15,12 +17,13 @@ use koushi_protocol::event::{CoreEvent, TimelineEvent};
 use koushi_protocol::ids::TimelineKey;
 use koushi_state::{ComposerDocument, SessionInfo, SessionState};
 
+use super::events;
 use super::grants::{self, Need};
-use crate::{CoreRuntimeState, commands};
 
 /// One `tools/call` request.
 pub(crate) async fn dispatch_tool_call(
-    app: &AppHandle,
+    runtime: &Arc<AccountRuntimeManager>,
+    log: &Arc<events::EventLog>,
     client_name: &str,
     data_dir: &Path,
     params: Value,
@@ -37,12 +40,12 @@ pub(crate) async fn dispatch_tool_call(
         .unwrap_or_else(|| json!({}));
 
     let result = match name {
-        "list_accounts" => list_accounts(app, client_name, data_dir),
-        "list_rooms" => list_rooms(app, client_name, data_dir, &arguments),
-        "search_messages" => search_messages(app, client_name, data_dir, &arguments).await,
-        "send_message" => send_message(app, client_name, data_dir, &arguments).await,
-        "wait_for_events" => wait_for_events(app, client_name, data_dir, &arguments).await,
-        "get_attachment" => get_attachment(app, client_name, data_dir, &arguments).await,
+        "list_accounts" => list_accounts(runtime, client_name, data_dir),
+        "list_rooms" => list_rooms(runtime, client_name, data_dir, &arguments),
+        "search_messages" => search_messages(runtime, client_name, data_dir, &arguments).await,
+        "send_message" => send_message(runtime, client_name, data_dir, &arguments).await,
+        "wait_for_events" => wait_for_events(runtime, log, client_name, data_dir, &arguments).await,
+        "get_attachment" => get_attachment(runtime, client_name, data_dir, &arguments).await,
         other => Err(WireError::new(
             ErrorCode::Unsupported,
             format!("unknown tool: {other}"),
@@ -63,16 +66,17 @@ pub(crate) async fn dispatch_tool_call(
 
 /// Every account is listed so a first-time client can be granted access, but
 /// identity fields appear only once a grant exists.
-fn list_accounts(app: &AppHandle, client_name: &str, data_dir: &Path) -> Result<Value, WireError> {
+fn list_accounts(
+    runtime: &Arc<AccountRuntimeManager>,
+    client_name: &str,
+    data_dir: &Path,
+) -> Result<Value, WireError> {
     let grants = grants::load(data_dir);
     let granted: Vec<&str> = grants
         .iter()
         .filter(|grant| grant.client_name == client_name)
         .flat_map(|grant| grant.accounts.iter().map(String::as_str))
         .collect();
-
-    let state = app.state::<CoreRuntimeState>();
-    let runtime = std::sync::Arc::clone(&state.runtime);
     let mut accounts = Vec::new();
     for tab in runtime.tab_descriptors() {
         if !tab.id.is_account() {
@@ -127,7 +131,7 @@ fn display_name_from_user_id(info: &SessionInfo) -> String {
 }
 
 fn list_rooms(
-    app: &AppHandle,
+    runtime: &Arc<AccountRuntimeManager>,
     client_name: &str,
     data_dir: &Path,
     arguments: &Value,
@@ -150,7 +154,7 @@ fn list_rooms(
         .and_then(|cursor| cursor.parse::<usize>().ok())
         .unwrap_or(0);
 
-    let connection = account_connection(app, &account_id)?;
+    let connection = account_connection(runtime, &account_id)?;
     let snapshot = connection.snapshot();
     let mut rooms: Vec<Value> = snapshot
         .rooms
@@ -192,7 +196,7 @@ fn direct_search_failure(failure: koushi_core::search::DirectSearchFailure) -> W
 }
 
 async fn search_messages(
-    app: &AppHandle,
+    runtime: &Arc<AccountRuntimeManager>,
     client_name: &str,
     data_dir: &Path,
     arguments: &Value,
@@ -230,7 +234,7 @@ async fn search_messages(
         })
         .unwrap_or_default();
 
-    let connection = account_connection(app, &account_id)?;
+    let connection = account_connection(runtime, &account_id)?;
     let room_names: std::collections::HashMap<String, String> = connection
         .snapshot()
         .rooms
@@ -264,7 +268,7 @@ async fn search_messages(
 }
 
 async fn send_message(
-    app: &AppHandle,
+    runtime: &Arc<AccountRuntimeManager>,
     client_name: &str,
     data_dir: &Path,
     arguments: &Value,
@@ -300,9 +304,9 @@ async fn send_message(
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty());
 
-    let mut connection = account_connection(app, &account_id)?;
+    let mut connection = account_connection(runtime, &account_id)?;
     let snapshot = connection.snapshot();
-    let account_key = commands::account_key_from_app_state(&snapshot);
+    let account_key = account_key_from_snapshot(&snapshot);
     if account_key.0.is_empty() {
         return Err(WireError::new(
             ErrorCode::AccountUnavailable,
@@ -375,7 +379,8 @@ async fn send_message(
 }
 
 async fn wait_for_events(
-    app: &AppHandle,
+    _runtime: &Arc<AccountRuntimeManager>,
+    log: &Arc<events::EventLog>,
     client_name: &str,
     data_dir: &Path,
     arguments: &Value,
@@ -392,15 +397,15 @@ async fn wait_for_events(
         .get("timeout_s")
         .and_then(Value::as_u64)
         .unwrap_or(25);
-    let log = app.state::<super::events::McpEventLog>();
-    super::events::wait_for_events(&log.0, &account_id, cursor, timeout_s).await
+
+    events::wait_for_events(log, &account_id, cursor, timeout_s).await
 }
 
 /// Downloads one file of a message into Koushi's managed media cache and
 /// returns its absolute path. Koushi chooses the destination; the caller never
 /// does.
 async fn get_attachment(
-    app: &AppHandle,
+    runtime: &Arc<AccountRuntimeManager>,
     client_name: &str,
     data_dir: &Path,
     arguments: &Value,
@@ -429,12 +434,12 @@ async fn get_attachment(
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    let connection = account_connection(app, &account_id)?;
+    let connection = account_connection(runtime, &account_id)?;
     let attachment = connection
         .fetch_attachment(room_id.clone(), event_id.clone(), thumbnail)
         .await
         .map_err(attachment_failure)?;
-    ensure_cache_containment(app, &account_id, &attachment.path)?;
+    ensure_cache_containment(runtime, &account_id, &attachment.path)?;
     Ok(json!({
         "room_id": room_id,
         "event_id": event_id,
@@ -461,15 +466,13 @@ fn attachment_failure(failure: koushi_core::AttachmentFetchFailure) -> WireError
 
 /// Refuse any returned path that leaves the account's media cache.
 fn ensure_cache_containment(
-    app: &AppHandle,
+    runtime: &Arc<AccountRuntimeManager>,
     account_id: &str,
     path: &std::path::Path,
 ) -> Result<(), WireError> {
-    let state = app.state::<CoreRuntimeState>();
     let tab_id =
         koushi_core::account_runtime_manager::AccountTabId::from_string(account_id.to_owned());
-    let cache = state
-        .runtime
+    let cache = runtime
         .media_cache_dir_for_tab(&tab_id)
         .ok_or_else(|| WireError::new(ErrorCode::Internal, "unknown account cache"))?;
     let canonical_cache = cache
@@ -489,11 +492,9 @@ fn ensure_cache_containment(
 }
 
 fn account_connection(
-    app: &AppHandle,
+    runtime: &Arc<AccountRuntimeManager>,
     account_id: &str,
 ) -> Result<koushi_core::CoreConnection, WireError> {
-    let state = app.state::<CoreRuntimeState>();
-    let runtime = std::sync::Arc::clone(&state.runtime);
     let tab_id =
         koushi_core::account_runtime_manager::AccountTabId::from_string(account_id.to_owned());
     runtime
@@ -508,4 +509,22 @@ fn required_account_id(arguments: &Value) -> Result<String, WireError> {
         .filter(|id| !id.trim().is_empty())
         .map(str::to_owned)
         .ok_or_else(|| WireError::new(ErrorCode::Unsupported, "account_id is required"))
+}
+
+/// The signed-in account key, or the empty key when no session is ready.
+pub(crate) fn account_key_from_snapshot(
+    snapshot: &koushi_state::AppState,
+) -> koushi_protocol::ids::AccountKey {
+    match &snapshot.session {
+        koushi_state::SessionState::Ready(info)
+        | koushi_state::SessionState::Provisional { info, .. }
+        | koushi_state::SessionState::AwaitingVerification { info, .. }
+        | koushi_state::SessionState::Verifying { info, .. }
+        | koushi_state::SessionState::AwaitingBootstrapConfirmation { info, .. }
+        | koushi_state::SessionState::Rejecting { info, .. }
+        | koushi_state::SessionState::Locked(info) => {
+            koushi_core::store::account_key_from_info(info)
+        }
+        _ => koushi_protocol::ids::AccountKey(String::new()),
+    }
 }

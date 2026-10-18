@@ -157,15 +157,13 @@ mod tests {
     #[test]
     fn reads_are_allowed_and_sends_are_not() {
         let grants = [grant()];
-        assert!(
-            authorize(
-                &grants,
-                "claude-code",
-                "account:@alice:example.org",
-                Need::Read
-            )
-            .is_ok()
-        );
+        assert!(authorize(
+            &grants,
+            "claude-code",
+            "account:@alice:example.org",
+            Need::Read
+        )
+        .is_ok());
         let error = authorize(
             &grants,
             "claude-code",
@@ -222,14 +220,12 @@ mod tests {
         .expect("write");
         let grants = load(dir.path());
         assert_eq!(grants.len(), 1);
-        assert!(
-            authorize(
-                &grants,
-                "claude-code",
-                "account:@alice:example.org",
-                Need::Send
-            )
-            .is_ok()
-        );
+        assert!(authorize(
+            &grants,
+            "claude-code",
+            "account:@alice:example.org",
+            Need::Send
+        )
+        .is_ok());
     }
 }

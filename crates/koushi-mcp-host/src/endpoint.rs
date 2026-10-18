@@ -175,11 +175,9 @@ mod tests {
     fn token_is_url_safe_and_long_enough() {
         let token = new_token().expect("token");
         assert!(token.len() >= 43, "token too short: {}", token.len());
-        assert!(
-            token
-                .chars()
-                .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_')
-        );
+        assert!(token
+            .chars()
+            .all(|c| c.is_ascii_alphanumeric() || c == '-' || c == '_'));
         assert_ne!(token, new_token().expect("token"));
     }
 
