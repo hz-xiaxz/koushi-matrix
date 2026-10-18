@@ -4734,13 +4734,19 @@ stateDiagram-v2
 - `AppState.account_management_url` is the sole UI-facing destination. The
   AccountActor owns one bounded task after promotion and accepts completion only
   for its current task generation and exact `SessionInfo`.
-- OAuth resolution uses public upstream SDK server metadata and its devices-list
-  account action. Non-OAuth resolution narrowly fetches the active homeserver's
+- Every active session first resolves public upstream SDK server metadata and
+  its devices-list account action, including password and SSO sessions on
+  servers that delegate account management to an authentication service.
+  The metadata request uses the client well-known timeout. If metadata has no
+  usable destination, non-OAuth sessions narrowly fetch the active homeserver's
   well-known client document, accepting finalized `m.authentication` and legacy
-  `org.matrix.msc2965.authentication`. Only HTTP(S) account URLs are admitted.
+  `org.matrix.msc2965.authentication`. OAuth sessions do not use that fallback.
+  Only credential-free HTTP(S) account URLs are admitted.
 - Missing, malformed, unsafe, or unreachable metadata leaves the capability
   unavailable and never fails login, restore, verification, or normal runtime.
-- Account Settings renders **Manage account & devices** only while available.
+- Account Settings renders **Manage account & devices** only while available,
+  in Account management and in the current Session action row above Other
+  sessions. Both open the same server-owned destination in the system browser.
   Koushi has no remote-device rename or sign-out state machine; the server
   destination owns those operations. Current-device diagnostics/name repair and
   explicit rejected-provisional-device cleanup remain local.

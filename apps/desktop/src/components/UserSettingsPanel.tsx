@@ -5,6 +5,7 @@ import {
   Check,
   Edit3,
   EyeOff,
+  ExternalLink,
   History,
   Image,
   Link,
@@ -563,6 +564,17 @@ export function UserSettingsPanel({
               >
                 <span>{t("sessionStatus.copyDeviceId")}</span>
               </button>
+              {toExternalHttpUrl(accountManagementUrl) ? (
+                <button
+                  className="profile-settings-action"
+                  type="button"
+                  onClick={onManageAccount}
+                  title={t("settings.manageAccountHint")}
+                >
+                  <ExternalLink size={14} aria-hidden="true" />
+                  <span>{t("settings.manageAccount")}</span>
+                </button>
+              ) : null}
               <button
                 className="profile-settings-action"
                 type="button"
@@ -587,14 +599,7 @@ export function UserSettingsPanel({
             <h3>{t("ownSessions.otherSessions")}</h3>
             <OtherOwnSessionsList devices={e2eeTrust.devices} label={t("ownSessions.otherSessions")} />
             {toExternalHttpUrl(accountManagementUrl) ? (
-              <>
-                <p className="profile-settings-hint">{t("ownSessions.signOutHint")}</p>
-                <div className="profile-settings-actions">
-                  <button className="profile-settings-action" type="button" onClick={onManageAccount}>
-                    <span>{t("settings.manageAccount")}</span>
-                  </button>
-                </div>
-              </>
+              <p className="profile-settings-hint">{t("ownSessions.signOutHint")}</p>
             ) : null}
           </section>
         </div>

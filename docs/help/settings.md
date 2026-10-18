@@ -38,7 +38,7 @@ translated app.
 | App Settings → Search history (検索履歴) | Shared background-work speed and pause/resume control. Search crawling and media prefetch use this budget across all accounts. **Off** pauses both. |
 | App Settings → Help & About (ヘルプと情報) | Public GitHub repository URL, copy button, and instructions for asking ChatGPT or another AI assistant. |
 | Account Settings → Account (アカウント) | Profile display name and avatar; account management page when provided by the server; change password when supported. **Deactivate account** sits in a separate **Danger zone** (危険な操作) block and is shown only for password-based accounts; accounts managed by an external provider use the account management page instead. |
-| Account Settings → Sessions (セッション) | Homeserver, user ID, device ID/name, verification, cross-signing, backup and local-store information; Sign out of the account named on the button. **Other sessions** lists the account's other sessions (name, ID, verification, last activity) from the last check, which runs at sign-in and at most once every 24 hours; sign them out with **Manage account & devices**. The status shown is the last checked result; Koushi re-checks it automatically when the app or account starts and after a connection outage, and the refresh action checks again immediately. |
+| Account Settings → Sessions (セッション) | Homeserver, user ID, device ID/name, verification, cross-signing, backup and local-store information; Sign out of the account named on the button. **Other sessions** lists the account's other sessions (name, ID, verification, last activity) from the last check, which runs at sign-in and at most once every 24 hours; open **Manage account & devices** beside the current session actions to manage them in your browser. The status shown is the last checked result; Koushi re-checks it automatically when the app or account starts and after a connection outage, and the refresh action checks again immediately. |
 | Account Settings → Notifications (通知) | Three tabs, **OS notifications** first. **OS notifications** (OS通知): desktop notifications and **Show message content in notifications**. **Sent from this device** (この端末から送信): destinations Koushi sends to from this computer (email or WeChat). **Homeserver notifications** (ホームサーバー通知): account-wide notification rules and **Email notifications**, which apply to every device. See [OS notifications](#os-notifications), [Notifications from this device](#notifications-from-this-device), and [Email notifications](#email-notifications). |
 | Account Settings → Security & Privacy (セキュリティとプライバシー) | URL previews in unencrypted/encrypted rooms; sending read receipts and typing notifications. |
 | Account Settings → Encryption (暗号化) | Identity/session verification and trust; secure backup setup and passphrase changes; recovery; encrypted room-key import/export; local-encryption diagnostics and local-data reset. Actions appear according to the current encryption state. |
@@ -112,6 +112,20 @@ topmost dismissible dialog and returns focus to its opener.
 For consequences and prerequisites, see [Search](search.md),
 [Security and recovery](security-and-recovery.md), and
 [User trust model](user-trust-model.md) before changing the corresponding settings.
+
+## Manage your account in a browser
+
+In **Account Settings → Account**, choose **Manage account & devices** under
+**Account management**. The same button is available in **Account Settings →
+Sessions**, beside the current session actions, above **Other sessions**. Both
+open the server's management page in your default browser. You may need to sign
+in there separately.
+
+The button appears only when the server advertises a usable management URL.
+This also works for password or SSO sign-ins on servers that advertise modern
+authentication metadata. Servers using the older client well-known account URL
+remain supported. If neither is available, use the server's own account portal;
+Koushi does not guess an address.
 
 ## Deactivate your account
 

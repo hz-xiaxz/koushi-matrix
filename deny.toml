@@ -49,6 +49,15 @@ ignore = [
     "RUSTSEC-2026-0367",
     "RUSTSEC-2026-0368",
     "RUSTSEC-2026-0369",
+    # RUSTSEC-2026-0370/0371/0372: zvariant, zbus_names, and zvariant_derive
+    # are INFO Unmaintained after consolidation into zbus 6, not vulnerability
+    # advisories. Tauri's opener/single-instance/notification plugins and our
+    # notify-rust dependency still require zbus 5, with no compatible patched
+    # standalone versions. Remove these when that dependency graph no longer
+    # includes the standalone crates. Upstream: z-galaxy/zbus#2043.
+    "RUSTSEC-2026-0370",
+    "RUSTSEC-2026-0371",
+    "RUSTSEC-2026-0372",
 ]
 
 [licenses]
