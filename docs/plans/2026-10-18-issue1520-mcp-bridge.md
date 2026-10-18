@@ -114,7 +114,7 @@ missing, signed out, or locked fails with `account_unavailable`.
 | `list_accounts` | read | — |
 | `list_rooms` | read | `account_id`, `limit?`, `cursor?` |
 | `search_messages` | read | `account_id`, `query`, `room_ids?`, `limit?` |
-| `get_attachment` | read | `account_id`, `event_id`, `attachment_index?` |
+| `get_attachment` | read | `account_id`, `room_id`, `event_id`, `thumbnail?` |
 | `send_message` | write | `account_id`, `room_id`, `body?`, `reply_to_event_id?`, `attachments?`, `client_request_id` |
 | `wait_for_events` | read | `account_id`, `cursor?`, `timeout_s?` |
 

@@ -24,6 +24,7 @@ your preferred language.
 - [Messaging](messaging.md): Send text and files, edit messages, reply, and use threads.
 - [Search](search.md): Find past messages and manage local history indexing.
 - [Security and recovery](security-and-recovery.md): Verify a session, recover encrypted history, and distinguish key backups from chat exports.
+- [Connect an AI assistant (MCP)](ai-assistants.md): Register Koushi with Claude Code or Codex, grant an account, and use the message tools.
 - [User trust model](user-trust-model.md): Understand unverified users, verified identities, identity resets, and device trust.
 - [Troubleshooting](troubleshooting.md): Resolve sign-in, missing-history, search, notification, and sending problems, or report a bug.
 

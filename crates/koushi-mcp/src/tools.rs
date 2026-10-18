@@ -83,15 +83,16 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "get_attachment",
-            description: "Save one attachment of a message into Koushi's managed attachment cache and return its path, mime type, and size. Requires account_id and event_id.",
+            description: "Download one attachment of a message into Koushi's managed media cache and return its path, mime type, and size. Koushi chooses the destination. Requires account_id, room_id, and event_id.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "account_id": account_id_property(),
+                    "room_id": { "type": "string" },
                     "event_id": { "type": "string" },
-                    "attachment_index": { "type": "integer", "minimum": 0, "description": "Zero-based attachment position; defaults to 0." }
+                    "thumbnail": { "type": "boolean", "description": "Return a thumbnail instead of the original file. Defaults to false." }
                 },
-                "required": ["account_id", "event_id"],
+                "required": ["account_id", "room_id", "event_id"],
                 "additionalProperties": false
             }),
             read_only: true,

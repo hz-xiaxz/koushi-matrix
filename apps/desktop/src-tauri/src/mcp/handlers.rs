@@ -10,7 +10,9 @@ use serde_json::{Value, json};
 use tauri::{AppHandle, Manager};
 
 use koushi_mcp::wire::{ErrorCode, WireError};
-use koushi_protocol::command::{CoreCommand, SearchCommand, SearchScope, TimelineCommand};
+use koushi_protocol::command::{
+    CoreCommand, MediaDownloadSelection, SearchCommand, SearchScope, TimelineCommand,
+};
 use koushi_protocol::event::{CoreEvent, SearchEvent, TimelineEvent};
 use koushi_protocol::ids::TimelineKey;
 use koushi_state::{ComposerDocument, SessionInfo, SessionState};
@@ -42,10 +44,7 @@ pub(crate) async fn dispatch_tool_call(
         "search_messages" => search_messages(app, client_name, data_dir, &arguments).await,
         "send_message" => send_message(app, client_name, data_dir, &arguments).await,
         "wait_for_events" => wait_for_events(app, client_name, data_dir, &arguments).await,
-        "get_attachment" => Err(WireError::new(
-            ErrorCode::Unsupported,
-            format!("{name} is not implemented yet"),
-        )),
+        "get_attachment" => get_attachment(app, client_name, data_dir, &arguments).await,
         other => Err(WireError::new(
             ErrorCode::Unsupported,
             format!("unknown tool: {other}"),
@@ -408,6 +407,134 @@ async fn wait_for_events(
         .unwrap_or(25);
     let log = app.state::<super::events::McpEventLog>();
     super::events::wait_for_events(&log.0, &account_id, cursor, timeout_s).await
+}
+
+/// Downloads one file of a message into Koushi's managed media cache and
+/// returns its absolute path. Koushi chooses the destination; the caller never
+/// does.
+async fn get_attachment(
+    app: &AppHandle,
+    client_name: &str,
+    data_dir: &Path,
+    arguments: &Value,
+) -> Result<Value, WireError> {
+    let account_id = required_account_id(arguments)?;
+    grants::authorize(
+        &grants::load(data_dir),
+        client_name,
+        &account_id,
+        Need::Attachments,
+    )?;
+    let room_id = arguments
+        .get("room_id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| WireError::new(ErrorCode::Unsupported, "room_id is required"))?
+        .to_owned();
+    let event_id = arguments
+        .get("event_id")
+        .and_then(Value::as_str)
+        .filter(|id| !id.trim().is_empty())
+        .ok_or_else(|| WireError::new(ErrorCode::Unsupported, "event_id is required"))?
+        .to_owned();
+    let thumbnail = arguments
+        .get("thumbnail")
+        .and_then(Value::as_bool)
+        .unwrap_or(false);
+
+    let mut connection = account_connection(app, &account_id)?;
+    let snapshot = connection.snapshot();
+    let account_key = commands::account_key_from_app_state(&snapshot);
+    if account_key.0.is_empty() {
+        return Err(WireError::new(
+            ErrorCode::AccountUnavailable,
+            "account is not signed in",
+        ));
+    }
+    let key = TimelineKey::room(account_key, room_id.clone());
+    let request_id = connection.next_request_id();
+    let selection = if thumbnail {
+        MediaDownloadSelection::Thumbnail {
+            width: 800,
+            height: 800,
+        }
+    } else {
+        MediaDownloadSelection::File
+    };
+    connection
+        .command(CoreCommand::Timeline(TimelineCommand::DownloadMedia {
+            request_id,
+            key: key.clone(),
+            event_id: event_id.clone(),
+            selection,
+        }))
+        .await
+        .map_err(|_| WireError::new(ErrorCode::Internal, "download could not be submitted"))?;
+
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+    loop {
+        let event = tokio::time::timeout_at(deadline, connection.recv_event())
+            .await
+            .map_err(|_| WireError::new(ErrorCode::Internal, "download timed out"))?;
+        match event {
+            Ok(CoreEvent::Timeline(TimelineEvent::MediaDownloadCompleted {
+                request_id: completed,
+                event_id: completed_event,
+                source_url,
+                byte_count,
+                mimetype,
+                ..
+            })) if completed == request_id && completed_event == event_id => {
+                let path =
+                    resolve_download_path(app, &account_id, &source_url).ok_or_else(|| {
+                        WireError::new(
+                            ErrorCode::Internal,
+                            "download finished without a path inside Koushi's media cache",
+                        )
+                    })?;
+                return Ok(json!({
+                    "room_id": room_id,
+                    "event_id": event_id,
+                    "path": path.to_string_lossy(),
+                    "mime_type": mimetype,
+                    "size_bytes": byte_count,
+                }));
+            }
+            Ok(CoreEvent::Timeline(TimelineEvent::MediaDownloadFailed {
+                request_id: completed,
+                ..
+            })) if completed == request_id => {
+                return Err(WireError::new(
+                    ErrorCode::Internal,
+                    "Koushi could not download this attachment",
+                ));
+            }
+            Ok(_) => continue,
+            Err(_) => {
+                return Err(WireError::new(
+                    ErrorCode::Internal,
+                    "event stream lagged during download",
+                ));
+            }
+        }
+    }
+}
+
+/// Maps a downloaded asset URL onto the per-account media cache, refusing any
+/// path that leaves it.
+fn resolve_download_path(
+    app: &AppHandle,
+    account_id: &str,
+    source_url: &str,
+) -> Option<std::path::PathBuf> {
+    let state = app.state::<CoreRuntimeState>();
+    let tab_id =
+        koushi_core::account_runtime_manager::AccountTabId::from_string(account_id.to_owned());
+    let cache = state.runtime.media_cache_dir_for_tab(&tab_id)?;
+    let relative = source_url.split("media-downloads/").nth(1)?;
+    let canonical_cache = cache.canonicalize().ok()?;
+    let candidate = cache.join(relative).canonicalize().ok()?;
+    candidate.starts_with(&canonical_cache).then_some(candidate)
 }
 
 fn account_connection(

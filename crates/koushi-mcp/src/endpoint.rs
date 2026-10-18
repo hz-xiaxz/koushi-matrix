@@ -9,8 +9,10 @@ use std::path::{Path, PathBuf};
 
 use crate::wire::EndpointFile;
 
-/// Application data directory name used by the Tauri bundle identifier.
-pub const APP_DIR: &str = "chat.koushi.desktop";
+/// Application data directory name the desktop app uses
+/// (`DATA_DIR_NAME` in the Tauri adapter). The launcher must look in the same
+/// place or the endpoint file is never found.
+pub const DATA_DIR_NAME: &str = "koushi-desktop";
 
 /// Default location of `endpoint.json` on this platform.
 pub fn default_path() -> Option<PathBuf> {
@@ -19,7 +21,7 @@ pub fn default_path() -> Option<PathBuf> {
         std::env::var_os("HOME").map(|home| {
             PathBuf::from(home)
                 .join("Library/Application Support")
-                .join(APP_DIR)
+                .join(DATA_DIR_NAME)
                 .join("mcp/endpoint.json")
         })
     }
@@ -27,22 +29,21 @@ pub fn default_path() -> Option<PathBuf> {
     {
         std::env::var_os("LOCALAPPDATA").map(|dir| {
             PathBuf::from(dir)
-                .join(APP_DIR)
+                .join(DATA_DIR_NAME)
                 .join("mcp")
                 .join("endpoint.json")
         })
     }
     #[cfg(all(unix, not(target_os = "macos")))]
     {
-        if let Some(runtime) = std::env::var_os("XDG_RUNTIME_DIR") {
-            return Some(PathBuf::from(runtime).join("koushi").join("endpoint.json"));
-        }
-        std::env::var_os("HOME").map(|home| {
-            PathBuf::from(home)
-                .join(".local/share")
-                .join(APP_DIR)
-                .join("mcp/endpoint.json")
-        })
+        // `dirs::data_local_dir()` on Linux: `$XDG_DATA_HOME`, else
+        // `$HOME/.local/share`.
+        let base = std::env::var_os("XDG_DATA_HOME")
+            .map(PathBuf::from)
+            .or_else(|| {
+                std::env::var_os("HOME").map(|home| PathBuf::from(home).join(".local/share"))
+            })?;
+        Some(base.join(DATA_DIR_NAME).join("mcp/endpoint.json"))
     }
 }
 
@@ -78,6 +79,28 @@ mod tests {
             use std::os::unix::fs::PermissionsExt;
             std::fs::set_permissions(path, std::fs::Permissions::from_mode(0o600)).expect("chmod");
         }
+    }
+
+    #[test]
+    fn the_default_path_matches_the_desktop_data_dir() {
+        let Some(path) = default_path() else {
+            return;
+        };
+        let tail: Vec<String> = path
+            .iter()
+            .rev()
+            .take(3)
+            .map(|part| part.to_string_lossy().into_owned())
+            .collect();
+        assert_eq!(
+            tail,
+            vec![
+                "endpoint.json".to_owned(),
+                "mcp".to_owned(),
+                DATA_DIR_NAME.to_owned()
+            ],
+            "launcher and app must agree on the data directory"
+        );
     }
 
     #[test]
