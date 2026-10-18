@@ -19,6 +19,7 @@ import {
 import { t } from "../i18n/messages";
 import { ImeTextField } from "./ImeTextControl";
 import { Tooltip } from "./Tooltip";
+import { useEmojiPickerSize } from "./useEmojiPickerSize";
 import {
   EMOJI_BY_CATEGORY,
   EMOJI_CATEGORIES,
@@ -55,9 +56,33 @@ export const EMOJI_PICKER_BLOCK_SIZE_PX = 520;
  */
 const EMOJI_PICKER_COMFORTABLE_BLOCK_SIZE_PX = 360;
 
+const MIN_PICKER_WIDTH = 300;
+const MIN_PICKER_HEIGHT = 200;
+const MAX_PICKER_SIZE = 1200;
+const RESIZE_KEY_STEP = 20;
+
+function constrainPickerSize(width: number, height: number): [number, number] {
+  return [
+    Math.round(Math.max(MIN_PICKER_WIDTH, Math.min(MAX_PICKER_SIZE, width))),
+    Math.round(Math.max(MIN_PICKER_HEIGHT, Math.min(MAX_PICKER_SIZE, height))),
+  ];
+}
+
+interface PickerResizeDrag {
+  x: number;
+  y: number;
+  width: number;
+  height: number;
+  horizontal: number;
+  vertical: number;
+  size: [number, number];
+}
+
 interface EmojiPickerProps {
   onSelect: (emoji: string) => void;
   onClose: () => void;
+  size?: [number, number] | null;
+  onSizeChange?: (size: [number, number]) => void;
   recentEmojis?: string[];
   onRecentEmojisChange?: (emojis: string[]) => void;
   /** Element that triggered the picker; excluded from outside-click detection
@@ -79,6 +104,8 @@ interface EmojiPickerProps {
 export function EmojiPicker({
   onSelect,
   onClose,
+  size,
+  onSizeChange,
   recentEmojis = [],
   onRecentEmojisChange,
   anchorRef,
@@ -87,6 +114,13 @@ export function EmojiPicker({
   align = "start",
   className,
 }: EmojiPickerProps) {
+  const savedSize = useEmojiPickerSize();
+  size ??= savedSize.size;
+  onSizeChange ??= savedSize.save;
+  const [draftSize, setDraftSize] = useState<[number, number]>(() =>
+    size ? constrainPickerSize(...size) : [EMOJI_PICKER_INLINE_SIZE_PX, EMOJI_PICKER_BLOCK_SIZE_PX]
+  );
+  const drag = useRef<PickerResizeDrag | null>(null);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<
     EmojiCategory | "recent"
@@ -138,12 +172,15 @@ export function EmojiPicker({
   const resolvedPlacement = useFloatingPlacement({
     align,
     anchorRef,
-    blockSize: EMOJI_PICKER_BLOCK_SIZE_PX,
+    blockSize: draftSize[1],
     comfortableBlockSize: EMOJI_PICKER_COMFORTABLE_BLOCK_SIZE_PX,
-    inlineSize: EMOJI_PICKER_INLINE_SIZE_PX,
+    inlineSize: draftSize[0],
     placement,
     resolveBoundaryElement
   });
+
+  const resizeAbove = resolvedPlacement?.placement === "above";
+  const resizeLeft = (resolvedPlacement?.align === "end") !== (document.documentElement.dir === "rtl");
 
   const initiallyFocused = useRef(false);
   useLayoutEffect(() => {
@@ -217,6 +254,47 @@ export function EmojiPicker({
         }
       }}
     >
+      <button
+        type="button"
+        className={`emoji-picker-resize ${resizeAbove ? "at-top" : "at-bottom"} ${resizeLeft ? "at-left" : "at-right"} ${resolvedPlacement?.align === "end" ? "at-start" : "at-end"}`}
+        aria-label={t("composer.emojiResize")}
+        onPointerDown={(event) => {
+          if (event.button !== 0 || !panelRef.current) return;
+          event.preventDefault();
+          const rect = panelRef.current.getBoundingClientRect();
+          drag.current = { x: event.clientX, y: event.clientY, width: rect.width, height: rect.height, horizontal: resizeLeft ? -1 : 1, vertical: resizeAbove ? -1 : 1, size: draftSize };
+          event.currentTarget.setPointerCapture(event.pointerId);
+        }}
+        onPointerMove={(event) => {
+          const start = drag.current;
+          if (!start) return;
+          start.size = constrainPickerSize(start.width + start.horizontal * (event.clientX - start.x), start.height + start.vertical * (event.clientY - start.y));
+          setDraftSize(start.size);
+        }}
+        onPointerUp={(event) => {
+          const start = drag.current;
+          if (!start) return;
+          drag.current = null;
+          event.currentTarget.releasePointerCapture(event.pointerId);
+          onSizeChange?.(start.size);
+        }}
+        onLostPointerCapture={() => { drag.current = null; }}
+        onPointerCancel={() => {
+          drag.current = null;
+          setDraftSize(size ?? [EMOJI_PICKER_INLINE_SIZE_PX, EMOJI_PICKER_BLOCK_SIZE_PX]);
+        }}
+        onKeyDown={(event) => {
+          const horizontal = event.key === "ArrowRight" ? RESIZE_KEY_STEP : event.key === "ArrowLeft" ? -RESIZE_KEY_STEP : 0;
+          const vertical = event.key === "ArrowDown" ? RESIZE_KEY_STEP : event.key === "ArrowUp" ? -RESIZE_KEY_STEP : 0;
+          if (!horizontal && !vertical) return;
+          event.preventDefault();
+          const next = constrainPickerSize(draftSize[0] + horizontal * (resizeLeft ? -1 : 1), draftSize[1] + vertical * (resizeAbove ? -1 : 1));
+          setDraftSize(next);
+          onSizeChange?.(next);
+        }}
+      >
+        <span aria-hidden="true">⋰</span>
+      </button>
       <div className="emoji-picker-header">
         <div className="emoji-picker-search">
           <Search size={14} aria-hidden="true" />
@@ -295,6 +373,7 @@ export function EmojiPicker({
       )}
 
       <div className="emoji-picker-body">
+        {savedSize.failed && <p role="alert">{t("composer.emojiSizeSaveFailed")}</p>}
         {searching ? (
           filtered && filtered.length > 0 ? (
             <EmojiGrid entries={filtered} onSelect={handleSelect} />

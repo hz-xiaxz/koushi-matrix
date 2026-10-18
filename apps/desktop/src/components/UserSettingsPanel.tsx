@@ -1313,7 +1313,7 @@ function WindowToggle({
 }: {
   label: string;
   description?: string;
-  settingKey: keyof WindowSettings;
+  settingKey: "close_to_tray";
   current: WindowSettings;
   onSelect: (patch: SettingsPatch) => void;
 }) {

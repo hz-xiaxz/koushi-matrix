@@ -34,11 +34,11 @@ async function topmostElementAtBubbleCentre(bubble: import("@playwright/test").L
 
 test("an emoji-picker explanation bubble paints above the picker", async ({ page }) => {
   await page.goto("/appHarness.html");
-  const emojiButton = page.getByRole("button", { name: t("composer.emoji") });
+  const emojiButton = page.getByRole("button", { name: t("composer.emoji"), exact: true });
   await expect(emojiButton).toBeVisible();
   await emojiButton.click();
 
-  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji"), exact: true });
   await expect(picker).toBeVisible();
 
   const closeButton = picker.getByRole("button", { name: t("mediaGallery.close") });

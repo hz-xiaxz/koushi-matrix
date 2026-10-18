@@ -539,6 +539,7 @@ export type NotificationSinkConfig =
 export type SmtpTls = "implicit" | "startTls";
 
 export interface WindowSettings {
+  emoji_picker_size?: [number, number] | null;
   close_to_tray: boolean;
 }
 

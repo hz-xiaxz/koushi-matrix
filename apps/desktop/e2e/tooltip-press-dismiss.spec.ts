@@ -19,7 +19,7 @@ import { t } from "../src/i18n/messages";
 
 test("a press keeps a parked hover dismissed and a fresh hover re-arms it", async ({ page }) => {
   await page.goto("/appHarness.html");
-  const emojiButton = page.getByRole("button", { name: t("composer.emoji") });
+  const emojiButton = page.getByRole("button", { name: t("composer.emoji"), exact: true });
   await expect(emojiButton).toBeVisible();
 
   const bubble = page.locator(".tooltip-bubble.is-open");
@@ -29,7 +29,7 @@ test("a press keeps a parked hover dismissed and a fresh hover re-arms it", asyn
 
   // The click parks the pointer on the trigger and must dismiss the bubble.
   await emojiButton.click();
-  const picker = page.getByRole("dialog", { name: t("composer.emoji") });
+  const picker = page.getByRole("dialog", { name: t("composer.emoji"), exact: true });
   await expect(picker).toBeVisible();
   await expect(bubble).toHaveCount(0);
 
