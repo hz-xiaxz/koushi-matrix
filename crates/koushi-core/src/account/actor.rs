@@ -3005,7 +3005,13 @@ impl AccountActor {
             ));
             return;
         };
-        let data_dir = self.data_dir.clone();
+        // Downloads belong to the account's own cache, the same directory the
+        // GUI's media cache maps for this tab. The app-level data dir would
+        // write outside it.
+        let data_dir = match &self.session_key_id {
+            Some(key_id) => self.store.account_local_data_dir(key_id),
+            None => self.data_dir.clone(),
+        };
         let selection = if thumbnail {
             koushi_protocol::command::MediaDownloadSelection::Thumbnail {
                 width: 800,
