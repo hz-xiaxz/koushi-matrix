@@ -1,0 +1,123 @@
+name: Agent MCP scenarios
+
+# End-to-end lane for #1526: a coding agent (pi) drives a real Koushi runtime
+# through the `koushi-mcp` launcher, and the scenario passes only on server-side
+# evidence — a message that replies to the seeded event and the seeded PNG in
+# Koushi's media cache.
+#
+# This lane calls a paid model, so it does not run per pull request: it runs on
+# demand and nightly. The model is `deepseek-flash` through the DeepSeek
+# provider; `DEEPSEEK_API_KEY` is the repository secret.
+on:
+  schedule:
+    - cron: "30 18 * * *"
+  workflow_dispatch:
+
+concurrency:
+  group: agent-mcp-scenarios
+  cancel-in-progress: false
+
+permissions:
+  contents: read
+  issues: write
+
+jobs:
+  search-attachment-reply:
+    name: Agent scenario (search, attachment, reply)
+    runs-on: ubuntu-latest
+    timeout-minutes: 25
+    steps:
+      - name: Check out
+        uses: actions/checkout@11d5960a326750d5838078e36cf38b85af677262 # v4
+        with:
+          submodules: recursive
+      - name: Install Rust toolchain
+        uses: dtolnay/rust-toolchain@191af2e1955bbe165f9bbacff2d2438002dff4d4 # 1.96.0
+      - name: Restore Rust build cache
+        uses: Swatinem/rust-cache@e18b497796c12c097a38f9edb9d0641fb99eee32 # v2.9.1
+        with:
+          workspaces: . -> target
+          shared-key: agent-mcp-scenarios
+      - uses: actions/setup-node@49933ea5288caeca8642d1e84afbd3f7d6820020 # v4
+        with:
+          node-version: "22"
+      - name: Install build dependencies
+        run: |
+          sudo apt-get update
+          sudo apt-get install -y --no-install-recommends \
+            build-essential pkg-config libssl-dev zstd
+      - name: Submodule sync guard
+        run: node scripts/check-sdk-submodule.mjs
+      - name: Cache Tuwunel v1.7.1 download
+        uses: actions/cache@0057852bfaa89a56745cba8c7296529d2fc39830 # v4
+        with:
+          path: ~/.cache/koushi/tuwunel/v1.7.1
+          key: tuwunel-v1.7.1-x86_64-v1-linux-gnu-64d6b60a781e2dad74e840ed6e211eced8c4206ce2d307fe62bbc62e3ffcc983
+      - name: Install Tuwunel v1.7.1
+        env:
+          TUWUNEL_URL: https://github.com/matrix-construct/tuwunel/releases/download/v1.7.1/v1.7.1-release-all-x86_64-v1-linux-gnu-tuwunel.zst
+          TUWUNEL_SHA256: 64d6b60a781e2dad74e840ed6e211eced8c4206ce2d307fe62bbc62e3ffcc983
+        run: |
+          mkdir -p "$HOME/.cache/koushi/tuwunel/v1.7.1" "$HOME/.local/bin"
+          archive="$HOME/.cache/koushi/tuwunel/v1.7.1/tuwunel.zst"
+          if [[ ! -s "$archive" ]]; then
+            curl --proto '=https' --tlsv1.2 -fsSLo "$archive" "$TUWUNEL_URL"
+          fi
+          printf '%s  %s\n' "$TUWUNEL_SHA256" "$archive" | sha256sum --check --strict
+          unzstd -f -o "$HOME/.local/bin/tuwunel" "$archive"
+          chmod 0755 "$HOME/.local/bin/tuwunel"
+          echo "$HOME/.local/bin" >> "$GITHUB_PATH"
+      - name: Verify Tuwunel is runnable
+        run: tuwunel --version
+      - name: Install pi (the agent under test)
+        run: |
+          npm install --global @earendil-works/pi-coding-agent@1.3.0
+          pi --version
+      - name: Build Koushi binaries
+        run: |
+          cargo build -p koushi-qa --features qa-bin --bin headless-core-qa
+          cargo build -p koushi-mcp --bin koushi-mcp
+      - name: Agent scenario
+        env:
+          DEEPSEEK_API_KEY: ${{ secrets.DEEPSEEK_API_KEY }}
+        run: |
+          node scripts/mcp-agent-scenario.mjs --server=tuwunel --timeout-ms=600000
+      - name: Upload scenario logs on failure
+        if: failure()
+        uses: actions/upload-artifact@ea165f8d65b6e75b540449e92b4886f43607fa02 # v4
+        with:
+          name: agent-mcp-scenario-logs
+          # Only Koushi's own logs: the raw homeserver log can contain Matrix
+          # request metadata.
+          path: |
+            .local-secrets/agent-scenarios/**/scenario.log
+            .local-secrets/agent-scenarios/**/host.log
+          if-no-files-found: ignore
+          retention-days: 14
+      - name: File or update the failure issue
+        if: failure()
+        env:
+          GH_TOKEN: ${{ github.token }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+        run: |
+          signature="nightly-qa/tuwunel/agent-mcp"
+          gh label create nightly-qa --description "Nightly agent QA lane failure" --color 1D76DB 2>/dev/null || true
+          gh label create "$signature" --description "Open nightly failure: agent MCP scenario" --color BFD4F2 2>/dev/null || true
+          number=$(gh issue list --label nightly-qa --label "$signature" --state open \
+            --limit 100 --json number --jq '.[0].number // ""')
+          if [ -n "$number" ]; then
+            gh issue comment "$number" --body "The agent MCP scenario failed again: ${RUN_URL}"
+            exit 0
+          fi
+          body=$(cat <<EOF
+          The agent MCP scenario failed.
+
+          - Run: ${RUN_URL}
+          - Command: \`node scripts/mcp-agent-scenario.mjs --server=tuwunel\`
+          - Koushi logs are attached to the run as \`agent-mcp-scenario-logs\`.
+
+          Filed automatically by \`.github/workflows/agent-scenarios.yml\`.
+          EOF
+          )
+          gh issue create --title "nightly-qa: agent MCP scenario failed (tuwunel)" \
+            --label nightly-qa --label "$signature" --body "$body"

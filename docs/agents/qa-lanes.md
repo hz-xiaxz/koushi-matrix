@@ -202,6 +202,42 @@ acceptance drives each ownership phase through the behavioral cleanup boundary
 and asserts logout/barrier/drop/shutdown order plus continuation to the
 remaining owners. Source-text inventory guards alone are not evidence.
 
+## Agent MCP scenario lane
+
+Proves that a coding agent can drive Koushi through the MCP bridge end to end
+(#1526). It is the only lane where the caller is a model, so the model's prose
+is never evidence: the scenario passes on server-side state only.
+
+`headless-core-qa` runs as a long-lived bridge host instead of a scenario when
+`KOUSHI_QA_MCP_HOST=1`, reusing the same guarded QA login, then publishes
+`mcp/endpoint.json` and grants one MCP client (`KOUSHI_QA_MCP_CLIENT`, `pi` by
+default) in `mcp/connections.json`. The agent reaches that bridge through the
+real `koushi-mcp` launcher, so the transport, the grant file, and the tool
+surface are exercised, not a test double.
+
+```bash
+DEEPSEEK_API_KEY=<key> node scripts/mcp-agent-scenario.mjs --server=tuwunel
+```
+
+The runner creates a disposable homeserver, a fresh account, one room, a
+searchable message, and one PNG, asks the agent to search, download the
+attachment, and reply, and then asserts:
+
+- a new message from the account replies to the seeded image event, and
+- the seeded PNG is in Koushi's media cache (same size and SHA-256).
+
+A passing run prints `agent scenario search_attachment_reply=ok`. The bridge
+lives in a short `mkdtemp` directory because a Unix socket path is limited to
+about 104 bytes; Koushi's data, credentials, and logs stay under
+`.local-secrets/agent-scenarios/<stamp>/`. Run directories are deleted unless
+`--keep` is passed.
+
+The lane calls a paid model, so `.github/workflows/agent-scenarios.yml` runs it
+on `workflow_dispatch` and nightly rather than per pull request. The model is
+`deepseek-flash` through pi's `deepseek` provider; `DEEPSEEK_API_KEY` is the
+repository secret. `pi mcp list` must report the six Koushi tools before the
+agent runs, so a transport or grant failure never looks like a model failure.
+
 ## Linux virtual-display GUI lane
 
 Real Tauri WebView driven through WebDriver under Xvfb. Command shape:

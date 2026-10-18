@@ -14,6 +14,7 @@ required-features = ["qa-bin"]
 tempfile = "3"
 koushi-core = { path = "../koushi-core" }
 koushi-diagnostics = { path = "../koushi-diagnostics" }
+koushi-mcp-host = { path = "../koushi-mcp-host" }
 koushi-protocol = { path = "../koushi-protocol" }
 koushi-sdk = { path = "../koushi-sdk" }
 koushi-state = { path = "../koushi-state" }
@@ -25,7 +26,7 @@ getrandom = "0.3"
 sha2 = "0.10"
 serde_json = "1"
 tracing-subscriber = { version = "0.3", default-features = false, features = ["std", "fmt", "env-filter"] }
-tokio = { version = "1", features = ["rt-multi-thread", "rt", "sync", "time", "macros", "test-util"] }
+tokio = { version = "1", features = ["rt-multi-thread", "rt", "sync", "time", "macros", "signal", "test-util"] }
 
 [features]
 qa-bin = ["koushi-core/test-hooks", "koushi-sdk/test-hooks", "koushi-store/test-hooks", "matrix-sdk/testing"]
