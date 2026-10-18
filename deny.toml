@@ -13,6 +13,16 @@
 # (primarily the vendored Matrix Rust SDK) with no available fix. Each is
 # documented with why it is accepted.
 ignore = [
+    # RUSTSEC-2026-0370/0371/0372: zvariant, zbus_names and zvariant_derive
+    # were merged into zbus 6 and are unmaintained as standalone crates.
+    # These are informational maintenance notices with no patched versions:
+    # https://github.com/z-galaxy/zbus/issues/2043
+    # Existing notify-rust and Tauri notification/opener/single-instance
+    # dependencies still require zbus 5, so a lockfile update cannot remove
+    # them. Drop these exceptions when those upstream users migrate to zbus 6.
+    "RUSTSEC-2026-0370",
+    "RUSTSEC-2026-0371",
+    "RUSTSEC-2026-0372",
     # RUSTSEC-2024-0370: proc-macro-error is unmaintained. Tauri's gtk3 stack
     # still pulls gtk3-macros, which pulls this compile-time macro helper. No
     # runtime code path depends on it directly.
