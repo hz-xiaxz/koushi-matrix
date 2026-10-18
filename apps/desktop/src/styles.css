@@ -5703,37 +5703,6 @@ mark {
   box-shadow: 0 16px 32px rgb(15 27 45 / 18%);
 }
 
-/* The free corner follows the resolved anchor side. Physical corners correspond
-   to pointer coordinates; logical alignment is resolved in EmojiPicker. */
-.emoji-picker-resize {
-  position: absolute;
-  z-index: 2;
-  inline-size: var(--emoji-picker-resize-handle-size);
-  block-size: var(--emoji-picker-resize-handle-size);
-  padding: 0;
-  border: 0;
-  background: var(--surface);
-  color: var(--text-muted);
-  touch-action: none;
-  user-select: none;
-  line-height: 1;
-}
-.emoji-picker-resize.at-top { inset-block-start: 0; }
-.emoji-picker-resize.at-bottom { inset-block-end: 0; }
-.emoji-picker-resize.at-start { inset-inline-start: 0; }
-.emoji-picker-resize.at-end { inset-inline-end: 0; }
-.emoji-picker-resize.at-top.at-right,
-.emoji-picker-resize.at-bottom.at-left { cursor: nesw-resize; }
-.emoji-picker-resize.at-top.at-left,
-.emoji-picker-resize.at-bottom.at-right { cursor: nwse-resize; }
-
-.emoji-picker:has(.emoji-picker-resize.at-top) .emoji-picker-header {
-  padding-block-start: var(--emoji-picker-resize-handle-size);
-}
-.emoji-picker:has(.emoji-picker-resize.at-bottom) .emoji-picker-body {
-  padding-block-end: var(--emoji-picker-resize-handle-size);
-}
-
 .timeline-reaction-emoji-picker {
   z-index: 90;
 }
@@ -5800,6 +5769,37 @@ mark {
   overflow-x: hidden;
   overflow-y: auto;
   padding: 8px;
+}
+
+/* The free corner follows the resolved anchor side. Physical corners correspond
+   to pointer coordinates; logical alignment is resolved in EmojiPicker. */
+.emoji-picker-resize {
+  position: absolute;
+  z-index: 2;
+  inline-size: var(--emoji-picker-resize-handle-size);
+  block-size: var(--emoji-picker-resize-handle-size);
+  padding: 0;
+  border: 0;
+  background: var(--surface);
+  color: var(--text-muted);
+  touch-action: none;
+  user-select: none;
+  line-height: 1;
+}
+.emoji-picker-resize.at-top { inset-block-start: 0; }
+.emoji-picker-resize.at-bottom { inset-block-end: 0; }
+.emoji-picker-resize.at-start { inset-inline-start: 0; }
+.emoji-picker-resize.at-end { inset-inline-end: 0; }
+.emoji-picker-resize.at-top.at-right,
+.emoji-picker-resize.at-bottom.at-left { cursor: nesw-resize; }
+.emoji-picker-resize.at-top.at-left,
+.emoji-picker-resize.at-bottom.at-right { cursor: nwse-resize; }
+
+.emoji-picker:has(.emoji-picker-resize.at-top) .emoji-picker-header {
+  padding-block-start: var(--emoji-picker-resize-handle-size);
+}
+.emoji-picker:has(.emoji-picker-resize.at-bottom) .emoji-picker-body {
+  padding-block-end: var(--emoji-picker-resize-handle-size);
 }
 
 .emoji-picker-section {

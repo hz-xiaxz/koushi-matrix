@@ -48,6 +48,7 @@ export const testkitTargets = [
 ];
 
 export const coreLocalIntegrationTargets = [
+  "emoji_picker_size.rs",
   "link_preview.rs",
   "media_save.rs",
   "native_artifact_boundary.rs",
