@@ -39,10 +39,9 @@ impl BridgeHandle {
     pub(crate) fn stop(&self) {
         let _ = self.shutdown.send(true);
         endpoint::remove(&self.data_dir);
-        #[cfg(unix)]
-        {
-            let _ = std::fs::remove_file(&self.socket_path);
-        }
+        // Harmless on Windows: the pipe vanishes with the process, and the
+        // path is not a filesystem entry there.
+        let _ = std::fs::remove_file(&self.socket_path);
     }
 }
 
@@ -90,7 +89,7 @@ pub(crate) fn start(app: AppHandle, data_dir: PathBuf) -> Result<BridgeHandle, &
 
     #[cfg(windows)]
     {
-        let listener = NamedPipeListener::bind(&transport, true).map_err(|_| "mcp_pipe")?;
+        let listener = Listener::bind(&transport, true).map_err(|_| "mcp_pipe")?;
         endpoint::write(&data_dir, &transport, &token, env!("CARGO_PKG_VERSION"))
             .map_err(|_| "mcp_endpoint_file")?;
         let (shutdown_tx, shutdown_rx) = watch::channel(false);
@@ -150,7 +149,7 @@ async fn accept_loop(
 
 #[cfg(windows)]
 async fn accept_loop(
-    mut listener: NamedPipeListener,
+    mut listener: Listener,
     app: AppHandle,
     token: String,
     mut shutdown: watch::Receiver<bool>,
