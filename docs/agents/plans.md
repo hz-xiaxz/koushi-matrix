@@ -19,6 +19,13 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
+[#1524 MCP/GUI isolation](../plans/2026-10-18-mcp-ui-isolation.md)
+makes every MCP tool run as an in-process Core call that never reduces app
+actions or emits WebView events: independent per-request searches with the
+caller's room filter, attachment retrieval without a timeline actor, and
+display-independent sends. Progress, errors and cancellation stay with the
+calling MCP client.
+
 [#1520 local MCP bridge](../plans/2026-10-18-issue1520-mcp-bridge.md)
 gives Claude Code and Codex encrypted search, sending with attachments, and
 polled new-message delivery through a stdio launcher (`crates/koushi-mcp`) over
