@@ -158,6 +158,20 @@ pub(crate) enum AccountMessage {
             >,
         >,
     },
+    /// A room timeline page for an out-of-band caller (MCP). Answered on the
+    /// reply channel only and read from the session, so no timeline actor is
+    /// mounted and no GUI state changes.
+    DirectRoomMessages {
+        room_id: String,
+        limit: u32,
+        from: Option<String>,
+        response: tokio::sync::oneshot::Sender<
+            Result<
+                koushi_protocol::event::RoomMessagesPage,
+                crate::direct_operations::RoomMessagesFailure,
+            >,
+        >,
+    },
     #[cfg(any(test, feature = "test-hooks"))]
     PauseHistoryKeyImport {
         disclosure: bool,
@@ -1110,6 +1124,8 @@ pub struct AccountActor {
     /// shutdown so no operation outlives the account (#1524).
     pub(super) direct_search_slots: Arc<tokio::sync::Semaphore>,
     pub(super) direct_search_tasks: Vec<crate::executor::JoinHandle<()>>,
+    /// Bounded reads of a room's recent timeline for out-of-band callers (#1530).
+    pub(super) direct_room_messages_tasks: Vec<crate::executor::JoinHandle<()>>,
     pub(super) direct_attachment_tasks: Vec<crate::executor::JoinHandle<()>>,
     pub(super) session_promoted: bool,
     pub(super) trust_generation: u64,
@@ -1469,6 +1485,7 @@ impl AccountActor {
             native_artifacts: Arc::clone(&native_artifacts),
             direct_search_slots: Arc::new(tokio::sync::Semaphore::new(DIRECT_SEARCH_LIMIT)),
             direct_search_tasks: Vec::new(),
+            direct_room_messages_tasks: Vec::new(),
             direct_attachment_tasks: Vec::new(),
             session_promoted: false,
             trust_generation: 0,
@@ -1836,6 +1853,15 @@ impl AccountActor {
                     response,
                 } => {
                     self.handle_direct_search(query, room_ids, content_policy, response)
+                        .await;
+                }
+                AccountMessage::DirectRoomMessages {
+                    room_id,
+                    limit,
+                    from,
+                    response,
+                } => {
+                    self.handle_direct_room_messages(room_id, limit, from, response)
                         .await;
                 }
                 AccountMessage::TimelineCommand(timeline_command) => {
@@ -3115,6 +3141,47 @@ impl AccountActor {
             task.abort();
             let _ = task.await;
         }
+        for task in self.direct_room_messages_tasks.drain(..) {
+            task.abort();
+            let _ = task.await;
+        }
+    }
+
+    /// Read one page of a room's recent timeline for an out-of-band caller
+    /// (#1530). The session resolves the room, so no timeline actor is mounted.
+    async fn handle_direct_room_messages(
+        &mut self,
+        room_id: String,
+        limit: u32,
+        from: Option<String>,
+        mut response: tokio::sync::oneshot::Sender<
+            Result<
+                koushi_protocol::event::RoomMessagesPage,
+                crate::direct_operations::RoomMessagesFailure,
+            >,
+        >,
+    ) {
+        let Some(session) = self.session.clone() else {
+            let _ = response.send(Err(
+                crate::direct_operations::RoomMessagesFailure::AccountInactive,
+            ));
+            return;
+        };
+        self.direct_room_messages_tasks
+            .retain(|task| !task.is_finished());
+        self.direct_room_messages_tasks
+            .push(crate::executor::spawn(async move {
+                let read = crate::timeline::read_room_messages(session, &room_id, limit, from);
+                tokio::pin!(read);
+                tokio::select! {
+                    outcome = &mut read => {
+                        if !response.is_closed() {
+                            let _ = response.send(outcome);
+                        }
+                    }
+                    _ = response.closed() => {}
+                }
+            }));
     }
 
     async fn handle_command(&mut self, command: AccountCommand) {

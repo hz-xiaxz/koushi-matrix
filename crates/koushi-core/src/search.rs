@@ -2439,6 +2439,8 @@ pub(crate) fn compact_search_results(
             room_id: result.room_id.clone(),
             event_id: result.event_id.clone(),
             snippet: result.snippet.clone(),
+            sender_id: result.sender.clone(),
+            timestamp_ms: result.timestamp_ms,
         })
         .collect()
 }

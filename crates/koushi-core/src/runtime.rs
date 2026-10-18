@@ -341,6 +341,19 @@ enum CoreCommandEnvelope {
         thumbnail: bool,
         response: oneshot::Sender<Result<FetchedAttachment, AttachmentFetchFailure>>,
     },
+    /// A room timeline page for an out-of-band caller (#1530). Answered on the
+    /// reply channel only; no timeline is mounted and no GUI event is produced.
+    DirectRoomMessages {
+        room_id: String,
+        limit: u32,
+        from: Option<String>,
+        response: oneshot::Sender<
+            Result<
+                koushi_protocol::event::RoomMessagesPage,
+                crate::direct_operations::RoomMessagesFailure,
+            >,
+        >,
+    },
     /// A search for an out-of-band caller (#1524). Answered on the reply
     /// channel only; no app action or GUI event is produced.
     DirectSearch {
@@ -365,6 +378,7 @@ impl CoreCommandEnvelope {
             }
             Self::RetentionDiagnostics(_) => panic!("expected public command envelope"),
             Self::DirectSearch { .. } => panic!("expected public command envelope"),
+            Self::DirectRoomMessages { .. } => panic!("expected public command envelope"),
             Self::DirectAttachment { .. } => panic!("expected public command envelope"),
             Self::TimelineResidencyDiagnostics(_) => panic!("expected public command envelope"),
             #[cfg(test)]
@@ -2630,6 +2644,12 @@ impl AppActor {
                 Box::pin(self.handle_direct_attachment(room_id, event_id, thumbnail, response))
                     .await
             }
+            CoreCommandEnvelope::DirectRoomMessages {
+                room_id,
+                limit,
+                from,
+                response,
+            } => Box::pin(self.handle_direct_room_messages(room_id, limit, from, response)).await,
             envelope => Box::pin(self.handle_public_command(envelope)).await,
         }
     }
@@ -2745,6 +2765,44 @@ impl AppActor {
         false
     }
 
+    /// Route one direct (non-GUI) room read to the account runtime (#1530).
+    ///
+    /// The runtime only decides session readiness; the account actor owns the
+    /// bounded read and the reply. No app action is reduced, so an open room's
+    /// timeline and scroll position cannot change.
+    async fn handle_direct_room_messages(
+        &mut self,
+        room_id: String,
+        limit: u32,
+        from: Option<String>,
+        response: oneshot::Sender<
+            Result<
+                koushi_protocol::event::RoomMessagesPage,
+                crate::direct_operations::RoomMessagesFailure,
+            >,
+        >,
+    ) -> bool {
+        if response.is_closed() {
+            return false;
+        }
+        if is_ready_session_for_commands(&self.state.session) {
+            let _ = self
+                .account_actor
+                .send(AccountMessage::DirectRoomMessages {
+                    room_id,
+                    limit,
+                    from,
+                    response,
+                })
+                .await;
+        } else {
+            let _ = response.send(Err(
+                crate::direct_operations::RoomMessagesFailure::AccountInactive,
+            ));
+        }
+        false
+    }
+
     /// Route one direct (non-GUI) search to the account runtime (#1524).
     ///
     /// The runtime only decides session readiness and carries the account's
@@ -2831,7 +2889,8 @@ impl AppActor {
                 unreachable!("internal command routed to public handler")
             }
             CoreCommandEnvelope::DirectSearch { .. }
-            | CoreCommandEnvelope::DirectAttachment { .. } => {
+            | CoreCommandEnvelope::DirectAttachment { .. }
+            | CoreCommandEnvelope::DirectRoomMessages { .. } => {
                 unreachable!("internal command routed to public handler")
             }
             #[cfg(test)]

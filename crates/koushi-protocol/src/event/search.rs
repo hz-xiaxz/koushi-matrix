@@ -102,6 +102,12 @@ pub struct SearchResultItem {
     pub room_id: String,
     pub event_id: String,
     pub snippet: String,
+    /// Who sent the matching event, so a caller can tell replies apart.
+    #[serde(default)]
+    pub sender_id: String,
+    /// When the matching event was sent, for callers that need a date.
+    #[serde(default)]
+    pub timestamp_ms: u64,
 }
 impl fmt::Debug for SearchResultItem {
     fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
@@ -110,6 +116,8 @@ impl fmt::Debug for SearchResultItem {
             .field("room_id", &"RoomId(..)")
             .field("event_id", &"EventId(..)")
             .field("snippet", &"Snippet(..)")
+            .field("sender_id", &"UserId(..)")
+            .field("timestamp_ms", &self.timestamp_ms)
             .finish()
     }
 }

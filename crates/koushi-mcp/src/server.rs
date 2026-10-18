@@ -305,7 +305,12 @@ mod tests {
             false
         );
         let tools = output[1]["result"]["tools"].as_array().expect("tools");
-        assert_eq!(tools.len(), 6);
+        assert_eq!(tools.len(), 7);
+        let read = tools
+            .iter()
+            .find(|tool| tool["name"] == "read_room_messages")
+            .expect("read_room_messages");
+        assert_eq!(read["annotations"]["readOnlyHint"], true);
         let send = tools
             .iter()
             .find(|tool| tool["name"] == "send_message")

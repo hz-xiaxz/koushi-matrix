@@ -926,6 +926,8 @@ fn search_result_item_snippet_is_redacted_from_debug() {
         room_id: "!r:test".to_owned(),
         event_id: "$e:test".to_owned(),
         snippet: "检索目标消息 found here".to_owned(),
+        sender_id: "@s:test".to_owned(),
+        timestamp_ms: 1_700_000_000_000,
     };
     let event = SearchEvent::Results {
         request_id: RequestId {

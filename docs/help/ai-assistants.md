@@ -13,14 +13,23 @@ and send replies without ever holding your encryption keys.
 | Tool | What it does | Grant needed |
 | --- | --- | --- |
 | `list_accounts` | Lists the signed-in accounts and whether each is ready. | none |
-| `list_rooms` | Lists rooms and direct messages with names and encryption state. | read |
-| `search_messages` | Searches decrypted history and returns room, event id, and a snippet. | read |
+| `list_rooms` | Lists rooms and direct messages with names, encryption state, unread counts, and the latest event's sender and time. | read |
+| `read_room_messages` | Reads a room's recent messages, newest first, with sender, time, and text. | read |
+| `search_messages` | Searches decrypted history and returns room, event id, sender, timestamp, and a snippet. | read |
 | `get_attachment` | Downloads one attachment into Koushi's media cache and returns its path. | attachments |
 | `send_message` | Sends a message, optionally as a reply. | send |
 | `wait_for_events` | Waits for new activity in the account and returns changed rooms. | read |
 
 Every tool needs an `account_id`. The assistant gets it from `list_accounts`;
 Koushi never guesses which account you meant.
+
+`list_rooms` answers the "what is unread" question: `unread_messages`,
+`unread_notifications`, `unread_mentions`, the thread equivalents, and
+`marked_unread` come from the room list, and `last_event` carries the newest
+event's sender, time, and preview. Pass `unread_only: true` to get only rooms
+with something waiting. `read_room_messages` then reads a room whether or not it
+is open, and `search_messages` returns a timestamp for every hit, so an assistant
+can date a conversation instead of guessing.
 
 ## Before you start
 
@@ -153,7 +162,8 @@ create or edit `connections.json` in Koushi's data directory:
 - `client_name` must match the assistant's `--client-name`.
 - `accounts` lists the account ids the assistant may touch. Nothing outside this
   list is visible, even by guessing a room id.
-- `allow_read` covers `list_rooms`, `search_messages`, and `wait_for_events`.
+- `allow_read` covers `list_rooms`, `read_room_messages`, `search_messages`, and
+  `wait_for_events`.
 - `allow_send` covers `send_message`.
 - `allow_attachments` covers `get_attachment`.
 
@@ -237,9 +247,13 @@ Two failures look similar and mean different things:
 
 ## Limitations
 
-- Search results carry the room, the event id, and a snippet. The search index
-  has no sender or timestamp fields today, so use `get_attachment` or the room
-  timeline in Koushi to see full context.
+- `read_room_messages` decrypts each page before returning it, so a message
+  this device cannot decrypt comes back with its sender and time but no text.
+  Only message-like events are returned; membership and other state events are
+  skipped.
+- Search results cover what the local index has crawled; a very recent message
+  may not be searchable yet. `read_room_messages` reads the room directly and
+  does not depend on the crawl.
 - Replies are supported with `reply_to_event_id`; starting a new thread is not.
 - `get_attachment` returns one file per call, always the first attachment of the
   message. Koushi chooses the destination inside its media cache; the assistant
