@@ -3398,6 +3398,7 @@ dependencies = [
  "koushi-core",
  "koushi-diagnostics",
  "koushi-key",
+ "koushi-mcp",
  "koushi-protocol",
  "koushi-state",
  "libc",

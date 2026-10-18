@@ -8,6 +8,7 @@ mod dto;
 #[cfg(target_os = "macos")]
 pub mod image_io_decoder;
 pub mod keyring_backend;
+mod mcp;
 mod media_save;
 mod oidc_browser;
 mod process_memory;
@@ -1429,6 +1430,7 @@ pub fn run() {
             let data_dir = app_data_dir().unwrap_or_else(|_| PathBuf::from("koushi-desktop-data"));
             let _ = cleanup_legacy_plaintext_thumbnail_dirs(&data_dir);
             let _ = cleanup_legacy_media_downloads(&data_dir);
+            let mcp_data_dir = data_dir.clone();
             // Enter Tauri's tokio runtime so `executor::spawn` (tokio::task::spawn)
             // can find a runtime handle from this non-tokio-worker thread.
             let async_handle = tauri::async_runtime::handle();
@@ -1463,6 +1465,8 @@ pub fn run() {
                 reader_subscriptions: TokioMutex::new(HashMap::new()),
             };
             app.manage(core_state);
+            let bridge = mcp::start(app.handle().clone(), mcp_data_dir);
+            app.manage(mcp::McpBridge(std::sync::Mutex::new(bridge)));
             app.manage(app_updates::DesktopUpdateManager::new());
             app.manage(commands::dropped_files::DroppedFileLedger::default());
             app_updates::spawn_auto_update_loop(app.handle().clone(), update_settings);
@@ -1948,6 +1952,13 @@ pub fn run() {
                     QuitRequestAction::AwaitShutdown => api.prevent_exit(),
                     QuitRequestAction::Exit => {}
                 }
+            }
+            if matches!(event, tauri::RunEvent::Exit)
+                && let Some(bridge) = app.try_state::<mcp::McpBridge>()
+                && let Ok(mut slot) = bridge.0.lock()
+                && let Some(handle) = slot.take()
+            {
+                handle.stop();
             }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {
