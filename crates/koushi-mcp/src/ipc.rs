@@ -17,17 +17,13 @@ use crate::wire::{
 
 #[cfg(unix)]
 type Stream = tokio::net::UnixStream;
-#[cfg(unix)]
-type ReadHalf = tokio::net::unix::OwnedReadHalf;
-#[cfg(unix)]
-type WriteHalf = tokio::net::unix::OwnedWriteHalf;
-
 #[cfg(windows)]
 type Stream = tokio::net::windows::named_pipe::NamedPipeClient;
-#[cfg(windows)]
-type ReadHalf = tokio::net::windows::named_pipe::OwnedReadHalf;
-#[cfg(windows)]
-type WriteHalf = tokio::net::windows::named_pipe::OwnedWriteHalf;
+
+/// `tokio::io::split` halves: the platform stream types have no portable owned
+/// split (named pipes have none at all).
+type ReadHalf = tokio::io::ReadHalf<Stream>;
+type WriteHalf = tokio::io::WriteHalf<Stream>;
 
 const CONNECT_TIMEOUT: Duration = Duration::from_secs(2);
 /// Covers the app's 50 s maximum long poll plus settlement overhead.
@@ -65,7 +61,7 @@ pub async fn connect(path: &Path, client: ClientInfo) -> Result<Client, WireErro
         .await
         .map_err(|_| WireError::new_without_detail(ErrorCode::KoushiUnavailable))??;
 
-    let (read_half, writer) = stream.into_split();
+    let (read_half, writer) = tokio::io::split(stream);
     let mut client_socket = Client {
         reader: BufReader::new(read_half),
         writer,
