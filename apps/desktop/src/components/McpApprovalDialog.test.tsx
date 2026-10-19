@@ -54,7 +54,8 @@ function state(pending: McpPendingApproval[]): McpAssistantsState {
     launcher: { state: "available", path: "/Applications/Koushi.app/Contents/MacOS/koushi-mcp" },
     pending,
     assistants: [],
-    registrations: []
+    registrations: [],
+    outdated_launchers: []
   };
 }
 

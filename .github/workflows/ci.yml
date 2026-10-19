@@ -361,6 +361,10 @@ jobs:
       # #1344: exercise the macOS-only process/allocator sampler for real.
       - name: macOS process memory audit tests
         run: cargo test --profile ci -p koushi-desktop process_memory --lib --locked
+      # MCP registration runner and extension builder on macOS (login shell,
+      # process groups, bundle layout).
+      - name: macOS MCP registration tests
+        run: cargo test --profile ci -p koushi-desktop 'mcp::' --lib --locked
 
   core-invites:
     # Prove invitation projection through the sole Simplified Sliding Sync
@@ -513,6 +517,10 @@ jobs:
       # #1344: exercise the Windows-only process/allocator sampler for real.
       - name: Prove Windows process memory audit sampling
         run: cargo test --profile ci -p koushi-desktop process_memory --lib
+      # MCP registration runner: PATHEXT lookup and .cmd shim escaping run for
+      # real only on Windows.
+      - name: Windows MCP registration tests
+        run: cargo test --profile ci -p koushi-desktop 'mcp::' --lib
       # Lint the Windows-only cfg paths Linux CI never compiles (#1035).
       - name: Clippy the Windows Tauri crate
         run: cargo clippy --profile ci -p koushi-desktop --all-targets --locked -- -D warnings

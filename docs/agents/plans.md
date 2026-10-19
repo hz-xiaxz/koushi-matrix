@@ -19,6 +19,11 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
+[One-click MCP registration](../plans/2026-10-19-mcp-one-click-register.md)
+lets the AI assistants page run Claude Code's, Codex's, or pi's own
+registration CLI (resolved with the login `PATH`, bounded and killable) and
+build a Claude Desktop MCPB extension; other clients keep copy and paste.
+
 [#1536 bundled MCP launcher and in-app approval](../plans/2026-10-19-issue1536-mcp-approval.md)
 replaces hand-edited grants with a consent broker in `koushi-mcp-host`: a
 missing permission becomes an approval the user answers in Koushi, per

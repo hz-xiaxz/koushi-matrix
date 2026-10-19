@@ -481,3 +481,31 @@ fn previews_drop_invisible_and_tag_characters_but_keep_joiners() {
         "abcde\u{200D}f"
     );
 }
+
+#[tokio::test]
+async fn an_outdated_launcher_is_listed_until_it_connects_on_the_current_protocol() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let broker = broker(&dir);
+    broker.note_outdated_launcher("claude-desktop");
+    assert_eq!(
+        broker.subscribe().borrow().outdated_launchers,
+        vec!["claude-desktop".to_owned()]
+    );
+    // A tool call does not clear it; a current-protocol handshake does.
+    broker
+        .set_permission("claude-desktop", ALICE, Need::Read, true)
+        .await
+        .expect("saved");
+    broker
+        .authorize(
+            &client("claude-desktop"),
+            ALICE,
+            Need::Read,
+            ConsentContext::default(),
+        )
+        .await
+        .expect("granted");
+    assert_eq!(broker.subscribe().borrow().outdated_launchers.len(), 1);
+    broker.note_current_launcher("claude-desktop");
+    assert!(broker.subscribe().borrow().outdated_launchers.is_empty());
+}

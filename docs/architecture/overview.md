@@ -1964,7 +1964,12 @@ Ownership:
 - `apps/desktop/src-tauri` is transport only: it starts and stops the bridge
   from the `mcp.enabled` setting, forwards the broker's process-wide state to
   the WebView, forwards the user's answers, and resolves the bundled launcher
-  path. It holds no grant logic.
+  path. It holds no grant logic. On the user's request it also runs a client's
+  own registration CLI (Claude Code, Codex, pi) and builds the Claude Desktop
+  extension (`.mcpb`). Koushi writes no other tool's files: the client's CLI,
+  or Claude Desktop's own install review, does. The webview names only a
+  client; the command is rebuilt in Rust from that closed set and the launcher
+  path the app resolved.
 - `koushi-core` remains the only production runtime owner. Search, send,
   attachment preparation, encryption, and projection stay in the existing
   actors; the bridge adds no alternate runtime and opens no crypto store.

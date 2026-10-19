@@ -1,9 +1,12 @@
 import { useState } from "react";
-import { Bot, Copy } from "lucide-react";
+import { Bot, Copy, Play, Puzzle } from "lucide-react";
 import { api } from "../../backend/appRuntime";
 import { uiDateTimeFormat } from "../../domain/intlFormatCache";
+import { ModalDialog } from "../ModalDialog";
 import type {
   AccountTabSummary,
+  McpExtensionOutcome,
+  McpRegisterOutcome,
   McpAssistant,
   McpAssistantAccount,
   McpAssistantsState,
@@ -25,6 +28,7 @@ const CLIENT_NAMES: Record<Exclude<McpRegistration["client"], "other">, string> 
   claude_code: "Claude Code",
   codex: "Codex",
   pi: "pi",
+  claude_desktop: "Claude Desktop",
   deepseek_harness: "DeepSeek Harness"
 };
 
@@ -94,6 +98,9 @@ function AssistantsStatus({ state }: { state: McpAssistantsState }) {
       translocated: t("settings.assistantsLauncherTranslocated"),
       ephemeral: t("settings.assistantsLauncherEphemeral")
     }[state.launcher.reason]);
+  }
+  for (const client of state.outdated_launchers) {
+    messages.push(t("settings.assistantsOutdated", { client }));
   }
   if (messages.length === 0) return null;
   return (
@@ -286,17 +293,24 @@ function PermissionSwitch({
   );
 }
 
+function clientLabel(registration: McpRegistration): string {
+  return registration.client === "other" ? t("settings.assistantsClientOther") : CLIENT_NAMES[registration.client];
+}
+
 function ConnectAssistant({ registrations }: { registrations: readonly McpRegistration[] }) {
   const [selected, setSelected] = useState(registrations[0]?.client);
   const [copyState, setCopyState] = useState<"idle" | "copied" | "failed">("idle");
+  const [confirming, setConfirming] = useState(false);
+  const [running, setRunning] = useState(false);
+  const [registerResult, setRegisterResult] = useState<{ client: string; outcome: McpRegisterOutcome } | null>(null);
+  const [extensionResult, setExtensionResult] = useState<McpExtensionOutcome | null>(null);
   const current = registrations.find(registration => registration.client === selected) ?? registrations[0];
   if (!current) return null;
-  const label = (registration: McpRegistration) =>
-    registration.client === "other" ? t("settings.assistantsClientOther") : CLIENT_NAMES[registration.client];
+  const label = clientLabel(current);
   const instruction = current.kind === "command"
     ? t("settings.assistantsConnectCommand")
-    : current.kind === "yaml"
-      ? t("settings.assistantsConnectYaml", { file: current.config_hint ?? "" })
+    : current.config_hint
+      ? t("settings.assistantsConnectYaml", { file: current.config_hint })
       : t("settings.assistantsConnectJson");
 
   async function copy() {
@@ -306,6 +320,32 @@ function ConnectAssistant({ registrations }: { registrations: readonly McpRegist
       setCopyState("copied");
     } catch {
       setCopyState("failed");
+    }
+  }
+
+  async function register() {
+    setConfirming(false);
+    setRunning(true);
+    setRegisterResult(null);
+    try {
+      const outcome = await api.registerMcpClient(current!.client);
+      setRegisterResult({ client: label, outcome });
+    } catch {
+      setRegisterResult({ client: label, outcome: { outcome: "failed", exit_code: null, output: "" } });
+    } finally {
+      setRunning(false);
+    }
+  }
+
+  async function createExtension() {
+    setRunning(true);
+    setExtensionResult(null);
+    try {
+      setExtensionResult(await api.createClaudeDesktopExtension());
+    } catch {
+      setExtensionResult({ outcome: "write_failed" });
+    } finally {
+      setRunning(false);
     }
   }
 
@@ -325,9 +365,11 @@ function ConnectAssistant({ registrations }: { registrations: readonly McpRegist
             onClick={() => {
               setSelected(registration.client);
               setCopyState("idle");
+              setRegisterResult(null);
+              setExtensionResult(null);
             }}
           >
-            {label(registration)}
+            {clientLabel(registration)}
           </button>
         ))}
       </div>
@@ -336,6 +378,27 @@ function ConnectAssistant({ registrations }: { registrations: readonly McpRegist
         role="tabpanel"
         aria-labelledby={`settings-assistants-tab-${current.client}`}
       >
+        {current.action === "run_command" ? (
+          <div className="settings-assistants-action">
+            <button type="button" className="profile-settings-action is-primary" disabled={running} onClick={() => setConfirming(true)}>
+              <Play size={14} aria-hidden="true" />
+              {running ? t("settings.assistantsRegisterRunning") : t("settings.assistantsRegister")}
+            </button>
+          </div>
+        ) : null}
+        {current.action === "create_extension" ? (
+          <div className="settings-assistants-action">
+            <p className="settings-assistants-note">{t("settings.assistantsExtensionExplain")}</p>
+            <button type="button" className="profile-settings-action is-primary" disabled={running} onClick={() => void createExtension()}>
+              <Puzzle size={14} aria-hidden="true" />
+              {t("settings.assistantsCreateExtension")}
+            </button>
+          </div>
+        ) : null}
+        <div role="status" aria-live="polite">
+          {registerResult ? <RegisterResult client={registerResult.client} outcome={registerResult.outcome} /> : null}
+          {extensionResult ? <ExtensionResult outcome={extensionResult} /> : null}
+        </div>
         <p className="settings-assistants-note">{instruction}</p>
         <div className="settings-assistants-snippet">
           <pre dir="ltr"><code>{current.text}</code></pre>
@@ -348,6 +411,69 @@ function ConnectAssistant({ registrations }: { registrations: readonly McpRegist
           {copyState === "copied" ? t("settings.assistantsCopied") : copyState === "failed" ? t("settings.assistantsCopyFailed") : ""}
         </p>
       </div>
+      {confirming ? (
+        <ModalDialog
+          title={t("settings.assistantsRegisterTitle", { client: label })}
+          className="mcp-approval-modal"
+          onClose={() => setConfirming(false)}
+        >
+          <div className="mcp-approval-content">
+            <p className="mcp-approval-note">{t("settings.assistantsRegisterExplain", { client: label })}</p>
+            <pre className="mcp-register-command" dir="ltr"><code>{current.text}</code></pre>
+            <div className="dialog-actions">
+              <button type="button" className="dialog-button" onClick={() => setConfirming(false)}>
+                {t("action.cancel")}
+              </button>
+              <button type="button" className="dialog-button is-primary" onClick={() => void register()}>
+                {t("settings.assistantsRegisterRun")}
+              </button>
+            </div>
+          </div>
+        </ModalDialog>
+      ) : null}
     </section>
   );
+}
+
+function RegisterResult({ client, outcome }: { client: string; outcome: McpRegisterOutcome }) {
+  switch (outcome.outcome) {
+    case "registered":
+      return <p className="settings-assistants-result is-success">{t("settings.assistantsRegistered", { client })}</p>;
+    case "not_found":
+      return <p className="settings-assistants-result">{t("settings.assistantsRegisterNotFound", { program: outcome.program, client })}</p>;
+    case "failed":
+      return (
+        <div className="settings-assistants-result">
+          <p>
+            {outcome.exit_code === null
+              ? t("settings.assistantsRegisterFailedNoCode", { client })
+              : t("settings.assistantsRegisterFailed", { client, code: String(outcome.exit_code) })}
+          </p>
+          {outcome.output ? <pre dir="ltr"><code>{outcome.output}</code></pre> : null}
+        </div>
+      );
+    case "timed_out":
+      return <p className="settings-assistants-result">{t("settings.assistantsRegisterTimedOut", { client })}</p>;
+    case "in_progress":
+      return <p className="settings-assistants-result">{t("settings.assistantsRegisterInProgress")}</p>;
+    case "unsafe_arguments":
+      return <p className="settings-assistants-result">{t("settings.assistantsRegisterUnsafe")}</p>;
+    case "launcher_unavailable":
+    case "unsupported":
+      return <p className="settings-assistants-result">{t("settings.assistantsRegisterUnavailable")}</p>;
+  }
+}
+
+function ExtensionResult({ outcome }: { outcome: McpExtensionOutcome }) {
+  switch (outcome.outcome) {
+    case "opened":
+      return <p className="settings-assistants-result is-success">{t("settings.assistantsExtensionOpened", { path: outcome.path })}</p>;
+    case "saved":
+      return <p className="settings-assistants-result">{t("settings.assistantsExtensionSaved", { path: outcome.path })}</p>;
+    case "launcher_unavailable":
+      return <p className="settings-assistants-result">{t("settings.assistantsRegisterUnavailable")}</p>;
+    case "unsupported":
+    case "write_failed":
+      return <p className="settings-assistants-result">{t("settings.assistantsExtensionFailed")}</p>;
+  }
 }

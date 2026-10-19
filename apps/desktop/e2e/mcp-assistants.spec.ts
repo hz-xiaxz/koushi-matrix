@@ -30,8 +30,10 @@ function mcpState(overrides: Partial<McpAssistantsState> = {}): McpAssistantsSta
       client_name: "claude-code",
       kind: "command",
       text: "claude mcp add --scope user koushi -- '/opt/koushi/koushi-mcp' --client-name claude-code",
-      config_hint: null
+      config_hint: null,
+      action: "run_command"
     }],
+    outdated_launchers: [],
     ...overrides
   };
 }
@@ -102,3 +104,22 @@ test("App Settings lists assistants and changes one permission at a time", async
   await expect.poll(() => page.evaluate(() => window.__harness.invocationsOf("update_settings").at(-1)?.args))
     .toMatchObject({ patch: { scope: "app", mcp: { enabled: false } } });
 });
+
+test("Register asks first, then runs the client's command through Rust", async ({ page }) => {
+  await gotoReadyShell(page);
+  await page.evaluate(() => window.__harness.clearInvocations());
+  await page.getByRole("button", { name: "App Settings", exact: true }).click();
+  const settings = page.getByRole("dialog", { name: "App Settings", exact: true });
+  await settings.getByRole("tab", { name: "AI assistants", exact: true }).click();
+  await page.evaluate((state) => window.__harness.pushMcpAssistants(state), mcpState());
+
+  await settings.getByRole("button", { name: "Register", exact: true }).click();
+  const confirm = page.getByRole("dialog", { name: "Register Koushi with Claude Code?", exact: true });
+  await expect(confirm).toBeVisible();
+  expect(await page.evaluate(() => window.__harness.invocationsOf("register_mcp_client").length)).toBe(0);
+  await confirm.getByRole("button", { name: "Run", exact: true }).click();
+  await expect.poll(() => page.evaluate(() => window.__harness.invocationsOf("register_mcp_client").at(-1)?.args))
+    .toMatchObject({ client: "claude_code" });
+  await expect(settings.getByText("Registered with Claude Code.", { exact: false })).toBeVisible();
+});
+

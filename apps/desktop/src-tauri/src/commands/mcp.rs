@@ -2,11 +2,17 @@
 //! The consent broker owns every decision; these only forward the user's
 //! answers and return closed outcome codes.
 
+use std::sync::atomic::Ordering;
+
 use koushi_mcp_host::Need;
 use koushi_mcp_host::consent::{AnswerOutcome, McpAssistantsState};
-use tauri::State;
+use koushi_mcp_host::registration::{Platform, RegistrationClient};
+use tauri::{AppHandle, Manager, State};
+use tauri_plugin_opener::OpenerExt;
 
 use crate::mcp::McpController;
+use crate::mcp::extension::{self, ExtensionOutcome};
+use crate::mcp::register::{self, RegisterOutcome};
 
 /// The current state, after re-reading the grant store so a hand edit shows.
 #[tauri::command]
@@ -57,4 +63,93 @@ pub async fn remove_mcp_assistant(
         .remove_client(&client_name)
         .await
         .map_err(|_| ())
+}
+
+/// Runs `client`'s own registration CLI with the bundled launcher. The webview
+/// names only the client; the command is rebuilt here. One at a time.
+#[tauri::command]
+pub async fn register_mcp_client(
+    state: State<'_, McpController>,
+    client: RegistrationClient,
+) -> Result<RegisterOutcome, ()> {
+    let Some(launcher) = state.launcher_path() else {
+        return Ok(RegisterOutcome::LauncherUnavailable);
+    };
+    if state.registering.swap(true, Ordering::SeqCst) {
+        return Ok(RegisterOutcome::InProgress);
+    }
+    // Cleared on every exit, including a panic or a dropped command future.
+    struct Registering<'a>(&'a std::sync::atomic::AtomicBool);
+    impl Drop for Registering<'_> {
+        fn drop(&mut self) {
+            self.0.store(false, Ordering::SeqCst);
+        }
+    }
+    let _registering = Registering(&state.registering);
+    let outcome = register::register(client, &launcher).await;
+    record("mcp.register", outcome.kind());
+    Ok(outcome)
+}
+
+/// Writes the Claude Desktop extension to the Downloads folder (or Koushi's
+/// data folder) and opens it.
+#[tauri::command]
+pub async fn create_claude_desktop_extension(
+    app: AppHandle,
+    state: State<'_, McpController>,
+) -> Result<ExtensionOutcome, ()> {
+    let platform = Platform::current();
+    if platform == Platform::Linux {
+        return Ok(ExtensionOutcome::Unsupported);
+    }
+    let Some(launcher) = state.launcher_path() else {
+        return Ok(ExtensionOutcome::LauncherUnavailable);
+    };
+    let directory = app
+        .path()
+        .download_dir()
+        .ok()
+        .filter(|dir| dir.is_dir())
+        .or_else(|| crate::app_data_dir().ok().map(|dir| dir.join("mcp")));
+    let Some(directory) = directory else {
+        return Ok(ExtensionOutcome::WriteFailed);
+    };
+    let written = tauri::async_runtime::spawn_blocking(move || {
+        let bytes = extension::build_bundle(
+            std::path::Path::new(&launcher),
+            env!("CARGO_PKG_VERSION"),
+            platform,
+        )?;
+        extension::write_bundle(&directory, &bytes)
+    })
+    .await;
+    let Ok(Ok(path)) = written else {
+        record("mcp.extension", "write_failed");
+        return Ok(ExtensionOutcome::WriteFailed);
+    };
+    let shown = path.to_string_lossy().into_owned();
+    let outcome = match app.opener().open_path(&shown, None::<&str>) {
+        Ok(()) => ExtensionOutcome::Opened { path: shown },
+        Err(_) => ExtensionOutcome::Saved { path: shown },
+    };
+    record(
+        "mcp.extension",
+        match outcome {
+            ExtensionOutcome::Opened { .. } => "opened",
+            _ => "saved",
+        },
+    );
+    Ok(outcome)
+}
+
+/// Outcome codes only; the client's output and paths stay out of diagnostics.
+fn record(source: &'static str, outcome: &'static str) {
+    koushi_diagnostics::record(
+        koushi_diagnostics::DiagnosticEvent::new(
+            koushi_diagnostics::DiagnosticLevel::Info,
+            source,
+            "outcome",
+        )
+        .field(koushi_diagnostics::DiagnosticField::token("kind", outcome)),
+    );
 }

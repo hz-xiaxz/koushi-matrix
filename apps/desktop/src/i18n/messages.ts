@@ -979,6 +979,25 @@ export type MessageId =
   | "mcp.saveFailed"
   | "mcp.moreMessagesWaiting"
   | "settings.assistantsPending"
+  | "settings.assistantsRegister"
+  | "settings.assistantsRegisterTitle"
+  | "settings.assistantsRegisterExplain"
+  | "settings.assistantsRegisterRun"
+  | "settings.assistantsRegisterRunning"
+  | "settings.assistantsRegistered"
+  | "settings.assistantsRegisterNotFound"
+  | "settings.assistantsRegisterFailed"
+  | "settings.assistantsRegisterFailedNoCode"
+  | "settings.assistantsRegisterTimedOut"
+  | "settings.assistantsRegisterInProgress"
+  | "settings.assistantsRegisterUnsafe"
+  | "settings.assistantsRegisterUnavailable"
+  | "settings.assistantsCreateExtension"
+  | "settings.assistantsExtensionExplain"
+  | "settings.assistantsExtensionOpened"
+  | "settings.assistantsExtensionSaved"
+  | "settings.assistantsExtensionFailed"
+  | "settings.assistantsOutdated"
   | "settings.updateIgnored"
   | "settings.updateDownloading"
   | "settings.updateReady"
@@ -3210,6 +3229,25 @@ const en: Catalog = {
   "mcp.saveFailed": "Koushi could not save this approval. See App Settings → AI assistants.",
   "mcp.moreMessagesWaiting": "Other calls from this assistant waiting for this answer: {count}",
   "settings.assistantsPending": "Waiting for your answer",
+  "settings.assistantsRegister": "Register",
+  "settings.assistantsRegisterTitle": "Register Koushi with {client}?",
+  "settings.assistantsRegisterExplain": "Koushi will run this command. {client} saves the registration in its own settings; Koushi does not edit its files.",
+  "settings.assistantsRegisterRun": "Run",
+  "settings.assistantsRegisterRunning": "Registering…",
+  "settings.assistantsRegistered": "Registered with {client}. Ask it something, and approve it in Koushi.",
+  "settings.assistantsRegisterNotFound": "{program} was not found on this computer. Install {client}, or copy the command and run it in a terminal.",
+  "settings.assistantsRegisterFailed": "{client} reported a problem (exit code {code}):",
+  "settings.assistantsRegisterFailedNoCode": "{client} reported a problem:",
+  "settings.assistantsRegisterTimedOut": "{client} did not finish within a minute. Copy the command and run it in a terminal instead.",
+  "settings.assistantsRegisterInProgress": "Another registration is still running.",
+  "settings.assistantsRegisterUnsafe": "Koushi cannot run this command safely on this computer. Copy it and run it in a terminal.",
+  "settings.assistantsRegisterUnavailable": "The launcher is not available, so nothing can be registered.",
+  "settings.assistantsCreateExtension": "Create Claude Desktop extension",
+  "settings.assistantsExtensionExplain": "Koushi creates Koushi.mcpb and opens it, and Claude Desktop shows its own install review. Create it again after updating Koushi.",
+  "settings.assistantsExtensionOpened": "Created {path}. Finish the installation in Claude Desktop.",
+  "settings.assistantsExtensionSaved": "Created {path}. In Claude Desktop, open Settings → Extensions and install it, or drag it into the Claude window.",
+  "settings.assistantsExtensionFailed": "Koushi could not create the extension. If Koushi.mcpb is open in another app, close it and try again.",
+  "settings.assistantsOutdated": "{client} uses a launcher from an older Koushi. For Claude Desktop, create the extension again; for other assistants, remove their old koushi entry and register again.",
   "settings.updateIgnored":
     "Automatic reminders are off for this version until Koushi restarts. You can still download it.",
   "settings.updateDownloading": "Downloading and verifying Koushi {version}…",
@@ -5478,6 +5516,25 @@ const ja: Catalog = {
   "mcp.saveFailed": "この承認を保存できませんでした。アプリ設定 → AI アシスタントを確認してください。",
   "mcp.moreMessagesWaiting": "この回答を待っている、このアシスタントのほかの呼び出し：{count} 件",
   "settings.assistantsPending": "回答待ち",
+  "settings.assistantsRegister": "登録",
+  "settings.assistantsRegisterTitle": "Koushi を {client} に登録しますか？",
+  "settings.assistantsRegisterExplain": "Koushi がこのコマンドを実行します。登録内容は {client} が自分の設定に保存し、Koushi がそのファイルを書き換えることはありません。",
+  "settings.assistantsRegisterRun": "実行",
+  "settings.assistantsRegisterRunning": "登録しています…",
+  "settings.assistantsRegistered": "{client} に登録しました。何か頼んでから、Koushi で承認してください。",
+  "settings.assistantsRegisterNotFound": "このコンピューターで {program} が見つかりませんでした。{client} をインストールするか、コマンドをコピーしてターミナルで実行してください。",
+  "settings.assistantsRegisterFailed": "{client} が問題を報告しました（終了コード {code}）：",
+  "settings.assistantsRegisterFailedNoCode": "{client} が問題を報告しました：",
+  "settings.assistantsRegisterTimedOut": "{client} が1分以内に終わりませんでした。代わりにコマンドをコピーしてターミナルで実行してください。",
+  "settings.assistantsRegisterInProgress": "別の登録がまだ実行中です。",
+  "settings.assistantsRegisterUnsafe": "このコンピューターでは Koushi からこのコマンドを安全に実行できません。コピーしてターミナルで実行してください。",
+  "settings.assistantsRegisterUnavailable": "ランチャーが使えないため、登録できません。",
+  "settings.assistantsCreateExtension": "Claude Desktop 拡張を作成",
+  "settings.assistantsExtensionExplain": "Koushi が Koushi.mcpb を作成して開くと、Claude Desktop がインストールの確認画面を表示します。Koushi を更新したら作り直してください。",
+  "settings.assistantsExtensionOpened": "{path} を作成しました。Claude Desktop でインストールを完了してください。",
+  "settings.assistantsExtensionSaved": "{path} を作成しました。Claude Desktop の「設定 → 拡張機能」からインストールするか、Claude のウィンドウにドラッグしてください。",
+  "settings.assistantsExtensionFailed": "拡張を作成できませんでした。Koushi.mcpb をほかのアプリで開いている場合は、閉じてからもう一度お試しください。",
+  "settings.assistantsOutdated": "{client} は古い Koushi のランチャーを使っています。Claude Desktop なら拡張を作り直してください。ほかのアシスタントなら、古い koushi の登録を削除してから登録し直してください。",
   "settings.updateIgnored":
     "Koushiを再起動するまで、このバージョンの自動通知はオフになります。ダウンロードは引き続き可能です。",
   "settings.updateDownloading": "Koushi {version}をダウンロードして検証しています…",

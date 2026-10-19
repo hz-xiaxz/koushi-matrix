@@ -10412,6 +10412,24 @@ kbd {
 }
 .settings-assistants-tabs button.is-selected { color: var(--brand); background: var(--surface-hover); }
 .settings-assistants-snippet { display: flex; gap: 8px; align-items: flex-start; }
+.settings-assistants-action { display: grid; gap: 6px; justify-items: start; margin-block-end: 10px; }
+.profile-settings-action.is-primary { border-color: var(--brand); color: var(--brand-contrast); background: var(--brand); }
+.settings-assistants-result { margin: 0 0 10px; font-size: 13px; }
+.settings-assistants-result p { margin: 0 0 6px; }
+.settings-assistants-result.is-success { color: var(--success); }
+.settings-assistants-result pre,
+.mcp-register-command {
+  margin: 0;
+  padding: 10px 12px;
+  border-radius: 8px;
+  color: var(--text);
+  background: var(--surface-hover);
+  font-size: 12px;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+  user-select: text;
+}
+.mcp-register-command { margin-block-end: 14px; }
 .settings-assistants-snippet pre {
   flex: 1 1 auto;
   min-inline-size: 0;
