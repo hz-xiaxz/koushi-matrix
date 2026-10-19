@@ -1,19 +1,19 @@
 {
   "meta.title": {
-    "text": "Koushi — 多言語の会話のためのデスクトップ Matrix クライアント",
-    "source_hash": "ba939fdc85ef"
+    "text": "Koushi — 多言語の会話と、AI アシスタントのためのデスクトップ Matrix クライアント",
+    "source_hash": "cb18f20f64bf"
   },
   "meta.description": {
-    "text": "仕事・個人・コミュニティの Matrix アカウントを並べて開いたまま使えます。暗号化チャット、日本語・中国語・韓国語に強いローカル全文検索、自分のパソコンから送る通知。",
-    "source_hash": "3bbef07d2b88"
+    "text": "仕事・個人・コミュニティの Matrix アカウントを並べて開いたまま使えます。暗号化チャット、日本語・中国語・韓国語に強いローカル全文検索、自分のパソコンから送る通知、そして AI アシスタント向けのローカル MCP サーバー。",
+    "source_hash": "46ffa30057cd"
   },
   "nav.language": {
     "text": "言語",
     "source_hash": "a4fe65264ef7"
   },
   "hero.tagline": {
-    "text": "多言語の会話のためのデスクトップ Matrix クライアント。",
-    "source_hash": "a1a07eb6026a"
+    "text": "多言語の会話と、AI アシスタントのためのデスクトップ Matrix クライアント。",
+    "source_hash": "debc95f63d3c"
   },
   "hero.lede": {
     "text": "仕事・個人・コミュニティの Matrix アカウントを、1 つのウィンドウで並べて開いておけます。アカウントごとにタブがあり、どれもサインインしたまま同期を続けます。",
@@ -163,6 +163,82 @@
     "text": "ChatGPT などの AI アシスタントに、あなたの言葉で聞いてください。Koushi のユーザーガイドは AI が読めるように書かれていて、アプリの「ヘルプと情報」に聞き方が載っています。",
     "source_hash": "225ee33c413b"
   },
+  "ai.heading": {
+    "text": "AI アシスタントをチャットに迎え入れる",
+    "source_hash": "00c2e2c1519e"
+  },
+  "ai.lede": {
+    "text": "Koushi は Claude Code や Codex などの MCP クライアント向けに、ローカルの MCP サーバーとして動作できます。アシスタントはパソコンですでに開いている Koushi アプリとやり取りするので、暗号鍵を一切持たずに検索・要約・返信ができます。",
+    "source_hash": "4b5604d69b9b"
+  },
+  "ai.can.heading": {
+    "text": "できること",
+    "source_hash": "55e8e93ff5d4"
+  },
+  "ai.can.search": {
+    "text": "暗号化ルームを含む履歴を検索し、ヒットごとに日時とルームを返す",
+    "source_hash": "0a5fb5ee1d16"
+  },
+  "ai.can.unread": {
+    "text": "未読メッセージやメンションのあるルームを一覧し、ルームの最近のメッセージを読んで要約する",
+    "source_hash": "0b01aeccae58"
+  },
+  "ai.can.reply": {
+    "text": "メッセージや返信を送る。開いていないルームにも送れ、書きかけの下書きには触れない",
+    "source_hash": "359f69051ef2"
+  },
+  "ai.can.attachments": {
+    "text": "添付ファイルを Koushi のメディアキャッシュにダウンロードする",
+    "source_hash": "29e016f7acf0"
+  },
+  "ai.can.wait": {
+    "text": "新着メッセージを待つ",
+    "source_hash": "e417118a31fe"
+  },
+  "ai.control.heading": {
+    "text": "主導権はあなたに",
+    "source_hash": "faa171843999"
+  },
+  "ai.control.grant": {
+    "text": "アクセスを許可するまで、アシスタントに見えるのはアカウント ID だけです。",
+    "source_hash": "81442e389379"
+  },
+  "ai.control.scope": {
+    "text": "アシスタントごとに必要なアカウントだけを許可でき、それ以外は一切見えません。",
+    "source_hash": "c1ba4a2e7994"
+  },
+  "ai.control.flags": {
+    "text": "読み取り・送信・添付ファイルは別々の権限です。変更は次の呼び出しから反映され、許可を削除すれば取り消せます。",
+    "source_hash": "05ae86ff7413"
+  },
+  "ai.control.plain": {
+    "text": "送信されたメッセージはあなたのアカウントからの普通のメッセージです。Koushi はアシスタントが書いたという印を付けません。",
+    "source_hash": "23dba9c72020"
+  },
+  "ai.try.heading": {
+    "text": "あとは普段の言葉で頼むだけ",
+    "source_hash": "3b458f832436"
+  },
+  "ai.try.unread": {
+    "text": "未読のあるルームは？ Design ルームの内容を要約して。",
+    "source_hash": "447a8abc45a5"
+  },
+  "ai.try.search": {
+    "text": "先月誰かが送ってくれた請求書を探して。",
+    "source_hash": "0ec0e805ccd0"
+  },
+  "ai.try.reply": {
+    "text": "そのメッセージに「ファイルは明日送ります」と返信して。",
+    "source_hash": "4a392390d2b6"
+  },
+  "ai.setup": {
+    "text": "現バージョンは技術者向けです。koushi-mcp ランチャーはまだアプリに同梱されていないためソースからビルドし、アクセス許可は JSON ファイルを編集して設定します。",
+    "source_hash": "f49d103201bb"
+  },
+  "ai.guide": {
+    "text": "AI アシスタントを設定する",
+    "source_hash": "9b9eb9cb1070"
+  },
   "features.heading": {
     "text": "ふだん使いの機能",
     "source_hash": "e844b2426dc5"
@@ -292,8 +368,8 @@
     "source_hash": "92acde95eedd"
   },
   "missing.body": {
-    "text": "音声・ビデオ通話、画面共有、ボット、ウィジェット、外部アプリとの連携。",
-    "source_hash": "bfed657cc891"
+    "text": "音声・ビデオ通話、画面共有、ボット、ウィジェット。",
+    "source_hash": "b506dbeb1304"
   },
   "platforms.heading": {
     "text": "対応プラットフォーム",
