@@ -1327,7 +1327,9 @@ normal QA-title mode and cannot change product title semantics.
   the state machine canon. The desktop adapter forwards its
   `McpAssistantsState` on `koushi-desktop://mcp` with a
   `get_mcp_assistants_state` getter, and the user's answers through
-  `answer_mcp_approval`, `set_mcp_permission`, and `remove_mcp_assistant`.
+  `answer_mcp_approval`, `set_mcp_permission`, and `remove_mcp_assistant`;
+  `register_mcp_client` and `create_claude_desktop_extension` return closed
+  outcome DTOs (`McpRegisterOutcome`, `McpExtensionOutcome`).
   React renders that state; it never decides a grant, retries an answer, or
   keeps a second copy of permissions.
 - Mirrors to change together: the Rust state types in

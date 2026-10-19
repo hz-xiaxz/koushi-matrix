@@ -1685,6 +1685,8 @@ pub fn run() {
             commands::mcp::answer_mcp_approval,
             commands::mcp::set_mcp_permission,
             commands::mcp::remove_mcp_assistant,
+            commands::mcp::register_mcp_client,
+            commands::mcp::create_claude_desktop_extension,
             commands::app_updates::download_desktop_update,
             commands::app_updates::restart_to_install_desktop_update,
             commands::app_updates::ignore_desktop_update,

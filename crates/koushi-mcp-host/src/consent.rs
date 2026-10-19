@@ -150,6 +150,9 @@ pub struct McpAssistantsState {
     pub pending: Vec<PendingApproval>,
     pub assistants: Vec<AssistantView>,
     pub registrations: Vec<Registration>,
+    /// Client names whose launcher speaks an older bridge protocol, so they
+    /// must be registered again (or the Claude Desktop extension recreated).
+    pub outdated_launchers: Vec<String>,
 }
 
 impl std::fmt::Debug for McpAssistantsState {
@@ -227,6 +230,7 @@ struct Inner {
     pending: Vec<Pending>,
     denied: HashSet<Key>,
     seen: HashMap<String, Seen>,
+    outdated: std::collections::BTreeSet<String>,
     bridge: BridgeStatus,
     launcher: LauncherStatus,
     store_status: StoreStatus,
@@ -275,6 +279,7 @@ impl ConsentBroker {
             pending: Vec::new(),
             denied: HashSet::new(),
             seen: HashMap::new(),
+            outdated: std::collections::BTreeSet::new(),
             bridge: BridgeStatus::Disabled,
             launcher: LauncherStatus::Unavailable {
                 reason: LauncherUnavailable::NotBundled,
@@ -315,6 +320,25 @@ impl ConsentBroker {
         self.update(|inner| {
             inner.adopt(generation, loaded);
         })
+    }
+
+    /// Records a launcher that authenticated but speaks another bridge
+    /// protocol. The name is cleared once that client completes a handshake on
+    /// the current protocol. Bounded like the other per-name memory.
+    pub fn note_outdated_launcher(&self, client_name: &str) {
+        self.update(|inner| {
+            if inner.outdated.len() < SEEN_LIMIT || inner.outdated.contains(client_name) {
+                inner.outdated.insert(client_name.to_owned());
+            }
+        });
+    }
+
+    /// A client completed a handshake on the current protocol.
+    pub fn note_current_launcher(&self, client_name: &str) {
+        let mut inner = self.lock();
+        if inner.outdated.remove(client_name) {
+            self.publish(&inner);
+        }
     }
 
     pub fn set_bridge_status(&self, bridge: BridgeStatus) {
@@ -880,7 +904,9 @@ fn view(inner: &Inner) -> McpAssistantsState {
     }
 
     let registrations = match &inner.launcher {
-        LauncherStatus::Available { path } => registration::registrations(path, cfg!(windows)),
+        LauncherStatus::Available { path } => {
+            registration::registrations(path, registration::Platform::current())
+        }
         LauncherStatus::Unavailable { .. } => Vec::new(),
     };
 
@@ -891,6 +917,7 @@ fn view(inner: &Inner) -> McpAssistantsState {
         pending,
         assistants,
         registrations,
+        outdated_launchers: inner.outdated.iter().cloned().collect(),
     }
 }
 
@@ -904,6 +931,7 @@ mod tests {
             pending: Vec::new(),
             denied: HashSet::new(),
             seen: HashMap::new(),
+            outdated: std::collections::BTreeSet::new(),
             bridge: BridgeStatus::Running,
             launcher: LauncherStatus::Unavailable {
                 reason: LauncherUnavailable::NotBundled,

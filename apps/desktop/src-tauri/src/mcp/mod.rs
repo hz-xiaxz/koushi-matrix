@@ -4,7 +4,9 @@
 //! forwards the broker's state to the WebView, and asks for attention when an
 //! approval is waiting.
 
+pub(crate) mod extension;
 mod launcher;
+pub(crate) mod register;
 
 use std::path::PathBuf;
 use std::sync::Arc;
@@ -24,6 +26,8 @@ pub(crate) struct McpController {
     bridge: std::sync::Mutex<Option<BridgeHandle>>,
     /// Serializes switch changes, which await the bridge's shutdown.
     switch: tokio::sync::Mutex<()>,
+    /// Set while a client's registration CLI runs; one at a time.
+    pub(crate) registering: std::sync::atomic::AtomicBool,
 }
 
 impl McpController {
@@ -32,6 +36,14 @@ impl McpController {
     pub(crate) fn stop_now(&self) {
         if let Some(handle) = self.take_bridge() {
             handle.stop();
+        }
+    }
+
+    /// The launcher path the app resolved, never one the webview supplied.
+    pub(crate) fn launcher_path(&self) -> Option<String> {
+        match &self.broker.subscribe().borrow().launcher {
+            koushi_mcp_host::consent::LauncherStatus::Available { path } => Some(path.clone()),
+            koushi_mcp_host::consent::LauncherStatus::Unavailable { .. } => None,
         }
     }
 
@@ -65,6 +77,7 @@ pub(crate) fn install(app: &AppHandle, runtime: Arc<AccountRuntimeManager>, data
         broker: Arc::clone(&broker),
         bridge: std::sync::Mutex::new(None),
         switch: tokio::sync::Mutex::new(()),
+        registering: std::sync::atomic::AtomicBool::new(false),
     });
     spawn_forwarder(app.clone(), Arc::clone(&broker));
     spawn_switch(app.clone(), runtime, data_dir);

@@ -17,7 +17,10 @@ import type {
   DesktopSnapshot,
   DesktopUpdateState,
   McpAssistantsState,
+  McpExtensionOutcome,
   McpNeed,
+  McpRegisterOutcome,
+  McpRegistrationClient,
   ComposerKeyEvent,
   ComposerResolvedAction,
   ComposerResolverOptions,
@@ -199,6 +202,14 @@ export class TauriDesktopApi implements DesktopApi {
 
   async removeMcpAssistant(clientName: string): Promise<void> {
     return this.invokeCommand<void>("remove_mcp_assistant", { clientName });
+  }
+
+  async registerMcpClient(client: McpRegistrationClient): Promise<McpRegisterOutcome> {
+    return this.invokeCommand<McpRegisterOutcome>("register_mcp_client", { client });
+  }
+
+  async createClaudeDesktopExtension(): Promise<McpExtensionOutcome> {
+    return this.invokeCommand<McpExtensionOutcome>("create_claude_desktop_extension");
   }
 
   async settlementSnapshot(accountTabId?: string): Promise<DesktopSnapshot> {

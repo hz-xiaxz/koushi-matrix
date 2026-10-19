@@ -587,13 +587,42 @@ export interface McpAssistant {
   accounts: McpAssistantAccount[];
 }
 
+export type McpRegistrationClient =
+  | "claude_code"
+  | "codex"
+  | "pi"
+  | "claude_desktop"
+  | "deepseek_harness"
+  | "other";
+
 export interface McpRegistration {
-  client: "claude_code" | "codex" | "pi" | "deepseek_harness" | "other";
+  client: McpRegistrationClient;
   client_name: string;
   kind: "command" | "yaml" | "json";
   text: string;
   config_hint: string | null;
+  /** Besides copying: run the client's own CLI, or build a Claude Desktop extension. */
+  action: "run_command" | "create_extension" | null;
 }
+
+/** Result of running a client's registration CLI (`register_mcp_client`). */
+export type McpRegisterOutcome =
+  | { outcome: "registered"; output: string }
+  | { outcome: "not_found"; program: string }
+  | { outcome: "failed"; exit_code: number | null; output: string }
+  | { outcome: "timed_out" }
+  | { outcome: "in_progress" }
+  | { outcome: "unsafe_arguments" }
+  | { outcome: "launcher_unavailable" }
+  | { outcome: "unsupported" };
+
+/** Result of `create_claude_desktop_extension`. */
+export type McpExtensionOutcome =
+  | { outcome: "opened"; path: string }
+  | { outcome: "saved"; path: string }
+  | { outcome: "unsupported" }
+  | { outcome: "launcher_unavailable" }
+  | { outcome: "write_failed" };
 
 /** Process-wide state of the MCP consent broker, pushed on `koushi-desktop://mcp`. */
 export interface McpAssistantsState {
@@ -605,6 +634,8 @@ export interface McpAssistantsState {
   pending: McpPendingApproval[];
   assistants: McpAssistant[];
   registrations: McpRegistration[];
+  /** Client names whose launcher is from an older Koushi. */
+  outdated_launchers: string[];
 }
 
 export type DesktopUpdateState =

@@ -57,17 +57,30 @@ can date a conversation instead of guessing.
 
 ## Step 1: register the assistant
 
-Open **App Settings → AI assistants**. Under **Connect an assistant**, pick your
-assistant, select **Copy**, and run or paste the text where the page says.
-Koushi never edits another tool's configuration itself.
+Open **App Settings → AI assistants** and pick your assistant under **Connect
+an assistant**.
 
-| Assistant | What to do with the copied text |
+| Assistant | How to register |
 | --- | --- |
-| Claude Code | Run it in a terminal: `claude mcp add --scope user koushi -- <launcher> --client-name claude-code` |
-| Codex | Run it in a terminal: `codex mcp add koushi -- <launcher> --client-name codex` |
-| pi (1.0 or later) | Run it in a terminal: `pi mcp add koushi -- <launcher> --client-name pi` |
-| DeepSeek Harness | Add the YAML entry (a `@deepseek-ai/dsh-mcp-client` plugin with `transport: stdio`) to `~/.dsh/profiles/<profile>/cordis.patch.yml`. Install the client plugin in that profile first. |
-| Other | Add the `mcpServers` JSON entry to the client's MCP configuration. |
+| Claude Code | Select **Register**, check the command, and select **Run**. Koushi runs `claude mcp add --scope user koushi -- <launcher> --client-name claude-code`. |
+| Codex | **Register** runs `codex mcp add koushi -- <launcher> --client-name codex`. |
+| pi (1.0 or later) | **Register** runs `pi mcp add koushi -- <launcher> --client-name pi`. |
+| Claude Desktop (macOS, Windows) | Select **Create Claude Desktop extension**. Koushi saves `Koushi.mcpb` in your Downloads folder and opens it; finish in Claude Desktop's install review. If nothing opens, install it from Claude Desktop's **Settings → Extensions**, or drag the file into the Claude window. |
+| DeepSeek Harness | Copy the YAML entry (a `@deepseek-ai/dsh-mcp-client` plugin with `transport: stdio`) into `~/.dsh/profiles/<profile>/cordis.patch.yml`. Install the client plugin in that profile first. |
+| Other | Copy the `mcpServers` JSON entry into the client's MCP configuration. |
+
+**Register** runs the assistant's own registration command, so the assistant
+saves the registration in its own settings; Koushi writes no other tool's
+files. Every tab also offers **Copy**, so you can run the command in a terminal
+yourself. If Koushi cannot find the command (the assistant is not installed, or
+it is installed somewhere your login shell does not put on `PATH`), copy it
+and run it in a terminal.
+
+The Claude Desktop extension contains its own copy of the launcher. After you
+update Koushi, create the extension again; the settings page tells you when a
+launcher from an older Koushi tries to connect. Registrations made with
+**Register** point at the launcher inside Koushi, so they keep working after an
+update.
 
 `--client-name` is the name Koushi shows when the assistant asks for access.
 Keep it the same, or Koushi treats the assistant as a new one. Every command also
@@ -303,6 +316,8 @@ Two failures look similar and mean different things:
 
 | Message | Meaning | Fix |
 | --- | --- | --- |
+| "… was not found on this computer" after **Register** | Koushi could not find the assistant's command on your login shell's `PATH` or in the usual install folders. | Install the assistant, or select **Copy** and run the command in a terminal. |
+| "… uses a launcher from an older Koushi" | A Claude Desktop extension (or another copy of the launcher) made with an earlier Koushi tried to connect. Registrations made with **Register** point at the launcher inside Koushi and update with it. | Create the Claude Desktop extension again. For another assistant, remove its old `koushi` entry (for example `claude mcp remove koushi -s user`) and register again. |
 | `koushi_unavailable` | Koushi is not running, **Let AI assistants connect** is off, or the bridge stopped while the call waited. | Open Koushi, check **App Settings → AI assistants**, and retry. |
 | `Operation not permitted` | The execution environment blocked the local socket connection before Koushi saw it. | Ask the environment for its escalated execution on that call; do not disable its sandbox. |
 | `consent_required` | Nobody answered the approval in Koushi in time. | Answer the dialog in Koushi, then retry. |

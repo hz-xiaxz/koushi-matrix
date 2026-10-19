@@ -34,7 +34,10 @@ import type {
   DesktopSnapshot,
   DesktopUpdateState,
   McpAssistantsState,
+  McpExtensionOutcome,
   McpNeed,
+  McpRegisterOutcome,
+  McpRegistrationClient,
   DelegatedAuthMethod,
   DirectoryQuery,
   DisplayPlatform,
@@ -154,6 +157,8 @@ export interface DesktopApi {
   answerMcpApproval(requestId: number, allow: boolean): Promise<"applied" | "stale" | "store_failed">;
   setMcpPermission(clientName: string, accountId: string, need: McpNeed, allowed: boolean): Promise<void>;
   removeMcpAssistant(clientName: string): Promise<void>;
+  registerMcpClient(client: McpRegistrationClient): Promise<McpRegisterOutcome>;
+  createClaudeDesktopExtension(): Promise<McpExtensionOutcome>;
   settlementSnapshot(accountTabId?: string): Promise<DesktopSnapshot>;
   resyncSnapshot(accountTabId?: string): Promise<DesktopSnapshot>;
   getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot>;

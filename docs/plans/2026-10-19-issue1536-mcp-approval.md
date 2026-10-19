@@ -25,7 +25,9 @@ built from source, and access is granted by hand-editing
 4. Once send is allowed, later sends need **no confirmation**. Revocation lives
    in the settings page.
 5. Registration is **copy-and-paste**; Koushi never edits another tool's
-   config. Clients: Claude Code, Codex, pi (1.0+), DeepSeek Harness, other.
+   config. (Extended by
+   [one-click registration](2026-10-19-mcp-one-click-register.md): Koushi may
+   run a client's own CLI on request, still writing no other tool's files.) Clients: Claude Code, Codex, pi (1.0+), DeepSeek Harness, other.
 6. The launcher ships inside every release package.
 
 ## Placement

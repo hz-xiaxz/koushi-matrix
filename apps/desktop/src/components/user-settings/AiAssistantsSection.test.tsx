@@ -8,6 +8,8 @@ const fixture = vi.hoisted(() => ({
   listeners: new Set<(state: McpAssistantsState) => void>(),
   getState: vi.fn(),
   answer: vi.fn(),
+  register: vi.fn(),
+  createExtension: vi.fn(),
   setPermission: vi.fn(),
   remove: vi.fn()
 }));
@@ -16,9 +18,12 @@ vi.mock("../../backend/appRuntime", () => ({
   api: {
     getMcpAssistantsState: fixture.getState,
     answerMcpApproval: fixture.answer,
+    registerMcpClient: fixture.register,
+    createClaudeDesktopExtension: fixture.createExtension,
     setMcpPermission: fixture.setPermission,
     removeMcpAssistant: fixture.remove
-  }
+  },
+  startSessionVerificationWindowDrag: vi.fn()
 }));
 vi.mock("../../backend/desktopEventRuntime", () => ({ desktopEventPort: {
   listenMcpAssistants: async (listener: (state: McpAssistantsState) => void) => {
@@ -53,9 +58,11 @@ function state(overrides: Partial<McpAssistantsState> = {}): McpAssistantsState 
       accounts: [{ account_id: WORK, read: true, send: false, attachments: false, denied: ["send"] }]
     }],
     registrations: [
-      { client: "claude_code", client_name: "claude-code", kind: "command", text: "claude mcp add --scope user koushi -- '/opt/koushi/koushi-mcp' --client-name claude-code", config_hint: null },
-      { client: "deepseek_harness", client_name: "deepseek-harness", kind: "yaml", text: "- id: mcp-koushi\n", config_hint: "~/.dsh/profiles/<profile>/cordis.patch.yml" }
+      { client: "claude_code", client_name: "claude-code", kind: "command", text: "claude mcp add --scope user koushi -- '/opt/koushi/koushi-mcp' --client-name claude-code", config_hint: null, action: "run_command" },
+      { client: "claude_desktop", client_name: "claude-desktop", kind: "json", text: "{}", config_hint: "claude_desktop_config.json", action: "create_extension" },
+      { client: "deepseek_harness", client_name: "deepseek-harness", kind: "yaml", text: "- id: mcp-koushi\n", config_hint: "~/.dsh/profiles/<profile>/cordis.patch.yml", action: null }
     ],
+    outdated_launchers: [],
     ...overrides
   };
 }
@@ -175,3 +182,55 @@ test("permissions of an account signed in this run match its tab", async () => {
   // Only the other account is listed as not requested.
   expect(within(card).getAllByText(/Koushi will ask when claude-code first uses this account/)).toHaveLength(1);
 });
+
+test("Register runs the client's own command only after confirmation", async () => {
+  fixture.register.mockResolvedValue({ outcome: "registered", output: "" });
+  await renderSection(state());
+  fireEvent.click(screen.getByRole("button", { name: "Register" }));
+  const dialog = screen.getByRole("dialog", { name: "Register Koushi with Claude Code?" });
+  expect(within(dialog).getByText(/claude mcp add --scope user koushi/)).toBeTruthy();
+  expect(fixture.register).not.toHaveBeenCalled();
+  fireEvent.click(within(dialog).getByRole("button", { name: "Run" }));
+  expect(fixture.register).toHaveBeenCalledWith("claude_code");
+  expect(await screen.findByText("Registered with Claude Code. Ask it something, and approve it in Koushi.")).toBeTruthy();
+});
+
+test("a failed registration shows the client's own message", async () => {
+  fixture.register.mockResolvedValue({ outcome: "failed", exit_code: 1, output: "MCP server koushi already exists" });
+  await renderSection(state());
+  fireEvent.click(screen.getByRole("button", { name: "Register" }));
+  fireEvent.click(screen.getByRole("button", { name: "Run" }));
+  expect(await screen.findByText("Claude Code reported a problem (exit code 1):")).toBeTruthy();
+  expect(screen.getByText("MCP server koushi already exists")).toBeTruthy();
+});
+
+test("a missing CLI points to installing it or copying the command", async () => {
+  fixture.register.mockResolvedValue({ outcome: "not_found", program: "claude" });
+  await renderSection(state());
+  fireEvent.click(screen.getByRole("button", { name: "Register" }));
+  fireEvent.click(screen.getByRole("button", { name: "Run" }));
+  expect(await screen.findByText(/claude was not found on this computer/)).toBeTruthy();
+});
+
+test("Claude Desktop gets an extension instead of a command", async () => {
+  fixture.createExtension.mockResolvedValue({ outcome: "saved", path: "/Users/member1/Downloads/Koushi.mcpb" });
+  await renderSection(state());
+  fireEvent.click(screen.getByRole("tab", { name: "Claude Desktop" }));
+  expect(screen.queryByRole("button", { name: "Register" })).toBeNull();
+  fireEvent.click(screen.getByRole("button", { name: "Create Claude Desktop extension" }));
+  expect(fixture.createExtension).toHaveBeenCalledOnce();
+  expect(await screen.findByText(/Created \/Users\/member1\/Downloads\/Koushi\.mcpb\. In Claude Desktop/)).toBeTruthy();
+});
+
+test("clients without a CLI keep copy only", async () => {
+  await renderSection(state());
+  fireEvent.click(screen.getByRole("tab", { name: "DeepSeek Harness" }));
+  expect(screen.queryByRole("button", { name: "Register" })).toBeNull();
+  expect(screen.getByRole("button", { name: "Copy" })).toBeTruthy();
+});
+
+test("an outdated launcher is reported", async () => {
+  await renderSection(state({ outdated_launchers: ["claude-desktop"] }));
+  expect(screen.getByText(/claude-desktop uses a launcher from an older Koushi/)).toBeTruthy();
+});
+

@@ -1571,11 +1571,17 @@ mock.setCommandResponse("get_mcp_assistants_state", () => ({
   launcher: { state: "unavailable", reason: "not_bundled" },
   pending: [],
   assistants: [],
-  registrations: []
+  registrations: [],
+  outdated_launchers: []
 }));
 mock.setCommandResponse("answer_mcp_approval", () => "applied");
 mock.setCommandResponse("set_mcp_permission", () => null);
 mock.setCommandResponse("remove_mcp_assistant", () => null);
+mock.setCommandResponse("register_mcp_client", () => ({ outcome: "registered", output: "" }));
+mock.setCommandResponse("create_claude_desktop_extension", () => ({
+  outcome: "opened",
+  path: "/Users/member1/Downloads/Koushi.mcpb"
+}));
 mock.setCommandResponse("subscribe_receipt_reader", ({
   source,
 }: {

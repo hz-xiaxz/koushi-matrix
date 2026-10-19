@@ -104,6 +104,8 @@ describe("DesktopApi command contract", () => {
         "answerMcpApproval",
         "setMcpPermission",
         "removeMcpAssistant",
+        "registerMcpClient",
+        "createClaudeDesktopExtension",
         "saveDiagnosticsReport",
         "cancelOidcLogin",
         "setSpaceChildSuggested",

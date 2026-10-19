@@ -240,7 +240,25 @@ async fn serve_connection(
     let mut reader = BufReader::new(read_half);
 
     let client = match read_hello(&mut reader, &token).await {
-        Ok(Hello::Accepted(client)) => client,
+        Ok(Hello::Accepted(client)) => {
+            shared.broker.note_current_launcher(&client.name);
+            client
+        }
+        Ok(Hello::Outdated(name)) => {
+            if let Some(name) = name {
+                shared.broker.note_outdated_launcher(&name);
+            }
+            let _ = write_message(
+                &mut write_half,
+                &ServerMessage::Error {
+                    code: ErrorCode::Unsupported,
+                    message: "this koushi-mcp launcher is older than the running Koushi; register it again"
+                        .to_owned(),
+                },
+            )
+            .await;
+            return;
+        }
         Ok(Hello::Rejected(error)) => {
             let _ = write_message(
                 &mut write_half,
@@ -348,6 +366,10 @@ async fn closed<R: tokio::io::AsyncRead + Unpin>(reader: &mut BufReader<R>) {
 enum Hello {
     Accepted(ClientIdentity),
     Rejected(WireError),
+    /// The token matched, but the launcher speaks another bridge protocol:
+    /// a copy left over from an older Koushi (such as a Claude Desktop
+    /// extension). Carries its name when that name is valid.
+    Outdated(Option<String>),
 }
 
 /// Reads and validates the handshake.
@@ -376,11 +398,15 @@ async fn read_hello<R: tokio::io::AsyncRead + Unpin>(
     else {
         return Ok(unauthorized());
     };
-    if protocol != PROTOCOL_VERSION {
-        return Ok(unauthorized());
-    }
     if !constant_time_eq(token.as_bytes(), expected_token.as_bytes()) {
         return Ok(unauthorized());
+    }
+    // Checked after the token, so only a launcher that may connect at all can
+    // put its name on the settings page as outdated.
+    if protocol != PROTOCOL_VERSION {
+        return Ok(Hello::Outdated(
+            koushi_mcp::wire::valid_client_name(&client.name).then_some(client.name),
+        ));
     }
     if !koushi_mcp::wire::valid_client_name(&client.name) {
         return Ok(Hello::Rejected(WireError::new(
@@ -490,6 +516,7 @@ mod tests {
         match hello {
             Hello::Rejected(error) => error.code,
             Hello::Accepted(_) => panic!("accepted"),
+            Hello::Outdated(_) => panic!("outdated"),
         }
     }
 
@@ -511,13 +538,21 @@ mod tests {
     }
 
     #[tokio::test]
-    async fn rejects_an_unsupported_protocol() {
+    async fn an_authenticated_launcher_with_another_protocol_is_reported_outdated() {
         let input = concat!(
-            r#"{"type":"hello","protocol":9,"token":"secret","client":{"name":"codex","version":"0"}}"#,
+            r#"{"type":"hello","protocol":9,"token":"secret","client":{"name":"claude-desktop","version":"0"}}"#,
+            "\n"
+        );
+        assert!(matches!(
+            handshake(input, "secret").await,
+            Hello::Outdated(Some(name)) if name == "claude-desktop"
+        ));
+        let unauthenticated = concat!(
+            r#"{"type":"hello","protocol":9,"token":"guess","client":{"name":"claude-desktop","version":"0"}}"#,
             "\n"
         );
         assert_eq!(
-            rejected(handshake(input, "secret").await),
+            rejected(handshake(unauthenticated, "secret").await),
             ErrorCode::Unauthorized
         );
     }
