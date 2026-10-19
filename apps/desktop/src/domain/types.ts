@@ -213,6 +213,7 @@ export interface SettingsValues {
   display: DisplaySettings;
   window: WindowSettings;
   updates: UpdatesSettings;
+  mcp: McpSettings;
   media: MediaSettings;
   timeline: TimelineSettings;
   sidebar: SidebarSettings;
@@ -234,6 +235,7 @@ export interface SettingsPatch {
   display?: DisplaySettings;
   window?: WindowSettings;
   updates?: UpdatesSettings;
+  mcp?: McpSettings;
   media?: MediaSettings;
   timeline?: TimelineSettings;
   sidebar?: SidebarSettings;
@@ -546,6 +548,61 @@ export interface WindowSettings {
 export interface UpdatesSettings {
   auto_check: boolean;
   include_prereleases: boolean;
+}
+
+/** Local MCP bridge switch (#1536). App scope; grants live in the bridge's store. */
+export interface McpSettings {
+  enabled: boolean;
+}
+
+export type McpNeed = "read" | "send" | "attachments";
+
+export interface McpPendingApproval {
+  request_id: number;
+  /** Self-declared by the assistant; validated to `[A-Za-z0-9._-]{1,64}`. */
+  client_name: string;
+  client_version: string;
+  account_id: string;
+  need: McpNeed;
+  room_label: string | null;
+  message_preview: string | null;
+  waiting: boolean;
+}
+
+export interface McpAssistantAccount {
+  account_id: string;
+  read: boolean;
+  send: boolean;
+  attachments: boolean;
+  /** Permissions denied for this account during this bridge run. */
+  denied: McpNeed[];
+}
+
+export interface McpAssistant {
+  client_name: string;
+  client_version: string | null;
+  last_used_ms: number | null;
+  accounts: McpAssistantAccount[];
+}
+
+export interface McpRegistration {
+  client: "claude_code" | "codex" | "pi" | "deepseek_harness" | "other";
+  client_name: string;
+  kind: "command" | "yaml" | "json";
+  text: string;
+  config_hint: string | null;
+}
+
+/** Process-wide state of the MCP consent broker, pushed on `koushi-desktop://mcp`. */
+export interface McpAssistantsState {
+  bridge: "disabled" | "running" | "start_failed";
+  store: "ok" | "missing" | "malformed" | "unreadable" | "unsupported_schema" | "write_failed";
+  launcher:
+    | { state: "available"; path: string }
+    | { state: "unavailable"; reason: "not_bundled" | "translocated" | "ephemeral" };
+  pending: McpPendingApproval[];
+  assistants: McpAssistant[];
+  registrations: McpRegistration[];
 }
 
 export type DesktopUpdateState =

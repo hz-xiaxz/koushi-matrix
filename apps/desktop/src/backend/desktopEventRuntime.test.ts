@@ -8,6 +8,7 @@ test("constructs one event adapter without subscribing eagerly", async () => {
     listenAccountTabs: vi.fn(),
     listenCoreEvents: vi.fn(),
     listenDesktopUpdates: vi.fn(),
+    listenMcpAssistants: vi.fn(),
     listenMenuActions: vi.fn(),
     listenStateUpdates: vi.fn()
   };
@@ -20,6 +21,7 @@ test("constructs one event adapter without subscribing eagerly", async () => {
   expect(port.listenAccountTabs).not.toHaveBeenCalled();
   expect(port.listenCoreEvents).not.toHaveBeenCalled();
   expect(port.listenDesktopUpdates).not.toHaveBeenCalled();
+  expect(port.listenMcpAssistants).not.toHaveBeenCalled();
   expect(port.listenMenuActions).not.toHaveBeenCalled();
   expect(port.listenStateUpdates).not.toHaveBeenCalled();
 });

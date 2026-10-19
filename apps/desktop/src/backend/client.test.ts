@@ -102,6 +102,24 @@ describe("TauriDesktopApi", () => {
     expect(invoke).toHaveBeenCalledWith("ignore_desktop_update", { version: "1.2.4" });
   });
 
+  test("forwards MCP approval answers and permission changes by name", async () => {
+    vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
+    const api = new TauriDesktopApi();
+
+    await api.answerMcpApproval(3, true);
+    await api.setMcpPermission("pi", "account:@member1:example.invalid", "send", false);
+    await api.removeMcpAssistant("pi");
+
+    expect(invoke).toHaveBeenCalledWith("answer_mcp_approval", { requestId: 3, allow: true });
+    expect(invoke).toHaveBeenCalledWith("set_mcp_permission", {
+      clientName: "pi",
+      accountId: "account:@member1:example.invalid",
+      need: "send",
+      allowed: false
+    });
+    expect(invoke).toHaveBeenCalledWith("remove_mcp_assistant", { clientName: "pi" });
+  });
+
   test("uses distinct state-only and state-plus-timeline resync commands", async () => {
     vi.stubGlobal("window", { __TAURI_INTERNALS__: {} });
 
