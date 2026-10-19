@@ -229,6 +229,37 @@ main > section {
 }
 .pain-answer { margin: 0; color: var(--muted); padding-left: 1.1em; }
 
+.ai h2 { text-align: left; }
+.ai-columns { display: grid; grid-template-columns: 1fr 1fr; gap: 20px; }
+.ai h3 { font-size: 1.1rem; margin: 0 0 0.6em; }
+.ai-columns ul { margin: 0; padding-left: 1.2em; }
+.ai-columns li { margin: 0.35em 0; }
+.ai-try { margin-top: 28px; }
+.ai-command {
+  margin: 0 0 20px;
+  padding: 14px 18px;
+  border-radius: 12px;
+  background: var(--navy);
+  border: 1px solid var(--line);
+  color: var(--photon);
+  font-size: 0.9rem;
+  line-height: 1.6;
+  white-space: pre-wrap;
+  overflow-wrap: anywhere;
+}
+/* Outranks the per-locale :lang() font stacks, which also match <code>. */
+.ai-command code { font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace; }
+.ai-try-heading { margin: 0 0 0.5em; font-weight: 700; }
+.ai-prompts { display: flex; flex-direction: column; align-items: flex-start; gap: 8px; padding: 0; margin: 0; list-style: none; }
+.ai-prompts li {
+  background: var(--surface);
+  border: 1px solid var(--line);
+  border-radius: 16px 16px 16px 4px;
+  padding: 8px 14px;
+}
+.ai-setup { margin-top: 1.5em; color: var(--muted); }
+.ai-setup a { font-weight: 600; }
+
 .feature-grid {
   display: grid;
   grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
@@ -278,6 +309,7 @@ main > section {
   .pain.has-shot,
   .languages-section,
   .settings-body,
+  .ai-columns,
   .fineprint { grid-template-columns: 1fr; }
   .pain.flip .pain-text { order: 0; }
   .hero-shot { margin-bottom: -40px; }

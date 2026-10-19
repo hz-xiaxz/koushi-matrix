@@ -5,7 +5,7 @@
 </p>
 
 <p align="center">
-  <strong>A desktop Matrix client for conversations in many languages.</strong>
+  <strong>A desktop Matrix client for many languages, and for your AI assistant.</strong>
 </p>
 
 <p align="center">
@@ -38,6 +38,9 @@
   rooms.
 - **Notifications even when your server sends none.** Koushi can email you
   (Resend or SMTP) or notify WeChat (ServerChan) from your own computer.
+- **Works with your AI assistant.** Koushi can act as a local MCP server, so
+  Claude Code, Codex, and other MCP clients can search, summarize, and reply to
+  your chats through the running app, only for the accounts you allow.
 - **Desktop first.** Three-pane layout, threads, Markdown, code, math, keyboard
   shortcuts, system tray, and native notifications.
 
@@ -45,6 +48,35 @@ The [website](https://shinaoka.github.io/koushi-matrix/) has screenshots and the
 full list. Koushi uses the [Matrix](https://matrix.org) protocol through the
 Matrix Rust SDK, with a Rust core and a Tauri desktop shell. Voice and video
 calls, screen sharing, bots, and widgets are not included yet.
+
+## Use Koushi from your AI assistant
+
+Koushi can act as a local [Model Context Protocol](https://modelcontextprotocol.io)
+server. Your assistant talks to the Koushi app already open on your computer,
+so it never holds your encryption keys. Then just ask:
+
+> Which rooms have unread messages? Summarize the Design room.
+>
+> Find the invoice someone sent me last month.
+>
+> Reply to that message saying I will send the file tomorrow.
+
+- **Read:** list rooms with unread counts and mentions, read recent messages,
+  and search history, including encrypted rooms.
+- **Act:** send messages and replies, download attachments, and wait for new
+  activity.
+- **You decide:** until you grant access, an assistant sees only account ids.
+  Reading, sending, and attachments are separate permissions, per assistant and
+  per account.
+
+```bash
+claude mcp add --scope user koushi -- /path/to/koushi-mcp --client-name claude-code
+```
+
+For technical users in this version: the `koushi-mcp` launcher is not bundled
+with the app yet, so you build it from source, and you grant access by editing a
+JSON file. See [Connect an AI assistant](docs/help/ai-assistants.md) for Claude
+Code, Codex, other MCP clients, and URL-only connectors.
 
 ## Downloads
 
