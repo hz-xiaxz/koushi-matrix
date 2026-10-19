@@ -1465,8 +1465,7 @@ pub fn run() {
                 reader_subscriptions: TokioMutex::new(HashMap::new()),
             };
             app.manage(core_state);
-            let bridge = mcp::start(std::sync::Arc::clone(&runtime), mcp_data_dir);
-            app.manage(mcp::McpBridge(std::sync::Mutex::new(bridge)));
+            mcp::install(app.handle(), std::sync::Arc::clone(&runtime), mcp_data_dir);
             app.manage(app_updates::DesktopUpdateManager::new());
             app.manage(commands::dropped_files::DroppedFileLedger::default());
             app_updates::spawn_auto_update_loop(app.handle().clone(), update_settings);
@@ -1682,6 +1681,10 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![
             commands::app_updates::check_for_desktop_update,
             commands::app_updates::get_desktop_update_state,
+            commands::mcp::get_mcp_assistants_state,
+            commands::mcp::answer_mcp_approval,
+            commands::mcp::set_mcp_permission,
+            commands::mcp::remove_mcp_assistant,
             commands::app_updates::download_desktop_update,
             commands::app_updates::restart_to_install_desktop_update,
             commands::app_updates::ignore_desktop_update,
@@ -1954,11 +1957,9 @@ pub fn run() {
                 }
             }
             if matches!(event, tauri::RunEvent::Exit)
-                && let Some(bridge) = app.try_state::<mcp::McpBridge>()
-                && let Ok(mut slot) = bridge.0.lock()
-                && let Some(handle) = slot.take()
+                && let Some(controller) = app.try_state::<mcp::McpController>()
             {
-                handle.stop();
+                controller.stop_now();
             }
             #[cfg(target_os = "macos")]
             if let tauri::RunEvent::Reopen { .. } = event {

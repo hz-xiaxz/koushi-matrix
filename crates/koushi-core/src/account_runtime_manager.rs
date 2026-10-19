@@ -359,6 +359,16 @@ impl AccountRuntimeManager {
         self.settings.subscribe()
     }
 
+    /// App-wide preferences as read from disk. Unlike the update channel, which
+    /// starts at defaults, this reports a settings file that could not be read,
+    /// so a policy that must fail closed (the MCP bridge switch) can tell
+    /// "no file yet" from "unreadable".
+    pub fn load_app_settings(
+        &self,
+    ) -> Result<koushi_state::AppSettingsValues, crate::settings::SettingsStoreError> {
+        self.settings.load().map(|values| values.app_settings())
+    }
+
     pub fn selected_tab_id(&self) -> AccountTabId {
         self.state
             .lock()

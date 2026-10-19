@@ -5,14 +5,19 @@
 //! publishes `endpoint.json`, verifies the per-launch token, and dispatches tool
 //! calls to the account runtimes it was handed. It never opens a crypto store
 //! and never reads Matrix credentials, so the desktop app and the headless QA
-//! harness host the same bridge.
+//! harness host the same bridge. Tool calls are authorized by a
+//! [`consent::ConsentBroker`], which asks the user in the app when a host has a
+//! consent surface and fails closed when it does not.
 
+pub mod consent;
 mod endpoint;
 mod events;
 mod grants;
 mod handlers;
+pub mod registration;
 mod server;
 
+pub use grants::{Need, StoreStatus};
 pub use server::{BridgeHandle, start};
 
 use std::path::PathBuf;

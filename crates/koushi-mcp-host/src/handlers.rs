@@ -1,15 +1,17 @@
 //! Tool handlers. Every handler returns a JSON value; the caller wraps it in an
 //! MCP tool result.
 //!
-//! Reads require a read grant, sends require a send grant. Grants are loaded per
-//! call from `mcp/connections.json`, so revoking one takes effect immediately.
-
-use std::path::Path;
+//! Every account-scoped tool first resolves the account to a live runtime, then
+//! asks the consent broker for the permission it needs. The broker re-reads
+//! `mcp/connections.json` on every call, so a revocation applies at once, and
+//! asks the user in Koushi when the permission is missing.
 
 use serde_json::{Value, json};
 use std::sync::Arc;
 
 use crate::BridgeAccounts;
+use crate::consent::{ClientIdentity, ConsentContext};
+use crate::server::Shared;
 
 use koushi_mcp::wire::{ErrorCode, WireError};
 use koushi_protocol::command::{CoreCommand, TimelineCommand};
@@ -18,14 +20,12 @@ use koushi_protocol::ids::TimelineKey;
 use koushi_state::{ComposerDocument, SessionInfo, SessionState};
 
 use super::events;
-use super::grants::{self, Need};
+use super::grants::Need;
 
 /// One `tools/call` request.
 pub(crate) async fn dispatch_tool_call(
-    accounts: &Arc<dyn BridgeAccounts>,
-    log: &Arc<events::EventLog>,
-    client_name: &str,
-    data_dir: &Path,
+    shared: &Shared,
+    client: &ClientIdentity,
     params: Value,
 ) -> Result<Value, WireError> {
     let Some(name) = params.get("name").and_then(Value::as_str) else {
@@ -40,17 +40,13 @@ pub(crate) async fn dispatch_tool_call(
         .unwrap_or_else(|| json!({}));
 
     let result = match name {
-        "list_accounts" => list_accounts(accounts, client_name, data_dir),
-        "list_rooms" => list_rooms(accounts, client_name, data_dir, &arguments),
-        "search_messages" => search_messages(accounts, client_name, data_dir, &arguments).await,
-        "send_message" => send_message(accounts, client_name, data_dir, &arguments).await,
-        "wait_for_events" => {
-            wait_for_events(accounts, log, client_name, data_dir, &arguments).await
-        }
-        "get_attachment" => get_attachment(accounts, client_name, data_dir, &arguments).await,
-        "read_room_messages" => {
-            read_room_messages(accounts, client_name, data_dir, &arguments).await
-        }
+        "list_accounts" => list_accounts(shared, client),
+        "list_rooms" => list_rooms(shared, client, &arguments).await,
+        "search_messages" => search_messages(shared, client, &arguments).await,
+        "send_message" => send_message(shared, client, &arguments).await,
+        "wait_for_events" => wait_for_events(shared, client, &arguments).await,
+        "get_attachment" => get_attachment(shared, client, &arguments).await,
+        "read_room_messages" => read_room_messages(shared, client, &arguments).await,
         other => Err(WireError::new(
             ErrorCode::Unsupported,
             format!("unknown tool: {other}"),
@@ -69,24 +65,22 @@ pub(crate) async fn dispatch_tool_call(
     }
 }
 
-/// Every account is listed so a first-time client can be granted access, but
-/// identity fields appear only once a grant exists.
-fn list_accounts(
-    accounts: &Arc<dyn BridgeAccounts>,
-    client_name: &str,
-    data_dir: &Path,
-) -> Result<Value, WireError> {
-    let grants = grants::load(data_dir);
-    let granted: Vec<&str> = grants
-        .iter()
-        .filter(|grant| grant.client_name == client_name)
-        .flat_map(|grant| grant.accounts.iter().map(String::as_str))
-        .collect();
+/// Every account is listed so a first-time client can ask for access, but
+/// identity fields appear only once the client holds some permission for it.
+/// `permissions` says which; a missing one is asked for in Koushi on first use.
+fn list_accounts(shared: &Shared, client: &ClientIdentity) -> Result<Value, WireError> {
+    let store = shared.broker.store();
     let mut listed = Vec::new();
-    for account in accounts.accounts() {
+    for account in shared.accounts.accounts() {
         let snapshot = account.connection.snapshot();
         let (status, session) = session_status(&snapshot.session);
-        if granted.contains(&account.id.as_str()) {
+        let grant = store.account(&client.name, &account.id);
+        let permissions = json!({
+            "read": grant.is_some_and(|grant| grant.read),
+            "send": grant.is_some_and(|grant| grant.send),
+            "attachments": grant.is_some_and(|grant| grant.attachments),
+        });
+        if grant.is_some_and(|grant| grant.read || grant.send || grant.attachments) {
             let user_id = session.map(|info| info.user_id.clone());
             let homeserver = session
                 .map(|info| info.homeserver.clone())
@@ -98,16 +92,35 @@ fn list_accounts(
                 "display_name": session.map(display_name_from_user_id),
                 "status": status,
                 "consent": "granted",
+                "permissions": permissions,
             }));
         } else {
             listed.push(json!({
                 "account_id": account.id,
                 "status": status,
                 "consent": "required",
+                "permissions": permissions,
             }));
         }
     }
     Ok(json!({ "accounts": listed }))
+}
+
+/// Resolves the account, then checks or asks for `need`. An unknown account
+/// fails before any approval is shown.
+async fn authorize(
+    shared: &Shared,
+    client: &ClientIdentity,
+    account_id: &str,
+    need: Need,
+    context: ConsentContext,
+) -> Result<koushi_core::CoreConnection, WireError> {
+    let connection = account_connection(&shared.accounts, account_id)?;
+    shared
+        .broker
+        .authorize(client, account_id, need, context)
+        .await?;
+    Ok(connection)
 }
 
 fn session_status(session: &SessionState) -> (&'static str, Option<&SessionInfo>) {
@@ -129,19 +142,20 @@ fn display_name_from_user_id(info: &SessionInfo) -> String {
         .to_owned()
 }
 
-fn list_rooms(
-    accounts: &Arc<dyn BridgeAccounts>,
-    client_name: &str,
-    data_dir: &Path,
+async fn list_rooms(
+    shared: &Shared,
+    client: &ClientIdentity,
     arguments: &Value,
 ) -> Result<Value, WireError> {
     let account_id = required_account_id(arguments)?;
-    grants::authorize(
-        &grants::load(data_dir),
-        client_name,
+    let connection = authorize(
+        shared,
+        client,
         &account_id,
         Need::Read,
-    )?;
+        ConsentContext::default(),
+    )
+    .await?;
     let limit = arguments
         .get("limit")
         .and_then(Value::as_u64)
@@ -158,7 +172,6 @@ fn list_rooms(
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    let connection = account_connection(accounts, &account_id)?;
     let snapshot = connection.snapshot();
     let mut rooms: Vec<Value> = snapshot
         .rooms
@@ -221,18 +234,19 @@ fn direct_search_failure(failure: koushi_core::search::DirectSearchFailure) -> W
 }
 
 async fn search_messages(
-    accounts: &Arc<dyn BridgeAccounts>,
-    client_name: &str,
-    data_dir: &Path,
+    shared: &Shared,
+    client: &ClientIdentity,
     arguments: &Value,
 ) -> Result<Value, WireError> {
     let account_id = required_account_id(arguments)?;
-    grants::authorize(
-        &grants::load(data_dir),
-        client_name,
+    let connection = authorize(
+        shared,
+        client,
         &account_id,
         Need::Read,
-    )?;
+        ConsentContext::default(),
+    )
+    .await?;
     let query = arguments
         .get("query")
         .and_then(Value::as_str)
@@ -259,7 +273,6 @@ async fn search_messages(
         })
         .unwrap_or_default();
 
-    let connection = account_connection(accounts, &account_id)?;
     let room_names: std::collections::HashMap<String, String> = connection
         .snapshot()
         .rooms
@@ -299,18 +312,19 @@ async fn search_messages(
 /// Koushi reads it from the account session, so a room nobody opened still
 /// answers and the GUI's open room, scroll position, and pagination stay put.
 async fn read_room_messages(
-    accounts: &Arc<dyn BridgeAccounts>,
-    client_name: &str,
-    data_dir: &Path,
+    shared: &Shared,
+    client: &ClientIdentity,
     arguments: &Value,
 ) -> Result<Value, WireError> {
     let account_id = required_account_id(arguments)?;
-    grants::authorize(
-        &grants::load(data_dir),
-        client_name,
+    let connection = authorize(
+        shared,
+        client,
         &account_id,
         Need::Read,
-    )?;
+        ConsentContext::default(),
+    )
+    .await?;
     let room_id = arguments
         .get("room_id")
         .and_then(Value::as_str)
@@ -328,7 +342,6 @@ async fn read_room_messages(
         .filter(|token| !token.is_empty())
         .map(str::to_owned);
 
-    let connection = account_connection(accounts, &account_id)?;
     let page = connection
         .read_room_messages(room_id.clone(), limit, from)
         .await
@@ -369,18 +382,11 @@ fn room_messages_failure(failure: koushi_core::RoomMessagesFailure) -> WireError
 }
 
 async fn send_message(
-    accounts: &Arc<dyn BridgeAccounts>,
-    client_name: &str,
-    data_dir: &Path,
+    shared: &Shared,
+    client: &ClientIdentity,
     arguments: &Value,
 ) -> Result<Value, WireError> {
     let account_id = required_account_id(arguments)?;
-    grants::authorize(
-        &grants::load(data_dir),
-        client_name,
-        &account_id,
-        Need::Send,
-    )?;
     let room_id = arguments
         .get("room_id")
         .and_then(Value::as_str)
@@ -405,7 +411,26 @@ async fn send_message(
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty());
 
-    let mut connection = account_connection(accounts, &account_id)?;
+    // The approval shows the message as context, and the room only when it is
+    // one this account has joined. Whether the room exists is decided after
+    // consent, so an unapproved client cannot probe membership.
+    let room_label = account_connection(&shared.accounts, &account_id)?
+        .snapshot()
+        .rooms
+        .iter()
+        .find(|room| room.room_id == room_id)
+        .map(|room| room.display_label.clone());
+    let mut connection = authorize(
+        shared,
+        client,
+        &account_id,
+        Need::Send,
+        ConsentContext {
+            room_label,
+            message_preview: Some(body.clone()),
+        },
+    )
+    .await?;
     let snapshot = connection.snapshot();
     let account_key = account_key_from_snapshot(&snapshot);
     if account_key.0.is_empty() {
@@ -479,45 +504,45 @@ async fn send_message(
     }
 }
 
+/// The whole `wait_for_events` call, approval wait included, stays under this
+/// many seconds (Codex's default tool timeout; the launcher allows 70).
+const WAIT_CALL_BUDGET_SECS: u64 = 60;
+
 async fn wait_for_events(
-    _accounts: &Arc<dyn BridgeAccounts>,
-    log: &Arc<events::EventLog>,
-    client_name: &str,
-    data_dir: &Path,
+    shared: &Shared,
+    client: &ClientIdentity,
     arguments: &Value,
 ) -> Result<Value, WireError> {
+    let started = tokio::time::Instant::now();
     let account_id = required_account_id(arguments)?;
-    grants::authorize(
-        &grants::load(data_dir),
-        client_name,
+    authorize(
+        shared,
+        client,
         &account_id,
         Need::Read,
-    )?;
+        ConsentContext::default(),
+    )
+    .await?;
     let cursor = arguments.get("cursor").and_then(Value::as_str);
+    let remaining = WAIT_CALL_BUDGET_SECS.saturating_sub(started.elapsed().as_secs());
     let timeout_s = arguments
         .get("timeout_s")
         .and_then(Value::as_u64)
-        .unwrap_or(25);
+        .unwrap_or(25)
+        .min(remaining);
 
-    events::wait_for_events(log, &account_id, cursor, timeout_s).await
+    events::wait_for_events(&shared.log, &account_id, cursor, timeout_s).await
 }
 
 /// Downloads one file of a message into Koushi's managed media cache and
 /// returns its absolute path. Koushi chooses the destination; the caller never
 /// does.
 async fn get_attachment(
-    accounts: &Arc<dyn BridgeAccounts>,
-    client_name: &str,
-    data_dir: &Path,
+    shared: &Shared,
+    client: &ClientIdentity,
     arguments: &Value,
 ) -> Result<Value, WireError> {
     let account_id = required_account_id(arguments)?;
-    grants::authorize(
-        &grants::load(data_dir),
-        client_name,
-        &account_id,
-        Need::Attachments,
-    )?;
     let room_id = arguments
         .get("room_id")
         .and_then(Value::as_str)
@@ -535,12 +560,28 @@ async fn get_attachment(
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    let connection = account_connection(accounts, &account_id)?;
+    let room_label = account_connection(&shared.accounts, &account_id)?
+        .snapshot()
+        .rooms
+        .iter()
+        .find(|room| room.room_id == room_id)
+        .map(|room| room.display_label.clone());
+    let connection = authorize(
+        shared,
+        client,
+        &account_id,
+        Need::Attachments,
+        ConsentContext {
+            room_label,
+            message_preview: None,
+        },
+    )
+    .await?;
     let attachment = connection
         .fetch_attachment(room_id.clone(), event_id.clone(), thumbnail)
         .await
         .map_err(attachment_failure)?;
-    ensure_cache_containment(accounts, &account_id, &attachment.path)?;
+    ensure_cache_containment(&shared.accounts, &account_id, &attachment.path)?;
     Ok(json!({
         "room_id": room_id,
         "event_id": event_id,

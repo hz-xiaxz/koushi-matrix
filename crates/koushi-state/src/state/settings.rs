@@ -158,6 +158,8 @@ pub struct SettingsValues {
     #[serde(default)]
     pub updates: UpdatesSettings,
     #[serde(default)]
+    pub mcp: McpSettings,
+    #[serde(default)]
     pub legacy_frontend_preferences_imported: bool,
 }
 
@@ -181,6 +183,7 @@ pub struct AppSettingsValues {
     pub search_crawler_speed: super::search_crawler::SearchCrawlerSpeed,
     pub window: WindowSettings,
     pub updates: UpdatesSettings,
+    pub mcp: McpSettings,
     pub legacy_frontend_preferences_imported: bool,
 }
 
@@ -255,6 +258,7 @@ impl SettingsValues {
             search_crawler_speed: self.search_crawler.speed,
             window: self.window,
             updates: self.updates,
+            mcp: self.mcp,
             legacy_frontend_preferences_imported: self.legacy_frontend_preferences_imported,
         }
     }
@@ -300,6 +304,7 @@ impl SettingsValues {
         self.search_crawler.speed = app.search_crawler_speed;
         self.window = app.window;
         self.updates = app.updates;
+        self.mcp = app.mcp;
         self.legacy_frontend_preferences_imported = app.legacy_frontend_preferences_imported;
     }
 
@@ -349,6 +354,9 @@ impl SettingsValues {
             }
             if let Some(updates) = patch.updates {
                 self.updates = updates;
+            }
+            if let Some(mcp) = patch.mcp {
+                self.mcp = mcp;
             }
             if let Some(imported) = patch.legacy_frontend_preferences_imported {
                 self.legacy_frontend_preferences_imported = imported;
@@ -465,6 +473,9 @@ impl AppSettingsValues {
         }
         if let Some(value) = &patch.updates {
             self.updates = *value;
+        }
+        if let Some(value) = &patch.mcp {
+            self.mcp = *value;
         }
         if let Some(value) = patch.legacy_frontend_preferences_imported {
             self.legacy_frontend_preferences_imported = value;
@@ -1003,6 +1014,22 @@ impl Default for UpdatesSettings {
     }
 }
 
+/// Local MCP bridge policy (#1536), app scope. When enabled, assistants on this
+/// computer may connect and ask for access, which Koushi approves per account
+/// and permission; the grants themselves live in the MCP grant store, never
+/// here, because they name accounts.
+#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
+pub struct McpSettings {
+    #[serde(default = "default_true")]
+    pub enabled: bool,
+}
+
+impl Default for McpSettings {
+    fn default() -> Self {
+        Self { enabled: true }
+    }
+}
+
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 /// Media settings.
 ///
@@ -1146,6 +1173,8 @@ pub struct SettingsPatch {
     pub window: Option<WindowSettings>,
     #[serde(default)]
     pub updates: Option<UpdatesSettings>,
+    #[serde(default)]
+    pub mcp: Option<McpSettings>,
     #[serde(default)]
     pub legacy_frontend_preferences_imported: Option<bool>,
 }
