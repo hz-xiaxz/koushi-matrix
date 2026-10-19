@@ -15,5 +15,7 @@ export const desktopEventPort: DesktopEventPort = {
   listenAccountTabs: (listener) =>
     isTauriRuntime() ? tauriEventPort.listenAccountTabs(listener) : noEvents(),
   listenDesktopUpdates: (listener) =>
-    isTauriRuntime() ? tauriEventPort.listenDesktopUpdates(listener) : noEvents()
+    isTauriRuntime() ? tauriEventPort.listenDesktopUpdates(listener) : noEvents(),
+  listenMcpAssistants: (listener) =>
+    isTauriRuntime() ? tauriEventPort.listenMcpAssistants(listener) : noEvents()
 };

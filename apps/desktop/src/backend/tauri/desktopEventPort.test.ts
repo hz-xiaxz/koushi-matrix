@@ -87,4 +87,18 @@ describe("Tauri desktop event port", () => {
 
     expect(updateListener).toHaveBeenCalledWith({ kind: "ready", version: "1.2.3" });
   });
+
+  test("forwards MCP assistant state on its adapter channel", async () => {
+    const mcpListener = vi.fn();
+    const port = createTauriDesktopEventPort();
+
+    await expect(port.listenMcpAssistants(mcpListener)).resolves.toBe(unlisten);
+    expect(listen).toHaveBeenCalledWith("koushi-desktop://mcp", expect.any(Function));
+    const envelopeListener = vi.mocked(listen).mock.calls[0]?.[1] as (
+      event: { payload: { bridge: string } }
+    ) => void;
+    envelopeListener({ payload: { bridge: "running" } });
+
+    expect(mcpListener).toHaveBeenCalledWith({ bridge: "running" });
+  });
 });

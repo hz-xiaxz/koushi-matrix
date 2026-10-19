@@ -16,6 +16,8 @@ import type {
   AccountTabsSnapshot,
   DesktopSnapshot,
   DesktopUpdateState,
+  McpAssistantsState,
+  McpNeed,
   ComposerKeyEvent,
   ComposerResolvedAction,
   ComposerResolverOptions,
@@ -173,6 +175,30 @@ export class TauriDesktopApi implements DesktopApi {
 
   async ignoreDesktopUpdate(version: string): Promise<void> {
     return this.invokeCommand<void>("ignore_desktop_update", { version });
+  }
+
+  async getMcpAssistantsState(): Promise<McpAssistantsState> {
+    return this.invokeCommand<McpAssistantsState>("get_mcp_assistants_state");
+  }
+
+  async answerMcpApproval(
+    requestId: number,
+    allow: boolean
+  ): Promise<"applied" | "stale" | "store_failed"> {
+    return this.invokeCommand("answer_mcp_approval", { requestId, allow });
+  }
+
+  async setMcpPermission(
+    clientName: string,
+    accountId: string,
+    need: McpNeed,
+    allowed: boolean
+  ): Promise<void> {
+    return this.invokeCommand<void>("set_mcp_permission", { clientName, accountId, need, allowed });
+  }
+
+  async removeMcpAssistant(clientName: string): Promise<void> {
+    return this.invokeCommand<void>("remove_mcp_assistant", { clientName });
   }
 
   async settlementSnapshot(accountTabId?: string): Promise<DesktopSnapshot> {

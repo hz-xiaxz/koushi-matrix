@@ -1320,6 +1320,29 @@ normal QA-title mode and cannot change product title semantics.
   carry the retired `true` default without an opt-in; opt-ins saved at version 1
   or later are preserved.
 
+## MCP assistants
+
+- The MCP consent broker (`koushi-mcp-host::consent`) owns approvals, grants,
+  remembered denials, and the launcher status; see "MCP Assistant Approval" in
+  the state machine canon. The desktop adapter forwards its
+  `McpAssistantsState` on `koushi-desktop://mcp` with a
+  `get_mcp_assistants_state` getter, and the user's answers through
+  `answer_mcp_approval`, `set_mcp_permission`, and `remove_mcp_assistant`.
+  React renders that state; it never decides a grant, retries an answer, or
+  keeps a second copy of permissions.
+- Mirrors to change together: the Rust state types in
+  `crates/koushi-mcp-host/src/consent.rs` and `registration.rs`,
+  `McpAssistantsState` and friends in `apps/desktop/src/domain/types.ts`, the
+  event port (`backend/desktopEventPort.ts` and its Tauri adapter), the API
+  methods (`backend/desktopApi.ts`, `backend/client.ts`, and the contract
+  test's command list), and the harness defaults and `pushMcpAssistants` in
+  `src/test/appHarnessMain.tsx`.
+- `SettingsValues.mcp` is ordinary app-scope settings state and follows the
+  settings mirrors above, including the frontend snapshot golden. Grants are
+  never settings: they live in `mcp/connections.json`.
+- Account labels in the dialog and on the settings page come from Koushi's own
+  account tabs, never from text an assistant supplied.
+
 ## E2EE trust
 
 - Device verification SDK handles are actor-private resources. Keep

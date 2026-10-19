@@ -173,7 +173,14 @@ async fn host(
     });
 
     write_grant(&bridge_dir, &client_name, &account_id)?;
-    let bridge = koushi_mcp_host::start(Arc::clone(&accounts), bridge_dir.clone())
+    // No consent surface here: a missing permission must fail at once rather
+    // than wait for a dialog nobody can answer. The schema 1 grant above also
+    // keeps proving that older grant files still work.
+    let broker = koushi_mcp_host::consent::ConsentBroker::new(
+        bridge_dir.clone(),
+        koushi_mcp_host::consent::ConsentMode::FailClosed,
+    );
+    let bridge = koushi_mcp_host::start(Arc::clone(&accounts), bridge_dir.clone(), broker)
         .map_err(|code| format!("MCP bridge failed to start: {code}"))?;
 
     let endpoint = bridge_dir.join("mcp").join("endpoint.json");

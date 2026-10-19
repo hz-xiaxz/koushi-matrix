@@ -106,7 +106,7 @@ pub use state::{
     MAX_NOTIFICATION_DELIVERY_MESSAGE_SOURCE_CHARS, MAX_NOTIFICATION_DELIVERY_MIN_INTERVAL_SECS,
     MAX_NOTIFICATION_DELIVERY_PREFIX_GRAPHEMES, MAX_NOTIFICATION_DELIVERY_SINKS,
     MAX_NOTIFICATION_EMAIL_LEN, MAX_NOTIFICATION_KEYWORD_CHARS, MAX_NOTIFICATION_KEYWORDS,
-    MAX_SPACE_LOCAL_PRESENTATIONS, MainTimelineAnchor, MediaGalleryStore,
+    MAX_SPACE_LOCAL_PRESENTATIONS, MainTimelineAnchor, McpSettings, MediaGalleryStore,
     MediaPreparationFailureKind, MediaSettings, MediaTransferProgress, MentionCandidate,
     MentionCandidateMembership, MentionCandidatesCompleteness, MentionCandidatesFailureKind,
     MentionCandidatesState, MentionCandidatesTarget, MentionSurface, MissingTargetPolicy,

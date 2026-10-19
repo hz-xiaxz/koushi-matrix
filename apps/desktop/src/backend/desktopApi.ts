@@ -33,6 +33,8 @@ import type {
   AccountTabsSnapshot,
   DesktopSnapshot,
   DesktopUpdateState,
+  McpAssistantsState,
+  McpNeed,
   DelegatedAuthMethod,
   DirectoryQuery,
   DisplayPlatform,
@@ -148,6 +150,10 @@ export interface DesktopApi {
   downloadDesktopUpdate(expectedGeneration: number): Promise<void>;
   restartToInstallDesktopUpdate(): Promise<void>;
   ignoreDesktopUpdate(version: string): Promise<void>;
+  getMcpAssistantsState(): Promise<McpAssistantsState>;
+  answerMcpApproval(requestId: number, allow: boolean): Promise<"applied" | "stale" | "store_failed">;
+  setMcpPermission(clientName: string, accountId: string, need: McpNeed, allowed: boolean): Promise<void>;
+  removeMcpAssistant(clientName: string): Promise<void>;
   settlementSnapshot(accountTabId?: string): Promise<DesktopSnapshot>;
   resyncSnapshot(accountTabId?: string): Promise<DesktopSnapshot>;
   getDiagnosticSnapshot(): Promise<DiagnosticLogSnapshot>;

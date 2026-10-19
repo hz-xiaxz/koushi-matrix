@@ -1,4 +1,5 @@
 import { HelpDialog } from "./components/HelpDialog";
+import { McpApprovalDialog } from "./components/McpApprovalDialog";
 import { DesktopUpdates } from "./components/DesktopUpdates";
 import { Tooltip } from "./components/Tooltip";
 import { ModalDialog, useModalFocusTracking } from "./components/ModalDialog";
@@ -1112,12 +1113,14 @@ function AppContent({ onShowHelp }: { onShowHelp: () => void }) {
           <AppSettingsDialog
             snapshot={selectedSnapshot}
             notificationDeliveryActions={appNotificationDeliveryActions}
+            accountTabs={accountTabs?.tabs ?? []}
             onUpdateSettings={(patch) => {
               void appSettingsUpdateRef.current(patch).catch(() => undefined);
             }}
             onClose={() => setSettingsScope(null)}
           />
         ) : null}
+        <McpApprovalDialog accountTabs={accountTabs?.tabs ?? []} />
       </>
     </PersistentAccountShell>
   );

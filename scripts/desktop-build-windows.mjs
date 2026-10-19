@@ -12,6 +12,7 @@ import { existsSync, mkdtempSync, readFileSync, readdirSync, rmSync, statSync, w
 import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { requireStagedSidecar, stageMcpSidecar, withMcpSidecar } from "./desktop-mcp-sidecar.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopDir = join(repoRoot, "apps", "desktop");
@@ -78,13 +79,13 @@ if (mode === "--build-only") {
   buildCommand.push("build");
   buildCommand.push("--bundles", "nsis");
 }
-buildCommand.push("--target", "x86_64-pc-windows-msvc");
-if (updater) {
-  buildCommand.push("--config", JSON.stringify({
-    bundle: { createUpdaterArtifacts: true },
-    plugins: { updater: { pubkey: updaterPublicKey } }
-  }));
-}
+const windowsTarget = "x86_64-pc-windows-msvc";
+buildCommand.push("--target", windowsTarget);
+// Every mode carries the bundled MCP launcher (#1536); updater builds add
+// their public key.
+buildCommand.push("--config", JSON.stringify(withMcpSidecar(updater
+  ? { bundle: { createUpdaterArtifacts: true }, plugins: { updater: { pubkey: updaterPublicKey } } }
+  : {})));
 if (args.has("--print-command")) {
   console.log(`desktop-build-windows: npm ${buildCommand.join(" ")}`);
   process.exit(0);
@@ -92,13 +93,10 @@ if (args.has("--print-command")) {
 
 // cmd.exe consumes JSON quotes in shell arguments. Use a config file for real
 // Windows builds; the file contains only public configuration, never secrets.
-let configDirectory;
-if (updater) {
-  configDirectory = mkdtempSync(join(tmpdir(), "koushi-updater-config-"));
-  const configPath = join(configDirectory, "updater.json");
-  writeFileSync(configPath, buildCommand[buildCommand.length - 1], "utf8");
-  buildCommand[buildCommand.length - 1] = `"${configPath}"`;
-}
+const configDirectory = mkdtempSync(join(tmpdir(), "koushi-build-config-"));
+const configPath = join(configDirectory, "build.json");
+writeFileSync(configPath, buildCommand[buildCommand.length - 1], "utf8");
+buildCommand[buildCommand.length - 1] = `"${configPath}"`;
 
 if (!args.has("--skip-preflight")) {
   run("node", ["scripts/desktop-release-preflight.mjs", "--check-config"], repoRoot);
@@ -108,8 +106,14 @@ const buildStartMs = Date.now();
 if (mode === "--bundle-only" && signedInput) {
   validateFile(executable, "signed main executable");
 }
+// The build stage stages the launcher; a separate bundle stage reuses it.
+if (mode === "--bundle-only") {
+  requireStagedSidecar(repoRoot, windowsTarget);
+} else {
+  stageMcpSidecar({ repoRoot, target: windowsTarget, shell: isWindows });
+}
 run("npm", buildCommand, desktopDir);
-if (configDirectory) rmSync(configDirectory, { recursive: true, force: true });
+rmSync(configDirectory, { recursive: true, force: true });
 
 if (mode === "--build-only") {
   validateFile(executable, "main executable", buildStartMs);

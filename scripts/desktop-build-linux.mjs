@@ -14,6 +14,7 @@ import { createHash } from "node:crypto";
 import { existsSync, readFileSync, readdirSync, statSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { MCP_SIDECAR_CONFIG, stageMcpSidecar } from "./desktop-mcp-sidecar.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopDir = join(repoRoot, "apps", "desktop");
@@ -44,7 +45,9 @@ const buildCommand = [
   "--bundles",
   "appimage,deb,rpm",
   "--target",
-  target
+  target,
+  "--config",
+  JSON.stringify(MCP_SIDECAR_CONFIG)
 ];
 if (args.has("--print-command")) {
   console.log(`desktop-build-linux: npm ${buildCommand.join(" ")}`);
@@ -58,6 +61,7 @@ if (!args.has("--skip-preflight")) {
 run("node", ["scripts/check-linux-build-deps.mjs"], repoRoot);
 
 const buildStartMs = Date.now();
+stageMcpSidecar({ repoRoot, target });
 run("npm", buildCommand, desktopDir);
 
 const appimages = listArtifacts(appimageDir, ".AppImage");

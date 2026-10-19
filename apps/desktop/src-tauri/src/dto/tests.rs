@@ -1709,6 +1709,8 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
     // A scoped Low priority preference exercises the optional
     // `SidebarScopeSettings.low_priority` entry and `low_priority_collapsed`.
     state.settings.values.sidebar.collapsed.low_priority = true;
+    // A non-default MCP switch proves the field crosses the wire (#1536).
+    state.settings.values.mcp.enabled = false;
     state.settings.values.sidebar.apply_section_patch(
         koushi_state::SidebarSectionPatch {
             scope: "!space:example.invalid".to_owned(),

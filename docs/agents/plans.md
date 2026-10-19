@@ -19,6 +19,13 @@ feasibility gate. Historical plans below are not the new implementation brief.
 
 ## Runtime and roadmap
 
+[#1536 bundled MCP launcher and in-app approval](../plans/2026-10-19-issue1536-mcp-approval.md)
+replaces hand-edited grants with a consent broker in `koushi-mcp-host`: a
+missing permission becomes an approval the user answers in Koushi, per
+assistant, account, and permission, recorded in `mcp/connections.json` schema 2.
+Adds the `mcp.enabled` switch, the App Settings AI assistants page with
+copyable registration text, and the launcher in every release package.
+
 [#1524 MCP/GUI isolation](../plans/2026-10-18-mcp-ui-isolation.md)
 makes every MCP tool run as an in-process Core call that never reduces app
 actions or emits WebView events: independent per-request searches with the

@@ -56,6 +56,26 @@ describe("desktop release scripts", () => {
     expect(trial).not.toContain("--no-binary-patching");
   });
 
+  test.each([
+    ["scripts/desktop-build-dmg.mjs", []],
+    ["scripts/desktop-build-dmg.mjs", ["--target", "aarch64-apple-darwin"]],
+    ["scripts/desktop-build-linux.mjs", []],
+    ["scripts/desktop-build-windows.mjs", []],
+    ["scripts/desktop-build-windows.mjs", ["--build-only"]],
+    ["scripts/desktop-build-windows.mjs", ["--bundle-only", "--signed-input"]]
+  ])("%s %j bundles the koushi-mcp launcher (#1536)", (script, extra) => {
+    const output = runScript(script, ["--print-command", ...extra]);
+    const config = JSON.parse(output.match(/--config (\{.+\})/)?.[1] ?? "null");
+    expect(config.bundle.externalBin).toEqual(["binaries/koushi-mcp"]);
+  });
+
+  test("the launcher is never listed in tauri.conf.json, so plain cargo builds need no staged file", () => {
+    const tauriConfig = JSON.parse(
+      readFileSync(new URL("../../../../apps/desktop/src-tauri/tauri.conf.json", import.meta.url), "utf8")
+    );
+    expect(tauriConfig.bundle.externalBin).toBeUndefined();
+  });
+
   test("Windows release preparation uses a Tauri CLI that supports no-binary-patching", () => {
     const packageJson = JSON.parse(
       readFileSync(new URL("../../../../apps/desktop/package.json", import.meta.url), "utf8")

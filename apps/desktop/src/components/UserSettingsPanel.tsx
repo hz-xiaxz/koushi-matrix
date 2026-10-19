@@ -20,6 +20,7 @@ import { t, type MessageId } from "../i18n/messages";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import { KeyboardSettingsContent } from "./KeyboardSettingsPanel";
 import { SearchHistorySection } from "./user-settings/SearchHistorySection";
+import { AiAssistantsSection } from "./user-settings/AiAssistantsSection";
 import { AccountManagementSection } from "./user-settings/AccountManagementSection";
 import {
   type AccountNotificationActions,
@@ -47,6 +48,7 @@ import { ModalDialog } from "./ModalDialog";
 import { OtherOwnSessionsList } from "./ownSessions";
 import { toExternalHttpUrl } from "../domain/externalLinks";
 import type {
+  AccountTabSummary,
   AccountManagementCapabilities,
   AccountManagementState,
   CatalogLocale,
@@ -140,7 +142,8 @@ export function UserSettingsPanel({
   notificationDelivery = defaultNotificationDeliveryState,
   notificationDeliveryActions = noopNotificationDeliveryActions,
   rooms,
-  spaces
+  spaces,
+  accountTabs = []
 }: {
   initialCategory?: SettingsCategoryId;
   settingsScope?: "account" | "app";
@@ -217,6 +220,8 @@ export function UserSettingsPanel({
   notificationDeliveryActions?: NotificationDeliveryActions;
   rooms?: RoomSummary[];
   spaces?: SpaceSummary[];
+  /** App scope: the account tabs that label MCP assistant permissions (#1536). */
+  accountTabs?: readonly AccountTabSummary[];
 }) {
   const sessionStatusRefreshOwnerRef = useRef<string | null>(null);
   useEffect(() => {
@@ -248,7 +253,7 @@ export function UserSettingsPanel({
   const [displayNameDraft, setDisplayNameDraft] = useState(profile.own.display_name ?? "");
   const visibleCategories = settingsCategories.filter((category) =>
     settingsScope === "app"
-      ? ["appearance", "notifications", "preferences", "keyboard", "search", "help"].includes(category.id)
+      ? ["appearance", "notifications", "preferences", "keyboard", "search", "assistants", "help"].includes(category.id)
       : ["account", "sessions", "notifications", "privacy", "encryption", "search"].includes(category.id)
   );
   const initialVisibleCategory = visibleCategories.some((category) => category.id === initialCategory)
@@ -959,6 +964,26 @@ export function UserSettingsPanel({
             />
           </section>
         </div>
+        <div id="settings-page-assistants" role="tabpanel" aria-labelledby="settings-tab-assistants" className="settings-category" hidden={activeCategory !== "assistants"} tabIndex={0}>
+          <section
+            id="settings-ai-assistants"
+            className="settings-section"
+            aria-label={t("settings.categoryAssistants")}
+          >
+            <div className="settings-section-heading">
+              <h3>{t("settings.categoryAssistants")}</h3>
+              {isSaving ? <span className="settings-save-state">{t("settings.saving")}</span> : null}
+            </div>
+            {activeCategory === "assistants" ? (
+              <AiAssistantsSection
+                settings={settings.values.mcp}
+                isSaving={isSaving}
+                accountTabs={accountTabs}
+                onUpdateSettings={onUpdateSettings}
+              />
+            ) : null}
+          </section>
+        </div>
         <div id="settings-page-help" role="tabpanel" aria-labelledby="settings-tab-help" className="settings-category" hidden={activeCategory !== "help"} tabIndex={0}>
           <HelpContent />
         </div>
@@ -971,11 +996,13 @@ export function AppSettingsDialog({
   snapshot,
   onUpdateSettings,
   notificationDeliveryActions = noopNotificationDeliveryActions,
+  accountTabs = [],
   onClose
 }: {
   snapshot: DesktopSnapshot;
   onUpdateSettings: (patch: SettingsPatch) => void;
   notificationDeliveryActions?: NotificationDeliveryActions;
+  accountTabs?: readonly AccountTabSummary[];
   onClose: () => void;
 }) {
   const domain = snapshot.state.domain;
@@ -1009,6 +1036,7 @@ export function AppSettingsDialog({
         notificationDeliveryActions={notificationDeliveryActions}
         rooms={domain.rooms}
         spaces={domain.spaces}
+        accountTabs={accountTabs}
         onUpdateSettings={onUpdateSettings}
         onSetDisplayName={noop}
         onSetAvatar={noop}

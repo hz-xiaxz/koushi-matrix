@@ -1945,8 +1945,9 @@ Repeated Core evaluations with the same coarse signature are deduplicated.
 
 ## External MCP Bridge (local IPC)
 
-Koushi exposes a running instance to external MCP clients (Claude Code, Codex)
-through a stdio launcher backed by authenticated local IPC. The bridge gives an
+Koushi exposes a running instance to external MCP clients (Claude Code, Codex,
+pi, DeepSeek Harness, and other stdio clients) through a stdio launcher backed
+by authenticated local IPC. The launcher ships inside every release package. The bridge gives an
 assistant the encrypted history Koushi can already decrypt and the sending path
 Koushi already owns; it never gives the assistant a Matrix client, session
 token, device key, SDK store, or search index key.
@@ -1956,18 +1957,23 @@ Ownership:
 - `crates/koushi-mcp` is a stdio adapter and launcher. It owns JSON-RPC
   translation only: no Matrix semantics, no crypto, no message storage. It
   reads the endpoint file, presents the connection token, and relays requests.
-- `apps/desktop/src-tauri` hosts the socket listener, the endpoint file, and
-  the consent surface. It is a transport adapter: it resolves every request to
-  a `CoreConnection` for the requested account and dispatches typed
-  `koushi-protocol` commands. It owns no product state beyond the live
-  connection registry.
+- `crates/koushi-mcp-host` owns the socket listener, the endpoint file, the
+  grant store, and the consent broker. It is toolkit-independent, so the
+  desktop app and the headless QA host run the same bridge. It resolves every
+  request to a `CoreConnection` for the requested account and calls Core.
+- `apps/desktop/src-tauri` is transport only: it starts and stops the bridge
+  from the `mcp.enabled` setting, forwards the broker's process-wide state to
+  the WebView, forwards the user's answers, and resolves the bundled launcher
+  path. It holds no grant logic.
 - `koushi-core` remains the only production runtime owner. Search, send,
   attachment preparation, encryption, and projection stay in the existing
   actors; the bridge adds no alternate runtime and opens no crypto store.
-- Connection grants persist as Rust-owned settings
-  (`SettingsValues.mcp.connections`): permitted accounts, room scope,
-  read/write, attachment send, and poll limits. A live connection resolves its
-  grant on every call.
+- Grants persist in `<data_dir>/mcp/connections.json` (schema 2: per assistant,
+  per account, `read`/`send`/`attachments`), written by the app and re-read on
+  every call. They are not settings: settings values must not contain user
+  IDs, and account ids embed them. Schema 1 files are still read. A file the
+  app cannot parse grants nothing and is never overwritten. Only the on/off
+  switch is a setting (`SettingsValues.mcp.enabled`, app scope).
 
 Invariants:
 
@@ -1982,6 +1988,22 @@ Invariants:
   grant and the account's room membership. Rejections are typed outcomes, not
   adapter instructions. Read-only tools are marked read-only; sends are marked
   as writes.
+- **Approval in the app.** A call that needs a permission the store lacks
+  becomes a pending approval keyed by (client name, account, permission). The
+  account must resolve to a live account first. The user answers in a dialog;
+  Allow records exactly that one permission. Approvals, denials, expiry, and
+  disconnects follow "MCP Assistant Approval" in the state machine canon. A
+  host without a consent surface uses the fail-closed mode, which answers
+  `consent_required` at once.
+- **What an unapproved client sees.** `list_accounts` needs no permission and
+  returns every account id with its sign-in status. Account ids embed the
+  Matrix user ID, so any process that holds the per-launch token (any process
+  of the same OS user) can learn which accounts are signed in. Everything else
+  needs an approved permission.
+- **Client names are self-declared.** `--client-name` is validated at the
+  handshake (1-64 characters from `[A-Za-z0-9._-]`) but not verified; any
+  process of the same OS user can claim any name. The token and socket
+  permissions are the boundary, and the dialog says so.
 - **Credentials stay inside.** The connection token authenticates the local
   launcher to the app and is generated per app launch, held in a `0600`
   endpoint file, and never written to argv, logs, or events. Matrix
@@ -1992,11 +2014,14 @@ Invariants:
   directory. No caller-chosen destination is accepted.
 - **Polling, not push.** MCP cannot wake a host that is not calling. New
   messages surface through an account-bound, monotonic cursor consumed by a
-  user-configured `wait_for_events` long-poll; the cursor cannot replay
-  another account's events. The connection's poll limits are settings, not
-  constants.
-- **Shutdown is visible.** On app shutdown the socket is removed and the token
-  invalidated. `initialize` and `tools/list` still answer while Koushi is
+  `wait_for_events` long-poll of at most 50 s; the cursor cannot replay
+  another account's events. An approval wait counts against that call's 60 s
+  budget. Other tools do not share the budget: a send may wait 40 s for
+  approval and then for delivery, and a retry with the same
+  `client_request_id` is deduplicated.
+- **Shutdown is visible.** On app shutdown, or when the user turns the bridge
+  off, the socket is removed, the token invalidated, and live connections are
+  closed. `initialize` and `tools/list` still answer while Koushi is
   unavailable; account-scoped calls fail with a closed error code, and the
   next call re-reads the endpoint file.
 - **No GUI coupling.** Every tool call is an in-process Core request that
@@ -2008,7 +2033,9 @@ Invariants:
   reuses the download and managed-cache path, so an unviewed room needs no
   timeline actor or projected media entry. Progress, cancellation, and errors
   reach only the calling client. A sent message appearing through normal sync
-  is the expected exception, not a GUI operation.
+  is the expected exception, not a GUI operation. The other exception is
+  consent: a call that needs approval publishes the broker's state to the
+  WebView and requests window attention, without calling `set_focus`.
 - **No content telemetry.** Message bodies, queries, attachment bytes, tokens,
   and identifiers never appear in logs or diagnostics; only counts and closed
   error codes do.
