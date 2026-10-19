@@ -65,7 +65,7 @@ of several rich-message features, not the headline.
 Order is a recommendation; the builder may adjust layout.
 
 1. **Hero.** Wordmark, one-line pitch ("A desktop Matrix client for
-   conversations in many languages"), main screenshot (account tabs + three
+   many languages, and for your AI assistant"), main screenshot (account tabs + three
    panes), download button for macOS Apple Silicon. Other platforms are
    secondary links labelled untested, as in the README.
 2. **What is Matrix? (one or two sentences).** Something like "an open chat

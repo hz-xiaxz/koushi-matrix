@@ -82,3 +82,10 @@ test("the header and hero link prominently to the GitHub repository", () => {
   assert.match(html, /<a class="button secondary" href="https:\/\/github\.com\/shinaoka\/koushi-matrix">/);
   assert.ok(html.includes(en["hero.github"]));
 });
+
+test("the AI assistant section links its setup guide at the release tag", () => {
+  const html = renderPage({ locale: "en", strings: strings(), staleKeys: [], release });
+  assert.match(html, /<section class="ai" id="ai">/);
+  assert.match(html, /\/blob\/v0\.26\.0\/docs\/help\/ai-assistants\.md/);
+  assert.ok(html.includes("claude mcp add --scope user koushi"));
+});

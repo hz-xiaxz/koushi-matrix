@@ -1,19 +1,19 @@
 {
   "meta.title": {
-    "text": "Koushi — 여러 언어로 나누는 대화를 위한 데스크톱 Matrix 클라이언트",
-    "source_hash": "ba939fdc85ef"
+    "text": "Koushi — 여러 언어로 나누는 대화와 AI 어시스턴트를 위한 데스크톱 Matrix 클라이언트",
+    "source_hash": "cb18f20f64bf"
   },
   "meta.description": {
-    "text": "업무, 개인, 커뮤니티 Matrix 계정을 한 창에 나란히 열어 두세요. 암호화된 채팅, 한국어·일본어·중국어에 강한 로컬 전문 검색, 내 컴퓨터에서 보내는 알림까지.",
-    "source_hash": "3bbef07d2b88"
+    "text": "업무, 개인, 커뮤니티 Matrix 계정을 한 창에 나란히 열어 두세요. 암호화된 채팅, 한국어·일본어·중국어에 강한 로컬 전문 검색, 내 컴퓨터에서 보내는 알림, 그리고 AI 어시스턴트를 위한 로컬 MCP 서버까지.",
+    "source_hash": "46ffa30057cd"
   },
   "nav.language": {
     "text": "언어",
     "source_hash": "a4fe65264ef7"
   },
   "hero.tagline": {
-    "text": "여러 언어로 나누는 대화를 위한 데스크톱 Matrix 클라이언트.",
-    "source_hash": "a1a07eb6026a"
+    "text": "여러 언어로 나누는 대화와 AI 어시스턴트를 위한 데스크톱 Matrix 클라이언트.",
+    "source_hash": "debc95f63d3c"
   },
   "hero.lede": {
     "text": "업무, 개인, 커뮤니티 Matrix 계정을 한 창에 나란히 열어 둘 수 있습니다. 계정마다 탭이 있고, 모두 로그인 상태를 유지하며 계속 동기화합니다.",
@@ -163,6 +163,82 @@
     "text": "ChatGPT 같은 AI 어시스턴트에게 내 언어로 물어보세요. Koushi 사용자 가이드는 어시스턴트가 읽을 수 있도록 쓰였고, 앱의 \"도움말 및 정보\"에서 묻는 방법을 알려 줍니다.",
     "source_hash": "225ee33c413b"
   },
+  "ai.heading": {
+    "text": "AI 어시스턴트를 대화에 초대하세요",
+    "source_hash": "00c2e2c1519e"
+  },
+  "ai.lede": {
+    "text": "Koushi는 Claude Code, Codex 등 MCP 클라이언트를 위한 로컬 MCP 서버로 동작할 수 있습니다. 어시스턴트는 컴퓨터에 이미 열려 있는 Koushi 앱과 통신하므로, 암호화 키를 전혀 갖지 않고도 검색하고 요약하고 답장할 수 있습니다.",
+    "source_hash": "4b5604d69b9b"
+  },
+  "ai.can.heading": {
+    "text": "할 수 있는 일",
+    "source_hash": "55e8e93ff5d4"
+  },
+  "ai.can.search": {
+    "text": "암호화된 방을 포함한 기록을 검색하고, 결과마다 시간과 방을 알려 줍니다",
+    "source_hash": "0a5fb5ee1d16"
+  },
+  "ai.can.unread": {
+    "text": "읽지 않은 메시지와 멘션이 있는 방을 나열하고, 방의 최근 메시지를 읽어 요약합니다",
+    "source_hash": "0b01aeccae58"
+  },
+  "ai.can.reply": {
+    "text": "메시지나 답장을 보냅니다. 열려 있지 않은 방에도 보낼 수 있고, 작성 중인 초안은 건드리지 않습니다",
+    "source_hash": "359f69051ef2"
+  },
+  "ai.can.attachments": {
+    "text": "첨부 파일을 Koushi의 미디어 캐시에 다운로드합니다",
+    "source_hash": "29e016f7acf0"
+  },
+  "ai.can.wait": {
+    "text": "새 메시지가 도착하기를 기다립니다",
+    "source_hash": "e417118a31fe"
+  },
+  "ai.control.heading": {
+    "text": "제어권은 당신에게",
+    "source_hash": "faa171843999"
+  },
+  "ai.control.grant": {
+    "text": "접근을 허용하기 전까지 어시스턴트는 계정 ID만 볼 수 있습니다.",
+    "source_hash": "81442e389379"
+  },
+  "ai.control.scope": {
+    "text": "어시스턴트마다 필요한 계정만 허용할 수 있으며, 그 밖의 계정은 전혀 보이지 않습니다.",
+    "source_hash": "c1ba4a2e7994"
+  },
+  "ai.control.flags": {
+    "text": "읽기, 보내기, 첨부 파일은 별도의 권한입니다. 변경 사항은 다음 호출부터 적용되며, 허용 항목을 삭제하면 취소됩니다.",
+    "source_hash": "05ae86ff7413"
+  },
+  "ai.control.plain": {
+    "text": "보낸 메시지는 당신의 계정에서 보낸 일반 메시지이며, Koushi는 어시스턴트가 작성했다고 표시하지 않습니다.",
+    "source_hash": "23dba9c72020"
+  },
+  "ai.try.heading": {
+    "text": "그다음 평소 말투로 요청하세요",
+    "source_hash": "3b458f832436"
+  },
+  "ai.try.unread": {
+    "text": "읽지 않은 메시지가 있는 방은? Design 방 내용을 요약해 줘.",
+    "source_hash": "447a8abc45a5"
+  },
+  "ai.try.search": {
+    "text": "지난달 누가 보내 준 청구서를 찾아 줘.",
+    "source_hash": "0ec0e805ccd0"
+  },
+  "ai.try.reply": {
+    "text": "그 메시지에 내일 파일을 보내겠다고 답장해 줘.",
+    "source_hash": "4a392390d2b6"
+  },
+  "ai.setup": {
+    "text": "현재 버전은 기술 사용자용입니다. koushi-mcp 런처가 아직 앱에 포함되어 있지 않아 소스에서 빌드해야 하며, 접근 권한은 JSON 파일을 편집해 부여합니다.",
+    "source_hash": "f49d103201bb"
+  },
+  "ai.guide": {
+    "text": "AI 어시스턴트 설정하기",
+    "source_hash": "9b9eb9cb1070"
+  },
   "features.heading": {
     "text": "일상 기능",
     "source_hash": "e844b2426dc5"
@@ -292,8 +368,8 @@
     "source_hash": "92acde95eedd"
   },
   "missing.body": {
-    "text": "음성 및 영상 통화, 화면 공유, 봇, 위젯, 서드파티 앱 연동.",
-    "source_hash": "bfed657cc891"
+    "text": "음성 및 영상 통화, 화면 공유, 봇, 위젯.",
+    "source_hash": "b506dbeb1304"
   },
   "platforms.heading": {
     "text": "플랫폼",
