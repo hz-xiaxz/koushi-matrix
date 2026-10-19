@@ -14,7 +14,8 @@ import type {
   SettingsPatch
 } from "../../domain/types";
 import { t } from "../../i18n/messages";
-import { mcpAccountLabel, useMcpAssistantsState } from "../useMcpAssistantsState";
+import { accountTabLabel } from "../accountSignOut";
+import { mcpAccountId, mcpAccountLabel, useMcpAssistantsState } from "../useMcpAssistantsState";
 import { MCP_ALLOW_ARMING_DELAY_MS, mcpAllowLabel, mcpWantsText, useArmed } from "../McpApprovalDialog";
 
 const NEEDS: readonly McpNeed[] = ["read", "send", "attachments"];
@@ -178,9 +179,10 @@ function AssistantCard({
   const [busy, setBusy] = useState(false);
   const client = assistant.client_name;
   const rows: McpAssistantAccount[] = [...assistant.accounts];
-  const unrequested = accountTabs.filter(
-    tab => tab.accountKey !== null && !rows.some(row => row.account_id === tab.id)
-  );
+  const unrequested = accountTabs.filter(tab => {
+    const accountId = mcpAccountId(tab);
+    return accountId !== null && !rows.some(row => row.account_id === accountId);
+  });
   const details = [
     t("settings.assistantsSelfDeclared"),
     assistant.client_version ? t("settings.assistantsVersion", { version: assistant.client_version }) : null,
@@ -240,7 +242,7 @@ function AssistantCard({
         })}
         {unrequested.map(tab => (
           <div role="row" className="settings-assistant-row" key={tab.id}>
-            <span role="rowheader">{mcpAccountLabel(tab.id, accountTabs)}</span>
+            <span role="rowheader">{accountTabLabel(tab)}</span>
             <span role="cell" aria-colspan={3} className="settings-assistant-unrequested">
               {t("settings.assistantsNotRequested", { client })}
             </span>

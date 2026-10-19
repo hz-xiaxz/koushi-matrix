@@ -3467,6 +3467,7 @@ version = "0.1.0"
 dependencies = [
  "koushi-core",
  "koushi-diagnostics",
+ "koushi-key",
  "koushi-mcp",
  "koushi-protocol",
  "koushi-state",

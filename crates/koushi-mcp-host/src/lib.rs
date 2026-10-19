@@ -40,15 +40,19 @@ pub trait BridgeAccounts: Send + Sync + 'static {
 }
 
 impl BridgeAccounts for AccountRuntimeManager {
+    /// Every tab bound to an account, named by its stable account id. A tab
+    /// that signed in during this run still has its sign-in tab id, which
+    /// would hide the account from assistants until the next launch and
+    /// change the id its grants are keyed by.
     fn accounts(&self) -> Vec<BridgeAccount> {
         self.tab_descriptors()
             .into_iter()
-            .filter(|tab| tab.id.is_account())
             .filter_map(|tab| {
+                let stable_id = tab.stable_account_id()?;
                 let connection = self.tab_connection(&tab.id)?;
                 let media_cache_dir = self.media_cache_dir_for_tab(&tab.id)?;
                 Some(BridgeAccount {
-                    id: tab.id.as_str().to_owned(),
+                    id: stable_id.as_str().to_owned(),
                     homeserver: tab.homeserver.clone(),
                     connection,
                     media_cache_dir,
