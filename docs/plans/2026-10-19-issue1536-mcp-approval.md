@@ -258,3 +258,17 @@ per-room scopes, a persisted activity log, launcher path pinning.
   per-client caps, preview labelling and redaction, typed store status and
   write ordering, canon edits, fail-closed startup, timing budget, lock
   discipline, packaging modes, AppImage/translocation paths, tests and docs.
+- Integrated-diff review (independent subagent, 2026-10-19): approve with
+  changes; no path grants access without the user. Adopted: a joining call
+  updates the dialog's context and is counted; a store generation keeps a stale
+  read from undoing a revocation; only live approvals are joined; Allow settles
+  every approval for its key; Deny is serialized with writes; the broker resets
+  after connections drain; the listener is dropped at once and a stuck drain is
+  aborted; exit stop no longer depends on an async lock; settings are
+  subscribed before loading; the `seen` map is bounded; invisible and tag
+  characters are stripped; `ConsentContext` Debug is redacted; open approvals
+  are answerable from the settings page; ARIA fixes; canon wording on publish
+  order, shutdown, the 60 s budget, focus, and the `list_accounts` account-id
+  disclosure (pre-existing, now documented rather than changed).
+- Verified locally: a debug `.deb` built with the staged sidecar contains
+  `usr/bin/koushi-mcp` beside `usr/bin/koushi-desktop`.

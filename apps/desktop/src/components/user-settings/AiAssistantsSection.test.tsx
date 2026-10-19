@@ -7,6 +7,7 @@ import { AiAssistantsSection } from "./AiAssistantsSection";
 const fixture = vi.hoisted(() => ({
   listeners: new Set<(state: McpAssistantsState) => void>(),
   getState: vi.fn(),
+  answer: vi.fn(),
   setPermission: vi.fn(),
   remove: vi.fn()
 }));
@@ -14,6 +15,7 @@ vi.mock("../../backend/runtimeEnvironment", () => ({ isTauriRuntime: () => true 
 vi.mock("../../backend/appRuntime", () => ({
   api: {
     getMcpAssistantsState: fixture.getState,
+    answerMcpApproval: fixture.answer,
     setMcpPermission: fixture.setPermission,
     removeMcpAssistant: fixture.remove
   }
@@ -131,6 +133,30 @@ test("problems are explained: launcher missing, unreadable store, start failure"
   expect(screen.getByText(/cannot read its assistant permissions file/)).toBeTruthy();
   expect(screen.getByText(/does not include the koushi-mcp launcher/)).toBeTruthy();
   expect(screen.queryByRole("tablist")).toBeNull();
+});
+
+test("an approval whose dialog was closed can be answered here", async () => {
+  fixture.answer.mockResolvedValue("applied");
+  await renderSection(state({
+    pending: [{
+      request_id: 5,
+      client_name: "pi",
+      client_version: "",
+      account_id: HOME,
+      need: "read",
+      room_label: null,
+      message_preview: null,
+      waiting: false,
+      waiting_calls: 0
+    }]
+  }));
+  const pending = screen.getByRole("region", { name: "Waiting for your answer" });
+  expect(within(pending).getByText("wants to read Member Home")).toBeTruthy();
+  const allow = within(pending).getByRole("button", { name: "Allow reading Member Home" }) as HTMLButtonElement;
+  expect(allow.disabled).toBe(true);
+  await waitFor(() => expect(allow.disabled).toBe(false), { timeout: 2000 });
+  fireEvent.click(allow);
+  expect(fixture.answer).toHaveBeenCalledWith(5, true);
 });
 
 test("live updates replace the shown state", async () => {

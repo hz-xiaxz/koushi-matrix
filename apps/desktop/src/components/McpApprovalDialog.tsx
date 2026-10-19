@@ -1,7 +1,7 @@
 import { useEffect, useState } from "react";
 import { Bot, ShieldAlert } from "lucide-react";
 import { api } from "../backend/appRuntime";
-import type { AccountTabSummary, McpPendingApproval } from "../domain/types";
+import type { AccountTabSummary, McpNeed, McpPendingApproval } from "../domain/types";
 import { t } from "../i18n/messages";
 import { ModalDialog } from "./ModalDialog";
 import { mcpAccountLabel, useMcpAssistantsState } from "./useMcpAssistantsState";
@@ -32,6 +32,33 @@ export function McpApprovalDialog({ accountTabs }: { accountTabs: readonly Accou
   );
 }
 
+/** Whether a just-shown approval may be allowed yet (see the arming delay). */
+export function useArmed(armingDelayMs: number): boolean {
+  const [armed, setArmed] = useState(armingDelayMs <= 0);
+  useEffect(() => {
+    if (armingDelayMs <= 0) return;
+    const timer = window.setTimeout(() => setArmed(true), armingDelayMs);
+    return () => window.clearTimeout(timer);
+  }, [armingDelayMs]);
+  return armed;
+}
+
+export function mcpWantsText(need: McpNeed, account: string): string {
+  return {
+    read: t("mcp.wantsRead", { account }),
+    send: t("mcp.wantsSend", { account }),
+    attachments: t("mcp.wantsAttachments", { account })
+  }[need];
+}
+
+export function mcpAllowLabel(need: McpNeed, account: string): string {
+  return {
+    read: t("mcp.allowRead", { account }),
+    send: t("mcp.allowSend", { account }),
+    attachments: t("mcp.allowAttachments", { account })
+  }[need];
+}
+
 export function McpApprovalPrompt({
   request,
   accountTabs,
@@ -45,14 +72,9 @@ export function McpApprovalPrompt({
   onClose: () => void;
   armingDelayMs?: number;
 }) {
-  const [armed, setArmed] = useState(armingDelayMs <= 0);
+  const armed = useArmed(armingDelayMs);
   const [busy, setBusy] = useState(false);
   const [saveFailed, setSaveFailed] = useState(false);
-  useEffect(() => {
-    if (armingDelayMs <= 0) return;
-    const timer = window.setTimeout(() => setArmed(true), armingDelayMs);
-    return () => window.clearTimeout(timer);
-  }, [armingDelayMs]);
 
   const client = request.client_name;
   const tab = accountTabs.find(candidate => candidate.id === request.account_id);
@@ -62,16 +84,8 @@ export function McpApprovalPrompt({
     send: t("mcp.approveSendTitle", { client }),
     attachments: t("mcp.approveAttachmentsTitle", { client })
   }[request.need];
-  const wants = {
-    read: t("mcp.wantsRead", { account }),
-    send: t("mcp.wantsSend", { account }),
-    attachments: t("mcp.wantsAttachments", { account })
-  }[request.need];
-  const allowLabel = {
-    read: t("mcp.allowRead", { account }),
-    send: t("mcp.allowSend", { account }),
-    attachments: t("mcp.allowAttachments", { account })
-  }[request.need];
+  const wants = mcpWantsText(request.need, account);
+  const allowLabel = mcpAllowLabel(request.need, account);
 
   async function answer(allow: boolean) {
     setBusy(true);
@@ -116,7 +130,7 @@ export function McpApprovalPrompt({
 
         {request.need === "send" ? (
           <>
-            {request.message_preview !== null ? (
+            {request.waiting && request.message_preview !== null ? (
               <>
                 <p className="mcp-approval-heading">
                   {request.room_label
@@ -144,6 +158,9 @@ export function McpApprovalPrompt({
           <span>{t("mcp.selfDeclared", { client })}</span>
         </p>
         {saveFailed ? <p role="alert" className="mcp-approval-error">{t("mcp.saveFailed")}</p> : null}
+        {request.waiting_calls > 1
+          ? <p className="mcp-approval-more">{t("mcp.moreMessagesWaiting", { count: String(request.waiting_calls - 1) })}</p>
+          : null}
         {moreWaiting > 0 ? <p className="mcp-approval-more">{t("mcp.moreWaiting", { count: String(moreWaiting) })}</p> : null}
 
         <div className="dialog-actions">

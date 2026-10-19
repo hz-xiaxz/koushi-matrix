@@ -975,6 +975,8 @@ export const ko: Catalog = {
   "mcp.allowAttachments": "{account}에서 다운로드 허용",
   "mcp.moreWaiting": "대기 중인 다른 요청: {count}",
   "mcp.saveFailed": "이 승인을 저장하지 못했습니다. 앱 설정 → AI 어시스턴트를 확인하세요.",
+  "mcp.moreMessagesWaiting": "이 답변을 기다리는 이 어시스턴트의 다른 호출: {count}",
+  "settings.assistantsPending": "답변 대기 중",
   "settings.updateIgnored": "Koushi를 다시 시작할 때까지 이 버전에 대한 자동 알림이 꺼집니다. 다운로드는 계속 할 수 있습니다.",
   "settings.updateDownloading": "Koushi {version} 다운로드 및 확인 중…",
   "settings.updateReady": "Koushi {version}을(를) 설치할 준비가 되었습니다.",

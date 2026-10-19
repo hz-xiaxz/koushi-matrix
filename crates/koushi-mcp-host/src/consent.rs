@@ -36,6 +36,8 @@ pub const PENDING_PER_CLIENT: usize = 4;
 pub const PENDING_TOTAL: usize = 16;
 /// Characters of an outgoing message shown as approval context.
 pub const PREVIEW_CHARS: usize = 280;
+/// Client names remembered for their version and last use.
+const SEEN_LIMIT: usize = 64;
 /// Granularity of the "last used" time, so routine calls do not republish.
 const LAST_USED_GRANULARITY_MS: u64 = 30_000;
 
@@ -86,12 +88,23 @@ pub struct ClientIdentity {
 }
 
 /// What the dialog shows besides the client, account, and permission.
-#[derive(Clone, Debug, Default, Eq, PartialEq)]
+#[derive(Clone, Default, Eq, PartialEq)]
 pub struct ConsentContext {
     /// The target room's label, only when the room resolved to a joined room.
     pub room_label: Option<String>,
     /// The beginning of the message a send is waiting to deliver.
     pub message_preview: Option<String>,
+}
+
+impl std::fmt::Debug for ConsentContext {
+    // The room label and message are user content; only their presence shows.
+    fn fmt(&self, formatter: &mut std::fmt::Formatter<'_>) -> std::fmt::Result {
+        formatter
+            .debug_struct("ConsentContext")
+            .field("room_label", &self.room_label.is_some())
+            .field("message_preview", &self.message_preview.is_some())
+            .finish()
+    }
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize)]
@@ -105,6 +118,9 @@ pub struct PendingApproval {
     pub message_preview: Option<String>,
     /// Whether a tool call is still waiting for this answer.
     pub waiting: bool,
+    /// How many tool calls wait for this answer. Allow releases all of them;
+    /// the preview shows the most recent one.
+    pub waiting_calls: usize,
 }
 
 #[derive(Clone, Eq, PartialEq, Serialize)]
@@ -215,6 +231,31 @@ struct Inner {
     launcher: LauncherStatus,
     store_status: StoreStatus,
     store: Store,
+    /// Bumped by every write of the store. A read that started before a write
+    /// must not replace what that write installed (a revocation would briefly
+    /// come undone).
+    store_generation: u64,
+}
+
+impl Inner {
+    /// Adopts a store read that began at `generation`, unless a write landed
+    /// since. Returns whether the visible state changed.
+    fn adopt(&mut self, generation: u64, loaded: grants::Loaded) -> bool {
+        if self.store_generation != generation {
+            return false;
+        }
+        let changed = self.store_status != loaded.status || self.store != loaded.store;
+        self.store_status = loaded.status;
+        self.store = loaded.store;
+        changed
+    }
+
+    /// Installs what a successful write produced.
+    fn written(&mut self, store: Store) {
+        self.store_generation += 1;
+        self.store_status = StoreStatus::Ok;
+        self.store = store;
+    }
 }
 
 /// The process-wide approval broker.
@@ -240,6 +281,7 @@ impl ConsentBroker {
             },
             store_status: loaded.status,
             store: loaded.store,
+            store_generation: 0,
         };
         let (state, _) = watch::channel(view(&inner));
         Arc::new(Self {
@@ -268,10 +310,10 @@ impl ConsentBroker {
     /// Re-reads the grant store (a person may have edited it) and returns the
     /// refreshed state.
     pub fn refresh(&self) -> McpAssistantsState {
+        let generation = self.lock().store_generation;
         let loaded = grants::load(&self.data_dir);
         self.update(|inner| {
-            inner.store_status = loaded.status;
-            inner.store = loaded.store;
+            inner.adopt(generation, loaded);
         })
     }
 
@@ -321,6 +363,7 @@ impl ConsentBroker {
         need: Need,
         context: ConsentContext,
     ) -> Result<(), WireError> {
+        let generation = self.lock().store_generation;
         let loaded = grants::load(&self.data_dir);
         let key = Key {
             client: client.name.clone(),
@@ -329,9 +372,7 @@ impl ConsentBroker {
         };
         let receiver = {
             let mut inner = self.lock();
-            let mut changed = inner.store_status != loaded.status || inner.store != loaded.store;
-            inner.store_status = loaded.status;
-            inner.store = loaded.store;
+            let mut changed = inner.adopt(generation, loaded);
             changed |= note_use(&mut inner, client);
             if inner.store.allows(&key.client, &key.account, need) {
                 if changed {
@@ -356,10 +397,23 @@ impl ConsentBroker {
                 ));
             }
             let (sender, receiver) = oneshot::channel();
-            let request_id = match inner.pending.iter_mut().find(|pending| pending.key == key) {
+            let now = Instant::now();
+            let room_label = context.room_label.map(|label| sanitize(&label, 120));
+            let message_preview = context
+                .message_preview
+                .map(|text| sanitize(&text, PREVIEW_CHARS));
+            let request_id = match inner
+                .pending
+                .iter_mut()
+                .find(|pending| pending.key == key && pending.expires_at > now)
+            {
                 Some(pending) => {
+                    // A retry or a second call joins; the dialog shows what
+                    // the newest caller is waiting to do.
                     pending.waiters += 1;
                     pending.senders.push(sender);
+                    pending.room_label = room_label;
+                    pending.message_preview = message_preview;
                     pending.request_id
                 }
                 None => {
@@ -383,11 +437,9 @@ impl ConsentBroker {
                         request_id,
                         key: key.clone(),
                         client_version: client.version.clone(),
-                        room_label: context.room_label.map(|label| sanitize(&label, 120)),
-                        message_preview: context
-                            .message_preview
-                            .map(|text| sanitize(&text, PREVIEW_CHARS)),
-                        expires_at: Instant::now() + APPROVAL_LIFETIME,
+                        room_label,
+                        message_preview,
+                        expires_at: now + APPROVAL_LIFETIME,
                         waiters: 1,
                         senders: vec![sender],
                     });
@@ -406,6 +458,9 @@ impl ConsentBroker {
 
     /// Answers a pending approval by its id.
     pub async fn answer(&self, request_id: u64, allow: bool) -> AnswerOutcome {
+        // Deny is serialized with writes too, so an Allow and a Deny for the
+        // same request cannot both apply.
+        let _writer = self.writer.lock().await;
         if !allow {
             let mut inner = self.lock();
             let Some(index) = live_index(&inner, request_id) else {
@@ -418,7 +473,6 @@ impl ConsentBroker {
             return AnswerOutcome::Applied;
         }
 
-        let _writer = self.writer.lock().await;
         let key = {
             let inner = self.lock();
             match live_index(&inner, request_id) {
@@ -431,12 +485,17 @@ impl ConsentBroker {
         let index = live_index(&inner, request_id);
         match saved {
             Ok(store) => {
-                inner.store_status = StoreStatus::Ok;
-                inner.store = store;
+                inner.written(store);
                 inner.denied.remove(&key);
-                if let Some(index) = index {
-                    inner.pending.remove(index).resolve(Outcome::Allowed);
-                }
+                // Settle every approval for this key, including one created
+                // after the answered one expired during the write.
+                inner.pending.retain_mut(|pending| {
+                    let settled = pending.key == key;
+                    if settled {
+                        pending.resolve(Outcome::Allowed);
+                    }
+                    !settled
+                });
                 self.publish(&inner);
                 AnswerOutcome::Applied
             }
@@ -470,8 +529,7 @@ impl ConsentBroker {
         let mut inner = self.lock();
         match saved {
             Ok(store) => {
-                inner.store_status = StoreStatus::Ok;
-                inner.store = store;
+                inner.written(store);
                 if allowed {
                     inner.denied.remove(&key);
                     if let Some(index) = inner.pending.iter().position(|pending| pending.key == key)
@@ -500,8 +558,7 @@ impl ConsentBroker {
         let mut inner = self.lock();
         match saved {
             Ok(store) => {
-                inner.store_status = StoreStatus::Ok;
-                inner.store = store;
+                inner.written(store);
                 inner.denied.retain(|key| key.client != client_name);
                 inner.pending.retain_mut(|pending| {
                     let keep = pending.key.client != client_name;
@@ -665,6 +722,9 @@ fn note_use(inner: &mut Inner, client: &ClientIdentity) -> bool {
             false
         }
         _ => {
+            if inner.seen.len() >= SEEN_LIMIT && !inner.seen.contains_key(&client.name) {
+                prune_seen(inner);
+            }
             inner.seen.insert(
                 client.name.clone(),
                 Seen {
@@ -677,6 +737,23 @@ fn note_use(inner: &mut Inner, client: &ClientIdentity) -> bool {
     }
 }
 
+/// Self-declared names are free to invent, so names that hold no grant, no
+/// denial, and no approval are forgotten once the map is full.
+fn prune_seen(inner: &mut Inner) {
+    let Inner {
+        seen,
+        store,
+        denied,
+        pending,
+        ..
+    } = inner;
+    seen.retain(|name, _| {
+        store.client(name).is_some()
+            || denied.iter().any(|key| &key.client == name)
+            || pending.iter().any(|request| &request.key.client == name)
+    });
+}
+
 fn now_ms() -> u64 {
     std::time::SystemTime::now()
         .duration_since(std::time::UNIX_EPOCH)
@@ -684,15 +761,24 @@ fn now_ms() -> u64 {
         .unwrap_or(0)
 }
 
-/// Text the assistant chose, made safe to show: control and bidirectional
-/// formatting characters removed, length capped.
+/// Text the assistant chose, made safe to show: control, bidirectional,
+/// invisible formatting, and tag characters removed (they could hide or
+/// reorder text), length capped.
 pub fn sanitize(text: &str, max_chars: usize) -> String {
     let mut out = String::new();
     let mut count = 0;
     for character in text.chars() {
         let formatting = matches!(
             character,
-            '\u{200E}' | '\u{200F}' | '\u{061C}' | '\u{202A}'..='\u{202E}' | '\u{2066}'..='\u{2069}'
+            // Zero-width joiners stay: emoji sequences and some scripts need them.
+            '\u{200B}'
+                | '\u{200E}'
+                | '\u{200F}'
+                | '\u{061C}'
+                | '\u{2028}'..='\u{202E}'
+                | '\u{2060}'..='\u{2069}'
+                | '\u{FEFF}'
+                | '\u{E0000}'..='\u{E007F}'
         );
         if formatting {
             continue;
@@ -725,6 +811,7 @@ fn view(inner: &Inner) -> McpAssistantsState {
             room_label: pending.room_label.clone(),
             message_preview: pending.message_preview.clone(),
             waiting: pending.waiters > 0,
+            waiting_calls: pending.waiters,
         })
         .collect();
 
@@ -804,5 +891,53 @@ fn view(inner: &Inner) -> McpAssistantsState {
         pending,
         assistants,
         registrations,
+    }
+}
+
+#[cfg(test)]
+mod tests {
+    use super::*;
+
+    fn inner(generation: u64) -> Inner {
+        Inner {
+            next_request_id: 1,
+            pending: Vec::new(),
+            denied: HashSet::new(),
+            seen: HashMap::new(),
+            bridge: BridgeStatus::Running,
+            launcher: LauncherStatus::Unavailable {
+                reason: LauncherUnavailable::NotBundled,
+            },
+            store_status: StoreStatus::Ok,
+            store: Store::default(),
+            store_generation: generation,
+        }
+    }
+
+    #[test]
+    fn a_read_that_started_before_a_write_does_not_replace_it() {
+        let mut granted = Store::default();
+        granted.set("pi", "account:@alice:example.invalid", Need::Read, true);
+        let stale = grants::Loaded {
+            status: StoreStatus::Ok,
+            store: granted.clone(),
+        };
+
+        // A revocation wrote generation 1 while this read was in flight.
+        let mut state = inner(1);
+        assert!(!state.adopt(0, stale.clone()));
+        assert!(
+            !state
+                .store
+                .allows("pi", "account:@alice:example.invalid", Need::Read)
+        );
+
+        // The same read with no intervening write is adopted.
+        assert!(state.adopt(1, stale));
+        assert!(
+            state
+                .store
+                .allows("pi", "account:@alice:example.invalid", Need::Read)
+        );
     }
 }

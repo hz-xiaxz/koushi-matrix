@@ -6885,7 +6885,9 @@ stateDiagram-v2
 ```
 
 - **Keys and fencing.** A pending approval is keyed by (client name, account
-  id, permission); a call with the same key joins it. Each has a monotonic
+  id, permission); a call with the same key joins a live one, and the dialog
+  then shows the newest caller's room and message and how many calls wait.
+  Allow settles every approval with that key. Each has a monotonic
   `request_id`, and answers name it. An answer for an unknown, expired, or
   already settled id is a no-op reported as `stale`.
 - **Admission.** The account must resolve to a live account before an approval
@@ -6897,9 +6899,12 @@ stateDiagram-v2
   approval stays pending, so a later Allow lets the retry pass. A call whose
   connection closes is dropped and never runs its tool. When the last waiter
   leaves, the message preview is cleared.
-- **Store writes.** Allow and settings changes re-read `connections.json`
-  under one async writer lock and atomically replace it, then update state,
-  publish, and wake waiters, in that order. A missing file is created; a
+- **Store writes.** Allow, Deny, and settings changes take one async writer
+  lock. Writes re-read `connections.json` and atomically replace it; then,
+  under the state lock, the new store is installed, waiters are woken, and the
+  state is published. Every write bumps a store generation, and a read that
+  began before a write never replaces what the write installed, so a
+  revocation cannot briefly come undone. A missing file is created; a
   malformed, unreadable, or newer-schema file is never overwritten, and the
   failure is published as the store status.
 - **Denial memory** lasts until the permission is turned on in settings, the
@@ -6909,8 +6914,10 @@ stateDiagram-v2
   await and no file I/O under it; each mutation publishes on the `watch`
   channel before the lock is released.
 - **Presentation.** The dialog never takes initial focus on Allow, and Allow
-  ignores activation for one second after a request appears. Window attention
-  shows a hidden window but never forces focus.
+  ignores activation for one second after a request appears, in the dialog and
+  in the settings page's list of open approvals. Window attention shows a
+  hidden window and requests attention without calling `set_focus`; platform
+  show/unminimize behavior may still bring the window forward.
 - `Debug` of the state redacts client names, account ids, room labels, and
   previews; diagnostics record closed codes only.
 
@@ -6925,9 +6932,11 @@ stateDiagram-v2
     StartFailed --> Disabled: mcp.enabled turned off
 ```
 
-- Stopping signals every connection, waits for them, removes the endpoint
-  file and socket, and resets the broker. A later start owns the socket path
-  alone; a dropped old handle never removes a newer bridge's files.
+- Turning the bridge off signals every connection, waits for them (aborting
+  after 5 s), resets the broker, and removes the endpoint file and socket. A
+  later start owns the socket path alone; a dropped old handle never removes a
+  newer bridge's files. On process exit the stop signals and resets without
+  waiting.
 
 ## Historical key recovery
 

@@ -19,18 +19,41 @@ pub const MCP_EVENT_NAME: &str = "koushi-desktop://mcp";
 /// Tauri-managed owner of the broker and the running bridge.
 pub(crate) struct McpController {
     pub(crate) broker: Arc<ConsentBroker>,
-    bridge: tokio::sync::Mutex<Option<BridgeHandle>>,
+    /// The running bridge. Never held across an await, so the synchronous
+    /// exit handler can always take it.
+    bridge: std::sync::Mutex<Option<BridgeHandle>>,
+    /// Serializes switch changes, which await the bridge's shutdown.
+    switch: tokio::sync::Mutex<()>,
 }
 
 impl McpController {
-    /// Stops the bridge on process exit without waiting: removes the
-    /// endpoint file and socket and releases waiting calls.
+    /// Stops the bridge on process exit: removes the endpoint file and socket
+    /// and releases waiting calls.
     pub(crate) fn stop_now(&self) {
-        if let Ok(mut slot) = self.bridge.try_lock()
-            && let Some(handle) = slot.take()
-        {
+        if let Some(handle) = self.take_bridge() {
             handle.stop();
         }
+    }
+
+    fn take_bridge(&self) -> Option<BridgeHandle> {
+        self.bridge
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .take()
+    }
+
+    fn has_bridge(&self) -> bool {
+        self.bridge
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner)
+            .is_some()
+    }
+
+    fn set_bridge(&self, handle: BridgeHandle) {
+        *self
+            .bridge
+            .lock()
+            .unwrap_or_else(std::sync::PoisonError::into_inner) = Some(handle);
     }
 }
 
@@ -40,7 +63,8 @@ pub(crate) fn install(app: &AppHandle, runtime: Arc<AccountRuntimeManager>, data
     broker.set_launcher(launcher::resolve(&data_dir));
     app.manage(McpController {
         broker: Arc::clone(&broker),
-        bridge: tokio::sync::Mutex::new(None),
+        bridge: std::sync::Mutex::new(None),
+        switch: tokio::sync::Mutex::new(()),
     });
     spawn_forwarder(app.clone(), Arc::clone(&broker));
     spawn_switch(app.clone(), runtime, data_dir);
@@ -51,14 +75,16 @@ pub(crate) fn install(app: &AppHandle, runtime: Arc<AccountRuntimeManager>, data
 /// than falling back to the default.
 fn spawn_switch(app: AppHandle, runtime: Arc<AccountRuntimeManager>, data_dir: PathBuf) {
     tauri::async_runtime::spawn(async move {
+        // Subscribe first: a change saved while the file loads is then seen
+        // by the loop below rather than lost.
+        let mut updates = runtime.subscribe_app_settings_updates();
+        updates.borrow_and_update();
         let loader = Arc::clone(&runtime);
         let initial = tauri::async_runtime::spawn_blocking(move || loader.load_app_settings())
             .await
             .ok()
             .and_then(Result::ok)
             .is_some_and(|values| values.mcp.enabled);
-        let mut updates = runtime.subscribe_app_settings_updates();
-        updates.borrow_and_update();
         let mut enabled = initial;
         loop {
             apply(&app, &runtime, &data_dir, enabled).await;
@@ -79,8 +105,8 @@ async fn apply(
     let Some(controller) = app.try_state::<McpController>() else {
         return;
     };
-    let mut slot = controller.bridge.lock().await;
-    match (enabled, slot.is_some()) {
+    let _switch = controller.switch.lock().await;
+    match (enabled, controller.has_bridge()) {
         (true, false) => {
             let started = koushi_mcp_host::start(
                 Arc::clone(runtime) as Arc<dyn koushi_mcp_host::BridgeAccounts>,
@@ -89,7 +115,7 @@ async fn apply(
             );
             match started {
                 Ok(handle) => {
-                    *slot = Some(handle);
+                    controller.set_bridge(handle);
                     controller.broker.set_bridge_status(BridgeStatus::Running);
                 }
                 Err(reason) => {
@@ -108,7 +134,7 @@ async fn apply(
             }
         }
         (false, true) => {
-            if let Some(handle) = slot.take() {
+            if let Some(handle) = controller.take_bridge() {
                 handle.shutdown().await;
             }
             controller.broker.set_bridge_status(BridgeStatus::Disabled);

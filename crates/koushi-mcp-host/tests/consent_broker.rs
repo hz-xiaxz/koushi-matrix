@@ -393,3 +393,91 @@ fn previews_drop_formatting_characters_and_are_capped() {
         "280 characters plus an ellipsis"
     );
 }
+
+#[tokio::test]
+async fn a_retry_joins_with_its_own_message_and_is_counted() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let broker = broker(&dir);
+    let first = ConsentContext {
+        room_label: Some("Synthetic Room".to_owned()),
+        message_preview: Some("first draft".to_owned()),
+    };
+    let (task, request_id) = ask(&broker, "pi", ALICE, Need::Send, first).await;
+    // The first caller gives up (a timeout or a closed connection).
+    task.abort();
+    let _ = task.await;
+    assert_eq!(broker.subscribe().borrow().pending[0].message_preview, None);
+
+    let retry = ConsentContext {
+        room_label: Some("Synthetic Room".to_owned()),
+        message_preview: Some("retried text".to_owned()),
+    };
+    let (retried, joined) = ask(&broker, "pi", ALICE, Need::Send, retry.clone()).await;
+    let (second, joined_again) = ask(&broker, "pi", ALICE, Need::Send, retry).await;
+    assert_eq!((joined, joined_again), (request_id, request_id));
+    let mut state = broker.subscribe();
+    tokio::time::timeout(Duration::from_secs(5), async {
+        while state.borrow_and_update().pending[0].waiting_calls != 2 {
+            state.changed().await.expect("broker alive");
+        }
+    })
+    .await
+    .expect("both calls wait");
+    let pending = broker.subscribe().borrow().pending[0].clone();
+    assert_eq!(pending.message_preview.as_deref(), Some("retried text"));
+    assert!(pending.waiting);
+
+    assert_eq!(
+        broker.answer(request_id, true).await,
+        AnswerOutcome::Applied
+    );
+    retried.await.expect("join").expect("allowed");
+    second.await.expect("join").expect("allowed");
+}
+
+#[tokio::test(start_paused = true)]
+async fn an_expired_approval_is_not_joined_and_allow_settles_the_whole_key() {
+    let dir = tempfile::tempdir().expect("tempdir");
+    let broker = broker(&dir);
+    let (task, expired_id) = ask(&broker, "pi", ALICE, Need::Read, ConsentContext::default()).await;
+    let _ = task.await; // times out after APPROVAL_WAIT
+    tokio::time::advance(APPROVAL_LIFETIME).await;
+
+    // Not swept yet, but expired: a new call opens a new approval.
+    let mut state = broker.subscribe();
+    let fresh_task = {
+        let broker = Arc::clone(&broker);
+        tokio::spawn(async move {
+            broker
+                .authorize(&client("pi"), ALICE, Need::Read, ConsentContext::default())
+                .await
+        })
+    };
+    let fresh_id = loop {
+        if let Some(fresh) = state
+            .borrow_and_update()
+            .pending
+            .iter()
+            .find(|pending| pending.request_id != expired_id)
+        {
+            break fresh.request_id;
+        }
+        state.changed().await.expect("broker alive");
+    };
+    assert_eq!(broker.answer(expired_id, true).await, AnswerOutcome::Stale);
+    assert_eq!(broker.answer(fresh_id, true).await, AnswerOutcome::Applied);
+    fresh_task.await.expect("join").expect("allowed");
+    assert!(
+        broker.subscribe().borrow().pending.is_empty(),
+        "every approval for the key is settled"
+    );
+}
+
+#[test]
+fn previews_drop_invisible_and_tag_characters_but_keep_joiners() {
+    let text = "a\u{2028}b\u{FEFF}c\u{2060}d\u{E0041}e\u{200D}f";
+    assert_eq!(
+        koushi_mcp_host::consent::sanitize(text, 280),
+        "abcde\u{200D}f"
+    );
+}

@@ -977,6 +977,8 @@ export type MessageId =
   | "mcp.allowAttachments"
   | "mcp.moreWaiting"
   | "mcp.saveFailed"
+  | "mcp.moreMessagesWaiting"
+  | "settings.assistantsPending"
   | "settings.updateIgnored"
   | "settings.updateDownloading"
   | "settings.updateReady"
@@ -3206,6 +3208,8 @@ const en: Catalog = {
   "mcp.allowAttachments": "Allow downloads from {account}",
   "mcp.moreWaiting": "More requests waiting: {count}",
   "mcp.saveFailed": "Koushi could not save this approval. See App Settings → AI assistants.",
+  "mcp.moreMessagesWaiting": "Other calls from this assistant waiting for this answer: {count}",
+  "settings.assistantsPending": "Waiting for your answer",
   "settings.updateIgnored":
     "Automatic reminders are off for this version until Koushi restarts. You can still download it.",
   "settings.updateDownloading": "Downloading and verifying Koushi {version}…",
@@ -5472,6 +5476,8 @@ const ja: Catalog = {
   "mcp.allowAttachments": "{account} からのダウンロードを許可",
   "mcp.moreWaiting": "ほかに待っている要求：{count} 件",
   "mcp.saveFailed": "この承認を保存できませんでした。アプリ設定 → AI アシスタントを確認してください。",
+  "mcp.moreMessagesWaiting": "この回答を待っている、このアシスタントのほかの呼び出し：{count} 件",
+  "settings.assistantsPending": "回答待ち",
   "settings.updateIgnored":
     "Koushiを再起動するまで、このバージョンの自動通知はオフになります。ダウンロードは引き続き可能です。",
   "settings.updateDownloading": "Koushi {version}をダウンロードして検証しています…",

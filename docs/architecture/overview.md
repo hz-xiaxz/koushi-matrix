@@ -1995,6 +1995,11 @@ Invariants:
   disconnects follow "MCP Assistant Approval" in the state machine canon. A
   host without a consent surface uses the fail-closed mode, which answers
   `consent_required` at once.
+- **What an unapproved client sees.** `list_accounts` needs no permission and
+  returns every account id with its sign-in status. Account ids embed the
+  Matrix user ID, so any process that holds the per-launch token (any process
+  of the same OS user) can learn which accounts are signed in. Everything else
+  needs an approved permission.
 - **Client names are self-declared.** `--client-name` is validated at the
   handshake (1-64 characters from `[A-Za-z0-9._-]`) but not verified; any
   process of the same OS user can claim any name. The token and socket
@@ -2010,8 +2015,10 @@ Invariants:
 - **Polling, not push.** MCP cannot wake a host that is not calling. New
   messages surface through an account-bound, monotonic cursor consumed by a
   `wait_for_events` long-poll of at most 50 s; the cursor cannot replay
-  another account's events. An approval wait counts against the call's 60 s
-  budget.
+  another account's events. An approval wait counts against that call's 60 s
+  budget. Other tools do not share the budget: a send may wait 40 s for
+  approval and then for delivery, and a retry with the same
+  `client_request_id` is deduplicated.
 - **Shutdown is visible.** On app shutdown, or when the user turns the bridge
   off, the socket is removed, the token invalidated, and live connections are
   closed. `initialize` and `tools/list` still answer while Koushi is
@@ -2028,7 +2035,7 @@ Invariants:
   reach only the calling client. A sent message appearing through normal sync
   is the expected exception, not a GUI operation. The other exception is
   consent: a call that needs approval publishes the broker's state to the
-  WebView and requests window attention, without forcing focus.
+  WebView and requests window attention, without calling `set_focus`.
 - **No content telemetry.** Message bodies, queries, attachment bytes, tokens,
   and identifiers never appear in logs or diagnostics; only counts and closed
   error codes do.

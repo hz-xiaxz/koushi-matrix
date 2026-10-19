@@ -42,6 +42,7 @@ function request(overrides: Partial<McpPendingApproval> = {}): McpPendingApprova
     room_label: null,
     message_preview: null,
     waiting: true,
+    waiting_calls: 1,
     ...overrides
   };
 }
@@ -119,13 +120,26 @@ test("a send request shows the waiting message as context and names the standing
 test("a send whose caller went away says the message will not be sent", () => {
   render(
     <McpApprovalPrompt
-      request={request({ need: "send", message_preview: null, waiting: false })}
+      request={request({ need: "send", message_preview: null, waiting: false, waiting_calls: 0 })}
       accountTabs={tabs}
       moreWaiting={0}
       onClose={() => undefined}
     />
   );
   expect(screen.getByText(/that message will not be sent/)).toBeTruthy();
+});
+
+test("several calls waiting on one approval are counted", () => {
+  render(
+    <McpApprovalPrompt
+      request={request({ need: "send", message_preview: "Newest text", waiting_calls: 3 })}
+      accountTabs={tabs}
+      moreWaiting={0}
+      onClose={() => undefined}
+    />
+  );
+  expect(screen.getByText("Newest text")).toBeTruthy();
+  expect(screen.getByText("Other calls from this assistant waiting for this answer: 2")).toBeTruthy();
 });
 
 test("an approval that could not be saved says so", async () => {

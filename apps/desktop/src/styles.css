@@ -10353,6 +10353,15 @@ kbd {
   border-radius: var(--r-md);
 }
 .settings-assistant-header { display: flex; gap: 12px; align-items: center; }
+.settings-assistant-pending {
+  display: flex;
+  gap: 8px;
+  align-items: center;
+  margin-block-end: 8px;
+  padding: 10px 12px;
+  border: 1px solid color-mix(in srgb, var(--warning) 55%, transparent);
+  border-radius: var(--r-md);
+}
 .settings-assistant-identity { display: grid; flex: 1 1 auto; min-inline-size: 0; }
 .settings-assistant-identity strong { overflow-wrap: anywhere; }
 .profile-settings-action.is-danger { border-color: var(--danger); color: var(--danger); }

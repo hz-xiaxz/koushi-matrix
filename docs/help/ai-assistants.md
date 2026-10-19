@@ -22,7 +22,10 @@ account and each permission.
 | `wait_for_events` | Waits for new activity in the account and returns changed rooms. | read |
 
 Every tool needs an `account_id`. The assistant gets it from `list_accounts`;
-Koushi never guesses which account you meant.
+Koushi never guesses which account you meant. `list_accounts` needs no
+approval, so any connected assistant can see each account's id, which contains
+its Matrix user ID, and whether it is signed in. Names, rooms, and messages need
+your approval.
 
 `list_rooms` answers the "what is unread" question: `unread_messages`,
 `unread_notifications`, `unread_mentions`, the thread equivalents, and
@@ -158,8 +161,9 @@ assistant's call waits for your answer (up to 40 seconds):
   the permission on in settings, remove the assistant, turn the bridge off, or
   restart Koushi, so a retrying assistant cannot ask again and again.
 - Closing the dialog without answering leaves the request open for five
-  minutes. If the assistant gave up waiting, it gets `consent_required`; once
-  you allow, its next try works.
+  minutes. **App Settings → AI assistants → Waiting for your answer** lists
+  open requests so you can still answer them. If the assistant gave up
+  waiting, it gets `consent_required`; once you allow, its next try works.
 
 For a send, the dialog shows the message the assistant is waiting to send, as
 context. If the assistant stopped waiting, that message is not sent; your answer

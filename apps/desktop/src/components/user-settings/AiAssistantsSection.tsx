@@ -8,12 +8,14 @@ import type {
   McpAssistantAccount,
   McpAssistantsState,
   McpNeed,
+  McpPendingApproval,
   McpRegistration,
   McpSettings,
   SettingsPatch
 } from "../../domain/types";
 import { t } from "../../i18n/messages";
 import { mcpAccountLabel, useMcpAssistantsState } from "../useMcpAssistantsState";
+import { MCP_ALLOW_ARMING_DELAY_MS, mcpAllowLabel, mcpWantsText, useArmed } from "../McpApprovalDialog";
 
 const NEEDS: readonly McpNeed[] = ["read", "send", "attachments"];
 
@@ -71,6 +73,7 @@ export function AiAssistantsSection({
       </button>
       <p className="settings-assistants-note">{t("settings.assistantsKeys")}</p>
       {state ? <AssistantsStatus state={state} /> : null}
+      {state && state.pending.length > 0 ? <PendingApprovals pending={state.pending} accountTabs={accountTabs} /> : null}
       {state ? <ConnectedAssistants assistants={state.assistants} accountTabs={accountTabs} /> : null}
       {state && state.registrations.length > 0 ? <ConnectAssistant registrations={state.registrations} /> : null}
     </>
@@ -95,6 +98,54 @@ function AssistantsStatus({ state }: { state: McpAssistantsState }) {
   return (
     <div className="settings-assistants-status" role="status">
       {messages.map(message => <p key={message}>{message}</p>)}
+    </div>
+  );
+}
+
+/** Approvals still open, so one whose dialog was closed can be answered here. */
+function PendingApprovals({
+  pending,
+  accountTabs
+}: {
+  pending: readonly McpPendingApproval[];
+  accountTabs: readonly AccountTabSummary[];
+}) {
+  return (
+    <section className="settings-assistants-group" aria-label={t("settings.assistantsPending")}>
+      <h4>{t("settings.assistantsPending")}</h4>
+      {pending.map(request => (
+        <PendingApprovalRow key={request.request_id} request={request} accountTabs={accountTabs} />
+      ))}
+    </section>
+  );
+}
+
+function PendingApprovalRow({
+  request,
+  accountTabs
+}: {
+  request: McpPendingApproval;
+  accountTabs: readonly AccountTabSummary[];
+}) {
+  const armed = useArmed(MCP_ALLOW_ARMING_DELAY_MS);
+  const [busy, setBusy] = useState(false);
+  const account = mcpAccountLabel(request.account_id, accountTabs) ?? t("settings.assistantsUnknownAccount");
+  function answer(allow: boolean) {
+    setBusy(true);
+    void api.answerMcpApproval(request.request_id, allow).catch(() => undefined).finally(() => setBusy(false));
+  }
+  return (
+    <div className="settings-assistant-pending">
+      <span className="settings-assistant-identity">
+        <strong dir="ltr">{request.client_name}</strong>
+        <span className="settings-toggle-description">{mcpWantsText(request.need, account)}</span>
+      </span>
+      <button type="button" className="profile-settings-action" disabled={busy} onClick={() => answer(false)}>
+        {t("mcp.deny")}
+      </button>
+      <button type="button" className="profile-settings-action" disabled={busy || !armed} onClick={() => answer(true)}>
+        {mcpAllowLabel(request.need, account)}
+      </button>
     </div>
   );
 }
@@ -190,7 +241,7 @@ function AssistantCard({
         {unrequested.map(tab => (
           <div role="row" className="settings-assistant-row" key={tab.id}>
             <span role="rowheader">{mcpAccountLabel(tab.id, accountTabs)}</span>
-            <span role="cell" className="settings-assistant-unrequested">
+            <span role="cell" aria-colspan={3} className="settings-assistant-unrequested">
               {t("settings.assistantsNotRequested", { client })}
             </span>
           </div>
@@ -263,8 +314,10 @@ function ConnectAssistant({ registrations }: { registrations: readonly McpRegist
         {registrations.map(registration => (
           <button
             key={registration.client}
+            id={`settings-assistants-tab-${registration.client}`}
             type="button"
             role="tab"
+            aria-controls="settings-assistants-snippet"
             aria-selected={registration.client === current.client}
             className={registration.client === current.client ? "is-selected" : ""}
             onClick={() => {
@@ -276,7 +329,11 @@ function ConnectAssistant({ registrations }: { registrations: readonly McpRegist
           </button>
         ))}
       </div>
-      <div role="tabpanel" aria-label={label(current)}>
+      <div
+        id="settings-assistants-snippet"
+        role="tabpanel"
+        aria-labelledby={`settings-assistants-tab-${current.client}`}
+      >
         <p className="settings-assistants-note">{instruction}</p>
         <div className="settings-assistants-snippet">
           <pre dir="ltr"><code>{current.text}</code></pre>

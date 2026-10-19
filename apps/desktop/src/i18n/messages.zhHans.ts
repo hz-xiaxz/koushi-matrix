@@ -975,6 +975,8 @@ export const zhHans: Catalog = {
   "mcp.allowAttachments": "允许从 {account} 下载",
   "mcp.moreWaiting": "其他等待中的请求：{count}",
   "mcp.saveFailed": "Koushi 无法保存此批准。请查看“应用设置 → AI 助手”。",
+  "mcp.moreMessagesWaiting": "此助手还有其他调用在等待此回答：{count}",
+  "settings.assistantsPending": "等待你的回答",
   "settings.updateIgnored": "在 Koushi 重新启动之前，将不再自动提醒此版本。你仍可以下载它。",
   "settings.updateDownloading": "正在下载并验证 Koushi {version}…",
   "settings.updateReady": "Koushi {version} 已准备好安装。",

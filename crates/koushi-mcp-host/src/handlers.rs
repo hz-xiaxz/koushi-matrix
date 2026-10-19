@@ -65,8 +65,10 @@ pub(crate) async fn dispatch_tool_call(
     }
 }
 
-/// Every account is listed so a first-time client can ask for access, but
-/// identity fields appear only once the client holds some permission for it.
+/// Every account is listed so a first-time client can ask for access. The
+/// account id itself embeds the Matrix user ID (the canon states this
+/// disclosure); display fields appear only once the client holds some
+/// permission for the account.
 /// `permissions` says which; a missing one is asked for in Koushi on first use.
 fn list_accounts(shared: &Shared, client: &ClientIdentity) -> Result<Value, WireError> {
     let store = shared.broker.store();

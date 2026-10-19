@@ -567,6 +567,8 @@ export interface McpPendingApproval {
   room_label: string | null;
   message_preview: string | null;
   waiting: boolean;
+  /** Tool calls waiting for this answer; the preview shows the newest. */
+  waiting_calls: number;
 }
 
 export interface McpAssistantAccount {

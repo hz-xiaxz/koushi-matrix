@@ -51,7 +51,8 @@ test("an assistant's first read opens an approval that answers by request id", a
       need: "read",
       room_label: null,
       message_preview: null,
-      waiting: true
+      waiting: true,
+      waiting_calls: 1
     }]
   }));
 

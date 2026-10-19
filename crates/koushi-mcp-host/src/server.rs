@@ -61,13 +61,20 @@ impl BridgeHandle {
 
     /// Stops the bridge and waits for the listener and its connections to
     /// finish, so a bridge started afterwards owns the socket path alone.
+    /// The broker is reset only after the connections are gone, so no call
+    /// can open an approval after the reset.
     pub async fn shutdown(mut self) {
         if !self.stopped.swap(true, Ordering::SeqCst) {
             let _ = self.shutdown.send(true);
-            self.broker.reset();
-            if let Some(task) = self.accept_task.take() {
-                let _ = tokio::time::timeout(SHUTDOWN_GRACE, task).await;
+            if let Some(mut task) = self.accept_task.take()
+                && tokio::time::timeout(SHUTDOWN_GRACE, &mut task)
+                    .await
+                    .is_err()
+            {
+                task.abort();
+                let _ = task.await;
             }
+            self.broker.reset();
             self.remove_files();
         }
     }
@@ -206,7 +213,9 @@ async fn accept_loop(
             }
         }
     }
-    // Every connection watches the same signal; wait for them to close.
+    // Stop accepting at once, then wait for every connection, which watches
+    // the same signal, to close.
+    drop(listener);
     while connections.join_next().await.is_some() {}
 }
 
