@@ -11,12 +11,13 @@ use tokio::sync::watch;
 
 /// Version of the on-disk `settings/settings.json` schema.
 ///
-/// Version 3 moves account-owned preferences into each account's encrypted
-/// settings file. Legacy account values remain here until the account manager
-/// has seeded every saved account.
-pub const SETTINGS_SCHEMA_VERSION: u32 = 3;
+/// Version 4 moves all notification preferences into encrypted account settings.
+/// Pre-v4 shared destinations are archived, never activated. The earlier version-3
+/// legacy account seed remains retryable until every saved account has been seeded.
+pub const SETTINGS_SCHEMA_VERSION: u32 = 4;
 
 const SCHEMA_VERSION_KEY: &str = "schema_version";
+const LEGACY_NOTIFICATION_ARCHIVE_KEY: &str = "legacy_notification_archive";
 const LEGACY_ACCOUNT_SETTINGS_KEY: &str = "legacy_account_settings";
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -50,6 +51,7 @@ impl SettingsStoreError {
 
 struct SettingsStoreState {
     loaded: bool,
+    legacy_notification_archive: Option<serde_json::Value>,
     values: AppSettingsValues,
     legacy_account_settings: Option<AccountSettingsValues>,
 }
@@ -70,6 +72,7 @@ impl SettingsStore {
             path: data_dir.as_ref().join("settings").join("settings.json"),
             state: Arc::new(Mutex::new(SettingsStoreState {
                 loaded: false,
+                legacy_notification_archive: None,
                 values: AppSettingsValues::default(),
                 legacy_account_settings: None,
             })),
@@ -103,13 +106,34 @@ impl SettingsStore {
         Ok(state.legacy_account_settings.clone())
     }
 
+    /// Only non-delivery preferences may seed an old account file once.
+    pub fn legacy_notification_defaults(&self) -> Result<Option<(bool, bool)>, SettingsStoreError> {
+        let mut state = self.state.lock().expect("settings store poisoned");
+        ensure_loaded(&self.path, &mut state, &self.updates)?;
+        Ok(state
+            .legacy_notification_archive
+            .as_ref()
+            .and_then(|archive| {
+                let notifications = archive.get("notifications")?;
+                Some((
+                    notifications.get("sound")?.as_bool()?,
+                    notifications.get("badges")?.as_bool()?,
+                ))
+            }))
+    }
+
     pub fn complete_legacy_account_migration(&self) -> Result<(), SettingsStoreError> {
         let mut state = self.state.lock().expect("settings store poisoned");
         ensure_loaded(&self.path, &mut state, &self.updates)?;
         if state.legacy_account_settings.is_none() {
             return Ok(());
         }
-        write_settings_file(&self.path, &state.values, None)?;
+        write_settings_file(
+            &self.path,
+            &state.values,
+            None,
+            state.legacy_notification_archive.as_ref(),
+        )?;
         state.legacy_account_settings = None;
         Ok(())
     }
@@ -127,7 +151,12 @@ impl SettingsStore {
         if updated == state.values {
             return Ok(());
         }
-        write_settings_file(&self.path, &updated, state.legacy_account_settings.as_ref())?;
+        write_settings_file(
+            &self.path,
+            &updated,
+            state.legacy_account_settings.as_ref(),
+            state.legacy_notification_archive.as_ref(),
+        )?;
         state.values = updated.clone();
         self.updates.send_replace(updated);
         Ok(())
@@ -142,7 +171,12 @@ impl SettingsStore {
         if updated == state.values {
             return Ok(());
         }
-        write_settings_file(&self.path, &updated, state.legacy_account_settings.as_ref())?;
+        write_settings_file(
+            &self.path,
+            &updated,
+            state.legacy_account_settings.as_ref(),
+            state.legacy_notification_archive.as_ref(),
+        )?;
         state.values = updated.clone();
         self.updates.send_replace(updated);
         Ok(())
@@ -167,6 +201,7 @@ fn ensure_loaded(
     };
     let mut document: serde_json::Value =
         serde_json::from_str(&json).map_err(|_| SettingsStoreError::corrupt())?;
+    let original_document = document.clone();
     let object = document
         .as_object_mut()
         .ok_or_else(SettingsStoreError::corrupt)?;
@@ -181,11 +216,19 @@ fn ensure_loaded(
         return Err(SettingsStoreError::corrupt());
     }
 
+    let archived = object.remove(LEGACY_NOTIFICATION_ARCHIVE_KEY);
     let legacy = object.remove(LEGACY_ACCOUNT_SETTINGS_KEY);
-    let (values, legacy_account_settings) = if version < SETTINGS_SCHEMA_VERSION {
+    state.legacy_notification_archive = if version < 4 {
+        // Keep the unprojected source inert. It must never become a delivery route.
+        Some(original_document)
+    } else {
+        archived
+    };
+    let (values, mut legacy_account_settings) = if version < 3 {
         let mut old_values: SettingsValues =
             serde_json::from_value(document).map_err(|_| SettingsStoreError::corrupt())?;
         migrate(&mut old_values, version);
+        *old_values.delivery = Default::default();
         (
             old_values.app_settings(),
             Some(old_values.account_settings()),
@@ -199,6 +242,21 @@ fn ensure_loaded(
         (values, legacy)
     };
 
+    if let Some(legacy) = legacy_account_settings.as_mut() {
+        let notifications = state
+            .legacy_notification_archive
+            .as_ref()
+            .and_then(|archive| archive.get("notifications"));
+        legacy.notifications.sound = notifications
+            .and_then(|value| value.get("sound"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        legacy.notifications.badges = notifications
+            .and_then(|value| value.get("badges"))
+            .and_then(|value| value.as_bool())
+            .unwrap_or(false);
+        *legacy.delivery = Default::default();
+    }
     state.values = values;
     state.legacy_account_settings = legacy_account_settings;
     state.loaded = true;
@@ -206,7 +264,12 @@ fn ensure_loaded(
     if version < SETTINGS_SCHEMA_VERSION {
         // A failed rewrite is safe: the source remains intact and this
         // migration is idempotent on the next launch.
-        let _ = write_settings_file(path, &state.values, state.legacy_account_settings.as_ref());
+        let _ = write_settings_file(
+            path,
+            &state.values,
+            state.legacy_account_settings.as_ref(),
+            state.legacy_notification_archive.as_ref(),
+        );
     }
     Ok(())
 }
@@ -215,6 +278,7 @@ fn write_settings_file(
     path: &Path,
     values: &AppSettingsValues,
     legacy_account_settings: Option<&AccountSettingsValues>,
+    legacy_notification_archive: Option<&serde_json::Value>,
 ) -> Result<(), SettingsStoreError> {
     if let Some(parent) = path.parent() {
         std::fs::create_dir_all(parent).map_err(|_| SettingsStoreError::io())?;
@@ -232,6 +296,9 @@ fn write_settings_file(
             LEGACY_ACCOUNT_SETTINGS_KEY.to_owned(),
             serde_json::to_value(legacy).map_err(|_| SettingsStoreError::corrupt())?,
         );
+    }
+    if let Some(archive) = legacy_notification_archive {
+        object.insert(LEGACY_NOTIFICATION_ARCHIVE_KEY.to_owned(), archive.clone());
     }
     let json =
         serde_json::to_string_pretty(&document).map_err(|_| SettingsStoreError::corrupt())?;

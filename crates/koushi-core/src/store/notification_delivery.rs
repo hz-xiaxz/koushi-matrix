@@ -1,11 +1,7 @@
 //! #1427: the credential seam for device-local notification sinks.
 //!
-//! A delivery sink's secret - a provider API key, a mailbox authorization code, a relay
-//! key - is app-scoped and device-local: it belongs to no Matrix account, so it is not
-//! part of any account vault entry and the credential name is derived from the sink's own
-//! id (`koushi_key::NotificationSinkSecretId`). Only this module turns a submitted id and
-//! value into a store read or write, so every path into the credential store validates
-//! both first and reports a typed refusal instead of panicking.
+//! Each credential belongs to one full Matrix session identity and one validated sink ID.
+//! No account-scoped operation falls back to the retired global namespace.
 //!
 //! No function here returns the secret to a caller that could log it: `load` hands back a
 //! `NotificationSinkSecret`, which is zeroizing, redacts its own `Debug`, and is neither
@@ -16,6 +12,7 @@ use koushi_key::{
 };
 
 use super::{CoreFailure, StoreActor};
+use koushi_protocol::SessionKeyId;
 
 /// Why a delivery secret could not be written, read, or forgotten.
 ///
@@ -69,19 +66,21 @@ impl StoreActor {
     /// keychain was locked.
     pub fn notification_sink_secret_configured(
         &self,
+        key_id: &SessionKeyId,
         sink_id: &str,
     ) -> Result<bool, NotificationDeliverySecretError> {
-        self.load_notification_sink_secret(sink_id)
+        self.load_notification_sink_secret(key_id, sink_id)
             .map(|secret| secret.is_some())
     }
 
     /// Store one sink's secret, replacing any previous value.
     pub fn save_notification_sink_secret(
         &self,
+        key_id: &SessionKeyId,
         sink_id: &str,
         secret: &str,
     ) -> Result<(), NotificationDeliverySecretError> {
-        let id = NotificationSinkSecretId::parse(sink_id)?;
+        let id = NotificationSinkSecretId::for_account(key_id, sink_id)?;
         let secret = NotificationSinkSecret::new(secret)?;
         self.credential_store
             .save_notification_sink_secret(&id, &secret)
@@ -94,9 +93,10 @@ impl StoreActor {
     /// one, is returned to the caller and never written to state, a log, or an event.
     pub fn load_notification_sink_secret(
         &self,
+        key_id: &SessionKeyId,
         sink_id: &str,
     ) -> Result<Option<NotificationSinkSecret>, NotificationDeliverySecretError> {
-        let id = NotificationSinkSecretId::parse(sink_id)?;
+        let id = NotificationSinkSecretId::for_account(key_id, sink_id)?;
         match self.credential_store.load_notification_sink_secret(&id) {
             Ok(secret) => Ok(Some(secret)),
             Err(error) if is_missing_credential_error(&error) => Ok(None),
@@ -108,9 +108,10 @@ impl StoreActor {
     /// product can clear a sink without first asking whether it was ever configured.
     pub fn delete_notification_sink_secret(
         &self,
+        key_id: &SessionKeyId,
         sink_id: &str,
     ) -> Result<(), NotificationDeliverySecretError> {
-        let id = NotificationSinkSecretId::parse(sink_id)?;
+        let id = NotificationSinkSecretId::for_account(key_id, sink_id)?;
         match self.credential_store.delete_notification_sink_secret(&id) {
             Ok(()) => Ok(()),
             Err(error) if is_missing_credential_error(&error) => Ok(()),

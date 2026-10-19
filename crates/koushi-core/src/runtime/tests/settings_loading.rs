@@ -85,6 +85,7 @@ async fn failed_settings_load_defers_safe_policy_and_retry_replaces_held_values(
 
     // Leave display/link policies held, then repair and retry. Only the new
     // policies may follow; the transient safe defaults must not be replayed.
+    std::fs::remove_file(&path).expect("remove corrupt synthetic settings before repair");
     actor
         .composer_draft_store_actor
         .save_account_settings(&key, &koushi_state::AccountSettingsValues::default())

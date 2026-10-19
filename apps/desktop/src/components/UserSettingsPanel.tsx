@@ -215,7 +215,7 @@ export function UserSettingsPanel({
   onManageAccount?: () => void;
   accountNotifications?: AccountNotificationsState;
   accountNotificationActions?: AccountNotificationActions;
-  /** #1427: the app-scoped runtime half of this device's own notification delivery. */
+  /** #1427: the selected account's runtime state for this device's notification delivery. */
   notificationDelivery?: NotificationDeliveryState;
   notificationDeliveryActions?: NotificationDeliveryActions;
   rooms?: RoomSummary[];
@@ -253,15 +253,15 @@ export function UserSettingsPanel({
   const [displayNameDraft, setDisplayNameDraft] = useState(profile.own.display_name ?? "");
   const visibleCategories = settingsCategories.filter((category) =>
     settingsScope === "app"
-      ? ["appearance", "notifications", "preferences", "keyboard", "search", "assistants", "help"].includes(category.id)
+      ? ["appearance", "preferences", "keyboard", "search", "assistants", "help"].includes(category.id)
       : ["account", "sessions", "notifications", "privacy", "encryption", "search"].includes(category.id)
   );
   const initialVisibleCategory = visibleCategories.some((category) => category.id === initialCategory)
     ? initialCategory
     : visibleCategories[0]?.id ?? initialCategory;
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(initialVisibleCategory);
-  // #1468: the Notifications page's source tabs. The app-scoped dialog has no account, so it
-  // has no homeserver tab; a tab with nothing to show is not offered.
+  // Source tabs for account notification settings. The homeserver tab requires
+  // a current account session.
   const homeserverNotificationsAvailable = settingsScope !== "app" && Boolean(currentSession);
   const notificationTabs: { id: NotificationTabId; label: MessageId }[] = [
     { id: "os", label: "settings.notificationsOs" },
@@ -707,7 +707,7 @@ export function UserSettingsPanel({
                     />
                   </>
                 ) : null}
-                {settingsScope !== "account" ? (
+                {settingsScope === "account" ? (
                   <>
                     <NotificationSettingToggle
                       label={t("settings.notificationSound")}
@@ -733,8 +733,7 @@ export function UserSettingsPanel({
             {...notificationPanelProps("device")}
           >
             {/*
-              The delivery section is app-scoped and names its own scope on every patch, so it
-              reads the same from either settings scope.
+              Delivery belongs to the selected account, like every other notification control.
             */}
             <NotificationDeliverySection
               delivery={settings.values.delivery}
@@ -995,13 +994,11 @@ export function UserSettingsPanel({
 export function AppSettingsDialog({
   snapshot,
   onUpdateSettings,
-  notificationDeliveryActions = noopNotificationDeliveryActions,
   accountTabs = [],
   onClose
 }: {
   snapshot: DesktopSnapshot;
   onUpdateSettings: (patch: SettingsPatch) => void;
-  notificationDeliveryActions?: NotificationDeliveryActions;
   accountTabs?: readonly AccountTabSummary[];
   onClose: () => void;
 }) {
@@ -1032,8 +1029,6 @@ export function AppSettingsDialog({
         catalogLocale={domain.locale_profile.catalog_locale}
         accountManagement={domain.account_management}
         accountManagementCapabilities={domain.account_management_capabilities}
-        notificationDelivery={domain.notification_delivery}
-        notificationDeliveryActions={notificationDeliveryActions}
         rooms={domain.rooms}
         spaces={domain.spaces}
         accountTabs={accountTabs}

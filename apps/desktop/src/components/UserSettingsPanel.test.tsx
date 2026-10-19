@@ -249,8 +249,8 @@ describe("UserSettingsPanel", () => {
     expect(markup).not.toContain("Compress images");
     expect(markup).toContain("Notifications");
     expect(markup).toContain("Desktop notifications");
-    expect(markup).not.toContain("Sound");
-    expect(markup).not.toContain("Badges");
+    expect(markup).toContain("Sound");
+    expect(markup).toContain("Badges");
     expect(markup).toContain("Send read receipts");
     expect(markup).toContain("Send typing notifications");
     const notificationsSection = markup.match(
@@ -260,8 +260,8 @@ describe("UserSettingsPanel", () => {
       /<section id="settings-messaging-privacy"[\s\S]*?<\/section>/
     )?.[0];
     expect(notificationsSection).toContain("Desktop notifications");
-    expect(notificationsSection).not.toContain("Sound");
-    expect(notificationsSection).not.toContain("Badges");
+    expect(notificationsSection).toContain("Sound");
+    expect(notificationsSection).toContain("Badges");
     // #1460: the verified preview switch (#994) sits beside the desktop switch.
     expect(notificationsSection).toContain("Show message content in notifications");
     expect(notificationsSection).not.toContain("Send read receipts");
@@ -317,7 +317,6 @@ describe("UserSettingsPanel", () => {
       )
     ).toEqual([
       "Appearance",
-      "Notifications",
       "Preferences",
       "Keyboard",
       "Search history",
@@ -327,8 +326,8 @@ describe("UserSettingsPanel", () => {
     const notificationsSection = markup.match(
       /<section id="settings-notifications-os"[\s\S]*?<\/section>/
     )?.[0];
-    expect(notificationsSection).toContain("Sound");
-    expect(notificationsSection).toContain("Badges");
+    expect(notificationsSection).not.toContain("Sound");
+    expect(notificationsSection).not.toContain("Badges");
     expect(notificationsSection).not.toContain("Desktop notifications");
     expect(notificationsSection).not.toContain("Show message content in notifications");
   });
@@ -1821,7 +1820,9 @@ describe("UserSettingsPanel", () => {
       />
     );
     // The category tab is named by the active catalog, so this works in either locale.
-    fireEvent.click(screen.getByRole("tab", { name: t("settings.notifications") }));
+    if (overrides.settingsScope !== "app") {
+      fireEvent.click(screen.getByRole("tab", { name: t("settings.notifications") }));
+    }
     return { accountNotificationActions, onUpdateSettings };
   };
 
@@ -1899,17 +1900,24 @@ describe("UserSettingsPanel", () => {
     );
   });
 
-  test("renders no homeserver section and no preview switch in the app settings scope", () => {
-    renderNotificationsPage({ settingsScope: "app", session: false });
-    expect(screen.queryByTestId("notifications-homeserver")).toBeNull();
-    expect(screen.queryByTestId("notifications-tab-homeserver")).toBeNull();
-    expect(
-      within(screen.getByRole("tablist", { name: "Notification sources" }))
-        .getAllByRole("tab")
-        .map((tab) => tab.textContent)
-    ).toEqual(["OS notifications", "Sent from this device"]);
+  test("keeps all notification editors out of app settings", () => {
+    renderNotificationsPage({ settingsScope: "app", session: true });
+    expect(screen.queryByRole("tab", { name: t("settings.notifications") })).toBeNull();
     expect(screen.queryByRole("switch", { name: /Show message content/ })).toBeNull();
-    expect(screen.getByTestId("notification-delivery")).toBeTruthy();
+    expect(screen.queryByRole("switch", { name: "Sound" })).toBeNull();
+    expect(screen.queryByRole("switch", { name: "Badges" })).toBeNull();
+  });
+
+  test("edits sound and badge policy for the current account beside OS notifications", () => {
+    const { onUpdateSettings } = renderNotificationsPage();
+    fireEvent.click(screen.getByRole("switch", { name: "Sound" }));
+    expect(onUpdateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      notifications: expect.objectContaining({ sound: false })
+    }));
+    fireEvent.click(screen.getByRole("switch", { name: "Badges" }));
+    expect(onUpdateSettings).toHaveBeenLastCalledWith(expect.objectContaining({
+      notifications: expect.objectContaining({ badges: false })
+    }));
   });
 
   test("ships the section headings in Japanese", () => {

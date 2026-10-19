@@ -140,10 +140,9 @@ test("settings categories change without scrolling the desktop", async ({ page }
 
   await page.getByRole("button", { name: "App Settings", exact: true }).click();
   const appDialog = page.getByRole("dialog", { name: "App Settings" });
-  for (const name of ["Appearance", "Notifications", "Preferences", "Keyboard", "Search history", "Help & About"]) {
+  await expect(appDialog.getByRole("tab", { name: "Notifications", exact: true })).toHaveCount(0);
+  for (const name of ["Appearance", "Preferences", "Keyboard", "Search history", "AI assistants", "Help & About"]) {
     await appDialog.getByRole("tab", { name, exact: true }).click();
-    // The app dialog shows the device delivery section too, which carries its own
-    // tabpanel, so this counts the category panels as well.
     await expect(appDialog.locator(".settings-category[role='tabpanel']:visible")).toHaveCount(1);
     await expect(appDialog.getByRole("tabpanel", { name, exact: true })).toBeVisible();
     expect(await page.locator(".desktop").evaluate(element => element.scrollTop)).toBe(0);

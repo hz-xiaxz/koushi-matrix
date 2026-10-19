@@ -1537,8 +1537,12 @@ activates; dismissal and other actions do not navigate. A notification request
 accepted for dispatch does not prove the OS displayed it; asynchronous send
 errors produce `show_failed`. The explicit Desktop notifications switch requests
 macOS authorization when enabled; passive dispatch checks existing authorization
-without prompting. Clearing attention removes delivered and pending macOS
-notifications and invalidates their activation tasks. A completed click
+without prompting. Clearing read attention targets only the owning account and
+waits until each submitted banner is at least five seconds old. Clicks remain usable
+during that interval. Newer notifications are excluded from an earlier clear.
+Session loss or notification/preview privacy disablement removes that account's
+notifications immediately and invalidates their activation tasks. Badge visibility
+and aggregate badge totals never determine whether a notification is cleared. A completed click
 restores the main window, re-checks the
 account fence captured when the banner was shown, and publishes the target.
 A click that arrives after logout, an account switch, or a session change is
@@ -1606,13 +1610,20 @@ every Matrix client on the account, so they are a separate Rust slice,
 `AppState.account_notifications`, never folded into `SettingsValues`. The
 device-local app switch (`desktop_notifications`) gates only this device's
 banners; server email delivery is a `kind: email` pusher and is independent of it.
-The device-local notification delivery (#1427, #1460) is a second, app-scoped
+All notification preferences are account-owned on this device: OS banners, message
+previews, sound, badge participation, and external delivery destinations and conditions.
+Account Settings → Notifications is their only editor; App Settings has no notification
+category. The OS badge is the sum of the contributions of accounts whose badges are on.
+No notification edit or credential operation may affect another account.
+
+The device-local notification delivery (#1427, #1460) is a second, account-scoped
 route, "Sent from this device": a list of destinations the user configures (the
 Resend API, a generic SMTP relay including the iCloud, Gmail and QQ Mail presets,
 and WeChat through ServerChan Turbo), each with its own targets, content mode and
 consent, and timing, and no enable switch. It reads the same unread/mention
 projection as the badge after each destination's dwell, sends only while the app
-runs, keeps every sink secret in the credential store and never in `SettingsValues`
+runs, keeps every sink secret in the credential store under its full Matrix session identity
+and sink ID, and never in `SettingsValues`
 (state-machine.md, "Local Notification Delivery"). Settings present three routes:
 OS notifications, Sent from this device, and Homeserver notifications.
 The four ON/OFF categories are projections of standard predefined push rules

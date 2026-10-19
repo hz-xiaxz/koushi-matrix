@@ -134,9 +134,8 @@ pub struct SettingsValues {
     pub composer: ComposerSettings,
     #[serde(default)]
     pub notifications: NotificationSettings,
-    /// Device-local notification delivery (#1427). App scope: the Matrix account is
-    /// never consulted for a destination. Boxed for the same reason the settings patch
-    /// is: the block would otherwise dominate the effect enum's largest variant.
+    /// Account-owned device-local notification delivery (#1427). Boxed like the
+    /// settings patch, so the block does not dominate the effect enum's largest variant.
     #[serde(default, deserialize_with = "deserialize_notification_delivery")]
     pub delivery: Box<NotificationDeliverySettings>,
     #[serde(default)]
@@ -171,11 +170,6 @@ pub struct AppSettingsValues {
     pub typography: TypographySettings,
     pub keyboard: KeyboardSettings,
     pub composer_math_mode: bool,
-    pub notifications: AppNotificationSettings,
-    /// The settings file holds the app projection, so the same load-time
-    /// canonicalization the full value gets has to run here too.
-    #[serde(default, deserialize_with = "deserialize_notification_delivery")]
-    pub delivery: Box<NotificationDeliverySettings>,
     pub display: AppDisplaySettings,
     pub media: MediaSettings,
     pub timeline: TimelineSettings,
@@ -189,13 +183,6 @@ pub struct AppSettingsValues {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
-pub struct AppNotificationSettings {
-    pub sound: bool,
-    pub badges: bool,
-}
-
-#[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
-#[serde(default)]
 pub struct AppDisplaySettings {
     pub code_block_wrap: bool,
     pub hide_redacted: bool,
@@ -205,6 +192,8 @@ pub struct AppDisplaySettings {
 #[serde(default)]
 pub struct AccountSettingsValues {
     pub notifications: AccountNotificationSettings,
+    #[serde(default, deserialize_with = "deserialize_notification_delivery")]
+    pub delivery: Box<NotificationDeliverySettings>,
     pub display: AccountDisplaySettings,
     pub sidebar: SidebarSettings,
     pub room_list_sort: RoomListSort,
@@ -215,6 +204,8 @@ pub struct AccountSettingsValues {
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(default)]
 pub struct AccountNotificationSettings {
+    pub sound: bool,
+    pub badges: bool,
     pub desktop_notifications: bool,
     pub message_previews: bool,
     pub send_read_receipts: bool,
@@ -243,15 +234,10 @@ impl SettingsValues {
             typography: self.typography.clone(),
             keyboard: self.keyboard.clone(),
             composer_math_mode: self.composer.math_mode,
-            notifications: AppNotificationSettings {
-                sound: self.notifications.sound,
-                badges: self.notifications.badges,
-            },
             display: AppDisplaySettings {
                 code_block_wrap: self.display.code_block_wrap,
                 hide_redacted: self.display.hide_redacted,
             },
-            delivery: self.delivery.clone(),
             media: self.media.clone(),
             timeline: self.timeline.clone(),
             thread_list_order: self.thread_list_order,
@@ -265,7 +251,10 @@ impl SettingsValues {
 
     pub fn account_settings(&self) -> AccountSettingsValues {
         AccountSettingsValues {
+            delivery: self.delivery.clone(),
             notifications: AccountNotificationSettings {
+                sound: self.notifications.sound,
+                badges: self.notifications.badges,
                 desktop_notifications: self.notifications.desktop_notifications,
                 message_previews: self.notifications.message_previews,
                 send_read_receipts: self.notifications.send_read_receipts,
@@ -291,13 +280,8 @@ impl SettingsValues {
         self.typography = app.typography.clone();
         self.keyboard = app.keyboard.clone();
         self.composer.math_mode = app.composer_math_mode;
-        self.notifications.sound = app.notifications.sound;
-        self.notifications.badges = app.notifications.badges;
         self.display.code_block_wrap = app.display.code_block_wrap;
         self.display.hide_redacted = app.display.hide_redacted;
-        let mut delivery = app.delivery.clone();
-        delivery.canonicalize();
-        self.delivery = delivery;
         self.media = app.media.clone();
         self.timeline = app.timeline.clone();
         self.thread_list_order = app.thread_list_order;
@@ -309,6 +293,10 @@ impl SettingsValues {
     }
 
     pub fn apply_account_settings(&mut self, account: &AccountSettingsValues) {
+        self.notifications.sound = account.notifications.sound;
+        self.notifications.badges = account.notifications.badges;
+        self.delivery = account.delivery.clone();
+        self.delivery.canonicalize();
         self.notifications.desktop_notifications = account.notifications.desktop_notifications;
         self.notifications.message_previews = account.notifications.message_previews;
         self.notifications.send_read_receipts = account.notifications.send_read_receipts;
@@ -370,18 +358,8 @@ impl SettingsValues {
                 self.composer.recent_emojis = canonicalize_recent_emojis(composer.recent_emojis);
             }
         }
-        if let Some(notifications) = patch.notifications {
-            if apply_app {
-                self.notifications.sound = notifications.sound;
-                self.notifications.badges = notifications.badges;
-            }
-            if apply_account {
-                self.notifications.desktop_notifications = notifications.desktop_notifications;
-                self.notifications.message_previews = notifications.message_previews;
-                self.notifications.send_read_receipts = notifications.send_read_receipts;
-                self.notifications.send_typing_notifications =
-                    notifications.send_typing_notifications;
-            }
+        if apply_account && let Some(notifications) = patch.notifications {
+            self.notifications = notifications;
         }
         if let Some(display) = patch.display {
             if apply_app {
@@ -394,7 +372,7 @@ impl SettingsValues {
                     display.encrypted_url_previews_enabled;
             }
         }
-        if apply_app && let Some(delivery) = &patch.delivery {
+        if apply_account && let Some(delivery) = &patch.delivery {
             self.delivery
                 .apply_patch(delivery, patch.delivery_bindings_from_core);
         }
@@ -440,21 +418,11 @@ impl AppSettingsValues {
         if let Some(value) = &patch.composer {
             self.composer_math_mode = value.math_mode;
         }
-        if let Some(value) = &patch.notifications {
-            self.notifications = AppNotificationSettings {
-                sound: value.sound,
-                badges: value.badges,
-            };
-        }
         if let Some(value) = &patch.display {
             self.display = AppDisplaySettings {
                 code_block_wrap: value.code_block_wrap,
                 hide_redacted: value.hide_redacted,
             };
-        }
-        if let Some(value) = &patch.delivery {
-            self.delivery
-                .apply_patch(value, patch.delivery_bindings_from_core);
         }
         if let Some(value) = &patch.media {
             self.media = value.clone();
@@ -499,6 +467,9 @@ impl AccountSettingsValues {
     /// In-memory fallback for a settings read failure; never persist these values.
     pub fn privacy_safe_fallback() -> Self {
         let mut settings = Self::default();
+        settings.notifications.sound = false;
+        settings.notifications.badges = false;
+        *settings.delivery = Default::default();
         settings.notifications.desktop_notifications = false;
         settings.notifications.message_previews = false;
         settings.notifications.send_read_receipts = false;
@@ -508,16 +479,6 @@ impl AccountSettingsValues {
         settings.search_crawler.include_media_captions = false;
         settings.search_crawler.include_filenames = false;
         settings
-    }
-}
-
-impl Default for AppNotificationSettings {
-    fn default() -> Self {
-        let settings = NotificationSettings::default();
-        Self {
-            sound: settings.sound,
-            badges: settings.badges,
-        }
     }
 }
 
@@ -535,6 +496,8 @@ impl Default for AccountNotificationSettings {
     fn default() -> Self {
         let settings = NotificationSettings::default();
         Self {
+            sound: settings.sound,
+            badges: settings.badges,
             desktop_notifications: settings.desktop_notifications,
             message_previews: settings.message_previews,
             send_read_receipts: settings.send_read_receipts,
@@ -1151,8 +1114,8 @@ pub struct SettingsPatch {
     pub keyboard: Option<KeyboardSettings>,
     pub composer: Option<ComposerSettings>,
     pub notifications: Option<NotificationSettings>,
-    /// Device-local notification delivery (#1427), app scope. The patch carries the
-    /// whole block, as the notification block does, and the app re-canonicalizes it.
+    /// Account-owned device-local delivery (#1427). The patch carries the whole
+    /// block, as the notification block does, and Core re-canonicalizes it.
     #[serde(default)]
     pub delivery: Option<NotificationDeliverySettings>,
     /// Whether `delivery` carries credential bindings the core itself just wrote. It never
@@ -1184,6 +1147,7 @@ impl SettingsPatch {
         self.scope != Some(SettingsPatchScope::App)
             && (self.composer.is_some()
                 || self.notifications.is_some()
+                || self.delivery.is_some()
                 || self.display.is_some()
                 || self.room_list_sort.is_some()
                 || self.search_crawler.is_some()

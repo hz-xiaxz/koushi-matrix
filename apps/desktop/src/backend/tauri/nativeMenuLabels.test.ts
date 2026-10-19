@@ -78,11 +78,11 @@ test("names the selected account on account-scoped menu items (#1504)", async ()
       ? ["menu.signOut", "menu.accountSettings", "menu.view"]
       : undefined
   );
-  await syncNativeMenuLabels("en", "none", "Alice");
+  await syncNativeMenuLabels("en", "none", "@alice:example.invalid");
   expect(invoke).toHaveBeenLastCalledWith("set_native_menu_labels", {
     labels: {
-      "menu.signOut": "Sign Out of Alice",
-      "menu.accountSettings": "Account Settings for Alice…",
+      "menu.signOut": "Sign Out of @alice:example.invalid",
+      "menu.accountSettings": "Account Settings for @alice:example.invalid…",
       "menu.view": "View"
     }
   });

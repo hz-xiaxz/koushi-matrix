@@ -1687,13 +1687,6 @@ impl AppActor {
                             .reduce_app_action(AppAction::AppSettingsSynchronized { values })
                             .await;
                         self.handle_ui_event_effects(&effects).await;
-                        // #1497: another runtime wrote these, so its save owns any credential
-                        // retirement; reading them here keeps the next observation from sweeping.
-                        if self.state.settings.values.delivery
-                            != before_state.settings.values.delivery
-                        {
-                            self.adopt_notification_delivery_credentials().await;
-                        }
                         if self.state != before_state {
                             self.publish_state_change(&before_state);
                         }
@@ -2401,6 +2394,9 @@ impl AppActor {
             return;
         }
         self.account_settings_loaded_for = None;
+        self.notification_delivery_sends.clear();
+        self.notification_delivery =
+            crate::notification_delivery::channel::NotificationDeliveryChannel::new();
         // Resolve the read before applying policy. An intermediate fallback
         // would invalidate caches and send policy updates even on a successful
         // load; those sends can also block the read behind a full mailbox.
@@ -2414,6 +2410,10 @@ impl AppActor {
             if let Some(legacy) = legacy {
                 account_store.seed_account_settings_from_legacy(&load_key_id, &legacy)?;
             }
+            let defaults = settings_store
+                .legacy_notification_defaults()
+                .map_err(|_| koushi_protocol::failure::CoreFailure::StoreUnavailable)?;
+            account_store.migrate_account_notifications(&load_key_id, defaults)?;
             account_store.load_account_settings(&load_key_id)
         })
         .await;

@@ -904,6 +904,7 @@ impl StoreActor {
         &self,
         key_id: &SessionKeyId,
     ) -> Result<(), AccountCleanupIncomplete> {
+        self.delete_account_notification_credentials(key_id)?;
         let root = self.account_root_dir(key_id);
         let credential_deleted = self.credential_store.delete(key_id).is_ok()
             && self.credential_store.delete_local_store_id(key_id).is_ok();
@@ -922,6 +923,21 @@ impl StoreActor {
         } else {
             Err(AccountCleanupIncomplete)
         }
+    }
+
+    /// Delete external credentials before removing any identity or encrypted retry metadata.
+    pub fn delete_account_notification_credentials(
+        &self,
+        key_id: &SessionKeyId,
+    ) -> Result<(), AccountCleanupIncomplete> {
+        let settings = self
+            .load_account_settings(key_id)
+            .map_err(|_| AccountCleanupIncomplete)?;
+        for sink in &settings.delivery.sinks {
+            self.delete_notification_sink_secret(key_id, &sink.id)
+                .map_err(|_| AccountCleanupIncomplete)?;
+        }
+        Ok(())
     }
 
     /// Probe the stored local unlock secret without creating a new one.

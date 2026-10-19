@@ -80,6 +80,17 @@ fn pending_notification_fences_the_ready_account() {
 }
 
 #[test]
+fn pending_notification_captures_preview_policy_with_the_source_payload() {
+    let mut state = ready_state();
+    state.settings.values.notifications.message_previews = true;
+    state.native_attention.notification = Some(payload());
+    let pending = pending_notification(&state, account_tab_id()).expect("source notification");
+    state.settings.values.notifications.message_previews = false;
+    assert!(pending.message_previews);
+    assert!(!state.settings.values.notifications.message_previews);
+}
+
+#[test]
 fn dispatch_diagnostics_name_the_click_waiter() {
     let _guard = koushi_diagnostics::test_support::lock();
     record_notification_outcome(NativeNotificationOutcome::Delivered, "candidate");

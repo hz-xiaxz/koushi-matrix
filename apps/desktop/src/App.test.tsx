@@ -2133,10 +2133,11 @@ describe("desktop integration source guards", () => {
     expect(notificationEffectSource).toContain("snapshot.state.domain.native_attention.summary.capabilities");
     expect(notificationEffectSource).not.toContain("snapshot.state.domain.rooms");
 
-    const clearStart = hookSource.indexOf("if (!desktopAttentionPort || badgeCount !== 0)");
-    const clearEnd = hookSource.indexOf("  }, [badgeCount, desktopAttentionPort]);", clearStart);
+    const clearStart = hookSource.indexOf("if (!desktopAttentionPort || (sessionReady && notificationsEnabled && accountUnreadCount !== 0))");
+    const clearEnd = hookSource.indexOf("  }, [accountUnreadCount, sessionReady, notificationsEnabled, desktopAttentionPort]);", clearStart);
     const clearSource = hookSource.slice(clearStart, clearEnd);
-    expect(clearSource).toContain("badgeCount !== 0");
+    expect(clearSource).toContain("accountUnreadCount !== 0");
+    expect(clearSource).not.toContain("badgeCount");
     expect(hookSource).toContain("aggregateBadgeCount ?? safeAttentionSummary.badgeCount");
     expect(appSource).toContain("aggregateBadgeCount: accountTabs?.badgeCount");
     expect(clearSource).toContain("void clearDesktopAttentionNotifications");

@@ -157,13 +157,16 @@ export function useDesktopAttentionEffects({
     });
   }, [appendDiagnosticLog, desktopAttentionPort]);
 
+  const accountUnreadCount = safeAttentionSummary.unreadTotal;
+  const sessionReady = snapshot?.state.domain.session.kind === "ready";
+  const notificationsEnabled = snapshot?.state.domain.settings.values.notifications.desktop_notifications;
   useEffect(() => {
-    if (!desktopAttentionPort || badgeCount !== 0) {
+    if (!desktopAttentionPort || (sessionReady && notificationsEnabled && accountUnreadCount !== 0)) {
       return;
     }
 
     void clearDesktopAttentionNotifications(desktopAttentionPort.notifications, (token) =>
       appendDiagnosticLog({ timestampMs: Date.now(), source: "native.attention", message: token })
     );
-  }, [badgeCount, desktopAttentionPort]);
+  }, [accountUnreadCount, sessionReady, notificationsEnabled, desktopAttentionPort]);
 }
