@@ -364,7 +364,7 @@ jobs:
       # MCP registration runner and extension builder on macOS (login shell,
       # process groups, bundle layout).
       - name: macOS MCP registration tests
-        run: cargo test --profile ci -p koushi-desktop mcp:: --lib --locked
+        run: cargo test --profile ci -p koushi-desktop 'mcp::' --lib --locked
 
   core-invites:
     # Prove invitation projection through the sole Simplified Sliding Sync
@@ -520,7 +520,7 @@ jobs:
       # MCP registration runner: PATHEXT lookup and .cmd shim escaping run for
       # real only on Windows.
       - name: Windows MCP registration tests
-        run: cargo test --profile ci -p koushi-desktop mcp:: --lib
+        run: cargo test --profile ci -p koushi-desktop 'mcp::' --lib
       # Lint the Windows-only cfg paths Linux CI never compiles (#1035).
       - name: Clippy the Windows Tauri crate
         run: cargo clippy --profile ci -p koushi-desktop --all-targets --locked -- -D warnings
