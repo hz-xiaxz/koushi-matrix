@@ -211,9 +211,12 @@ is never evidence: the scenario passes on server-side state only.
 `headless-core-qa` runs as a long-lived bridge host instead of a scenario when
 `KOUSHI_QA_MCP_HOST=1`, reusing the same guarded QA login, then publishes
 `mcp/endpoint.json` and grants one MCP client (`KOUSHI_QA_MCP_CLIENT`, `pi` by
-default) in `mcp/connections.json`. The agent reaches that bridge through the
-real `koushi-mcp` launcher, so the transport, the grant file, and the tool
-surface are exercised, not a test double.
+default) in `mcp/connections.json`, written in the older schema 1 shape so the
+lane keeps proving that format still works. The host has no consent surface, so
+its broker runs fail-closed: a missing permission answers `consent_required` at
+once instead of waiting for a dialog (#1536). The agent reaches that bridge
+through the real `koushi-mcp` launcher, so the transport, the grant file, and
+the tool surface are exercised, not a test double.
 
 ```bash
 DEEPSEEK_API_KEY=<key> node scripts/mcp-agent-scenario.mjs --server=tuwunel

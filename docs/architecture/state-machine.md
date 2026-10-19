@@ -6107,6 +6107,10 @@ stateDiagram-v2
   section preferences. An absent `low_priority` entry inherits the legacy
   device-global `SidebarCollapsedSections.low_priority` flag and the scope's
   Rooms sort, so an older persisted settings file keeps its collapse choice.
+- `McpSettings.enabled` (app scope, default on) is the local MCP bridge switch.
+  The desktop applies it only after the first settings load; an unreadable
+  settings file keeps the bridge off. MCP grants are never settings values
+  (they name accounts); see "MCP Assistant Approval".
 - `WindowSettings.emoji_picker_size` is an optional device-wide width/height
   preference. Every emoji picker reads it on opening and submits an app-scoped
   `UpdateSettings` when a resize finishes. Drag measurements are transient React
@@ -6854,6 +6858,76 @@ stateDiagram-v2
 - Avatar MXC URIs, thumbnail state, and user-room avatar associations are
   account-scoped sensitive metadata. Debug, logs, tests, QA tokens, fixtures,
   and issue evidence must redact real values.
+
+## MCP Assistant Approval
+
+The consent broker in `koushi-mcp-host` owns one process-wide approval
+lifecycle (#1536). It is independent of account readiness and of the GUI
+reducer: tool calls never reduce `AppAction`s. The desktop adapter forwards its
+`McpAssistantsState` and the user's answers; the headless QA host constructs
+it in fail-closed mode.
+
+```mermaid
+stateDiagram-v2
+    [*] --> Granted: store holds (client, account, permission)
+    [*] --> Refused: FailClosed mode [consent_required]
+    [*] --> Refused: denied earlier this bridge run [not_permitted]
+    [*] --> Refused: per-client or total cap reached [busy]
+    [*] --> Pending: no grant (new, or joins the pending key)
+    Pending --> Granted: Allow, store write succeeded
+    Pending --> Pending: Allow, store write failed (waiters get internal)
+    Pending --> Pending: caller timed out or disconnected (call dropped, preview cleared)
+    Pending --> Denied: Deny (key remembered for the run)
+    Pending --> Granted: permission turned on in settings
+    Pending --> Closed: Remove access (waiters get not_permitted)
+    Pending --> Closed: expired after 5 minutes
+    Pending --> Closed: bridge stopped or turned off (waiters get koushi_unavailable)
+```
+
+- **Keys and fencing.** A pending approval is keyed by (client name, account
+  id, permission); a call with the same key joins it. Each has a monotonic
+  `request_id`, and answers name it. An answer for an unknown, expired, or
+  already settled id is a no-op reported as `stale`.
+- **Admission.** The account must resolve to a live account before an approval
+  exists; an unknown account answers `account_unavailable` with no dialog. A
+  send's room label is shown only when the room resolves to a joined room, and
+  room existence is checked after consent, so consent cannot probe
+  membership.
+- **Waiting.** A call waits up to 40 s, then answers `consent_required`; the
+  approval stays pending, so a later Allow lets the retry pass. A call whose
+  connection closes is dropped and never runs its tool. When the last waiter
+  leaves, the message preview is cleared.
+- **Store writes.** Allow and settings changes re-read `connections.json`
+  under one async writer lock and atomically replace it, then update state,
+  publish, and wake waiters, in that order. A missing file is created; a
+  malformed, unreadable, or newer-schema file is never overwritten, and the
+  failure is published as the store status.
+- **Denial memory** lasts until the permission is turned on in settings, the
+  assistant is removed, the bridge is turned off, or the app restarts.
+- **Caps.** At most 4 pending keys per client name and 16 in total.
+- **Lock discipline.** One `std::sync::Mutex` guards broker state, with no
+  await and no file I/O under it; each mutation publishes on the `watch`
+  channel before the lock is released.
+- **Presentation.** The dialog never takes initial focus on Allow, and Allow
+  ignores activation for one second after a request appears. Window attention
+  shows a hidden window but never forces focus.
+- `Debug` of the state redacts client names, account ids, room labels, and
+  previews; diagnostics record closed codes only.
+
+The bridge lifecycle follows the setting:
+
+```mermaid
+stateDiagram-v2
+    [*] --> Disabled: before the first settings load, or load failed
+    Disabled --> Running: mcp.enabled and the socket bound
+    Disabled --> StartFailed: mcp.enabled but binding failed
+    Running --> Disabled: mcp.enabled turned off (connections closed, pending dropped)
+    StartFailed --> Disabled: mcp.enabled turned off
+```
+
+- Stopping signals every connection, waits for them, removes the endpoint
+  file and socket, and resets the broker. A later start owns the socket path
+  alone; a dropped old handle never removes a newer bridge's files.
 
 ## Historical key recovery
 

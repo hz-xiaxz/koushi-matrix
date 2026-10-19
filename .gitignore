@@ -17,3 +17,6 @@ apps/desktop/playwright-report/
 # runs `npx playwright test` from there instead of apps/desktop.
 /test-results/
 /playwright-report/
+
+# Release builds stage the bundled koushi-mcp launcher here (#1536).
+apps/desktop/src-tauri/binaries/
