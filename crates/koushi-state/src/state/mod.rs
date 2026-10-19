@@ -128,7 +128,7 @@ pub use settings::{
     AccountSettingsValues, AppDisplaySettings, AppSettingsValues, AppearanceSettings,
     ComposerSendShortcut, ComposerSettings, DisplayDensity, DisplaySettings, EmojiPreference,
     FontPreference, ImageUploadCompressionMode, ImageUploadCompressionPolicy, KeyboardSettings,
-    LinkPreviewSettingsState, LocaleSettings, MediaSettings, NotificationSettings,
+    LinkPreviewSettingsState, LocaleSettings, McpSettings, MediaSettings, NotificationSettings,
     RoomNotificationMode, RoomNotificationModeOperation, RoomNotificationSettings, RoomPreference,
     RoomPreferencesState, RoomUrlPreviews, SIDEBAR_HOME_SCOPE_KEY, SettingsPatch,
     SettingsPatchScope, SettingsPersistenceState, SettingsState, SettingsValues, SidebarCategory,

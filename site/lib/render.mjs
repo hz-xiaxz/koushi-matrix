@@ -37,6 +37,12 @@ const PAIN_POINTS = [
   { id: "help" }
 ];
 
+const AI_CAN = ["search", "unread", "reply", "attachments", "wait"];
+const AI_CONTROL = ["grant", "scope", "flags", "plain"];
+const AI_TRY = ["unread", "search", "reply"];
+// Shown verbatim in every locale; it mirrors the Claude Code command in docs/help/ai-assistants.md.
+const AI_COMMAND = "claude mcp add --scope user koushi -- /path/to/koushi-mcp --client-name claude-code";
+
 const FEATURES = ["e2ee", "layout", "timeline", "rich", "files", "desktop", "keywords", "spaces", "updates", "diagnostics"];
 
 const SETTINGS_ROWS = [
@@ -169,6 +175,33 @@ export function renderPage({ locale, strings, staleKeys = [], englishStrings = s
         <h2>${t("pain.heading")}</h2>
         <p class="section-lede">${t("pain.lede")}</p>
         ${painItems}
+      </section>
+
+      <section class="ai" id="ai">
+        <h2>${t("ai.heading")}</h2>
+        <p class="section-lede">${t("ai.lede")}</p>
+        <div class="ai-columns">
+          <div class="card">
+            <h3>${t("ai.can.heading")}</h3>
+            <ul>
+              ${AI_CAN.map((id) => `<li>${t(`ai.can.${id}`)}</li>`).join("\n              ")}
+            </ul>
+          </div>
+          <div class="card">
+            <h3>${t("ai.control.heading")}</h3>
+            <ul>
+              ${AI_CONTROL.map((id) => `<li>${t(`ai.control.${id}`)}</li>`).join("\n              ")}
+            </ul>
+          </div>
+        </div>
+        <div class="ai-try">
+          <pre class="ai-command"><code>${escapeHtml(AI_COMMAND)}</code></pre>
+          <p class="ai-try-heading">${t("ai.try.heading")}</p>
+          <ul class="ai-prompts">
+            ${AI_TRY.map((id) => `<li>${t(`ai.try.${id}`)}</li>`).join("\n            ")}
+          </ul>
+        </div>
+        <p class="ai-setup">${t("ai.setup")} <a href="${help("ai-assistants.md")}">${t("ai.guide")}</a></p>
       </section>
 
       <section class="features" id="features">

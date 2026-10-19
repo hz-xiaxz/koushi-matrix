@@ -918,6 +918,86 @@ export type MessageId =
   | "settings.updateAvailableConfirm"
   | "settings.updateDownload"
   | "settings.updateIgnore"
+  | "settings.categoryAssistants"
+  | "settings.assistantsEnable"
+  | "settings.assistantsEnableDescription"
+  | "settings.assistantsKeys"
+  | "settings.assistantsBridgeFailed"
+  | "settings.assistantsStoreUnreadable"
+  | "settings.assistantsStoreWriteFailed"
+  | "settings.assistantsConnected"
+  | "settings.assistantsNone"
+  | "settings.assistantsSelfDeclared"
+  | "settings.assistantsLastUsed"
+  | "settings.assistantsVersion"
+  | "settings.assistantsAccount"
+  | "settings.assistantsRead"
+  | "settings.assistantsSend"
+  | "settings.assistantsAttachments"
+  | "settings.assistantsDenied"
+  | "settings.assistantsPermissionLabel"
+  | "settings.assistantsNotRequested"
+  | "settings.assistantsUnknownAccount"
+  | "settings.assistantsRemove"
+  | "settings.assistantsRemoveLabel"
+  | "settings.assistantsConnect"
+  | "settings.assistantsClients"
+  | "settings.assistantsClientOther"
+  | "settings.assistantsConnectCommand"
+  | "settings.assistantsConnectYaml"
+  | "settings.assistantsConnectJson"
+  | "settings.assistantsCopy"
+  | "settings.assistantsCopied"
+  | "settings.assistantsCopyFailed"
+  | "settings.assistantsLauncherMissing"
+  | "settings.assistantsLauncherTranslocated"
+  | "settings.assistantsLauncherEphemeral"
+  | "mcp.approveReadTitle"
+  | "mcp.approveSendTitle"
+  | "mcp.approveAttachmentsTitle"
+  | "mcp.requestedBy"
+  | "mcp.wantsRead"
+  | "mcp.wantsSend"
+  | "mcp.wantsAttachments"
+  | "mcp.readCan"
+  | "mcp.readCanRooms"
+  | "mcp.readCanMessages"
+  | "mcp.readCanSearch"
+  | "mcp.readCannot"
+  | "mcp.sendPreviewHeading"
+  | "mcp.sendPreviewHeadingRoom"
+  | "mcp.sendNoLongerWaiting"
+  | "mcp.sendExplain"
+  | "mcp.attachmentsExplain"
+  | "mcp.attachmentsRoom"
+  | "mcp.selfDeclared"
+  | "mcp.deny"
+  | "mcp.allowRead"
+  | "mcp.allowSend"
+  | "mcp.allowAttachments"
+  | "mcp.moreWaiting"
+  | "mcp.saveFailed"
+  | "mcp.moreMessagesWaiting"
+  | "settings.assistantsPending"
+  | "settings.assistantsRegister"
+  | "settings.assistantsRegisterTitle"
+  | "settings.assistantsRegisterExplain"
+  | "settings.assistantsRegisterRun"
+  | "settings.assistantsRegisterRunning"
+  | "settings.assistantsRegistered"
+  | "settings.assistantsRegisterNotFound"
+  | "settings.assistantsRegisterFailed"
+  | "settings.assistantsRegisterFailedNoCode"
+  | "settings.assistantsRegisterTimedOut"
+  | "settings.assistantsRegisterInProgress"
+  | "settings.assistantsRegisterUnsafe"
+  | "settings.assistantsRegisterUnavailable"
+  | "settings.assistantsCreateExtension"
+  | "settings.assistantsExtensionExplain"
+  | "settings.assistantsExtensionOpened"
+  | "settings.assistantsExtensionSaved"
+  | "settings.assistantsExtensionFailed"
+  | "settings.assistantsOutdated"
   | "settings.updateIgnored"
   | "settings.updateDownloading"
   | "settings.updateReady"
@@ -3088,6 +3168,86 @@ const en: Catalog = {
   "settings.updateAvailableConfirm": "Download and install Koushi {version}?",
   "settings.updateDownload": "Download update",
   "settings.updateIgnore": "Ignore this version",
+  "settings.categoryAssistants": "AI assistants",
+  "settings.assistantsEnable": "Let AI assistants connect",
+  "settings.assistantsEnableDescription": "Assistants on this computer, such as Claude Code or Codex, can ask for access. Koushi asks you before each account and each permission.",
+  "settings.assistantsKeys": "Assistants talk to this running app, so they never hold your encryption keys. Nothing works while Koushi is closed.",
+  "settings.assistantsBridgeFailed": "Koushi could not start the assistant connection. Restart Koushi to try again.",
+  "settings.assistantsStoreUnreadable": "Koushi cannot read its assistant permissions file (connections.json), so no assistant has access. Fix or remove the file to approve assistants again.",
+  "settings.assistantsStoreWriteFailed": "Koushi could not save the last change to assistant permissions.",
+  "settings.assistantsConnected": "Connected assistants",
+  "settings.assistantsNone": "No assistant has asked for access yet.",
+  "settings.assistantsSelfDeclared": "Name the assistant gave itself",
+  "settings.assistantsLastUsed": "Last used {time}",
+  "settings.assistantsVersion": "Version {version}",
+  "settings.assistantsAccount": "Account",
+  "settings.assistantsRead": "Read",
+  "settings.assistantsSend": "Send",
+  "settings.assistantsAttachments": "Attachments",
+  "settings.assistantsDenied": "Denied",
+  "settings.assistantsPermissionLabel": "{permission} for {account}",
+  "settings.assistantsNotRequested": "Not requested yet. Koushi will ask when {client} first uses this account.",
+  "settings.assistantsUnknownAccount": "Account not open in Koushi",
+  "settings.assistantsRemove": "Remove access",
+  "settings.assistantsRemoveLabel": "Remove access for {client}",
+  "settings.assistantsConnect": "Connect an assistant",
+  "settings.assistantsClients": "Assistant",
+  "settings.assistantsClientOther": "Other",
+  "settings.assistantsConnectCommand": "Run this in a terminal, then ask the assistant something. Koushi will ask you to approve it.",
+  "settings.assistantsConnectYaml": "Add this entry to {file}, then ask the assistant something. Koushi will ask you to approve it.",
+  "settings.assistantsConnectJson": "Add this to the assistant's MCP configuration, then ask it something. Koushi will ask you to approve it.",
+  "settings.assistantsCopy": "Copy",
+  "settings.assistantsCopied": "Copied",
+  "settings.assistantsCopyFailed": "Could not copy",
+  "settings.assistantsLauncherMissing": "This build of Koushi does not include the koushi-mcp launcher. The user guide explains how to build it.",
+  "settings.assistantsLauncherTranslocated": "Move Koushi to the Applications folder and open it again. Assistants cannot use a launcher on a disk image or a temporary copy.",
+  "settings.assistantsLauncherEphemeral": "Koushi could not copy its launcher to a permanent location, so assistants cannot use it. Check free disk space and restart Koushi.",
+  "mcp.approveReadTitle": "Allow {client} to read your messages?",
+  "mcp.approveSendTitle": "Allow {client} to send messages?",
+  "mcp.approveAttachmentsTitle": "Allow {client} to download attachments?",
+  "mcp.requestedBy": "Requested by a program on this computer",
+  "mcp.wantsRead": "wants to read {account}",
+  "mcp.wantsSend": "wants to send as {account}",
+  "mcp.wantsAttachments": "wants to download attachments from {account}",
+  "mcp.readCan": "If you allow, {client} can:",
+  "mcp.readCanRooms": "List the rooms in {account}, with unread counts",
+  "mcp.readCanMessages": "Read recent messages, including encrypted rooms",
+  "mcp.readCanSearch": "Search your message history in {account}",
+  "mcp.readCannot": "It cannot send messages or download attachments. Koushi will ask again if it tries. Other accounts stay hidden.",
+  "mcp.sendPreviewHeading": "The message it is waiting to send:",
+  "mcp.sendPreviewHeadingRoom": "The message it is waiting to send, in {room}:",
+  "mcp.sendNoLongerWaiting": "The assistant stopped waiting, so that message will not be sent. Your answer still applies to its future messages.",
+  "mcp.sendExplain": "If you allow, {client} can send messages and replies from {account} without asking again. They look like messages you wrote. You can turn this off in App Settings → AI assistants.",
+  "mcp.attachmentsExplain": "If you allow, {client} can download attachments from {account} into Koushi's media cache without asking again.",
+  "mcp.attachmentsRoom": "Requested for a file in {room}.",
+  "mcp.selfDeclared": "“{client}” is the name the assistant gave itself. Allow it only if you just set up or asked that assistant.",
+  "mcp.deny": "Deny",
+  "mcp.allowRead": "Allow reading {account}",
+  "mcp.allowSend": "Allow sending from {account}",
+  "mcp.allowAttachments": "Allow downloads from {account}",
+  "mcp.moreWaiting": "More requests waiting: {count}",
+  "mcp.saveFailed": "Koushi could not save this approval. See App Settings → AI assistants.",
+  "mcp.moreMessagesWaiting": "Other calls from this assistant waiting for this answer: {count}",
+  "settings.assistantsPending": "Waiting for your answer",
+  "settings.assistantsRegister": "Register",
+  "settings.assistantsRegisterTitle": "Register Koushi with {client}?",
+  "settings.assistantsRegisterExplain": "Koushi will run this command. {client} saves the registration in its own settings; Koushi does not edit its files.",
+  "settings.assistantsRegisterRun": "Run",
+  "settings.assistantsRegisterRunning": "Registering…",
+  "settings.assistantsRegistered": "Registered with {client}. Ask it something, and approve it in Koushi.",
+  "settings.assistantsRegisterNotFound": "{program} was not found on this computer. Install {client}, or copy the command and run it in a terminal.",
+  "settings.assistantsRegisterFailed": "{client} reported a problem (exit code {code}):",
+  "settings.assistantsRegisterFailedNoCode": "{client} reported a problem:",
+  "settings.assistantsRegisterTimedOut": "{client} did not finish within a minute. Copy the command and run it in a terminal instead.",
+  "settings.assistantsRegisterInProgress": "Another registration is still running.",
+  "settings.assistantsRegisterUnsafe": "Koushi cannot run this command safely on this computer. Copy it and run it in a terminal.",
+  "settings.assistantsRegisterUnavailable": "The launcher is not available, so nothing can be registered.",
+  "settings.assistantsCreateExtension": "Create Claude Desktop extension",
+  "settings.assistantsExtensionExplain": "Koushi creates Koushi.mcpb and opens it, and Claude Desktop shows its own install review. Create it again after updating Koushi.",
+  "settings.assistantsExtensionOpened": "Created {path}. Finish the installation in Claude Desktop.",
+  "settings.assistantsExtensionSaved": "Created {path}. In Claude Desktop, open Settings → Extensions and install it, or drag it into the Claude window.",
+  "settings.assistantsExtensionFailed": "Koushi could not create the extension. If Koushi.mcpb is open in another app, close it and try again.",
+  "settings.assistantsOutdated": "{client} uses a launcher from an older Koushi. For Claude Desktop, create the extension again; for other assistants, remove their old koushi entry and register again.",
   "settings.updateIgnored":
     "Automatic reminders are off for this version until Koushi restarts. You can still download it.",
   "settings.updateDownloading": "Downloading and verifying Koushi {version}…",
@@ -5295,6 +5455,86 @@ const ja: Catalog = {
   "settings.updateAvailableConfirm": "Koushi {version}をダウンロードしてインストールしますか？",
   "settings.updateDownload": "アップデートをダウンロード",
   "settings.updateIgnore": "このバージョンを無視",
+  "settings.categoryAssistants": "AI アシスタント",
+  "settings.assistantsEnable": "AI アシスタントの接続を許可",
+  "settings.assistantsEnableDescription": "Claude Code や Codex など、このコンピューター上のアシスタントがアクセスを求められます。Koushi はアカウントごと、権限ごとに確認します。",
+  "settings.assistantsKeys": "アシスタントは起動中のこのアプリとやり取りするため、暗号鍵を持つことはありません。Koushi を閉じている間は何も動きません。",
+  "settings.assistantsBridgeFailed": "Koushi はアシスタント接続を開始できませんでした。Koushi を再起動してもう一度お試しください。",
+  "settings.assistantsStoreUnreadable": "Koushi はアシスタントの権限ファイル（connections.json）を読み取れないため、どのアシスタントにもアクセス権がありません。ファイルを修正するか削除すると、再び承認できるようになります。",
+  "settings.assistantsStoreWriteFailed": "アシスタントの権限に対する直前の変更を保存できませんでした。",
+  "settings.assistantsConnected": "接続したアシスタント",
+  "settings.assistantsNone": "まだアクセスを求めたアシスタントはありません。",
+  "settings.assistantsSelfDeclared": "アシスタントの自己申告名",
+  "settings.assistantsLastUsed": "最終使用 {time}",
+  "settings.assistantsVersion": "バージョン {version}",
+  "settings.assistantsAccount": "アカウント",
+  "settings.assistantsRead": "読み取り",
+  "settings.assistantsSend": "送信",
+  "settings.assistantsAttachments": "添付ファイル",
+  "settings.assistantsDenied": "拒否済み",
+  "settings.assistantsPermissionLabel": "{account} の{permission}",
+  "settings.assistantsNotRequested": "まだ求められていません。{client} がこのアカウントを初めて使うときに確認します。",
+  "settings.assistantsUnknownAccount": "Koushi で開いていないアカウント",
+  "settings.assistantsRemove": "アクセスを取り消す",
+  "settings.assistantsRemoveLabel": "{client} のアクセスを取り消す",
+  "settings.assistantsConnect": "アシスタントを接続",
+  "settings.assistantsClients": "アシスタント",
+  "settings.assistantsClientOther": "その他",
+  "settings.assistantsConnectCommand": "ターミナルでこれを実行してから、アシスタントに何か頼んでください。Koushi が承認を求めます。",
+  "settings.assistantsConnectYaml": "この項目を {file} に追加してから、アシスタントに何か頼んでください。Koushi が承認を求めます。",
+  "settings.assistantsConnectJson": "これをアシスタントの MCP 設定に追加してから、何か頼んでください。Koushi が承認を求めます。",
+  "settings.assistantsCopy": "コピー",
+  "settings.assistantsCopied": "コピーしました",
+  "settings.assistantsCopyFailed": "コピーできませんでした",
+  "settings.assistantsLauncherMissing": "このビルドの Koushi には koushi-mcp ランチャーが含まれていません。ビルド方法はユーザーガイドを参照してください。",
+  "settings.assistantsLauncherTranslocated": "Koushi を「アプリケーション」フォルダーに移動してから開き直してください。ディスクイメージ上や一時的なコピーのランチャーはアシスタントが使えません。",
+  "settings.assistantsLauncherEphemeral": "Koushi はランチャーを固定の場所にコピーできなかったため、アシスタントが使えません。空き容量を確認して Koushi を再起動してください。",
+  "mcp.approveReadTitle": "{client} にメッセージの読み取りを許可しますか？",
+  "mcp.approveSendTitle": "{client} にメッセージの送信を許可しますか？",
+  "mcp.approveAttachmentsTitle": "{client} に添付ファイルのダウンロードを許可しますか？",
+  "mcp.requestedBy": "このコンピューター上のプログラムからの要求です",
+  "mcp.wantsRead": "{account} の読み取りを求めています",
+  "mcp.wantsSend": "{account} として送信しようとしています",
+  "mcp.wantsAttachments": "{account} の添付ファイルのダウンロードを求めています",
+  "mcp.readCan": "許可すると、{client} は次のことができます。",
+  "mcp.readCanRooms": "{account} のルームを未読数つきで一覧する",
+  "mcp.readCanMessages": "暗号化ルームを含む最近のメッセージを読む",
+  "mcp.readCanSearch": "{account} のメッセージ履歴を検索する",
+  "mcp.readCannot": "メッセージの送信や添付ファイルのダウンロードはできません。試みた場合は改めて確認します。ほかのアカウントは見えません。",
+  "mcp.sendPreviewHeading": "送信を待っているメッセージ：",
+  "mcp.sendPreviewHeadingRoom": "{room} への送信を待っているメッセージ：",
+  "mcp.sendNoLongerWaiting": "アシスタントが待つのをやめたため、そのメッセージは送信されません。ここでの回答は今後のメッセージに適用されます。",
+  "mcp.sendExplain": "許可すると、{client} は今後確認なしで {account} からメッセージや返信を送れます。あなたが書いたメッセージと同じように見えます。アプリ設定 → AI アシスタントでいつでもオフにできます。",
+  "mcp.attachmentsExplain": "許可すると、{client} は今後確認なしで {account} の添付ファイルを Koushi のメディアキャッシュにダウンロードできます。",
+  "mcp.attachmentsRoom": "{room} のファイルについての要求です。",
+  "mcp.selfDeclared": "「{client}」はアシスタントの自己申告による名前です。そのアシスタントを設定した直後や、頼みごとをした場合にだけ許可してください。",
+  "mcp.deny": "拒否",
+  "mcp.allowRead": "{account} の読み取りを許可",
+  "mcp.allowSend": "{account} からの送信を許可",
+  "mcp.allowAttachments": "{account} からのダウンロードを許可",
+  "mcp.moreWaiting": "ほかに待っている要求：{count} 件",
+  "mcp.saveFailed": "この承認を保存できませんでした。アプリ設定 → AI アシスタントを確認してください。",
+  "mcp.moreMessagesWaiting": "この回答を待っている、このアシスタントのほかの呼び出し：{count} 件",
+  "settings.assistantsPending": "回答待ち",
+  "settings.assistantsRegister": "登録",
+  "settings.assistantsRegisterTitle": "Koushi を {client} に登録しますか？",
+  "settings.assistantsRegisterExplain": "Koushi がこのコマンドを実行します。登録内容は {client} が自分の設定に保存し、Koushi がそのファイルを書き換えることはありません。",
+  "settings.assistantsRegisterRun": "実行",
+  "settings.assistantsRegisterRunning": "登録しています…",
+  "settings.assistantsRegistered": "{client} に登録しました。何か頼んでから、Koushi で承認してください。",
+  "settings.assistantsRegisterNotFound": "このコンピューターで {program} が見つかりませんでした。{client} をインストールするか、コマンドをコピーしてターミナルで実行してください。",
+  "settings.assistantsRegisterFailed": "{client} が問題を報告しました（終了コード {code}）：",
+  "settings.assistantsRegisterFailedNoCode": "{client} が問題を報告しました：",
+  "settings.assistantsRegisterTimedOut": "{client} が1分以内に終わりませんでした。代わりにコマンドをコピーしてターミナルで実行してください。",
+  "settings.assistantsRegisterInProgress": "別の登録がまだ実行中です。",
+  "settings.assistantsRegisterUnsafe": "このコンピューターでは Koushi からこのコマンドを安全に実行できません。コピーしてターミナルで実行してください。",
+  "settings.assistantsRegisterUnavailable": "ランチャーが使えないため、登録できません。",
+  "settings.assistantsCreateExtension": "Claude Desktop 拡張を作成",
+  "settings.assistantsExtensionExplain": "Koushi が Koushi.mcpb を作成して開くと、Claude Desktop がインストールの確認画面を表示します。Koushi を更新したら作り直してください。",
+  "settings.assistantsExtensionOpened": "{path} を作成しました。Claude Desktop でインストールを完了してください。",
+  "settings.assistantsExtensionSaved": "{path} を作成しました。Claude Desktop の「設定 → 拡張機能」からインストールするか、Claude のウィンドウにドラッグしてください。",
+  "settings.assistantsExtensionFailed": "拡張を作成できませんでした。Koushi.mcpb をほかのアプリで開いている場合は、閉じてからもう一度お試しください。",
+  "settings.assistantsOutdated": "{client} は古い Koushi のランチャーを使っています。Claude Desktop なら拡張を作り直してください。ほかのアシスタントなら、古い koushi の登録を削除してから登録し直してください。",
   "settings.updateIgnored":
     "Koushiを再起動するまで、このバージョンの自動通知はオフになります。ダウンロードは引き続き可能です。",
   "settings.updateDownloading": "Koushi {version}をダウンロードして検証しています…",

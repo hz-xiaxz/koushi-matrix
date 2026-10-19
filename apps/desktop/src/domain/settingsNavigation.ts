@@ -11,6 +11,7 @@ export const settingsCategories = [
   { id: "privacy", label: "settings.securityPrivacy" },
   { id: "encryption", label: "trust.encryption" },
   { id: "search", label: "settings.searchHistory" },
+  { id: "assistants", label: "settings.categoryAssistants" },
   { id: "help", label: "settings.categoryHelp" }
 ] as const satisfies ReadonlyArray<{ id: string; label: MessageId }>;
 

@@ -91,6 +91,27 @@ pub struct ClientInfo {
     pub version: String,
 }
 
+/// Why a client name was refused. The name is shown in Koushi's approval
+/// dialog, so it must not be able to carry spacing, line breaks, or
+/// bidirectional controls that could make it read as another assistant.
+pub const CLIENT_NAME_RULE: &str = "client name must be 1-64 characters from A-Z a-z 0-9 . _ -";
+
+/// Whether `name` is an acceptable `--client-name`.
+pub fn valid_client_name(name: &str) -> bool {
+    (1..=64).contains(&name.len())
+        && name
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-'))
+}
+
+/// Whether a client version is shown as declared; anything else is dropped.
+pub fn valid_client_version(version: &str) -> bool {
+    version.len() <= 32
+        && version
+            .bytes()
+            .all(|byte| byte.is_ascii_alphanumeric() || matches!(byte, b'.' | b'_' | b'-' | b'+'))
+}
+
 /// Messages sent by the launcher to the app.
 #[derive(Clone, Debug, serde::Serialize, serde::Deserialize)]
 #[serde(tag = "type", rename_all = "snake_case")]

@@ -5,12 +5,16 @@
 //! credentials and never hands one to a caller.
 
 use std::path::PathBuf;
+use std::sync::Arc;
+use std::sync::atomic::{AtomicBool, Ordering};
+use std::time::Duration;
 
 use serde_json::Value;
 use tokio::io::{AsyncBufReadExt, AsyncWriteExt, BufReader};
 use tokio::sync::watch;
 
 use crate::BridgeAccounts;
+use crate::consent::{ClientIdentity, ConsentBroker};
 use koushi_mcp::wire::{
     ClientMessage, ErrorCode, MAX_FRAME_BYTES, PROTOCOL_VERSION, ServerMessage, WireError,
     decode_line, encode_line,
@@ -27,17 +31,55 @@ type Listener = NamedPipeListener;
 #[cfg(windows)]
 type Stream = tokio::net::windows::named_pipe::NamedPipeServer;
 
+/// How often expired approvals are closed while the bridge runs.
+const SWEEP_INTERVAL: Duration = Duration::from_secs(5);
+/// How long a graceful shutdown waits for connections to wind down.
+const SHUTDOWN_GRACE: Duration = Duration::from_secs(5);
+
 /// Owns the listener task and the files it published.
 pub struct BridgeHandle {
     shutdown: watch::Sender<bool>,
+    stopped: AtomicBool,
+    accept_task: Option<tokio::task::JoinHandle<()>>,
+    broker: Arc<ConsentBroker>,
     data_dir: PathBuf,
     socket_path: PathBuf,
 }
 
 impl BridgeHandle {
-    /// Signals the listener to stop and removes the published files.
+    /// Signals the listener and every connection to stop and removes the
+    /// published files. Waiting tool calls answer `koushi_unavailable`.
+    /// Idempotent, so a later `Drop` cannot remove files a newer bridge wrote.
     pub fn stop(&self) {
+        if self.stopped.swap(true, Ordering::SeqCst) {
+            return;
+        }
         let _ = self.shutdown.send(true);
+        self.broker.reset();
+        self.remove_files();
+    }
+
+    /// Stops the bridge and waits for the listener and its connections to
+    /// finish, so a bridge started afterwards owns the socket path alone.
+    /// The broker is reset only after the connections are gone, so no call
+    /// can open an approval after the reset.
+    pub async fn shutdown(mut self) {
+        if !self.stopped.swap(true, Ordering::SeqCst) {
+            let _ = self.shutdown.send(true);
+            if let Some(mut task) = self.accept_task.take()
+                && tokio::time::timeout(SHUTDOWN_GRACE, &mut task)
+                    .await
+                    .is_err()
+            {
+                task.abort();
+                let _ = task.await;
+            }
+            self.broker.reset();
+            self.remove_files();
+        }
+    }
+
+    fn remove_files(&self) {
         endpoint::remove(&self.data_dir);
         // Harmless on Windows: the pipe vanishes with the process, and the
         // path is not a filesystem entry there.
@@ -52,10 +94,11 @@ impl Drop for BridgeHandle {
 }
 
 /// Starts the bridge: binds the socket, writes `endpoint.json`, and accepts
-/// connections until shutdown.
+/// connections until shutdown. Tool calls are authorized by `broker`.
 pub fn start(
-    accounts: std::sync::Arc<dyn BridgeAccounts>,
+    accounts: Arc<dyn BridgeAccounts>,
     data_dir: PathBuf,
+    broker: Arc<ConsentBroker>,
 ) -> Result<BridgeHandle, &'static str> {
     endpoint::ensure_dir(&data_dir).map_err(|_| "mcp_dir")?;
     let transport = endpoint::transport_path(&data_dir);
@@ -63,207 +106,235 @@ pub fn start(
     let socket_path = PathBuf::from(&transport);
 
     #[cfg(unix)]
-    {
+    let listener = {
         // A stale socket from a crashed run must not block binding.
         let _ = std::fs::remove_file(&socket_path);
         let listener = Listener::bind(&socket_path).map_err(|_| "mcp_bind")?;
         use std::os::unix::fs::PermissionsExt;
         std::fs::set_permissions(&socket_path, std::fs::Permissions::from_mode(0o600))
             .map_err(|_| "mcp_socket_mode")?;
-        endpoint::write(&data_dir, &transport, &token, env!("CARGO_PKG_VERSION"))
-            .map_err(|_| "mcp_endpoint_file")?;
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let log = std::sync::Arc::new(super::events::EventLog::new());
-        super::events::spawn_poller(
-            std::sync::Arc::clone(&accounts),
-            std::sync::Arc::clone(&log),
-            shutdown_rx.clone(),
-        );
-        tokio::spawn(accept_loop(
-            listener,
-            accounts,
-            log,
-            token,
-            shutdown_rx,
-            data_dir.clone(),
-        ));
-        Ok(BridgeHandle {
-            shutdown: shutdown_tx,
-            data_dir,
-            socket_path,
-        })
-    }
-
+        listener
+    };
     #[cfg(windows)]
-    {
-        let listener = Listener::bind(&transport, true).map_err(|_| "mcp_pipe")?;
-        endpoint::write(&data_dir, &transport, &token, env!("CARGO_PKG_VERSION"))
-            .map_err(|_| "mcp_endpoint_file")?;
-        let (shutdown_tx, shutdown_rx) = watch::channel(false);
-        let log = std::sync::Arc::new(super::events::EventLog::new());
-        super::events::spawn_poller(
-            std::sync::Arc::clone(&accounts),
-            std::sync::Arc::clone(&log),
-            shutdown_rx.clone(),
-        );
-        tokio::spawn(accept_loop(
-            listener,
+    let listener = Listener::bind(&transport, true).map_err(|_| "mcp_pipe")?;
+
+    endpoint::write(&data_dir, &transport, &token, env!("CARGO_PKG_VERSION"))
+        .map_err(|_| "mcp_endpoint_file")?;
+    let (shutdown_tx, shutdown_rx) = watch::channel(false);
+    let log = Arc::new(events::EventLog::new());
+    events::spawn_poller(Arc::clone(&accounts), Arc::clone(&log), shutdown_rx.clone());
+    spawn_sweeper(Arc::clone(&broker), shutdown_rx.clone());
+    let accept_task = tokio::spawn(accept_loop(
+        listener,
+        Shared {
             accounts,
             log,
-            token,
-            shutdown_rx,
-            data_dir.clone(),
-        ));
-        Ok(BridgeHandle {
-            shutdown: shutdown_tx,
-            data_dir,
-            socket_path,
-        })
-    }
+            broker: Arc::clone(&broker),
+        },
+        token,
+        shutdown_rx,
+    ));
+    Ok(BridgeHandle {
+        shutdown: shutdown_tx,
+        stopped: AtomicBool::new(false),
+        accept_task: Some(accept_task),
+        broker,
+        data_dir,
+        socket_path,
+    })
 }
 
-#[cfg(unix)]
+/// What every connection task shares.
+#[derive(Clone)]
+pub(crate) struct Shared {
+    pub(crate) accounts: Arc<dyn BridgeAccounts>,
+    pub(crate) log: Arc<events::EventLog>,
+    pub(crate) broker: Arc<ConsentBroker>,
+}
+
+fn spawn_sweeper(broker: Arc<ConsentBroker>, mut shutdown: watch::Receiver<bool>) {
+    tokio::spawn(async move {
+        let mut ticker = tokio::time::interval(SWEEP_INTERVAL);
+        loop {
+            tokio::select! {
+                _ = shutdown.changed() => {
+                    if *shutdown.borrow() {
+                        return;
+                    }
+                }
+                _ = ticker.tick() => broker.sweep(),
+            }
+        }
+    });
+}
+
 async fn accept_loop(
-    listener: Listener,
-    accounts: std::sync::Arc<dyn BridgeAccounts>,
-    log: std::sync::Arc<events::EventLog>,
+    #[allow(unused_mut)] mut listener: Listener,
+    shared: Shared,
     token: String,
     mut shutdown: watch::Receiver<bool>,
-    data_dir: PathBuf,
 ) {
+    let mut connections = tokio::task::JoinSet::new();
     loop {
         tokio::select! {
             _ = shutdown.changed() => {
                 if *shutdown.borrow() {
-                    return;
+                    break;
                 }
             }
+            // Reap finished connections so the set does not grow.
+            Some(_) = connections.join_next(), if !connections.is_empty() => {}
             accepted = listener.accept() => {
                 match accepted {
+                    #[cfg(unix)]
                     Ok((stream, _addr)) => {
-                        let accounts = accounts.clone();
-                        let log = log.clone();
-                        let token = token.clone();
-                        let data_dir = data_dir.clone();
-                        tokio::spawn(async move {
-                            let _ = serve_connection(stream, accounts, log, token, data_dir).await;
-                        });
+                        connections.spawn(serve_connection(
+                            stream,
+                            shared.clone(),
+                            token.clone(),
+                            shutdown.clone(),
+                        ));
+                    }
+                    #[cfg(windows)]
+                    Ok(stream) => {
+                        connections.spawn(serve_connection(
+                            stream,
+                            shared.clone(),
+                            token.clone(),
+                            shutdown.clone(),
+                        ));
                     }
                     Err(_) => {
                         // Transient accept failure; give the runtime a moment
                         // rather than spinning on a broken listener.
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
+                        tokio::time::sleep(Duration::from_millis(50)).await;
                     }
                 }
             }
         }
     }
+    // Stop accepting at once, then wait for every connection, which watches
+    // the same signal, to close.
+    drop(listener);
+    while connections.join_next().await.is_some() {}
 }
 
-#[cfg(windows)]
-async fn accept_loop(
-    mut listener: Listener,
-    accounts: std::sync::Arc<dyn BridgeAccounts>,
-    log: std::sync::Arc<events::EventLog>,
-    token: String,
-    mut shutdown: watch::Receiver<bool>,
-    data_dir: PathBuf,
-) {
-    loop {
-        tokio::select! {
-            _ = shutdown.changed() => {
-                if *shutdown.borrow() {
-                    return;
-                }
-            }
-            accepted = listener.accept() => {
-                match accepted {
-                    Ok(stream) => {
-                        let accounts = accounts.clone();
-                        let log = log.clone();
-                        let token = token.clone();
-                        let data_dir = data_dir.clone();
-                        tokio::spawn(async move {
-                            let _ = serve_connection(stream, accounts, log, token, data_dir).await;
-                        });
-                    }
-                    Err(_) => {
-                        tokio::time::sleep(std::time::Duration::from_millis(50)).await;
-                    }
-                }
-            }
-        }
-    }
+async fn write_message(
+    writer: &mut (impl AsyncWriteExt + Unpin),
+    message: &ServerMessage,
+) -> std::io::Result<()> {
+    let Ok(encoded) = encode_line(message) else {
+        return Err(std::io::Error::other("encode"));
+    };
+    writer.write_all(encoded.as_bytes()).await?;
+    writer.flush().await
 }
 
 async fn serve_connection(
     stream: Stream,
-    accounts: std::sync::Arc<dyn BridgeAccounts>,
-    log: std::sync::Arc<events::EventLog>,
+    shared: Shared,
     token: String,
-    data_dir: PathBuf,
-) -> std::io::Result<()> {
+    mut shutdown: watch::Receiver<bool>,
+) {
     let (read_half, mut write_half) = tokio::io::split(stream);
     let mut reader = BufReader::new(read_half);
 
-    let Some(client) = read_hello(&mut reader, &token).await? else {
-        let _ = write_half
-            .write_all(
-                encode_line(&ServerMessage::Error {
-                    code: ErrorCode::Unauthorized,
-                    message: "connection token rejected".to_owned(),
-                })
-                .unwrap_or_default()
-                .as_bytes(),
+    let client = match read_hello(&mut reader, &token).await {
+        Ok(Hello::Accepted(client)) => {
+            shared.broker.note_current_launcher(&client.name);
+            client
+        }
+        Ok(Hello::Outdated(name)) => {
+            if let Some(name) = name {
+                shared.broker.note_outdated_launcher(&name);
+            }
+            let _ = write_message(
+                &mut write_half,
+                &ServerMessage::Error {
+                    code: ErrorCode::Unsupported,
+                    message: "this koushi-mcp launcher is older than the running Koushi; register it again"
+                        .to_owned(),
+                },
             )
             .await;
-        let _ = write_half.flush().await;
-        return Ok(());
+            return;
+        }
+        Ok(Hello::Rejected(error)) => {
+            let _ = write_message(
+                &mut write_half,
+                &ServerMessage::Error {
+                    code: error.code,
+                    message: error.message,
+                },
+            )
+            .await;
+            return;
+        }
+        Err(_) => return,
     };
 
-    let _ = write_half
-        .write_all(
-            encode_line(&ServerMessage::HelloOk {
-                protocol: PROTOCOL_VERSION,
-                connection_id: format!("{}-{}", client.name, std::process::id()),
-                app_version: env!("CARGO_PKG_VERSION").to_owned(),
-            })
-            .unwrap_or_default()
-            .as_bytes(),
-        )
-        .await;
-    write_half.flush().await?;
+    if write_message(
+        &mut write_half,
+        &ServerMessage::HelloOk {
+            protocol: PROTOCOL_VERSION,
+            connection_id: format!("{}-{}", client.name, std::process::id()),
+            app_version: env!("CARGO_PKG_VERSION").to_owned(),
+        },
+    )
+    .await
+    .is_err()
+    {
+        return;
+    }
 
     loop {
         let mut line = String::new();
-        let read = match reader.read_line(&mut line).await {
-            Ok(read) => read,
-            Err(_) => return Ok(()),
+        let read = tokio::select! {
+            _ = shutdown.changed() => return,
+            read = reader.read_line(&mut line) => match read {
+                Ok(read) => read,
+                Err(_) => return,
+            },
         };
         if read == 0 {
-            return Ok(());
+            return;
         }
         if line.len() > MAX_FRAME_BYTES {
-            let _ = write_half
-                .write_all(
-                    encode_line(&ServerMessage::Error {
-                        code: ErrorCode::Internal,
-                        message: "frame too large".to_owned(),
-                    })
-                    .unwrap_or_default()
-                    .as_bytes(),
-                )
-                .await;
-            return Ok(());
+            let _ = write_message(
+                &mut write_half,
+                &ServerMessage::Error {
+                    code: ErrorCode::Internal,
+                    message: "frame too large".to_owned(),
+                },
+            )
+            .await;
+            return;
         }
         let response = match decode_line::<ClientMessage>(&line) {
             Ok(ClientMessage::Request { id, method, params }) => {
-                let result =
-                    dispatch_method(&accounts, &log, &client.name, &data_dir, &method, params)
-                        .await;
-                match result {
-                    Ok(value) => ServerMessage::success(id, value),
-                    Err(error) => ServerMessage::failure(id, error),
+                // The launcher sends one request at a time, so while a call
+                // runs, the only thing to watch for is the client going away
+                // (it cancelled, or was killed) or the bridge stopping. Either
+                // drops the call before it can act, including a send that is
+                // still waiting for approval.
+                let dispatch = dispatch_method(&shared, &client, &method, params);
+                tokio::select! {
+                    biased;
+                    _ = shutdown.changed() => return,
+                    _ = closed(&mut reader) => return,
+                    result = dispatch => {
+                        // Stopping signals the connection and then releases
+                        // waiting approvals, and one poll can observe the
+                        // second without the first. A stopped bridge closes
+                        // the connection; it never answers.
+                        if *shutdown.borrow() {
+                            return;
+                        }
+                        match result {
+                            Ok(value) => ServerMessage::success(id, value),
+                            Err(error) => ServerMessage::failure(id, error),
+                        }
+                    }
                 }
             }
             Ok(ClientMessage::Hello { .. }) => ServerMessage::failure(
@@ -274,32 +345,50 @@ async fn serve_connection(
                 ServerMessage::failure(0, WireError::new(ErrorCode::Internal, "malformed request"))
             }
         };
-        let Ok(encoded) = encode_line(&response) else {
-            return Ok(());
-        };
-        if write_half.write_all(encoded.as_bytes()).await.is_err() {
-            return Ok(());
-        }
-        if write_half.flush().await.is_err() {
-            return Ok(());
+        if write_message(&mut write_half, &response).await.is_err() {
+            return;
         }
     }
 }
 
-/// Reads and validates the handshake. Returns the declared client on success.
+/// Resolves when the peer closed its side. Data that arrives meanwhile stays
+/// buffered for the next read, and this future then never resolves.
+async fn closed<R: tokio::io::AsyncRead + Unpin>(reader: &mut BufReader<R>) {
+    let pending_data = match reader.fill_buf().await {
+        Ok(buffer) => !buffer.is_empty(),
+        Err(_) => false,
+    };
+    if pending_data {
+        std::future::pending::<()>().await;
+    }
+}
+
+enum Hello {
+    Accepted(ClientIdentity),
+    Rejected(WireError),
+    /// The token matched, but the launcher speaks another bridge protocol:
+    /// a copy left over from an older Koushi (such as a Claude Desktop
+    /// extension). Carries its name when that name is valid.
+    Outdated(Option<String>),
+}
+
+/// Reads and validates the handshake.
 async fn read_hello<R: tokio::io::AsyncRead + Unpin>(
     reader: &mut BufReader<R>,
     expected_token: &str,
-) -> std::io::Result<Option<koushi_mcp::wire::ClientInfo>> {
+) -> std::io::Result<Hello> {
+    let unauthorized = || {
+        Hello::Rejected(WireError::new(
+            ErrorCode::Unauthorized,
+            "connection token rejected",
+        ))
+    };
     let mut line = String::new();
-    let read = tokio::time::timeout(
-        std::time::Duration::from_secs(5),
-        reader.read_line(&mut line),
-    )
-    .await
-    .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timeout"))??;
+    let read = tokio::time::timeout(Duration::from_secs(5), reader.read_line(&mut line))
+        .await
+        .map_err(|_| std::io::Error::new(std::io::ErrorKind::TimedOut, "handshake timeout"))??;
     if read == 0 || line.len() > MAX_FRAME_BYTES {
-        return Ok(None);
+        return Ok(unauthorized());
     }
     let Ok(ClientMessage::Hello {
         protocol,
@@ -307,15 +396,33 @@ async fn read_hello<R: tokio::io::AsyncRead + Unpin>(
         client,
     }) = decode_line::<ClientMessage>(&line)
     else {
-        return Ok(None);
+        return Ok(unauthorized());
     };
-    if protocol != PROTOCOL_VERSION {
-        return Ok(None);
-    }
     if !constant_time_eq(token.as_bytes(), expected_token.as_bytes()) {
-        return Ok(None);
+        return Ok(unauthorized());
     }
-    Ok(Some(client))
+    // Checked after the token, so only a launcher that may connect at all can
+    // put its name on the settings page as outdated.
+    if protocol != PROTOCOL_VERSION {
+        return Ok(Hello::Outdated(
+            koushi_mcp::wire::valid_client_name(&client.name).then_some(client.name),
+        ));
+    }
+    if !koushi_mcp::wire::valid_client_name(&client.name) {
+        return Ok(Hello::Rejected(WireError::new(
+            ErrorCode::Unsupported,
+            koushi_mcp::wire::CLIENT_NAME_RULE,
+        )));
+    }
+    let version = if koushi_mcp::wire::valid_client_version(&client.version) {
+        client.version
+    } else {
+        String::new()
+    };
+    Ok(Hello::Accepted(ClientIdentity {
+        name: client.name,
+        version,
+    }))
 }
 
 fn constant_time_eq(left: &[u8], right: &[u8]) -> bool {
@@ -363,20 +470,15 @@ impl NamedPipeListener {
     }
 }
 
-/// Dispatches one IPC request. Reads are the only tools implemented so far;
-/// everything else answers `unsupported` rather than pretending to work.
+/// Dispatches one IPC request.
 async fn dispatch_method(
-    accounts: &std::sync::Arc<dyn BridgeAccounts>,
-    log: &std::sync::Arc<events::EventLog>,
-    client_name: &str,
-    data_dir: &std::path::Path,
+    shared: &Shared,
+    client: &ClientIdentity,
     method: &str,
     params: Value,
 ) -> Result<Value, WireError> {
     match method {
-        "tools/call" => {
-            handlers::dispatch_tool_call(accounts, log, client_name, data_dir, params).await
-        }
+        "tools/call" => handlers::dispatch_tool_call(shared, client, params).await,
         "status" => Ok(serde_json::json!({
             "protocol": PROTOCOL_VERSION,
             "app_version": env!("CARGO_PKG_VERSION")
@@ -392,7 +494,7 @@ async fn dispatch_method(
 mod tests {
     use super::*;
 
-    async fn handshake(input: &str, expected_token: &str) -> Option<koushi_mcp::wire::ClientInfo> {
+    async fn handshake(input: &str, expected_token: &str) -> Hello {
         let (mut client, server) = tokio::io::duplex(8 * 1024);
         client.write_all(input.as_bytes()).await.expect("write");
         client.shutdown().await.expect("shutdown");
@@ -400,39 +502,114 @@ mod tests {
         read_hello(&mut reader, expected_token).await.expect("read")
     }
 
+    fn hello(token: &str, name: &str, version: &str) -> String {
+        format!(
+            "{}\n",
+            serde_json::json!({
+                "type": "hello", "protocol": 1, "token": token,
+                "client": { "name": name, "version": version }
+            })
+        )
+    }
+
+    fn rejected(hello: Hello) -> ErrorCode {
+        match hello {
+            Hello::Rejected(error) => error.code,
+            Hello::Accepted(_) => panic!("accepted"),
+            Hello::Outdated(_) => panic!("outdated"),
+        }
+    }
+
     #[tokio::test]
     async fn accepts_the_matching_token_and_returns_client_info() {
-        let input = concat!(
-            r#"{"type":"hello","protocol":1,"token":"secret","client":{"name":"codex","version":"0.147.0"}}"#,
-            "\n"
-        );
-        let client = handshake(input, "secret").await.expect("accepted");
+        let Hello::Accepted(client) =
+            handshake(&hello("secret", "codex", "0.147.0"), "secret").await
+        else {
+            panic!("rejected");
+        };
         assert_eq!(client.name, "codex");
         assert_eq!(client.version, "0.147.0");
     }
 
     #[tokio::test]
     async fn rejects_a_wrong_token() {
-        let input = concat!(
-            r#"{"type":"hello","protocol":1,"token":"guess","client":{"name":"codex","version":"0"}}"#,
-            "\n"
-        );
-        assert!(handshake(input, "secret").await.is_none());
+        let result = handshake(&hello("guess", "codex", "0"), "secret").await;
+        assert_eq!(rejected(result), ErrorCode::Unauthorized);
     }
 
     #[tokio::test]
-    async fn rejects_an_unsupported_protocol() {
+    async fn an_authenticated_launcher_with_another_protocol_is_reported_outdated() {
         let input = concat!(
-            r#"{"type":"hello","protocol":9,"token":"secret","client":{"name":"codex","version":"0"}}"#,
+            r#"{"type":"hello","protocol":9,"token":"secret","client":{"name":"claude-desktop","version":"0"}}"#,
             "\n"
         );
-        assert!(handshake(input, "secret").await.is_none());
+        assert!(matches!(
+            handshake(input, "secret").await,
+            Hello::Outdated(Some(name)) if name == "claude-desktop"
+        ));
+        let unauthenticated = concat!(
+            r#"{"type":"hello","protocol":9,"token":"guess","client":{"name":"claude-desktop","version":"0"}}"#,
+            "\n"
+        );
+        assert_eq!(
+            rejected(handshake(unauthenticated, "secret").await),
+            ErrorCode::Unauthorized
+        );
     }
 
     #[tokio::test]
     async fn rejects_a_non_hello_first_message() {
         let input = r#"{"type":"request","id":1,"method":"tools/call"}"#.to_owned() + "\n";
-        assert!(handshake(&input, "secret").await.is_none());
+        assert_eq!(
+            rejected(handshake(&input, "secret").await),
+            ErrorCode::Unauthorized
+        );
+    }
+
+    #[tokio::test]
+    async fn rejects_a_client_name_that_could_mislead_the_dialog() {
+        for name in [
+            "",
+            "claude\u{202E}edoc",
+            "a b",
+            "line\nbreak",
+            &"x".repeat(65),
+        ] {
+            let result = handshake(&hello("secret", name, "1"), "secret").await;
+            assert_eq!(rejected(result), ErrorCode::Unsupported, "{name:?}");
+        }
+    }
+
+    #[tokio::test]
+    async fn drops_an_unusable_version_but_keeps_the_client() {
+        let Hello::Accepted(client) =
+            handshake(&hello("secret", "pi", "1.0\u{202E}"), "secret").await
+        else {
+            panic!("rejected");
+        };
+        assert_eq!(client.version, "");
+    }
+
+    #[tokio::test]
+    async fn closed_resolves_on_eof_but_not_on_buffered_data() {
+        let (client, server) = tokio::io::duplex(1024);
+        let mut reader = BufReader::new(server);
+        drop(client);
+        tokio::time::timeout(Duration::from_secs(1), closed(&mut reader))
+            .await
+            .expect("eof seen");
+
+        let (mut client, server) = tokio::io::duplex(1024);
+        client.write_all(b"next\n").await.expect("write");
+        let mut reader = BufReader::new(server);
+        assert!(
+            tokio::time::timeout(Duration::from_millis(50), closed(&mut reader))
+                .await
+                .is_err()
+        );
+        let mut line = String::new();
+        reader.read_line(&mut line).await.expect("read");
+        assert_eq!(line, "next\n", "buffered data is kept for the next read");
     }
 
     #[test]

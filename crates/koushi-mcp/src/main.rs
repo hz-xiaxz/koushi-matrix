@@ -54,7 +54,11 @@ async fn async_main() -> ExitCode {
                 }
             },
             "--client-name" => match args.next() {
-                Some(value) => client_name = value,
+                Some(value) if koushi_mcp::wire::valid_client_name(&value) => client_name = value,
+                Some(_) => {
+                    eprintln!("koushi-mcp: {}", koushi_mcp::wire::CLIENT_NAME_RULE);
+                    return ExitCode::from(2);
+                }
                 None => {
                     eprintln!("koushi-mcp: --client-name requires a value");
                     return ExitCode::from(2);

@@ -3,6 +3,7 @@ import { spawnSync } from "node:child_process";
 import { existsSync, readdirSync } from "node:fs";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
+import { hostTarget, stageMcpSidecar, withMcpSidecar } from "./desktop-mcp-sidecar.mjs";
 
 const repoRoot = resolve(dirname(fileURLToPath(import.meta.url)), "..");
 const desktopDir = join(repoRoot, "apps", "desktop");
@@ -32,7 +33,7 @@ printStorageNotice();
 const bundleVersion = macOSBundleVersion();
 const buildEnvironment = localSigningEnvironment();
 const updaterPublicKey = buildEnvironment.KOUSHI_UPDATER_PUBLIC_KEY?.trim();
-const buildConfig = {
+const buildConfig = withMcpSidecar({
   bundle: {
     macOS: {
       bundleVersion,
@@ -48,7 +49,7 @@ const buildConfig = {
     createUpdaterArtifacts: args.has("--signed") || Boolean(updaterPublicKey)
   },
   ...(updaterPublicKey ? { plugins: { updater: { pubkey: updaterPublicKey } } } : {})
-};
+});
 const buildCommand = [
   "run",
   "tauri",
@@ -81,7 +82,13 @@ if (args.has("--signed")) {
   );
 }
 
+stageMcpSidecar({ repoRoot, target: target ?? hostTarget(), env: buildEnvironment });
 run("npm", buildCommand, desktopDir);
+const launcher = join(bundleDir, "macos", "Koushi.app", "Contents", "MacOS", "koushi-mcp");
+if (!existsSync(launcher)) {
+  console.error(`desktop-build-dmg: the koushi-mcp launcher is missing from the app bundle: ${launcher}`);
+  process.exit(1);
+}
 run("codesign", ["--verify", "--deep", "--strict", join(bundleDir, "macos", "Koushi.app")], repoRoot);
 
 const dmgFiles = listDmgArtifacts();

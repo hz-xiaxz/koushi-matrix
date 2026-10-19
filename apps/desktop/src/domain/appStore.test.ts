@@ -1446,6 +1446,7 @@ function makeSnapshot(): DesktopSnapshot {
             },
             window: { close_to_tray: true },
             updates: { auto_check: true, include_prereleases: false },
+            mcp: { enabled: true },
             media: {
               image_upload_compression_policy: {
                 threshold_bytes: 1048576,

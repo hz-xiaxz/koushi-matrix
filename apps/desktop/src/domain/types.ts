@@ -213,6 +213,7 @@ export interface SettingsValues {
   display: DisplaySettings;
   window: WindowSettings;
   updates: UpdatesSettings;
+  mcp: McpSettings;
   media: MediaSettings;
   timeline: TimelineSettings;
   sidebar: SidebarSettings;
@@ -234,6 +235,7 @@ export interface SettingsPatch {
   display?: DisplaySettings;
   window?: WindowSettings;
   updates?: UpdatesSettings;
+  mcp?: McpSettings;
   media?: MediaSettings;
   timeline?: TimelineSettings;
   sidebar?: SidebarSettings;
@@ -546,6 +548,94 @@ export interface WindowSettings {
 export interface UpdatesSettings {
   auto_check: boolean;
   include_prereleases: boolean;
+}
+
+/** Local MCP bridge switch (#1536). App scope; grants live in the bridge's store. */
+export interface McpSettings {
+  enabled: boolean;
+}
+
+export type McpNeed = "read" | "send" | "attachments";
+
+export interface McpPendingApproval {
+  request_id: number;
+  /** Self-declared by the assistant; validated to `[A-Za-z0-9._-]{1,64}`. */
+  client_name: string;
+  client_version: string;
+  account_id: string;
+  need: McpNeed;
+  room_label: string | null;
+  message_preview: string | null;
+  waiting: boolean;
+  /** Tool calls waiting for this answer; the preview shows the newest. */
+  waiting_calls: number;
+}
+
+export interface McpAssistantAccount {
+  account_id: string;
+  read: boolean;
+  send: boolean;
+  attachments: boolean;
+  /** Permissions denied for this account during this bridge run. */
+  denied: McpNeed[];
+}
+
+export interface McpAssistant {
+  client_name: string;
+  client_version: string | null;
+  last_used_ms: number | null;
+  accounts: McpAssistantAccount[];
+}
+
+export type McpRegistrationClient =
+  | "claude_code"
+  | "codex"
+  | "pi"
+  | "claude_desktop"
+  | "deepseek_harness"
+  | "other";
+
+export interface McpRegistration {
+  client: McpRegistrationClient;
+  client_name: string;
+  kind: "command" | "yaml" | "json";
+  text: string;
+  config_hint: string | null;
+  /** Besides copying: run the client's own CLI, or build a Claude Desktop extension. */
+  action: "run_command" | "create_extension" | null;
+}
+
+/** Result of running a client's registration CLI (`register_mcp_client`). */
+export type McpRegisterOutcome =
+  | { outcome: "registered"; output: string }
+  | { outcome: "not_found"; program: string }
+  | { outcome: "failed"; exit_code: number | null; output: string }
+  | { outcome: "timed_out" }
+  | { outcome: "in_progress" }
+  | { outcome: "unsafe_arguments" }
+  | { outcome: "launcher_unavailable" }
+  | { outcome: "unsupported" };
+
+/** Result of `create_claude_desktop_extension`. */
+export type McpExtensionOutcome =
+  | { outcome: "opened"; path: string }
+  | { outcome: "saved"; path: string }
+  | { outcome: "unsupported" }
+  | { outcome: "launcher_unavailable" }
+  | { outcome: "write_failed" };
+
+/** Process-wide state of the MCP consent broker, pushed on `koushi-desktop://mcp`. */
+export interface McpAssistantsState {
+  bridge: "disabled" | "running" | "start_failed";
+  store: "ok" | "missing" | "malformed" | "unreadable" | "unsupported_schema" | "write_failed";
+  launcher:
+    | { state: "available"; path: string }
+    | { state: "unavailable"; reason: "not_bundled" | "translocated" | "ephemeral" };
+  pending: McpPendingApproval[];
+  assistants: McpAssistant[];
+  registrations: McpRegistration[];
+  /** Client names whose launcher is from an older Koushi. */
+  outdated_launchers: string[];
 }
 
 export type DesktopUpdateState =

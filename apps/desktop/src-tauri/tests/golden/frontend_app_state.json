@@ -1244,6 +1244,9 @@
             "language_tag": null,
             "text_direction": "auto"
           },
+          "mcp": {
+            "enabled": false
+          },
           "media": {
             "image_upload_compression_policy": {
               "quality_percent": 82,

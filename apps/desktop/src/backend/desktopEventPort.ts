@@ -1,5 +1,5 @@
 import type { CoreEventPayload, StateUpdateEnvelope } from "../domain/coreEvents";
-import type { AccountTabsSnapshot, DesktopUpdateState } from "../domain/types";
+import type { AccountTabsSnapshot, DesktopUpdateState, McpAssistantsState } from "../domain/types";
 
 export type DesktopEventUnlisten = () => void;
 
@@ -16,5 +16,8 @@ export interface DesktopEventPort {
   ): Promise<DesktopEventUnlisten>;
   listenDesktopUpdates(
     listener: (payload: DesktopUpdateState) => void
+  ): Promise<DesktopEventUnlisten>;
+  listenMcpAssistants(
+    listener: (payload: McpAssistantsState) => void
   ): Promise<DesktopEventUnlisten>;
 }

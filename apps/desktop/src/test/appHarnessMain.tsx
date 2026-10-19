@@ -47,6 +47,7 @@ import {
   type ComposerSurface,
   type DesktopSnapshot,
   type DesktopUpdateState,
+  type McpAssistantsState,
   type E2eeTrustState,
   type AccountTabsSnapshot,
   type LocaleDisplayProfile,
@@ -131,6 +132,7 @@ interface AppHarnessControl {
   pushNotificationActivation(activation: DesktopNotificationActivation): Promise<void>;
   pushAccountTabs(snapshot: AccountTabsSnapshot): Promise<void>;
   pushDesktopUpdate(state: DesktopUpdateState): Promise<void>;
+  pushMcpAssistants(state: McpAssistantsState): Promise<void>;
   pushStateUpdate(envelope?: StateUpdateEnvelope): void;
   currentSnapshot(): DesktopSnapshot;
   /**
@@ -400,6 +402,7 @@ function defaultSettingsState(): DesktopSnapshot["state"]["domain"]["settings"] 
       },
       window: { close_to_tray: true },
           updates: { auto_check: true, include_prereleases: false },
+          mcp: { enabled: true },
       media: {
         image_upload_compression_policy: {
           threshold_bytes: 1048576,
@@ -560,6 +563,7 @@ function applySettingsPatch(
     display: patch.display ?? values.display,
     window: patch.window ?? values.window,
     updates: patch.updates ?? values.updates,
+    mcp: patch.mcp ?? values.mcp,
     media: patch.media ?? values.media,
     timeline: patch.timeline ?? values.timeline,
     search_crawler: patch.search_crawler ?? values.search_crawler,
@@ -1561,6 +1565,23 @@ mock.setCommandResponse("check_for_desktop_update", () => null);
 mock.setCommandResponse("download_desktop_update", () => null);
 mock.setCommandResponse("restart_to_install_desktop_update", () => null);
 mock.setCommandResponse("ignore_desktop_update", () => null);
+mock.setCommandResponse("get_mcp_assistants_state", () => ({
+  bridge: "running",
+  store: "ok",
+  launcher: { state: "unavailable", reason: "not_bundled" },
+  pending: [],
+  assistants: [],
+  registrations: [],
+  outdated_launchers: []
+}));
+mock.setCommandResponse("answer_mcp_approval", () => "applied");
+mock.setCommandResponse("set_mcp_permission", () => null);
+mock.setCommandResponse("remove_mcp_assistant", () => null);
+mock.setCommandResponse("register_mcp_client", () => ({ outcome: "registered", output: "" }));
+mock.setCommandResponse("create_claude_desktop_extension", () => ({
+  outcome: "opened",
+  path: "/Users/member1/Downloads/Koushi.mcpb"
+}));
 mock.setCommandResponse("subscribe_receipt_reader", ({
   source,
 }: {
@@ -4377,6 +4398,7 @@ const harnessControl: AppHarnessControl = {
     emit("koushi-desktop://notification-activated", activation),
   pushAccountTabs: (snapshot) => emit("koushi-desktop://account-tabs-update", snapshot),
   pushDesktopUpdate: (state) => emit("koushi-desktop://update", state),
+  pushMcpAssistants: (state) => emit("koushi-desktop://mcp", state),
   pushCoreEvent: (event) => {
     // Records that a test now owns the CoreEvent stream so the boot seed
     // loop below stops re-emitting its generation-1 timeline over test data.

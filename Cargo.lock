@@ -3426,6 +3426,7 @@ dependencies = [
  "url",
  "webkit2gtk",
  "windows-sys 0.61.2",
+ "zip",
 ]
 
 [[package]]
@@ -3467,6 +3468,7 @@ version = "0.1.0"
 dependencies = [
  "koushi-core",
  "koushi-diagnostics",
+ "koushi-key",
  "koushi-mcp",
  "koushi-protocol",
  "koushi-state",

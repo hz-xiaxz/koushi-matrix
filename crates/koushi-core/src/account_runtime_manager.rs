@@ -57,6 +57,17 @@ pub struct AccountTabDescriptor {
     pub homeserver: Option<String>,
 }
 
+impl AccountTabDescriptor {
+    /// The id this tab's account keeps across launches, `account:<user id>`.
+    /// A tab that signed in during this run keeps its sign-in id (`add:N`)
+    /// until the next launch restores it, so surfaces that must name an
+    /// account stably (the MCP bridge and its grants) use this instead of
+    /// `id`. `None` while the tab has no account.
+    pub fn stable_account_id(&self) -> Option<AccountTabId> {
+        self.account_key.as_ref().map(AccountTabId::account)
+    }
+}
+
 struct ManagedTab {
     descriptor: AccountTabDescriptor,
     session_key_id: Option<SessionKeyId>,
@@ -357,6 +368,16 @@ impl AccountRuntimeManager {
         &self,
     ) -> tokio::sync::watch::Receiver<koushi_state::AppSettingsValues> {
         self.settings.subscribe()
+    }
+
+    /// App-wide preferences as read from disk. Unlike the update channel, which
+    /// starts at defaults, this reports a settings file that could not be read,
+    /// so a policy that must fail closed (the MCP bridge switch) can tell
+    /// "no file yet" from "unreadable".
+    pub fn load_app_settings(
+        &self,
+    ) -> Result<koushi_state::AppSettingsValues, crate::settings::SettingsStoreError> {
+        self.settings.load().map(|values| values.app_settings())
     }
 
     pub fn selected_tab_id(&self) -> AccountTabId {

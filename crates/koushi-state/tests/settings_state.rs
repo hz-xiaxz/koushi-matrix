@@ -118,6 +118,7 @@ fn settings_loaded_replaces_values_without_requiring_a_session() {
         sidebar: koushi_state::SidebarSettings::default(),
         window: WindowSettings::default(),
         updates: Default::default(),
+        mcp: Default::default(),
         legacy_frontend_preferences_imported: false,
     };
 
