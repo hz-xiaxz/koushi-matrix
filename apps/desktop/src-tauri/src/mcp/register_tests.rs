@@ -218,8 +218,8 @@ mod windows {
     async fn a_batch_shim_receives_a_launcher_path_with_spaces_as_one_argument() {
         let dir = tempfile::tempdir().expect("tempdir");
         let shim = dir.path().join("claude.cmd");
-        // %~6 is the launcher (after mcp add --scope user koushi --).
-        std::fs::write(&shim, "@echo off\r\necho [%~6]\r\n").expect("write");
+        // %~7 is the launcher: mcp add --scope user koushi -- <launcher>.
+        std::fs::write(&shim, "@echo off\r\necho [%~7]\r\n").expect("write");
         let launcher = r"C:\Program Files\Koushi\koushi-mcp.exe";
         let (_, args) = command_argv(RegistrationClient::ClaudeCode, launcher).expect("argv");
         let system = std::env::var_os("SystemRoot")
@@ -227,11 +227,9 @@ mod windows {
             .unwrap_or_default();
         let outcome = run(&shim, &args, &system, Duration::from_secs(20)).await;
         // A path with spaces must reach the shim intact, not be refused.
-        assert_eq!(
-            outcome,
-            RegisterOutcome::Registered {
-                output: format!("[{launcher}]")
-            }
-        );
+        match outcome {
+            RegisterOutcome::Registered { output } => assert_eq!(output, format!("[{launcher}]")),
+            other => panic!("expected registered, got {other:?}"),
+        }
     }
 }
