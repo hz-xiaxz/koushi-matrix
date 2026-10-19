@@ -1,6 +1,8 @@
 //! `SettingsValues.mcp` (#1536): the app-scope switch for the local MCP bridge.
 
-use koushi_state::{AppSettingsValues, McpSettings, SettingsPatch, SettingsPatchScope, SettingsValues};
+use koushi_state::{
+    AppSettingsValues, McpSettings, SettingsPatch, SettingsPatchScope, SettingsValues,
+};
 
 #[test]
 fn the_bridge_is_on_by_default_and_for_older_settings_files() {

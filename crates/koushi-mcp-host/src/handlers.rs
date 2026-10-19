@@ -414,23 +414,20 @@ async fn send_message(
     // The approval shows the message as context, and the room only when it is
     // one this account has joined. Whether the room exists is decided after
     // consent, so an unapproved client cannot probe membership.
-    let room_label = account_connection(&shared.accounts, &account_id)?
-        .snapshot()
-        .rooms
-        .iter()
-        .find(|room| room.room_id == room_id)
-        .map(|room| room.display_label.clone());
-    let mut connection = authorize(
-        shared,
-        client,
-        &account_id,
-        Need::Send,
-        ConsentContext {
-            room_label,
-            message_preview: Some(body.clone()),
-        },
-    )
-    .await?;
+    let mut connection = account_connection(&shared.accounts, &account_id)?;
+    let room_label = joined_room_label(&connection, &room_id);
+    shared
+        .broker
+        .authorize(
+            client,
+            &account_id,
+            Need::Send,
+            ConsentContext {
+                room_label,
+                message_preview: Some(body.clone()),
+            },
+        )
+        .await?;
     let snapshot = connection.snapshot();
     let account_key = account_key_from_snapshot(&snapshot);
     if account_key.0.is_empty() {
@@ -560,23 +557,20 @@ async fn get_attachment(
         .and_then(Value::as_bool)
         .unwrap_or(false);
 
-    let room_label = account_connection(&shared.accounts, &account_id)?
-        .snapshot()
-        .rooms
-        .iter()
-        .find(|room| room.room_id == room_id)
-        .map(|room| room.display_label.clone());
-    let connection = authorize(
-        shared,
-        client,
-        &account_id,
-        Need::Attachments,
-        ConsentContext {
-            room_label,
-            message_preview: None,
-        },
-    )
-    .await?;
+    let connection = account_connection(&shared.accounts, &account_id)?;
+    let room_label = joined_room_label(&connection, &room_id);
+    shared
+        .broker
+        .authorize(
+            client,
+            &account_id,
+            Need::Attachments,
+            ConsentContext {
+                room_label,
+                message_preview: None,
+            },
+        )
+        .await?;
     let attachment = connection
         .fetch_attachment(room_id.clone(), event_id.clone(), thumbnail)
         .await
@@ -632,6 +626,17 @@ fn ensure_cache_containment(
             "download finished outside Koushi's media cache",
         ))
     }
+}
+
+/// The room's label, only when the account has joined it. Used as approval
+/// context; membership itself is enforced after consent by the tool.
+fn joined_room_label(connection: &koushi_core::CoreConnection, room_id: &str) -> Option<String> {
+    connection
+        .snapshot()
+        .rooms
+        .iter()
+        .find(|room| room.room_id == room_id)
+        .map(|room| room.display_label.clone())
 }
 
 fn account_connection(

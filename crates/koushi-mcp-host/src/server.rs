@@ -295,10 +295,19 @@ async fn serve_connection(
                     biased;
                     _ = shutdown.changed() => return,
                     _ = closed(&mut reader) => return,
-                    result = dispatch => match result {
-                        Ok(value) => ServerMessage::success(id, value),
-                        Err(error) => ServerMessage::failure(id, error),
-                    },
+                    result = dispatch => {
+                        // Stopping signals the connection and then releases
+                        // waiting approvals, and one poll can observe the
+                        // second without the first. A stopped bridge closes
+                        // the connection; it never answers.
+                        if *shutdown.borrow() {
+                            return;
+                        }
+                        match result {
+                            Ok(value) => ServerMessage::success(id, value),
+                            Err(error) => ServerMessage::failure(id, error),
+                        }
+                    }
                 }
             }
             Ok(ClientMessage::Hello { .. }) => ServerMessage::failure(
