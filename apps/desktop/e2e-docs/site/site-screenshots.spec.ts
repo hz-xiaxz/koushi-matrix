@@ -312,7 +312,12 @@ for (const locale of SITE_LOCALES) {
       await expect(dialog).toBeVisible();
       await dialog.locator("#settings-tab-notifications").click();
       await dialog.getByRole("tab", { name: label(locale, "settings.notificationDelivery"), exact: true }).click();
-      await expect(dialog.getByText(label(locale, "settings.notificationDeliveryConfigured"), { exact: false })).toHaveCount(3);
+      const configured = dialog.getByTestId("notification-delivery-sink-status");
+      await expect(configured).toHaveCount(3);
+      for (const status of await configured.all()) {
+        await expect(status).toHaveAttribute("data-configured", "true");
+        await expect(status).toHaveText(label(locale, "settings.notificationDeliveryConfigured"));
+      }
       await capture(page, locale, "notifications", dialog);
     });
 

@@ -696,6 +696,7 @@ export function ContextualRightPanel({
           onChangePassword={onChangePassword ?? (() => undefined)}
           accountNotifications={snapshot.state.domain.account_notifications}
           accountNotificationActions={accountNotificationActions}
+          notificationDelivery={snapshot.state.domain.notification_delivery}
           notificationDeliveryActions={notificationDeliveryActions}
           onDeactivateAccount={onDeactivateAccount ?? (() => undefined)}
           onSubmitAccountManagementUia={onSubmitAccountManagementUia ?? (() => undefined)}

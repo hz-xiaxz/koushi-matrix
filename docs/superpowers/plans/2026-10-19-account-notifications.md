@@ -52,3 +52,10 @@ The feature-unified CI-profile workspace suite, workspace/QA/release Clippy,
 frontend suite (2,162), and both-server local QA pass. An initial workspace run
 hit an existing MCP registration deadline; the unchanged exact test and complete
 workspace rerun pass. Final required CI is checked on the PR before merge.
+
+The website lane exposed missing delivery runtime-state forwarding in the account
+panel. A production-wiring browser test reproduced `needsCredential` for an
+explicitly configured Rust-shaped fixture, then passed after forwarding the same
+account snapshot's notification_delivery field. Exact screenshot status assertions
+replace an English partial-text match. Eight focused browser cases, the English
+screenshot, full UI suite, typecheck, and lint pass; independent review approved.
