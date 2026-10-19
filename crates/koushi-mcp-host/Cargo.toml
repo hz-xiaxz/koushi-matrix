@@ -18,4 +18,5 @@ tempfile = "3"
 tokio = { version = "1", features = ["io-util", "macros", "net", "rt", "sync", "time"] }
 
 [dev-dependencies]
+koushi-key = { path = "../koushi-key" }
 tokio = { version = "1", features = ["test-util"] }

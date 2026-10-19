@@ -4,7 +4,7 @@ import { api } from "../backend/appRuntime";
 import type { AccountTabSummary, McpNeed, McpPendingApproval } from "../domain/types";
 import { t } from "../i18n/messages";
 import { ModalDialog } from "./ModalDialog";
-import { mcpAccountLabel, useMcpAssistantsState } from "./useMcpAssistantsState";
+import { mcpAccountLabel, mcpAccountTab, useMcpAssistantsState } from "./useMcpAssistantsState";
 
 /** How long Allow ignores activation after a request appears (#1536), so a
  * keystroke or click meant for something else cannot approve it. */
@@ -77,7 +77,7 @@ export function McpApprovalPrompt({
   const [saveFailed, setSaveFailed] = useState(false);
 
   const client = request.client_name;
-  const tab = accountTabs.find(candidate => candidate.id === request.account_id);
+  const tab = mcpAccountTab(request.account_id, accountTabs);
   const account = mcpAccountLabel(request.account_id, accountTabs) ?? t("settings.assistantsUnknownAccount");
   const title = {
     read: t("mcp.approveReadTitle", { client }),

@@ -161,3 +161,10 @@ test("closing hides that request until a new one arrives; listeners are released
   view.unmount();
   expect(fixture.listeners.size).toBe(0);
 });
+
+test("an account signed in this run is named although its tab keeps a sign-in id", () => {
+  const signInTab = { ...tabs[0], id: "add:1" } as AccountTabSummary;
+  render(<McpApprovalPrompt request={request()} accountTabs={[signInTab]} moreWaiting={0} onClose={() => undefined} />);
+  expect(screen.getByText("wants to read Synthetic Workspace")).toBeTruthy();
+  expect(screen.queryByText("Account not open in Koushi")).toBeNull();
+});

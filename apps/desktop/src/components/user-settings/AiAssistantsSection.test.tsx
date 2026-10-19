@@ -164,3 +164,14 @@ test("live updates replace the shown state", async () => {
   act(() => fixture.listeners.forEach(listener => listener(state({ assistants: [] }))));
   expect(screen.getByText("No assistant has asked for access yet.")).toBeTruthy();
 });
+
+test("permissions of an account signed in this run match its tab", async () => {
+  fixture.getState.mockResolvedValue(state());
+  const signInTabs = [{ ...tabs[0], id: "add:1" } as AccountTabSummary, tabs[1]];
+  render(<AiAssistantsSection settings={{ enabled: true }} isSaving={false} accountTabs={signInTabs} onUpdateSettings={vi.fn()} />);
+  const card = await screen.findByRole("article", { name: "claude-code" });
+  expect(within(card).getByRole("switch", { name: "Read for Synthetic Workspace" })).toBeTruthy();
+  expect(within(card).queryByText("Account not open in Koushi")).toBeNull();
+  // Only the other account is listed as not requested.
+  expect(within(card).getAllByText(/Koushi will ask when claude-code first uses this account/)).toHaveLength(1);
+});

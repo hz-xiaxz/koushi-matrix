@@ -42,6 +42,22 @@ export function useMcpAssistantsState(): McpAssistantsState | null {
 }
 
 /**
+ * The stable id the MCP bridge names a tab's account by: `account:<user id>`.
+ * A tab that signed in during this run still has its sign-in tab id, so the
+ * tab id alone cannot be matched against the bridge's account ids.
+ */
+export function mcpAccountId(tab: AccountTabSummary): string | null {
+  return tab.accountKey ? `account:${tab.accountKey}` : null;
+}
+
+export function mcpAccountTab(
+  accountId: string,
+  tabs: readonly AccountTabSummary[]
+): AccountTabSummary | undefined {
+  return tabs.find(candidate => mcpAccountId(candidate) === accountId);
+}
+
+/**
  * An account as Koushi itself names it. Assistants only ever supply an account
  * id; the label comes from Koushi's own tabs, never from the request.
  */
@@ -49,6 +65,6 @@ export function mcpAccountLabel(
   accountId: string,
   tabs: readonly AccountTabSummary[]
 ): string | null {
-  const tab = tabs.find(candidate => candidate.id === accountId);
+  const tab = mcpAccountTab(accountId, tabs);
   return tab ? accountTabLabel(tab) : null;
 }

@@ -1981,7 +1981,10 @@ Invariants:
   account runtime the app already runs. It never signs in, restores, or
   verifies on its own, and never opens an SDK or crypto store.
 - **Explicit account, no fallback.** Every account-scoped request carries an
-  `account_id` resolved to that account's live runtime. The selected UI tab is
+  `account_id` resolved to that account's live runtime. The id is the stable
+  `account:<user id>` (`AccountTabDescriptor::stable_account_id`), not the tab
+  id: an account that signed in during this run keeps its sign-in tab id until
+  the next launch, and grants must not change key on restart. The selected UI tab is
   never an input. A missing, signed-out, locked, or replaced account fails the
   request; it never falls through to another account.
 - **Server-side authorization.** Each call is checked against the connection's

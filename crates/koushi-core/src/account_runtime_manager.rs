@@ -57,6 +57,17 @@ pub struct AccountTabDescriptor {
     pub homeserver: Option<String>,
 }
 
+impl AccountTabDescriptor {
+    /// The id this tab's account keeps across launches, `account:<user id>`.
+    /// A tab that signed in during this run keeps its sign-in id (`add:N`)
+    /// until the next launch restores it, so surfaces that must name an
+    /// account stably (the MCP bridge and its grants) use this instead of
+    /// `id`. `None` while the tab has no account.
+    pub fn stable_account_id(&self) -> Option<AccountTabId> {
+        self.account_key.as_ref().map(AccountTabId::account)
+    }
+}
+
 struct ManagedTab {
     descriptor: AccountTabDescriptor,
     session_key_id: Option<SessionKeyId>,
