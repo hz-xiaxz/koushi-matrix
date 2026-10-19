@@ -248,7 +248,7 @@ export function UserSettingsPanel({
   const [displayNameDraft, setDisplayNameDraft] = useState(profile.own.display_name ?? "");
   const visibleCategories = settingsCategories.filter((category) =>
     settingsScope === "app"
-      ? ["appearance", "notifications", "preferences", "keyboard", "search", "help"].includes(category.id)
+      ? ["appearance", "preferences", "keyboard", "search", "help"].includes(category.id)
       : ["account", "sessions", "notifications", "privacy", "encryption", "search"].includes(category.id)
   );
   const initialVisibleCategory = visibleCategories.some((category) => category.id === initialCategory)
@@ -702,7 +702,7 @@ export function UserSettingsPanel({
                     />
                   </>
                 ) : null}
-                {settingsScope !== "account" ? (
+                {settingsScope === "account" ? (
                   <>
                     <NotificationSettingToggle
                       label={t("settings.notificationSound")}
@@ -728,8 +728,7 @@ export function UserSettingsPanel({
             {...notificationPanelProps("device")}
           >
             {/*
-              The delivery section is app-scoped and names its own scope on every patch, so it
-              reads the same from either settings scope.
+              Delivery belongs to the selected account, like every other notification control.
             */}
             <NotificationDeliverySection
               delivery={settings.values.delivery}
@@ -970,12 +969,10 @@ export function UserSettingsPanel({
 export function AppSettingsDialog({
   snapshot,
   onUpdateSettings,
-  notificationDeliveryActions = noopNotificationDeliveryActions,
   onClose
 }: {
   snapshot: DesktopSnapshot;
   onUpdateSettings: (patch: SettingsPatch) => void;
-  notificationDeliveryActions?: NotificationDeliveryActions;
   onClose: () => void;
 }) {
   const domain = snapshot.state.domain;
@@ -1005,8 +1002,6 @@ export function AppSettingsDialog({
         catalogLocale={domain.locale_profile.catalog_locale}
         accountManagement={domain.account_management}
         accountManagementCapabilities={domain.account_management_capabilities}
-        notificationDelivery={domain.notification_delivery}
-        notificationDeliveryActions={notificationDeliveryActions}
         rooms={domain.rooms}
         spaces={domain.spaces}
         onUpdateSettings={onUpdateSettings}

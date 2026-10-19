@@ -5,7 +5,7 @@
 //! ServerChan Turbo - with its own targets, content mode, timing, and outcome. There is
 //! no channel-wide and no per-destination enable switch: a destination is eligible when
 //! its setup is complete, its credential is stored, and one of its targets is set. The
-//! route is app-scoped: it never asks the Matrix account for a destination, so it works
+//! route is account-scoped on this device: it never asks the Matrix account for a destination, so it works
 //! on a homeserver that supports neither email 3PIDs nor pushers. Every value here is
 //! non-secret. A sink's credential lives in the credential store, keyed by the sink id,
 //! and is reported to the product only as a configured flag (state-machine.md, "Local
@@ -751,7 +751,7 @@ fn trimmed_field(value: &str) -> String {
 
 /// The device-local delivery channel as the frontend sees it (#1427).
 ///
-/// App scope, and deliberately outside [`NotificationDeliverySettings`]: the settings
+/// Account scope, and deliberately outside [`NotificationDeliverySettings`]: the settings
 /// file holds what the user chose, this holds what this run of the app has observed -
 /// whether each sink's credential is in the store, and how its last send ended. It is
 /// never persisted, so restarting re-reads the credential store instead of trusting a

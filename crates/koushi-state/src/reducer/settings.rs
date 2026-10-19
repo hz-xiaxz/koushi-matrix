@@ -67,6 +67,9 @@ pub(crate) fn handle_account_settings_loaded(
         AppEffect::EmitUiEvent(UiEvent::SettingsChanged),
         AppEffect::EmitUiEvent(UiEvent::RoomListChanged),
     ];
+    if super::native_attention::apply_badge_setting(state) {
+        effects.push(AppEffect::EmitUiEvent(UiEvent::NativeAttentionChanged));
+    }
     let crawler = state.settings.values.search_crawler.clone();
     let content_changed = previous_crawler.include_media_captions != crawler.include_media_captions
         || previous_crawler.include_filenames != crawler.include_filenames;

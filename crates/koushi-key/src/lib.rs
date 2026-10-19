@@ -11,7 +11,7 @@ use base64::{
 use hkdf::Hkdf;
 use koushi_protocol::SessionKeyId;
 use serde::{Deserialize, Serialize};
-use sha2::Sha256;
+use sha2::{Digest, Sha256};
 use thiserror::Error;
 use zeroize::Zeroizing;
 
@@ -1003,6 +1003,18 @@ impl NotificationSinkSecretId {
             return Err(LocalSecretError::InvalidNotificationSinkSecretId);
         }
         Ok(Self(value.to_owned()))
+    }
+
+    /// A namespace that no legacy unscoped ID can name (its length exceeds the
+    /// public raw-ID bound). Identity components are length-delimited before hashing.
+    pub fn for_account(key: &SessionKeyId, sink_id: &str) -> Result<Self, LocalSecretError> {
+        Self::parse(sink_id)?;
+        let mut hash = Sha256::new();
+        for part in [&key.homeserver, &key.user_id, &key.device_id, sink_id] {
+            hash.update((part.len() as u64).to_be_bytes());
+            hash.update(part.as_bytes());
+        }
+        Ok(Self(format!("account-v1-{:x}", hash.finalize())))
     }
 
     pub fn as_str(&self) -> &str {

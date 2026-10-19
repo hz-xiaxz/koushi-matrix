@@ -2310,6 +2310,12 @@ impl AccountActor {
         let store = self.store.clone();
         let key_id = key_id.clone();
         executor::spawn_blocking(move || {
+            if store
+                .delete_account_notification_credentials(&key_id)
+                .is_err()
+            {
+                return false;
+            }
             let backend = store.credential_backend();
             let mut cleared = backend.delete_matrix_session(&key_id).is_ok();
             cleared &= backend.forget_saved_session(&key_id).is_ok();

@@ -107,6 +107,7 @@ async fn runtime_with_delivery(
 ) -> (CoreRuntime, IsolatedStores, super::CoreConnection) {
     let (runtime, stores) = CoreRuntime::start_isolated_with_event_capacity(64);
     let mut connection = runtime.attach();
+    establish_notification_account(&runtime, &mut connection).await;
     put_delivery_settings(&mut connection, delivery).await;
     wait_for_runtime_snapshot(&mut connection, |state| {
         !state.notification_delivery.sinks.is_empty()
@@ -117,10 +118,15 @@ async fn runtime_with_delivery(
 
 /// The binding the settings file records for the fixture sink, as a test can read it back.
 fn settings_file_has_binding(stores: &IsolatedStores, binding: &str) -> bool {
-    let path = stores.data_dir().join("settings").join("settings.json");
-    std::fs::read_to_string(path)
-        .map(|json| json.contains(binding))
-        .unwrap_or(false)
+    credential_store(stores)
+        .load_account_settings(&notification_key())
+        .is_ok_and(|settings| {
+            settings.delivery.sinks.iter().any(|sink| {
+                sink.secret_binding
+                    .as_deref()
+                    .is_some_and(|value| value.contains(binding))
+            })
+        })
 }
 
 /// Wait until the settings file names this binding, which the persist effect writes after the
@@ -240,7 +246,7 @@ async fn the_secret_command_round_trips_and_flips_configured() {
 
     let store = credential_store(&stores);
     let stored = store
-        .load_notification_sink_secret(SINK)
+        .load_notification_sink_secret(&notification_key(), SINK)
         .expect("the credential store is readable")
         .expect("the command stored the secret");
     assert_eq!(stored.as_str(), SECRET);
@@ -261,7 +267,7 @@ async fn the_secret_command_round_trips_and_flips_configured() {
     .await;
     assert!(
         store
-            .load_notification_sink_secret(SINK)
+            .load_notification_sink_secret(&notification_key(), SINK)
             .expect("the credential store is readable")
             .is_none()
     );
@@ -298,7 +304,7 @@ async fn an_unusable_sink_id_is_refused_without_touching_the_store() {
     );
     assert!(
         credential_store(&stores)
-            .load_notification_sink_secret(SINK)
+            .load_notification_sink_secret(&notification_key(), SINK)
             .expect("the credential store is readable")
             .is_none()
     );
@@ -318,7 +324,9 @@ async fn an_unusable_sink_id_is_refused_without_touching_the_store() {
 async fn the_secret_reaches_no_snapshot_no_debug_and_no_settings_file() {
     let (runtime, stores, mut connection) =
         runtime_with_sink("https://relay.example.invalid/emails").await;
-    let settings_path = stores.data_dir().join("settings").join("settings.json");
+    let settings_path = credential_store(&stores)
+        .account_local_data_dir(&notification_key())
+        .join("settings/account-settings.v1.enc");
     let without_binding = wait_for_settings_file(&settings_path).await;
 
     let command = AppCommand::SetNotificationDeliverySecret {
@@ -385,9 +393,15 @@ async fn the_secret_reaches_no_snapshot_no_debug_and_no_settings_file() {
         .await;
         std::fs::read(&settings_path).expect("the settings file is still there")
     };
-    assert_eq!(
-        without_binding, cleared,
-        "clearing the secret restores the settings byte for byte"
+    assert!(!cleared.is_empty() && !without_binding.is_empty());
+    assert!(
+        credential_store(&stores)
+            .load_account_settings(&notification_key())
+            .expect("read cleared account settings")
+            .delivery
+            .sinks[0]
+            .secret_binding
+            .is_none()
     );
 
     // Saving again mints a new revision, so a content consent bound to the previous credential
@@ -456,7 +470,7 @@ async fn changing_the_recipient_targets_or_timing_keeps_the_credential() {
     );
     assert!(
         credential_store(&stores)
-            .load_notification_sink_secret(SINK)
+            .load_notification_sink_secret(&notification_key(), SINK)
             .expect("the credential store is readable")
             .is_some(),
         "a cosmetic edit must not delete the credential"
@@ -519,7 +533,7 @@ async fn changing_the_server_retires_the_credential_and_flips_configured() {
     assert!(state.notification_delivery.sinks[0].secret_retired);
     assert!(
         credential_store(&stores)
-            .load_notification_sink_secret(SINK)
+            .load_notification_sink_secret(&notification_key(), SINK)
             .expect("the credential store is readable")
             .is_none(),
         "a credential entered for another server is deleted, not kept"
@@ -550,10 +564,11 @@ async fn a_stored_credential_with_no_binding_is_deleted_and_never_used() {
         .await;
     let (runtime, stores) = CoreRuntime::start_isolated_with_event_capacity(64);
     let mut connection = runtime.attach();
+    establish_notification_account(&runtime, &mut connection).await;
     // A credential that nothing in the settings names, as a hand-edited or half-restored profile
     // leaves behind.
     credential_store(&stores)
-        .save_notification_sink_secret(SINK, SECRET)
+        .save_notification_sink_secret(&notification_key(), SINK, SECRET)
         .expect("the fixture credential is stored");
 
     put_delivery_settings(
@@ -577,7 +592,7 @@ async fn a_stored_credential_with_no_binding_is_deleted_and_never_used() {
     );
     assert!(
         credential_store(&stores)
-            .load_notification_sink_secret(SINK)
+            .load_notification_sink_secret(&notification_key(), SINK)
             .expect("the credential store is readable")
             .is_none(),
         "a credential no binding names belongs to no destination this sink has"
@@ -629,14 +644,19 @@ async fn a_settings_file_whose_binding_moved_comes_up_unconfigured() {
 
     // The settings file is editable while the app is closed, so a binding that no longer names
     // this configuration must fail closed on the next start rather than be trusted.
-    let settings_path = stores.data_dir().join("settings").join("settings.json");
-    let edited = std::fs::read_to_string(&settings_path)
-        .expect("the settings file is there")
-        .replace(binding, "resend:https://elsewhere.example.invalid/emails");
-    std::fs::write(&settings_path, edited).expect("the edited settings file is written");
+    let store = credential_store(&stores);
+    let mut values = store
+        .load_account_settings(&notification_key())
+        .expect("load account settings");
+    values.delivery.sinks[0].secret_binding =
+        Some("resend:https://elsewhere.example.invalid/emails#01".into());
+    store
+        .save_account_settings(&notification_key(), &values)
+        .expect("write changed binding");
 
     let runtime = CoreRuntime::restart_isolated(&stores);
     let mut connection = runtime.attach();
+    establish_notification_account(&runtime, &mut connection).await;
     let state = wait_for_runtime_snapshot(&mut connection, |state| {
         !state.notification_delivery.sinks.is_empty()
             && !state.notification_delivery.sinks[0].secret_configured
@@ -648,7 +668,7 @@ async fn a_settings_file_whose_binding_moved_comes_up_unconfigured() {
     assert!(!state.notification_delivery.sinks[0].secret_configured);
     assert!(
         credential_store(&stores)
-            .load_notification_sink_secret(SINK)
+            .load_notification_sink_secret(&notification_key(), SINK)
             .expect("the credential store is readable")
             .is_none(),
         "the credential loaded beside a binding that moved belongs to another server"
@@ -929,7 +949,7 @@ async fn a_serverchan3_sendkey_is_refused_by_kind_and_never_stored() {
     assert!(!sink_state(&connection).secret_configured);
     assert!(
         credential_store(&stores)
-            .load_notification_sink_secret(SINK)
+            .load_notification_sink_secret(&notification_key(), SINK)
             .expect("the credential store is readable")
             .is_none()
     );
@@ -1024,7 +1044,9 @@ async fn a_new_secret_is_not_stored_while_the_old_binding_cannot_be_retired() {
     wait_for_settings_binding(&stores, &old_binding).await;
 
     // The settings file can no longer be replaced, so no binding change can be persisted.
-    let settings_dir = stores.data_dir().join("settings");
+    let settings_dir = credential_store(&stores)
+        .account_local_data_dir(&notification_key())
+        .join("settings");
     let writable = std::fs::metadata(&settings_dir)
         .expect("the settings directory exists")
         .permissions();
@@ -1040,7 +1062,7 @@ async fn a_new_secret_is_not_stored_while_the_old_binding_cannot_be_retired() {
     // for ServerChan, the consent given for the old key's owner). The unbound in-memory sink lets
     // the orphan sweep drop the old credential too, which is the safe side of a failed write.
     let stored = credential_store(&stores)
-        .load_notification_sink_secret(SINK)
+        .load_notification_sink_secret(&notification_key(), SINK)
         .expect("the credential store is readable");
     assert!(
         stored
@@ -1097,6 +1119,7 @@ fn rejected(
 async fn one_save_adds_a_destination_with_its_secret() {
     let (runtime, stores) = CoreRuntime::start_isolated_with_event_capacity(64);
     let mut connection = runtime.attach();
+    establish_notification_account(&runtime, &mut connection).await;
     save_sink(
         &connection,
         fixture_sink("https://relay.example.invalid/emails"),
@@ -1115,7 +1138,7 @@ async fn one_save_adds_a_destination_with_its_secret() {
     let binding = snapshot_binding(&connection).expect("the save bound the credential");
     wait_for_settings_binding(&stores, &binding).await;
     let stored = credential_store(&stores)
-        .load_notification_sink_secret(SINK)
+        .load_notification_sink_secret(&notification_key(), SINK)
         .expect("the credential store is readable")
         .expect("the save stored the secret");
     assert_eq!(stored.as_str(), SECRET);
@@ -1153,6 +1176,7 @@ async fn a_failed_secret_store_removes_the_destination_the_save_added() {
 
     let (runtime, stores) = CoreRuntime::start_isolated_with_event_capacity(64);
     let mut connection = runtime.attach();
+    establish_notification_account(&runtime, &mut connection).await;
     let credential_dir = stores.credential_dir().to_path_buf();
     std::fs::create_dir_all(&credential_dir).expect("the credential directory exists");
     let writable = std::fs::metadata(&credential_dir)
@@ -1190,6 +1214,7 @@ async fn a_failed_secret_store_removes_the_destination_the_save_added() {
 async fn a_serverchan_consent_accepted_in_the_save_names_the_key_it_stored() {
     let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(64);
     let mut connection = runtime.attach();
+    establish_notification_account(&runtime, &mut connection).await;
     let mut sink = serverchan_settings("https://sctapi.ftqq.com")
         .sinks
         .remove(0);
@@ -1239,6 +1264,7 @@ async fn a_consent_the_renderer_built_is_not_taken() {
 async fn a_malformed_sendkey_save_writes_nothing() {
     let (runtime, stores) = CoreRuntime::start_isolated_with_event_capacity(64);
     let mut connection = runtime.attach();
+    establish_notification_account(&runtime, &mut connection).await;
     let sink = serverchan_settings("https://sctapi.ftqq.com")
         .sinks
         .remove(0);
@@ -1259,7 +1285,7 @@ async fn a_malformed_sendkey_save_writes_nothing() {
     );
     assert!(
         credential_store(&stores)
-            .load_notification_sink_secret(SINK)
+            .load_notification_sink_secret(&notification_key(), SINK)
             .expect("the credential store is readable")
             .is_none()
     );
@@ -1270,6 +1296,7 @@ async fn a_malformed_sendkey_save_writes_nothing() {
 async fn an_incomplete_destination_is_refused_by_kind() {
     let (runtime, _stores) = CoreRuntime::start_isolated_with_event_capacity(64);
     let mut connection = runtime.attach();
+    establish_notification_account(&runtime, &mut connection).await;
     let mut sink = fixture_sink("https://relay.example.invalid/emails");
     sink.destination.clear();
     let request_id = save_sink(&connection, sink, Some(SECRET), false).await;
@@ -1332,83 +1359,62 @@ async fn a_save_beyond_the_destination_limit_is_refused() {
     drop(runtime);
 }
 
-/// Write one delivery block to the shared settings file the way another account runtime's
-/// core does, binding included.
-fn write_shared_delivery(
-    settings: &crate::settings::SettingsStore,
-    sink: &NotificationSinkSettings,
-) {
-    settings
-        .save_patch(&SettingsPatch {
-            delivery: Some(NotificationDeliverySettings {
-                sinks: vec![sink.clone()],
-            }),
-            delivery_bindings_from_core: true,
-            ..SettingsPatch::default()
-        })
-        .expect("the shared settings file is written");
-}
-
-/// Every account runtime observes the one app-scoped settings file and the one credential
-/// store. A save in one runtime unbinds on disk, stores the new secret, and binds again, so
-/// another runtime can adopt the unbound sink after the new secret is already stored. That
-/// runtime did not unbind anything: it must not take the fresh credential for an orphan and
-/// delete it, which left the saved destination bound to a credential that was gone.
 #[tokio::test]
-async fn a_runtime_adopting_another_runtimes_save_keeps_the_new_credential() {
-    let stores = IsolatedStores::new();
-    let settings = crate::settings::SettingsStore::new(stores.data_dir());
-    let observer = CoreRuntime::start_with_shared_stores(
-        credential_store(&stores),
-        settings.clone(),
-        std::sync::Arc::new(crate::native_artifact::NativeArtifactRegistry::new()),
-        crate::account_work::AccountWorkScheduler::default().for_account("observer"),
-        None,
-    );
-    let mut connection = observer.attach();
-    let mut sink = fixture_sink("https://relay.example.invalid/emails");
-    sink.secret_binding = Some(sink.credential_binding("01d0"));
-    write_shared_delivery(&settings, &sink);
+async fn app_settings_cannot_replace_account_routes_or_retire_their_credentials() {
+    let (runtime, stores, mut connection) =
+        runtime_with_sink("https://relay.example.invalid/emails").await;
+    set_secret(&connection).await;
     wait_for_runtime_snapshot(&mut connection, |state| {
-        state.notification_delivery.sinks.len() == 1
-            && state.settings.values.delivery.sinks[0]
-                .secret_binding
-                .is_some()
-    })
-    .await;
-
-    // The saving runtime's unbind and its store of the new secret, with no chance for the
-    // observer to run in between: the observer next sees an unbound sink beside a credential.
-    sink.secret_binding = None;
-    write_shared_delivery(&settings, &sink);
-    credential_store(&stores)
-        .save_notification_sink_secret(SINK, SECRET)
-        .expect("the new credential is stored");
-    wait_for_runtime_snapshot(&mut connection, |state| {
-        state.settings.values.delivery.sinks[0]
-            .secret_binding
-            .is_none()
-    })
-    .await;
-    // The observation that follows the adopted settings runs on the next actor iteration.
-    tokio::time::sleep(Duration::from_millis(200)).await;
-    assert!(
-        credential_store(&stores)
-            .load_notification_sink_secret(SINK)
-            .expect("the credential store is readable")
-            .is_some(),
-        "a runtime that only adopted another runtime's write deleted the credential it was saving"
-    );
-
-    // The saving runtime's bind: the observer agrees the destination is configured.
-    let binding = sink.credential_binding("f7e5");
-    sink.secret_binding = Some(binding.clone());
-    write_shared_delivery(&settings, &sink);
-    let state = wait_for_runtime_snapshot(&mut connection, |state| {
         state.notification_delivery.sinks[0].secret_configured
     })
     .await;
-    assert!(!state.notification_delivery.sinks[0].secret_retired);
-    assert_eq!(snapshot_binding(&connection), Some(binding));
-    drop(observer);
+    let settings = crate::settings::SettingsStore::new(stores.data_dir());
+    settings
+        .save_patch(&SettingsPatch {
+            scope: Some(koushi_state::SettingsPatchScope::App),
+            delivery: Some(NotificationDeliverySettings::default()),
+            ..SettingsPatch::default()
+        })
+        .expect("app patch");
+    assert_eq!(
+        connection.snapshot().settings.values.delivery.sinks.len(),
+        1
+    );
+    assert!(
+        credential_store(&stores)
+            .load_notification_sink_secret(&notification_key(), SINK)
+            .expect("account credential")
+            .is_some()
+    );
+    drop(runtime);
+}
+
+fn notification_key() -> koushi_protocol::SessionKeyId {
+    koushi_protocol::SessionKeyId {
+        homeserver: "https://example.invalid".into(),
+        user_id: "@me:example.invalid".into(),
+        device_id: "DEVICE".into(),
+    }
+}
+
+async fn establish_notification_account(
+    runtime: &CoreRuntime,
+    connection: &mut super::CoreConnection,
+) {
+    runtime
+        .inject_actions(vec![
+            AppAction::AppStarted,
+            AppAction::RestoreSessionSucceeded(SessionInfo {
+                homeserver: "https://example.invalid".into(),
+                user_id: "@me:example.invalid".into(),
+                device_id: "DEVICE".into(),
+                authentication_method: Default::default(),
+            }),
+            AppAction::CurrentDeviceTrustChanged(CurrentDeviceTrustState::Verified),
+        ])
+        .await;
+    wait_for_runtime_snapshot(connection, |state| {
+        matches!(state.session, koushi_state::SessionState::Ready(_))
+    })
+    .await;
 }

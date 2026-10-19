@@ -8,6 +8,7 @@ const scriptDirectory = path.dirname(fileURLToPath(import.meta.url));
 const repositoryRoot = path.resolve(scriptDirectory, "..");
 
 export const testkitTargets = [
+  "account_notification_ownership.rs",
   "command_redaction.rs",
   "composer_draft_lifecycle.rs",
   "composer_draft_wire.rs",

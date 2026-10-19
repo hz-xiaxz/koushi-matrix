@@ -332,13 +332,19 @@ impl CoreRuntimeState {
     pub(crate) async fn restart_account_tab_watchers(&self, app: tauri::AppHandle) {
         self.stop_account_tab_watchers().await;
         let tabs = self.runtime.tab_connections();
+        let known: Vec<_> = tabs.iter().map(|(tab, _)| tab.id.clone()).collect();
+        commands::native_attention::notification::clear_notifications_for_missing_tabs(&known)
+            .await;
         let mut watchers = self.account_tab_watchers.lock().await;
         for (tab, mut connection) in tabs {
             let tab_id = tab.id.clone();
             let runtime = Arc::clone(&self.runtime);
             let app = app.clone();
             watchers.push(tauri::async_runtime::spawn(async move {
-                let mut previous_attention = connection.snapshot().native_attention;
+                let initial = connection.snapshot();
+                commands::native_attention::notification::reconcile_notifications_for_tab(&tab_id, &initial, false).await;
+                let mut previous_previews = initial.settings.values.notifications.message_previews;
+                let mut previous_attention = initial.native_attention;
                 while let Some(snapshot) = connection.next_versioned_snapshot().await {
                     if let Some(info) = session_info_for_account(&snapshot.state.session)
                         && !runtime.is_session_binding_current(&tab_id, &info)
@@ -391,6 +397,11 @@ impl CoreRuntimeState {
                                 Err(_) => {}
                             }
                     }
+                    let previews = snapshot.state.settings.values.notifications.message_previews;
+                    commands::native_attention::notification::reconcile_notifications_for_tab(
+                        &tab_id, &snapshot.state, previous_previews && !previews,
+                    ).await;
+                    previous_previews = previews;
                     let descriptor = runtime
                         .tab_descriptors()
                         .into_iter()
@@ -426,6 +437,7 @@ impl CoreRuntimeState {
                     emit_account_tabs_changed(&app, &runtime);
                     allow_account_media_cache_dirs(&app, &runtime);
                 }
+                commands::native_attention::notification::clear_removed_account_notifications(&tab_id).await;
             }));
         }
         emit_account_tabs_changed(&app, &self.runtime);

@@ -253,10 +253,15 @@ async fn persisted_settings_load_when_runtime_restarts() {
 
 #[tokio::test]
 async fn disabled_badges_remain_rust_projected_to_zero_after_runtime_restart() {
-    let data_dir = tempfile::tempdir().expect("tempdir");
+    let (initial_runtime, stores) = CoreRuntime::start_isolated();
     {
-        let runtime = CoreRuntime::start_with_data_dir(data_dir.path().to_path_buf());
+        let runtime = initial_runtime;
         let mut connection = runtime.attach();
+        runtime.inject_actions(restore_ready_actions()).await;
+        wait_for_state(&mut connection, |state| {
+            matches!(state.session, koushi_state::SessionState::Ready(_))
+        })
+        .await;
         let request_id = connection.next_request_id();
         let notifications = NotificationSettings {
             badges: false,
@@ -267,7 +272,7 @@ async fn disabled_badges_remain_rust_projected_to_zero_after_runtime_restart() {
             .command(CoreCommand::App(AppCommand::UpdateSettings {
                 request_id,
                 patch: SettingsPatch {
-                    scope: Some(koushi_state::SettingsPatchScope::App),
+                    scope: Some(koushi_state::SettingsPatchScope::Account),
                     notifications: Some(notifications),
                     ..SettingsPatch::default()
                 },
@@ -284,21 +289,14 @@ async fn disabled_badges_remain_rust_projected_to_zero_after_runtime_restart() {
             connection.snapshot().errors.is_empty(),
             "badges setting must persist successfully"
         );
-        assert!(
-            !koushi_core::settings::SettingsStore::new(data_dir.path())
-                .load()
-                .expect("saved app settings")
-                .notifications
-                .badges
-        );
     }
 
-    let restarted = CoreRuntime::start_with_data_dir(data_dir.path().to_path_buf());
+    let restarted = CoreRuntime::restart_isolated(&stores);
     let mut connection = restarted.attach();
-    assert!(!connection.snapshot().settings.values.notifications.badges);
     restarted.inject_actions(restore_ready_actions()).await;
     wait_for_state(&mut connection, |state| {
         matches!(state.session, koushi_state::SessionState::Ready(_))
+            && !state.settings.values.notifications.badges
     })
     .await;
 
@@ -565,7 +563,7 @@ fn settings_store_resets_version_1_message_previews_default() {
     // The version-1 encrypted-room opt-in survives while the retired message
     // preview default is reset before the account settings are seeded.
     assert!(legacy.display.encrypted_url_previews_enabled);
-    assert!(!values.notifications.sound);
+    assert!(!legacy.notifications.sound);
     assert_eq!(values.locale.language_tag.as_deref(), Some("ja-JP"));
     assert_eq!(values.appearance.theme, ThemePreference::Dark);
 

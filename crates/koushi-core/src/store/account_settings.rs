@@ -37,11 +37,44 @@ impl StoreActor {
         read_account_settings(&self.load_unlock_secret(key_id)?, &payload).map(|file| file.values)
     }
 
+    /// Upgrade an existing v1 file once without activating old shared destinations.
+    pub fn migrate_account_notifications(
+        &self,
+        key_id: &SessionKeyId,
+        defaults: Option<(bool, bool)>,
+    ) -> Result<(), CoreFailure> {
+        let path = self.account_settings_file(key_id);
+        let payload = match std::fs::read(&path) {
+            Ok(payload) => payload,
+            Err(error) if error.kind() == std::io::ErrorKind::NotFound => return Ok(()),
+            Err(_) => return Err(CoreFailure::StoreUnavailable),
+        };
+        let secret = self.load_unlock_secret(key_id)?;
+        let mut file = read_account_settings(&secret, &payload)?;
+        if file.version == 2 {
+            return Ok(());
+        }
+        let (sound, badges) = defaults.unwrap_or((false, false));
+        file.values.notifications.sound = sound;
+        file.values.notifications.badges = badges;
+        *file.values.delivery = Default::default();
+        write_account_settings(&secret, &path, &file.values)
+    }
+
     pub fn save_account_settings(
         &self,
         key_id: &SessionKeyId,
         values: &AccountSettingsValues,
     ) -> Result<(), CoreFailure> {
+        // Retire removed destinations before losing their IDs. A failed deletion leaves
+        // the encrypted source available for retry and prevents the new file from landing.
+        let previous = self.load_account_settings(key_id)?;
+        for old in &previous.delivery.sinks {
+            if values.delivery.sink(&old.id).is_none() {
+                self.delete_notification_sink_secret(key_id, &old.id)
+                    .map_err(|_| CoreFailure::StoreUnavailable)?;
+            }
+        }
         write_account_settings(
             &self.load_or_create_unlock_secret(key_id)?,
             &self.account_settings_file(key_id),
@@ -92,7 +125,7 @@ fn read_account_settings(
     .map_err(|_| CoreFailure::StoreUnavailable)?;
     let file: AccountSettingsFile =
         serde_json::from_slice(&plaintext).map_err(|_| CoreFailure::StoreUnavailable)?;
-    if file.version != 1 {
+    if !matches!(file.version, 1 | 2) {
         return Err(CoreFailure::StoreUnavailable);
     }
     Ok(file)
@@ -104,7 +137,7 @@ fn write_account_settings(
     values: &AccountSettingsValues,
 ) -> Result<(), CoreFailure> {
     let file = AccountSettingsFile {
-        version: 1,
+        version: 2,
         legacy_migration_complete: true,
         values: values.clone(),
     };

@@ -124,6 +124,7 @@ struct ActivationFence {
 
 /// One eligible banner: the Rust-owned text/target plus its account fence.
 struct PendingNotification {
+    message_previews: bool,
     payload: NativeNotificationPayload,
     fence: ActivationFence,
 }
@@ -150,6 +151,7 @@ fn pending_notification(
         return Err("session_unavailable");
     }
     Ok(PendingNotification {
+        message_previews: state.settings.values.notifications.message_previews,
         payload,
         fence: ActivationFence {
             account_key,
@@ -169,7 +171,12 @@ pub(crate) fn dispatch_notification_for_tab(
             return record_notification_outcome(NativeNotificationOutcome::Skipped, reason);
         }
     };
-    let outcome = dispatch_native_notification(app, &pending.payload, pending.fence);
+    let outcome = dispatch_native_notification(
+        app,
+        &pending.payload,
+        pending.fence,
+        pending.message_previews,
+    );
     record_notification_outcome(outcome, "candidate")
 }
 
@@ -202,7 +209,12 @@ pub(crate) async fn show_native_attention_notification(
             reason,
         )),
         Ok(pending) => {
-            let outcome = dispatch_native_notification(&app, &pending.payload, pending.fence);
+            let outcome = dispatch_native_notification(
+                &app,
+                &pending.payload,
+                pending.fence,
+                pending.message_previews,
+            );
             Ok(record_notification_outcome(outcome, "candidate"))
         }
     }
@@ -242,12 +254,14 @@ fn dispatch_native_notification(
     app: &AppHandle,
     payload: &NativeNotificationPayload,
     fence: ActivationFence,
+    message_previews: bool,
 ) -> NativeNotificationOutcome {
     #[cfg(target_os = "macos")]
-    return macos::dispatch(app, payload, fence);
+    return macos::dispatch(app, payload, fence, message_previews);
 
     #[cfg(not(target_os = "macos"))]
     {
+        let _ = message_previews;
         let Some(reservation) = ActivationWaiterReservation::acquire() else {
             // ponytail: bounded waiter pool; past the bound the banner is shown
             // without activation. Raise the bound, or move activation to a platform
@@ -517,16 +531,65 @@ fn pending_activation_count() -> usize {
     PENDING_ACTIVATION_WAITERS.load(Ordering::Relaxed)
 }
 
-/// Withdraw currently visible notifications when the owning attention is cleared.
-#[tauri::command]
-pub(crate) async fn clear_native_attention_notifications() -> Result<(), &'static str> {
+/// Reconcile one account's banners from its Rust-owned attention and privacy policy.
+pub(crate) async fn reconcile_notifications_for_tab(
+    tab: &AccountTabId,
+    snapshot: &AppState,
+    preview_disabled: bool,
+) {
     #[cfg(target_os = "macos")]
     {
-        macos::clear().await;
+        let values = &snapshot.settings.values.notifications;
+        let immediate = !matches!(snapshot.session, SessionState::Ready(_))
+            || !values.desktop_notifications
+            || (!values.message_previews
+                && (preview_disabled || macos::has_previews(tab.as_str())));
+        if immediate || snapshot.native_attention.summary.unread_count == 0 {
+            macos::clear(tab.as_str(), immediate).await;
+        }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (tab, snapshot, preview_disabled);
+}
+
+/// Withdraw the owning account's banners; routine reads preserve five seconds.
+#[tauri::command]
+pub(crate) async fn clear_native_attention_notifications(
+    account_tab_id: Option<String>,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<(), &'static str> {
+    #[cfg(target_os = "macos")]
+    {
+        let tab = account_tab_id
+            .map(AccountTabId::from_string)
+            .unwrap_or_else(|| state.runtime.selected_tab_id());
+        if let Some(connection) = state.runtime.tab_connection(&tab) {
+            let snapshot = connection.versioned_snapshot();
+            reconcile_notifications_for_tab(&tab, &snapshot.state, false).await;
+        } else {
+            clear_removed_account_notifications(&tab).await;
+        }
         Ok(())
     }
     #[cfg(not(target_os = "macos"))]
-    Err("native notification clear is not implemented on this platform")
+    {
+        let _ = (account_tab_id, state);
+        Err("native notification clear is not implemented on this platform")
+    }
+}
+
+pub(crate) async fn clear_notifications_for_missing_tabs(known: &[AccountTabId]) {
+    #[cfg(target_os = "macos")]
+    macos::clear_missing_accounts(known).await;
+    #[cfg(not(target_os = "macos"))]
+    let _ = known;
+}
+
+pub(crate) async fn clear_removed_account_notifications(tab: &AccountTabId) {
+    #[cfg(target_os = "macos")]
+    macos::clear(tab.as_str(), true).await;
+    #[cfg(not(target_os = "macos"))]
+    let _ = tab;
 }
 
 /// Called only from the explicit Desktop notifications switch, never from a

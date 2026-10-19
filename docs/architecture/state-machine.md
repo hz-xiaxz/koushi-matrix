@@ -6362,13 +6362,23 @@ transport or to one country's infrastructure. The app must be running to send.
   least one of its targets is set. The UI shows that setup state as **Configured** or
   **Not configured**; neither word claims a delivery. Removing a destination is the
   way to stop it.
-- **Settings.** `SettingsValues.delivery` holds the destination list at app scope, a
+- **Settings.** `SettingsValues.delivery` holds the destination list at account scope, a
   different group from `SettingsValues.notifications` (this device's banners). Each
   destination owns its non-secret configuration, its targets, its content mode and
-  consent, and its timing. The Matrix account is never consulted for a destination,
+  consent, and its timing. The Matrix homeserver is never asked to supply a destination,
   so the route works on a homeserver that supports neither email 3PIDs nor pushers.
-  Delivery is app-scoped, while each account runtime evaluates its own rooms against
-  the same destination list; a digest never mixes accounts.
+  Each account runtime evaluates only its own rooms and its own destination list;
+  a digest never mixes accounts. All notification preferences, including sound and
+  badge participation, persist in that account's encrypted settings. App-scoped
+  patches cannot change any notification preference or destination.
+- **Account-scope migration (schema 4).** Preserve the original pre-v4 global JSON
+  document in an inert archive on every rewrite. Never use its destinations or
+  credentials for delivery. Existing encrypted account files upgrade atomically from
+  version 1 to 2: preserve account preferences, seed only sound/badges once from the
+  archived shared values (false if unavailable), and start with no destinations.
+  New accounts use ordinary defaults. Existing destinations must be configured again
+  for their intended account; credentials have no legacy fallback. Version 2 files
+  are never reseeded. A failed read or migration cannot authorize sending or saving.
 - **Migration.** A pre-#1460 settings file has one global switch, trigger set,
   timing, and prefix consent. A legacy destination is rebuilt on load: if the global
   switch or the destination's own switch was off, all its targets are off (it stays
@@ -6390,9 +6400,11 @@ transport or to one country's infrastructure. The app must be running to send.
   it. A save unbinds on disk before the store receives the new value, and binds only
   once that is persisted; a failed write reports `StoreUnavailable` and leaves the
   sink unconfigured rather than pairing a new value with an old binding. Every account
-  runtime shares the settings file and the credential store, so only the runtime that
-  changed or loaded the settings deletes a credential no binding names; a runtime that
-  adopts another runtime's write only records the sink as unconfigured, because it can
+  runtime owns its encrypted settings and credentials are keyed by the complete
+  `SessionKeyId` (homeserver, Matrix ID, device) plus sink ID. Reading, replacing or
+  deleting one account's credential cannot access another account's entry. The old
+  shared credential namespace is never read. Historically a runtime adopting another
+  runtime's write only recorded a sink as unconfigured, because it could
   read the store between that runtime's store and bind (#1497). Removing a
   sink clears its credential first and keeps the sink when that clear fails.
 - **Saving a destination (#1468).** The settings screen saves a destination as one
@@ -6408,7 +6420,9 @@ transport or to one country's infrastructure. The app must be running to send.
   rule as any renderer patch: the renderer never names a binding. A secret is then
   stored with the unbind, store, bind sequence above. If that store fails for a
   destination the command added, the destination is removed again, so a failed add
-  leaves nothing half-configured. If it fails for a destination that already existed,
+  leaves nothing half-configured when cleanup succeeds. If credential cleanup fails,
+  retain the sink ID and encrypted retry metadata until deletion succeeds; never forget
+  the saved account identity before external credential cleanup. If it fails for a destination that already existed,
   the non-secret edits stay, the destination reads as not configured, and the failure
   is reported. An accepted consent is minted by the core, after the final binding, from
   the destination exactly as saved. A ServerChan consent therefore names the SendKey

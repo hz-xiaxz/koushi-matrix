@@ -129,7 +129,7 @@ export interface AppDomainState {
   account_management_capabilities: AccountManagementCapabilities;
   account_notifications: AccountNotificationsState;
   /**
-   * #1427: the app-scoped runtime half of this device's own notification delivery. The
+   * #1427: the account-scoped runtime half of this device's own notification delivery. The
    * settings half is `settings.values.delivery`; a sink's credential is never here, only
    * whether one is configured. App state, never part of the settings file.
    */
@@ -381,7 +381,7 @@ export interface DisplaySettings {
 }
 
 /**
- * #1427/#1460: this device's own notification delivery. App scope, so the Matrix account
+ * #1427/#1460: this device's own notification delivery. Account scope; the Matrix homeserver
  * is never asked for a destination, and a sink's credential never crosses this boundary:
  * the settings carry the id the credential store is keyed by and nothing else. Every
  * route decision - targets, content, timing - belongs to one destination; there is no

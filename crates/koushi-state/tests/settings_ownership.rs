@@ -23,14 +23,14 @@ fn scoped_patches_preserve_fields_owned_by_the_other_settings_store() {
     };
     assert!(!app_patch.affects_account_settings());
     values.apply_patch(app_patch);
-    assert!(!values.notifications.sound);
-    assert!(!values.notifications.badges);
+    assert!(values.notifications.sound);
+    assert!(values.notifications.badges);
     assert!(!values.notifications.desktop_notifications);
     assert!(!values.notifications.send_read_receipts);
 
     let mut notifications = values.notifications.clone();
-    notifications.sound = true;
-    notifications.badges = true;
+    notifications.sound = false;
+    notifications.badges = false;
     notifications.desktop_notifications = true;
     notifications.send_read_receipts = true;
     let account_patch = SettingsPatch {
@@ -77,7 +77,6 @@ fn app_and_account_settings_round_trip_without_overwriting_each_other() {
     let mut app = values.app_settings();
     app.appearance.theme = ThemePreference::Dark;
     app.search_crawler_speed = SearchCrawlerSpeed::Fast;
-    app.notifications.sound = false;
     values.apply_app_settings(&app);
 
     assert_eq!(values.app_settings(), app);
@@ -87,4 +86,21 @@ fn app_and_account_settings_round_trip_without_overwriting_each_other() {
             .expect("serialize account settings")
             .contains("appearance")
     );
+}
+
+#[test]
+fn notification_delivery_patch_is_account_owned_and_app_sync_cannot_replace_it() {
+    let mut values = SettingsValues::default();
+    let delivery = koushi_state::NotificationDeliverySettings::default();
+    let patch = SettingsPatch {
+        scope: Some(SettingsPatchScope::Account),
+        delivery: Some(delivery),
+        ..SettingsPatch::default()
+    };
+    assert!(patch.affects_account_settings());
+    values.notifications.sound = false;
+    values.notifications.badges = false;
+    let account = values.account_settings();
+    values.apply_app_settings(&SettingsValues::default().app_settings());
+    assert!(values.account_settings() == account);
 }

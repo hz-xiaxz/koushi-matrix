@@ -184,7 +184,7 @@ type DeliveryView =
  *
  * A list of destinations, each opening a detail screen that owns its own connection,
  * targets, content and timing. Everything shown is Rust state: `delivery` is the settings
- * block, `state` is the app-scoped runtime half (whether a credential exists, and the last
+ * block, `state` is the account-scoped runtime half (whether a credential exists, and the last
  * outcome per sink), and `rooms`/`spaces` supply the labels the watch list renders. The
  * detail screen's edits stay a local draft until its single Save. This component computes
  * no dwell, starts no timer, assembles no message, builds no consent, and never reads a

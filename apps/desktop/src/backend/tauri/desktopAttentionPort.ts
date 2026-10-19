@@ -26,7 +26,7 @@ export function createTauriDesktopAttentionPort(accountTabId?: string): DesktopA
       },
       requestPermission: () => invoke<boolean>("request_native_attention_notification_permission"),
       async clear() {
-        await invoke("clear_native_attention_notifications");
+        await invokeAccount("clear_native_attention_notifications");
       },
       onActivated(handler) {
         let disposed = false;

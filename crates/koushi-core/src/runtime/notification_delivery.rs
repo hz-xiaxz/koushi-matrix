@@ -70,10 +70,11 @@ pub(super) async fn send_notification_delivery(
     intent: NotificationDeliveryIntent,
     sink_settings: NotificationSinkSettings,
     store: StoreActor,
+    key_id: koushi_protocol::SessionKeyId,
 ) -> NotificationDeliverySendResult {
     let sink_id = intent.sink_id.clone();
     let idempotency_key = intent.idempotency_key.clone();
-    let secret = match store.load_notification_sink_secret(&sink_id) {
+    let secret = match store.load_notification_sink_secret(&key_id, &sink_id) {
         Ok(Some(secret)) => secret,
         Ok(None) => {
             return NotificationDeliverySendResult::SecretMissing {
@@ -148,6 +149,18 @@ impl AppActor {
         self.state.native_attention_context.window_focused
     }
 
+    fn notification_account(&self) -> Result<koushi_protocol::SessionKeyId, CoreFailure> {
+        if !matches!(self.state.session, koushi_state::SessionState::Ready(_)) {
+            return Err(CoreFailure::StoreUnavailable);
+        }
+        let key = super::account_settings_session_key(&self.state)
+            .ok_or(CoreFailure::StoreUnavailable)?;
+        if self.account_settings_loaded_for.as_ref() != Some(&key) {
+            return Err(CoreFailure::StoreUnavailable);
+        }
+        Ok(key)
+    }
+
     /// The delay until the channel next needs the actor, following the composer-debounce and
     /// scheduled-send timers: one sleep on the core executor's clock, no task per room.
     pub(super) fn notification_delivery_wake_delay(&self) -> Option<Duration> {
@@ -168,6 +181,10 @@ impl AppActor {
     /// timer. It returns whether the delivery projection the frontend renders changed, so the
     /// caller publishes exactly once per change.
     pub(super) async fn observe_notification_delivery(&mut self) -> bool {
+        if self.notification_account().is_err() {
+            self.notification_delivery_sends.clear();
+            return false;
+        }
         let now = executor::Instant::now();
         let settings = self.state.settings.values.delivery.clone();
         self.notification_delivery.retain_sinks(&settings);
@@ -210,42 +227,25 @@ impl AppActor {
     /// collection, it is a credential that no longer belongs to any destination this sink has, and
     /// leaving it would let the next send offer the previous server's password to the new one.
     pub(super) async fn refresh_notification_delivery_configured(&mut self) -> bool {
-        self.refresh_notification_delivery_credentials(CredentialSweep::RetireUnbound)
-            .await
-    }
-
-    /// Read which sinks hold a usable credential after adopting settings another account
-    /// runtime wrote (#1497).
-    ///
-    /// Every account runtime shares the app-scoped settings file and the credential store, and a
-    /// save unbinds on disk before it stores the new secret. A runtime that adopts that unbound
-    /// write can read the store after the new secret landed, so only the runtime that changed the
-    /// settings retires a credential; this one records the sink as unconfigured and leaves the
-    /// store alone until the saving runtime's bind arrives.
-    pub(super) async fn adopt_notification_delivery_credentials(&mut self) -> bool {
-        self.refresh_notification_delivery_credentials(CredentialSweep::KeepUnbound)
-            .await
-    }
-
-    async fn refresh_notification_delivery_credentials(&mut self, sweep: CredentialSweep) -> bool {
+        let Ok(account) = self.notification_account() else {
+            return false;
+        };
         let settings = self.state.settings.values.delivery.clone();
         for sink in &settings.sinks {
+            let key_id = account.clone();
             let store = self.composer_draft_store_actor.clone();
             let sink_id = sink.id.clone();
             let bound = sink.secret_binding.is_some();
             let (configured, deleted) = executor::spawn_blocking(move || {
                 if !store
-                    .notification_sink_secret_configured(&sink_id)
+                    .notification_sink_secret_configured(&key_id, &sink_id)
                     .unwrap_or(false)
                 {
                     // No credential at all: nothing was retired, and nothing is configured.
                     return (false, false);
                 }
                 if !bound {
-                    if sweep == CredentialSweep::KeepUnbound {
-                        return (false, false);
-                    }
-                    let _ = store.delete_notification_sink_secret(&sink_id);
+                    let _ = store.delete_notification_sink_secret(&key_id, &sink_id);
                     return (false, true);
                 }
                 (true, false)
@@ -328,7 +328,7 @@ impl AppActor {
 
     /// Reduce the whole delivery projection into app state, and say whether it moved.
     ///
-    /// The projection is app scope and never persisted: it is what this run of the app has
+    /// The projection is account scope and never persisted: it is what this run of the app has
     /// observed about the credential store and the last sends, and a restart re-observes it.
     pub(super) async fn refresh_notification_delivery_projection(&mut self) -> bool {
         let settings = self.state.settings.values.delivery.clone();
@@ -352,6 +352,9 @@ impl AppActor {
         jobs: Vec<NotificationDeliveryJob>,
         settings: &NotificationDeliverySettings,
     ) {
+        let Ok(key_id) = self.notification_account() else {
+            return;
+        };
         for job in jobs {
             let Some(sink) = settings.sink(&job.sink_id) else {
                 continue;
@@ -377,6 +380,7 @@ impl AppActor {
                     job.intent,
                     sink.clone(),
                     self.composer_draft_store_actor.clone(),
+                    key_id.clone(),
                     self.notification_delivery_outcome_tx.clone(),
                 ),
             ));
@@ -387,7 +391,7 @@ impl AppActor {
     /// the projection that says the sink is configured.
     ///
     /// The value is handed to the credential store inside a blocking task and is not kept here:
-    /// the actor learns only that the write succeeded. The binding is written into the app-scoped
+    /// the actor learns only that the write succeeded. The binding is written into the account-scoped
     /// settings, derived from the canonical configuration the state holds, so the user never types
     /// it and the frontend never sends it.
     pub(super) async fn set_notification_delivery_secret(
@@ -396,6 +400,7 @@ impl AppActor {
         sink_id: &str,
         secret: koushi_state::AuthSecret,
     ) -> Result<(), CoreFailure> {
+        let key_id = self.notification_account()?;
         let Some(sink) = self.state.settings.values.delivery.sink(sink_id) else {
             return Err(CoreFailure::NotificationDeliveryRejected {
                 kind: NotificationDeliveryFailureKind::UnknownSink,
@@ -431,7 +436,7 @@ impl AppActor {
         let store = self.composer_draft_store_actor.clone();
         let save_sink_id = sink_id.to_owned();
         let saved = executor::spawn_blocking(move || {
-            store.save_notification_sink_secret(&save_sink_id, secret.expose_secret())
+            store.save_notification_sink_secret(&key_id, &save_sink_id, secret.expose_secret())
         })
         .await;
         match saved {
@@ -476,6 +481,7 @@ impl AppActor {
         secret: Option<koushi_state::AuthSecret>,
         accept_content_consent: bool,
     ) -> Result<(), CoreFailure> {
+        self.notification_account()?;
         // The mode the user chose, taken before canonicalization: a ServerChan sink that has no
         // key yet reads as names only until the consent below names the key this save stores.
         let requested_content = sink.content;
@@ -515,6 +521,10 @@ impl AppActor {
             None => delivery.sinks.push(sink),
         }
         if !self.write_notification_delivery(request_id, delivery).await {
+            if existing.is_none() {
+                self.roll_back_added_notification_sink(request_id, &sink_id)
+                    .await;
+            }
             self.refresh_notification_delivery_configured().await;
             return Err(CoreFailure::StoreUnavailable);
         }
@@ -554,12 +564,23 @@ impl AppActor {
         request_id: koushi_protocol::RequestId,
         sink_id: &str,
     ) {
+        let Ok(key_id) = self.notification_account() else {
+            return;
+        };
+        let store = self.composer_draft_store_actor.clone();
+        let delete_id = sink_id.to_owned();
+        if !matches!(
+            executor::spawn_blocking(
+                move || store.delete_notification_sink_secret(&key_id, &delete_id)
+            )
+            .await,
+            Ok(Ok(()))
+        ) {
+            return; // Retain the sink ID until credential deletion can be retried.
+        }
         let mut delivery = (*self.state.settings.values.delivery).clone();
         delivery.sinks.retain(|sink| sink.id != sink_id);
         self.write_notification_delivery(request_id, delivery).await;
-        let _ = self
-            .clear_notification_delivery_secret(request_id, sink_id)
-            .await;
     }
 
     /// Write a whole delivery block through the reducer, as a renderer patch so the bindings
@@ -570,6 +591,7 @@ impl AppActor {
         delivery: NotificationDeliverySettings,
     ) -> bool {
         let patch = koushi_state::SettingsPatch {
+            scope: Some(koushi_state::SettingsPatchScope::Account),
             delivery: Some(delivery),
             ..koushi_state::SettingsPatch::default()
         };
@@ -581,7 +603,7 @@ impl AppActor {
             .await;
         self.handle_app_effects(request_id, effects).await;
         let expected = &self.state.settings.values.delivery;
-        *expected == self.settings_store.subscribe().borrow().delivery
+        self.notification_delivery_saved(expected).await
     }
 
     /// Forget one sink's secret and the binding that named its configuration.
@@ -590,6 +612,7 @@ impl AppActor {
         request_id: koushi_protocol::RequestId,
         sink_id: &str,
     ) -> Result<(), CoreFailure> {
+        let key_id = self.notification_account()?;
         // A sink the settings no longer hold may still own a credential - its removal and this
         // clear race, or an earlier clear failed - so the delete runs for it too. The store
         // refuses an id that is not a sink id.
@@ -598,7 +621,7 @@ impl AppActor {
         let store = self.composer_draft_store_actor.clone();
         let delete_sink_id = sink_id.to_owned();
         let deleted = executor::spawn_blocking(move || {
-            store.delete_notification_sink_secret(&delete_sink_id)
+            store.delete_notification_sink_secret(&key_id, &delete_sink_id)
         })
         .await;
         match deleted {
@@ -632,7 +655,7 @@ impl AppActor {
             .retain(|(owner, task)| owner != sink_id && !task.get().is_finished());
     }
 
-    /// Write or clear one sink's credential binding in the app-scoped settings.
+    /// Write or clear one sink's credential binding in the account-scoped settings.
     ///
     /// This goes through the reducer like every other settings edit, and the patch is persisted
     /// under the command's own request id so the binding survives a restart. Clearing the field
@@ -649,12 +672,15 @@ impl AppActor {
             return false;
         };
         if sink.secret_binding == binding
-            && self.notification_delivery_binding_saved(sink_id, &binding)
+            && self
+                .notification_delivery_binding_saved(sink_id, &binding)
+                .await
         {
             return true;
         }
         sink.secret_binding = binding.clone();
         let patch = koushi_state::SettingsPatch {
+            scope: Some(koushi_state::SettingsPatchScope::Account),
             delivery: Some(*delivery),
             delivery_bindings_from_core: true,
             ..koushi_state::SettingsPatch::default()
@@ -667,17 +693,46 @@ impl AppActor {
             .await;
         self.handle_app_effects(request_id, effects).await;
         self.notification_delivery_binding_saved(sink_id, &binding)
+            .await
     }
 
     /// Whether the settings file holds `binding` for `sink_id`. The store publishes only what
     /// it wrote, so a failed write reads back as the previous binding.
-    fn notification_delivery_binding_saved(&self, sink_id: &str, binding: &Option<String>) -> bool {
-        self.settings_store
-            .subscribe()
-            .borrow()
+    async fn notification_delivery_saved(&self, expected: &NotificationDeliverySettings) -> bool {
+        let Ok(key_id) = self.notification_account() else {
+            return false;
+        };
+        if !matches!(
+            self.state.settings.persistence,
+            koushi_state::SettingsPersistenceState::Idle
+        ) {
+            return false;
+        }
+        let store = self.composer_draft_store_actor.clone();
+        let expected = expected.clone();
+        executor::spawn_blocking(move || {
+            store
+                .load_account_settings(&key_id)
+                .is_ok_and(|values| *values.delivery == expected)
+        })
+        .await
+        .unwrap_or(false)
+    }
+
+    async fn notification_delivery_binding_saved(
+        &self,
+        sink_id: &str,
+        binding: &Option<String>,
+    ) -> bool {
+        self.state
+            .settings
+            .values
             .delivery
             .sink(sink_id)
             .is_some_and(|sink| &sink.secret_binding == binding)
+            && self
+                .notification_delivery_saved(&self.state.settings.values.delivery)
+                .await
     }
 
     /// Settle a delivery command: a success commits, and every outcome already went through the
@@ -732,6 +787,7 @@ impl AppActor {
         sink_id: &str,
         window_id: String,
     ) -> Result<(), CoreFailure> {
+        let key_id = self.notification_account()?;
         let settings = self.state.settings.values.delivery.clone();
         let Some(sink) = settings.sink(sink_id).cloned() else {
             return Err(CoreFailure::NotificationDeliveryRejected {
@@ -749,11 +805,12 @@ impl AppActor {
         let intent = test_delivery_intent(&sink, &window_id);
         let store = self.composer_draft_store_actor.clone();
         let configured = executor::spawn_blocking({
+            let key_id = key_id.clone();
             let store = store.clone();
             let sink_id = sink_id.to_owned();
             move || {
                 store
-                    .notification_sink_secret_configured(&sink_id)
+                    .notification_sink_secret_configured(&key_id, &sink_id)
                     .unwrap_or(false)
             }
         })
@@ -777,6 +834,7 @@ impl AppActor {
                 intent,
                 sink,
                 store,
+                key_id,
                 self.notification_delivery_outcome_tx.clone(),
             ),
         ));
@@ -791,19 +849,11 @@ fn spawn_notification_delivery_send(
     intent: NotificationDeliveryIntent,
     sink: NotificationSinkSettings,
     store: StoreActor,
+    key_id: koushi_protocol::SessionKeyId,
     outcome_tx: tokio::sync::mpsc::Sender<NotificationDeliverySendResult>,
 ) -> AbortOnDrop<()> {
     AbortOnDrop::new(executor::spawn(async move {
-        let result = send_notification_delivery(intent, sink, store).await;
+        let result = send_notification_delivery(intent, sink, store, key_id).await;
         let _ = outcome_tx.send(result).await;
     }))
-}
-
-/// Whether a credential read may delete what no binding names.
-#[derive(Clone, Copy, Debug, PartialEq, Eq)]
-enum CredentialSweep {
-    /// This runtime changed or loaded the settings, so an unbound credential is retired.
-    RetireUnbound,
-    /// The settings came from another account runtime, which owns any retirement.
-    KeepUnbound,
 }

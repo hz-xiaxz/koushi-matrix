@@ -29,7 +29,7 @@ describe("account-scoped confirmations name their account (#1504)", () => {
     const { message, options } = accountSignOutConfirmation(alice, [alice, bob], {
       removeTab: false
     });
-    expect(options.title).toBe(t("settings.signOutAccountTitle", { account: "Alice" }));
+    expect(options.title).toBe(t("settings.signOutAccountTitle", { account: "@alice:example.invalid" }));
     expect(options.okLabel).toBe(t("settings.signOutConfirmAction"));
     expect(message).toContain("@alice:example.invalid");
     expect(message).toContain("https://matrix.example.invalid");
@@ -38,7 +38,7 @@ describe("account-scoped confirmations name their account (#1504)", () => {
 
   it("says the tab is removed, and omits the others line for the only account", () => {
     const { message, options } = accountSignOutConfirmation(alice, [alice], { removeTab: true });
-    expect(options.title).toBe(t("settings.signOutAndRemoveTitle", { account: "Alice" }));
+    expect(options.title).toBe(t("settings.signOutAndRemoveTitle", { account: "@alice:example.invalid" }));
     expect(options.okLabel).toBe(t("settings.signOutAndRemoveAction"));
     expect(message).toContain(t("settings.signOutAndRemoveBody"));
     expect(message).not.toContain(t("settings.signOutOthersStay"));
@@ -52,14 +52,18 @@ describe("account-scoped confirmations name their account (#1504)", () => {
 
   it("names the account whose identity is reset", () => {
     const { message, options } = accountResetIdentityConfirmation(bob);
-    expect(options.title).toBe(t("trust.resetIdentityConfirmTitle", { account: "Bob" }));
+    expect(options.title).toBe(t("trust.resetIdentityConfirmTitle", { account: "@bob:example.invalid" }));
     expect(message).toContain("@bob:example.invalid");
   });
 
   it("names menu items only for a signed-in account", () => {
-    expect(signedInAccountLabel(tab({ id: "dave" }))).toBe("dave");
+    expect(signedInAccountLabel(tab({ id: "dave" }))).toBe("@dave:example.invalid");
     expect(signedInAccountLabel(tab({ id: "erin", status: "signedOut" }))).toBeNull();
     expect(signedInAccountLabel(null)).toBeNull();
+    expect(signedInAccountLabel(alice)).toBe("@alice:example.invalid");
+    expect(signedInAccountLabel(tab({
+      id: "other", displayName: "Alice", accountKey: "@alice:other.invalid"
+    }))).toBe("@alice:other.invalid");
   });
 });
 

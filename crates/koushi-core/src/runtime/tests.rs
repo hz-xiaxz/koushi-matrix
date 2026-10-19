@@ -5169,6 +5169,8 @@ async fn account_settings_load_failure_is_retryable_and_never_persists_defaults(
         .composer_draft_store_actor
         .account_local_data_dir(&key_id)
         .join("settings/account-settings.v1.enc");
+    let original_settings =
+        std::fs::read(&account_settings_file).expect("valid encrypted settings");
     std::fs::write(&account_settings_file, b"corrupt settings").expect("corrupt test file");
 
     actor.load_account_settings_for_current_session().await;
@@ -5247,10 +5249,10 @@ async fn account_settings_load_failure_is_retryable_and_never_persists_defaults(
     );
 
     let mut app_values = actor.state.settings.values.clone();
-    app_values.notifications.sound = false;
+    app_values.appearance.theme = koushi_state::ThemePreference::Dark;
     let app_patch = SettingsPatch {
         scope: Some(koushi_state::SettingsPatchScope::App),
-        notifications: Some(app_values.notifications.clone()),
+        appearance: Some(app_values.appearance.clone()),
         ..SettingsPatch::default()
     };
     let app_request_id = RequestId {
@@ -5267,23 +5269,22 @@ async fn account_settings_load_failure_is_retryable_and_never_persists_defaults(
             }],
         )
         .await;
-    assert!(
-        !actor
+    assert_eq!(
+        actor
             .settings_store
             .load()
             .expect("app-only patch persists without account settings")
-            .notifications
-            .sound
+            .appearance
+            .theme,
+        koushi_state::ThemePreference::Dark
     );
     assert_eq!(
         std::fs::read(&account_settings_file).expect("account settings remain untouched"),
         b"corrupt settings"
     );
 
-    actor
-        .composer_draft_store_actor
-        .save_account_settings(&key_id, &stored)
-        .expect("repair account settings");
+    std::fs::write(&account_settings_file, original_settings)
+        .expect("restore valid encrypted settings");
     assert!(
         actor
             .composer_draft_store_actor

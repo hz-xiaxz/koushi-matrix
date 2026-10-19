@@ -8,7 +8,10 @@ Select the account icon at the bottom of the left rail to open **Account
 Settings** for that account. Select the gear in the top bar to open **App
 Settings**, which apply across account tabs. On macOS, the **Koushi** menu has
 these as separate **Account Settings…** and **App Settings…** items; **Cmd+,**
-opens **App Settings**. Choosing either item while settings are already open
+opens **App Settings**. The account-settings and sign-out menu items name the
+selected account by its full Matrix ID (for example `@alice:example.org`), so
+accounts with the same display name remain distinguishable. Sign-out and
+identity-reset confirmations also use the full Matrix ID. Choosing either item while settings are already open
 switches directly to that scope. With **Account Settings** open, use the button
 at the bottom of the category list to switch to **App Settings**; to return,
 open **Account Settings** from the rail or the **Koushi** menu.
@@ -32,14 +35,13 @@ translated app.
 | Scope and category | Settings and actions |
 | --- | --- |
 | App Settings → Appearance (外観) | Language (English, 日本語, 简体中文, 繁體中文, or 한국어); theme; display density; UI font and emoji style. |
-| App Settings → Notifications (通知) | Two tabs: **OS notifications** (notification sounds and badge counts) and **Sent from this device** (the destinations described under [Notifications from this device](#notifications-from-this-device)). Operating-system permissions also apply. |
 | App Settings → Preferences (環境設定) | Code-block wrapping; hiding removed messages; close to tray where configurable; automatic loading of older messages; placement of threaded conversations at their latest reply. |
 | App Settings → Keyboard (キーボード) | Send-message shortcut (Enter or the platform modifier+Enter); reference list of keyboard shortcuts and their availability. |
 | App Settings → Search history (検索履歴) | Shared background-work speed and pause/resume control. Search crawling and media prefetch use this budget across all accounts. **Off** pauses both. |
 | App Settings → Help & About (ヘルプと情報) | Public GitHub repository URL, copy button, and instructions for asking ChatGPT or another AI assistant. |
 | Account Settings → Account (アカウント) | Profile display name and avatar; account management page when provided by the server; change password when supported. **Deactivate account** sits in a separate **Danger zone** (危険な操作) block and is shown only for password-based accounts; accounts managed by an external provider use the account management page instead. |
 | Account Settings → Sessions (セッション) | Homeserver, user ID, device ID/name, verification, cross-signing, backup and local-store information; Sign out of the account named on the button. **Other sessions** lists the account's other sessions (name, ID, verification, last activity) from the last check, which runs at sign-in and at most once every 24 hours; open **Manage account & devices** beside the current session actions to manage them in your browser. The status shown is the last checked result; Koushi re-checks it automatically when the app or account starts and after a connection outage, and the refresh action checks again immediately. |
-| Account Settings → Notifications (通知) | Three tabs, **OS notifications** first. **OS notifications** (OS通知): desktop notifications and **Show message content in notifications**. **Sent from this device** (この端末から送信): destinations Koushi sends to from this computer (email or WeChat). **Homeserver notifications** (ホームサーバー通知): account-wide notification rules and **Email notifications**, which apply to every device. See [OS notifications](#os-notifications), [Notifications from this device](#notifications-from-this-device), and [Email notifications](#email-notifications). |
+| Account Settings → Notifications (通知) | Three tabs, **OS notifications** first. **OS notifications** (OS通知): desktop notifications, **Show message content in notifications**, sound and badges. **Sent from this device** (この端末から送信): destinations Koushi sends to from this computer (email or WeChat). **Homeserver notifications** (ホームサーバー通知): account-wide notification rules and **Email notifications**, which apply to every device. See [OS notifications](#os-notifications), [Notifications from this device](#notifications-from-this-device), and [Email notifications](#email-notifications). |
 | Account Settings → Security & Privacy (セキュリティとプライバシー) | URL previews in unencrypted/encrypted rooms; sending read receipts and typing notifications. |
 | Account Settings → Encryption (暗号化) | Identity/session verification and trust; secure backup setup and passphrase changes; recovery; encrypted room-key import/export; local-encryption diagnostics and local-data reset. Actions appear according to the current encryption state. |
 | Account Settings → Search history (検索履歴) | Indexing of media captions and file names; crawler activity, per-room progress and start/stop actions; rebuild search database. |
@@ -146,13 +148,24 @@ After a successful deactivation, Koushi signs this computer out of the account.
 
 ## OS notifications
 
-The **OS notifications** tab holds the alerts your operating system shows on
-this computer. **Desktop notifications** turns them on or off.
+All notification settings belong to the selected Matrix account on this computer.
+Open **Account Settings → Notifications**; the header shows its full Matrix ID.
+App Settings has no notification category.
+
+The **OS notifications** tab holds the alerts your operating system shows for
+this account. **Desktop notifications** turns them on or off.
 
 On macOS, turning on Desktop notifications requests system permission. If it was
 previously denied, allow Koushi in macOS System Settings. Clicking an OS
 notification opens the room that raised it; it does not jump to an exact
-message.
+message. When messages become read, Koushi waits until the banner has been
+submitted for at least five seconds before withdrawing it. Clicking or manually
+dismissing it still works immediately, and macOS controls its normal banner duration.
+Signing out or disabling notification privacy options clears the account's banners
+immediately. Turning badges off does not dismiss notifications.
+
+**Sound** and **Badges** apply only to this account. The app icon combines badge
+counts from the accounts whose Badges switch is on.
 
 **Show message content in notifications** is **off** by default, so a banner
 names the room and the sender without the message. Turned on, a banner also shows
@@ -205,10 +218,16 @@ What you can do with addresses depends on the server:
 Notifications**, lists the destinations Koushi sends to itself, from this
 computer, through a service you set up. Because Koushi sends them, they work even
 when your homeserver cannot send email. The **Homeserver notifications** tab is
-your server's own and independent of these. The destinations are app-wide, so
-the **Sent from this device** tab of **App Settings → Notifications** shows the
-same list. The app settings have no homeserver tab, because they belong to no
-account.
+your server's own and independent of these. Destinations, credentials, message-content
+consent, trigger conditions and timing belong only to this Matrix account on this
+computer. Creating, editing or removing a destination does not change another account.
+
+On upgrading from shared notification settings, Koushi preserves the old configuration
+in an inactive archive and stops using its destinations. Configure each destination
+again under the intended account, including its credential and content consent. This
+prevents notifications from an unintended account being sent to a formerly shared
+address. The previous Sound and Badges preferences are copied once into existing
+accounts; later changes stay independent.
 
 There is no switch to turn a destination on: a destination sends once its fields,
 its credential, and at least one target are set, and its row then reads

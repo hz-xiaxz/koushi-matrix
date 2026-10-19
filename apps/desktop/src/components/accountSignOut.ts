@@ -40,14 +40,14 @@ export function isSignedInAccountTab(tab: AccountTabSummary): boolean {
   return tab.accountKey !== null && tab.status !== "signedOut" && tab.status !== "addAccount";
 }
 
-/** The label account-scoped menu items name, or null when no account is bound. */
+/** Full Matrix ID for account-scoped actions, or null when no account is bound. */
 export function signedInAccountLabel(tab: AccountTabSummary | null | undefined): string | null {
-  return tab && isSignedInAccountTab(tab) ? accountTabLabel(tab) : null;
+  return tab && isSignedInAccountTab(tab) ? tab.accountKey : null;
 }
 
 /**
- * #1504: the sign-out confirmation names the target account (display name,
- * full user ID, homeserver) and says whether the other accounts stay signed in,
+ * #1504: the sign-out confirmation names the target account (full Matrix ID
+ * and homeserver) and says whether the other accounts stay signed in,
  * so signing out one tab can't be mistaken for signing out of every account.
  */
 export function accountSignOutConfirmation(
@@ -55,7 +55,7 @@ export function accountSignOutConfirmation(
   tabs: readonly AccountTabSummary[],
   { removeTab }: { removeTab: boolean }
 ): { message: string; options: WindowConfirmOptions } {
-  const account = accountTabLabel(tab);
+  const account = tab.accountKey ?? accountTabLabel(tab);
   const othersSignedIn = tabs.some((other) => other.id !== tab.id && isSignedInAccountTab(other));
   const message = [
     t("settings.signOutTarget", {
@@ -93,7 +93,7 @@ export function accountResetIdentityConfirmation(tab: AccountTabSummary): {
       t("trust.resetIdentityConfirmBody")
     ].join("\n\n"),
     options: {
-      title: t("trust.resetIdentityConfirmTitle", { account: accountTabLabel(tab) }),
+      title: t("trust.resetIdentityConfirmTitle", { account: tab.accountKey ?? accountTabLabel(tab) }),
       kind: "warning",
       okLabel: t("trust.resetIdentityConfirmAction")
     }
