@@ -215,7 +215,7 @@ export function UserSettingsPanel({
   onManageAccount?: () => void;
   accountNotifications?: AccountNotificationsState;
   accountNotificationActions?: AccountNotificationActions;
-  /** #1427: the app-scoped runtime half of this device's own notification delivery. */
+  /** #1427: the selected account's runtime state for this device's notification delivery. */
   notificationDelivery?: NotificationDeliveryState;
   notificationDeliveryActions?: NotificationDeliveryActions;
   rooms?: RoomSummary[];
@@ -260,8 +260,8 @@ export function UserSettingsPanel({
     ? initialCategory
     : visibleCategories[0]?.id ?? initialCategory;
   const [activeCategory, setActiveCategory] = useState<SettingsCategoryId>(initialVisibleCategory);
-  // #1468: the Notifications page's source tabs. The app-scoped dialog has no account, so it
-  // has no homeserver tab; a tab with nothing to show is not offered.
+  // Source tabs for account notification settings. The homeserver tab requires
+  // a current account session.
   const homeserverNotificationsAvailable = settingsScope !== "app" && Boolean(currentSession);
   const notificationTabs: { id: NotificationTabId; label: MessageId }[] = [
     { id: "os", label: "settings.notificationsOs" },

@@ -44,3 +44,11 @@ Verification completed:
 
 The legacy shared destinations are archived and inactive; users must register them
 for the intended account again. This change has not been released or installed.
+
+Merge preparation: integrated current main, preserving its account-tab and MCP
+assistant settings additions; independent follow-up review approved. Updated the
+existing browser and website screenshot routes to use account notifications.
+The feature-unified CI-profile workspace suite, workspace/QA/release Clippy,
+frontend suite (2,162), and both-server local QA pass. An initial workspace run
+hit an existing MCP registration deadline; the unchanged exact test and complete
+workspace rerun pass. Final required CI is checked on the PR before merge.

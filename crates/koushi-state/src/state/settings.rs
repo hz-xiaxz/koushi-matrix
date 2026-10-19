@@ -1114,8 +1114,8 @@ pub struct SettingsPatch {
     pub keyboard: Option<KeyboardSettings>,
     pub composer: Option<ComposerSettings>,
     pub notifications: Option<NotificationSettings>,
-    /// Device-local notification delivery (#1427), app scope. The patch carries the
-    /// whole block, as the notification block does, and the app re-canonicalizes it.
+    /// Account-owned device-local delivery (#1427). The patch carries the whole
+    /// block, as the notification block does, and Core re-canonicalizes it.
     #[serde(default)]
     pub delivery: Option<NotificationDeliverySettings>,
     /// Whether `delivery` carries credential bindings the core itself just wrote. It never
