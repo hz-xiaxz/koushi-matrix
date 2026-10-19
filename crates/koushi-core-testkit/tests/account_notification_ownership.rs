@@ -196,10 +196,9 @@ async fn a_signed_out_runtime_cannot_save_external_destinations_or_credentials()
                 request_id: failed,
                 failure,
             }) = connection.recv_event().await
+                && failed == request_id
             {
-                if failed == request_id {
-                    break failure;
-                }
+                break failure;
             }
         }
     })

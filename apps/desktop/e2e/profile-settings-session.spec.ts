@@ -1027,13 +1027,13 @@ test("account notification settings load read-only and dispatch typed commands",
   ).toEqual({ address: "harness@example.invalid", lang: "en" });
 });
 
-test("app notification settings dispatch Rust-owned update_settings patches", async ({
+test("account notification sound and badge settings dispatch Rust-owned update_settings patches", async ({
   page
 }) => {
   await gotoReadyShell(page);
   await page.evaluate(() => window.__harness.clearInvocations());
 
-  await page.getByRole("button", { name: "App Settings", exact: true }).click();
+  await page.getByRole("button", { name: "Account Settings", exact: true }).click();
   await page.getByRole("tab", { name: "Notifications", exact: true }).click();
   await expect(page.getByRole("heading", { name: "Notifications", exact: true })).toBeVisible();
 
@@ -1044,7 +1044,7 @@ test("app notification settings dispatch Rust-owned update_settings patches", as
   await expect.poll(() => page.evaluate(() => window.__harness.invocationsOf("update_settings")[0]?.args))
     .toEqual({
       patch: {
-        scope: "app",
+        scope: "account",
         notifications: {
           desktop_notifications: true,
           sound: false,
@@ -1065,7 +1065,7 @@ test("app notification settings dispatch Rust-owned update_settings patches", as
   await expect.poll(() => page.evaluate(() => window.__harness.invocationsOf("update_settings")[0]?.args))
     .toEqual({
       patch: {
-        scope: "app",
+        scope: "account",
         notifications: {
           desktop_notifications: true,
           sound: false,

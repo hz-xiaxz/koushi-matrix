@@ -150,9 +150,7 @@ test("language round trip persists the explicit choice across Settings reopen", 
   await page.getByRole("button", { name: "App Settings", exact: true }).click();
   const appDialog = page.getByRole("dialog", { name: "App Settings", exact: true });
   await expect(appDialog).toBeVisible();
-  // The app settings dialog also carries the device notification delivery fields, whose
-  // selects share this class; the appearance panel holds the language control alone, and
-  // the panel id keeps this locator working after the language switch renames the dialog.
+  // The panel id keeps this locator working after the language switch renames the dialog.
   const languageSelect = page.locator(
     "dialog.user-settings-modal #settings-page-appearance .profile-settings-field select"
   );
