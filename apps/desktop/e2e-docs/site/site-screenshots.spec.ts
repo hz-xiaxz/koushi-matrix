@@ -307,8 +307,8 @@ for (const locale of SITE_LOCALES) {
           };
         }
       });
-      await page.evaluate(() => window.__harness.pushDesktopMenu("openAppSettings"));
-      const dialog = page.getByRole("dialog", { name: label(locale, "settings.appSettings") });
+      await page.evaluate(() => window.__harness.pushDesktopMenu("openAccountSettings"));
+      const dialog = page.getByRole("dialog", { name: label(locale, "settings.accountSettings") });
       await expect(dialog).toBeVisible();
       await dialog.locator("#settings-tab-notifications").click();
       await dialog.getByRole("tab", { name: label(locale, "settings.notificationDelivery"), exact: true }).click();
