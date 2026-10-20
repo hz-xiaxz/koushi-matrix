@@ -52,6 +52,7 @@ export const testkitTargets = [
 export const coreLocalIntegrationTargets = [
   "emoji_picker_size.rs",
   "link_preview.rs",
+  "local_upload.rs",
   "media_save.rs",
   "native_artifact_boundary.rs",
   // Exercise the production runtime without the testkit's test-hooks feature.
