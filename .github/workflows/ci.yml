@@ -251,6 +251,8 @@ jobs:
         run: node --test scripts/desktop-release-version.test.mjs
       - name: Updater manifest tests
         run: node --test scripts/desktop-updater-manifest.test.mjs
+      - name: macOS stapler retry shim tests
+        run: node --test scripts/macos-xcrun-shim.test.mjs
       # Every PR, not only a release PR: a stale Cargo.lock or npm lockfile
       # version is rewritten by the next `cargo` / `npm install` on any branch,
       # so the release bump would otherwise land in an unrelated PR (observed
