@@ -919,9 +919,15 @@ button:disabled {
   text-align: center;
 }
 
+/* A fixed, non-shrinking square: as a flex item beside a long account label it
+   used to shrink horizontally into an oval that wobbled while rotating (#1544). */
 .account-tab-spinner {
+  display: block;
+  flex: 0 0 13px;
   inline-size: 13px;
+  min-inline-size: 13px;
   block-size: 13px;
+  transform-origin: 50% 50%;
   border: 2px solid var(--line);
   border-block-start-color: var(--brand);
   border-radius: 50%;
