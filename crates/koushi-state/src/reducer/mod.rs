@@ -2508,13 +2508,14 @@ pub(crate) fn refresh_native_attention_candidate_display_projection(state: &mut 
     if candidate.room_display_name == display_label {
         return false;
     }
+    let locale = crate::resolve_catalog_locale(&state.settings.values.locale);
     let Some(candidate) = state.native_attention.summary.candidate.as_mut() else {
         return false;
     };
     let candidate_kind = candidate.kind;
     candidate.room_display_name = display_label.clone();
     if let Some(notification) = state.native_attention.notification.as_mut() {
-        notification.refresh_title_for_candidate(&display_label, candidate_kind);
+        notification.refresh_title_for_candidate(&display_label, candidate_kind, locale);
     }
     true
 }

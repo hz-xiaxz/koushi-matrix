@@ -121,18 +121,22 @@ pub struct NotificationDeliveryPreviewDto {
 }
 
 /// #1492: render the catalog's sample direct message through the digest renderer under
-/// the unsaved draft. Stateless: it needs no account, stores nothing, and reads no
-/// credential.
+/// the unsaved draft. It needs no account, stores nothing, and reads no credential; it
+/// reads only the selected locale, so the preview is worded as a send would be (#1476).
 #[tauri::command]
-pub fn preview_notification_delivery(
+pub async fn preview_notification_delivery(
     sink: koushi_state::NotificationSinkSettings,
     partner_user_id: String,
     partner_alias: String,
     message_text: String,
-) -> NotificationDeliveryPreviewDto {
+    state: State<'_, CoreRuntimeState>,
+) -> Result<NotificationDeliveryPreviewDto, String> {
     use koushi_core::notification_delivery::digest::{
         NotificationDeliveryPreviewSample, preview_digest,
     };
+    let locale = koushi_state::resolve_catalog_locale(
+        &state.connection.lock().await.snapshot().settings.values.locale,
+    );
     let preview = preview_digest(
         &sink,
         &NotificationDeliveryPreviewSample {
@@ -140,12 +144,13 @@ pub fn preview_notification_delivery(
             partner_alias,
             message_text,
         },
+        locale,
     );
-    NotificationDeliveryPreviewDto {
+    Ok(NotificationDeliveryPreviewDto {
         sender_name: preview.sender_name,
         subject: preview.subject,
         body: preview.body,
-    }
+    })
 }
 
 #[tauri::command]

@@ -5,7 +5,8 @@ use std::{
 
 use serde::{Deserialize, Serialize};
 
-use crate::locale_profile::DisplayPlatform;
+use crate::locale_profile::{CatalogLocale, DisplayPlatform};
+use crate::notification_text::{NotificationText, notification_counts, notification_text};
 
 use super::AppState;
 use super::errors::OperationFailureKind;
@@ -124,8 +125,9 @@ impl NativeNotificationPayload {
         &mut self,
         room_display_name: &str,
         kind: RoomAttentionKind,
+        locale: CatalogLocale,
     ) {
-        self.title = native_notification_title(room_display_name, kind);
+        self.title = native_notification_title(room_display_name, kind, locale);
     }
 }
 
@@ -190,6 +192,9 @@ pub struct NativeAttentionProjectionInput<'a> {
     /// event's text instead of the count body.
     pub message_previews: bool,
     pub capabilities: NativeAttentionCapabilities,
+    /// The catalog locale the banner text is written in, resolved from the
+    /// current settings when the projection runs (#1476).
+    pub locale: CatalogLocale,
 }
 
 #[derive(Clone, Debug, Eq, PartialEq)]
@@ -381,6 +386,7 @@ pub(crate) fn native_attention_projection_from_rooms_with_live_room(
             entry,
             candidate,
             input.message_previews && input.observation == NativeAttentionObservationKind::Live,
+            input.locale,
         )),
         _ => None,
     };
@@ -612,6 +618,7 @@ pub fn attention_room_candidates_for_state(state: &AppState) -> Vec<RoomAttentio
         previous_candidate: state.native_attention.summary.candidate.as_ref(),
         message_previews: state.settings.values.notifications.message_previews,
         capabilities: state.native_attention.summary.capabilities,
+        locale: crate::resolve_catalog_locale(&state.settings.values.locale),
     });
     for candidate in &mut candidates {
         if let Some(partner) = candidate.direct_partner.as_mut() {
@@ -668,13 +675,14 @@ fn native_notification_payload(
     entry: &NativeAttentionCandidateEntry<'_>,
     candidate: &NativeAttentionCandidate,
     previews_allowed: bool,
+    locale: CatalogLocale,
 ) -> NativeNotificationPayload {
     let preview = previews_allowed
         .then(|| verified_native_preview(entry))
         .flatten();
     NativeNotificationPayload {
-        title: native_notification_title(&candidate.room_display_name, candidate.kind),
-        body: preview.unwrap_or_else(|| native_notification_count_body(candidate)),
+        title: native_notification_title(&candidate.room_display_name, candidate.kind, locale),
+        body: preview.unwrap_or_else(|| native_notification_count_body(candidate, locale)),
         target: NativeNotificationTarget {
             room_id: entry.room_id.to_owned(),
             event_id: None,
@@ -736,38 +744,34 @@ fn verified_native_preview(entry: &NativeAttentionCandidateEntry<'_>) -> Option<
     Some(format!("{bounded}…"))
 }
 
-fn native_notification_title(room_display_name: &str, kind: RoomAttentionKind) -> String {
-    match kind {
-        RoomAttentionKind::Mention => format!("Mention in {room_display_name}"),
-        RoomAttentionKind::Dm => format!("Direct message in {room_display_name}"),
-        RoomAttentionKind::Message => format!("Message in {room_display_name}"),
-    }
+fn native_notification_title(
+    room_display_name: &str,
+    kind: RoomAttentionKind,
+    locale: CatalogLocale,
+) -> String {
+    let place = room_display_name;
+    notification_text(
+        locale,
+        match kind {
+            RoomAttentionKind::Mention => NotificationText::MentionIn { place },
+            RoomAttentionKind::Dm => NotificationText::DirectMessageIn { place },
+            RoomAttentionKind::Message => NotificationText::MessageIn { place },
+        },
+    )
 }
 
-fn native_notification_count_body(candidate: &NativeAttentionCandidate) -> String {
-    let mut parts = Vec::new();
-    if candidate.kind == RoomAttentionKind::Mention {
-        parts.push(format_notification_count(
-            candidate.highlight_count,
-            "mention",
-            "mentions",
-        ));
-    }
-    parts.push(format_notification_count(
-        candidate.unread_count,
-        "unread",
-        "unread",
-    ));
-    parts.retain(|part| !part.is_empty());
-    parts.join(", ")
-}
-
-fn format_notification_count(count: u64, singular: &str, plural: &str) -> String {
-    match count {
-        0 => String::new(),
-        1 => format!("1 {singular}"),
-        count => format!("{count} {plural}"),
-    }
+/// The count body: the mention count for a mention, then the unread count,
+/// zero counts left out.
+fn native_notification_count_body(
+    candidate: &NativeAttentionCandidate,
+    locale: CatalogLocale,
+) -> String {
+    let mentions = if candidate.kind == RoomAttentionKind::Mention {
+        candidate.highlight_count
+    } else {
+        0
+    };
+    notification_counts(locale, mentions, candidate.unread_count)
 }
 
 fn attention_kind_priority(kind: RoomAttentionKind) -> u8 {

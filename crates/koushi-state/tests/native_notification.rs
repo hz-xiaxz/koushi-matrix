@@ -164,6 +164,7 @@ fn project(
         previous_candidate,
         message_previews,
         capabilities: capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     })
     .state
 }
@@ -270,6 +271,7 @@ fn muted_rooms_produce_no_notification_text() {
         previous_candidate: None,
         message_previews: true,
         capabilities: capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     })
     .state;
 

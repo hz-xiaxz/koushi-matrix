@@ -17,15 +17,21 @@
 //! quoted lines so it cannot forge another room's line, and a ServerChan body has its
 //! Markdown punctuation escaped so it cannot inject a link or an image
 //! (`docs/architecture/state-machine.md`, "Local Notification Delivery").
+//!
+//! The wording follows the catalog locale the caller resolves when it renders
+//! (#1476): headlines, counts, and tails come from `koushi_state::notification_text`
+//! with that locale's plural rule and separators. Localization changes wording only;
+//! which message text a destination receives is decided by its content mode alone.
 
 use std::collections::BTreeSet;
 use std::fmt;
 use std::time::Duration;
 
 use koushi_state::{
-    DEFAULT_NOTIFICATION_SENDER_NAME, DirectPartner, NotificationDeliveryContent,
+    CatalogLocale, DEFAULT_NOTIFICATION_SENDER_NAME, DirectPartner, NotificationDeliveryContent,
     NotificationDeliveryPartnerLabel, NotificationSinkConfig, NotificationSinkSettings,
-    RoomAttentionKind, bounded_notification_delivery_message_source,
+    NotificationText, RoomAttentionKind, bounded_notification_delivery_message_source,
+    notification_counts, notification_label_separator, notification_text,
 };
 use unicode_segmentation::UnicodeSegmentation;
 
@@ -125,11 +131,12 @@ pub fn render_intent(
     sink: &NotificationSinkSettings,
     rooms: &[QualifyingRoom],
     window_id: &str,
+    locale: CatalogLocale,
 ) -> Option<NotificationDeliveryIntent> {
     if !sink_is_deliverable(sink) {
         return None;
     }
-    let (subject, body) = render_digest(sink, sink.effective_content(), rooms)?;
+    let (subject, body) = render_digest(sink, sink.effective_content(), rooms, locale)?;
     Some(NotificationDeliveryIntent {
         sink_id: sink.id.clone(),
         destination: sink.destination.clone(),
@@ -150,6 +157,7 @@ fn render_digest(
     sink: &NotificationSinkSettings,
     content: NotificationDeliveryContent,
     rooms: &[QualifyingRoom],
+    locale: CatalogLocale,
 ) -> Option<(String, String)> {
     let rooms = ordered_rooms(rooms);
     let first = rooms.first()?;
@@ -166,8 +174,8 @@ fn render_digest(
     let names = sink.direct_partner_label;
     let text_cap = text_cap_graphemes(content, sink.text_budget_graphemes());
     Some((
-        digest_subject(first, rooms.len(), subject_cap, names),
-        digest_body(&rooms, text_cap, format, names),
+        digest_subject(first, rooms.len(), subject_cap, names, locale),
+        digest_body(&rooms, text_cap, format, names, locale),
     ))
 }
 
@@ -213,6 +221,7 @@ pub struct NotificationDeliveryPreview {
 pub fn preview_digest(
     sink: &NotificationSinkSettings,
     sample: &NotificationDeliveryPreviewSample,
+    locale: CatalogLocale,
 ) -> NotificationDeliveryPreview {
     let alias = sample.partner_alias.trim();
     let room = QualifyingRoom {
@@ -229,7 +238,7 @@ pub fn preview_digest(
         message_text: bounded_notification_delivery_message_source(&sample.message_text),
     };
     let (subject, body) =
-        render_digest(sink, sink.content, std::slice::from_ref(&room)).unwrap_or_default();
+        render_digest(sink, sink.content, std::slice::from_ref(&room), locale).unwrap_or_default();
     let sender_name = match sink.config {
         NotificationSinkConfig::ServerChan { .. } => String::new(),
         NotificationSinkConfig::Resend { .. } | NotificationSinkConfig::Smtp { .. } => {
@@ -334,12 +343,18 @@ fn digest_subject(
     room_count: usize,
     cap: usize,
     names: NotificationDeliveryPartnerLabel,
+    locale: CatalogLocale,
 ) -> String {
-    let headline = room_headline(first, names);
+    let headline = room_headline(first, names, locale);
     let subject = match room_count.saturating_sub(1) {
         0 => headline,
-        1 => format!("{headline} and 1 more room"),
-        more => format!("{headline} and {more} more rooms"),
+        more => notification_text(
+            locale,
+            NotificationText::SubjectMoreRooms {
+                headline: &headline,
+                count: more as u64,
+            },
+        ),
     };
     ellipsize(&subject, cap)
 }
@@ -351,12 +366,13 @@ fn digest_body(
     text_cap: usize,
     format: BodyFormat,
     names: NotificationDeliveryPartnerLabel,
+    locale: CatalogLocale,
 ) -> String {
     let mut blocks: Vec<String> = Vec::new();
     for room in rooms.iter().take(MAX_NOTIFICATION_DIGEST_ROOMS) {
         let mut block = match format {
-            BodyFormat::PlainText => room_line(room, names),
-            BodyFormat::Markdown => escape_markdown(&room_line(room, names)),
+            BodyFormat::PlainText => room_line(room, names, locale),
+            BodyFormat::Markdown => escape_markdown(&room_line(room, names, locale)),
         };
         if let Some(text) = room_text(room, text_cap, format) {
             block.push('\n');
@@ -367,7 +383,12 @@ fn digest_body(
 
     let remaining = rooms.len().saturating_sub(MAX_NOTIFICATION_DIGEST_ROOMS);
     if remaining > 0 {
-        blocks.push(format!("and {remaining} more"));
+        blocks.push(notification_text(
+            locale,
+            NotificationText::BodyMoreRooms {
+                count: remaining as u64,
+            },
+        ));
     }
 
     blocks.join("\n\n")
@@ -378,29 +399,42 @@ fn digest_body(
 /// A one-to-one direct message is named by its partner, `… from {name}`, with no space:
 /// the partner is the conversation. Every other room is named by its safe display label
 /// and its first parent space, `… in {room · space}`.
-fn room_headline(room: &QualifyingRoom, names: NotificationDeliveryPartnerLabel) -> String {
+fn room_headline(
+    room: &QualifyingRoom,
+    names: NotificationDeliveryPartnerLabel,
+    locale: CatalogLocale,
+) -> String {
     if let Some(name) = room
         .direct_partner
         .as_ref()
         .and_then(|partner| partner_name(partner, names))
     {
-        return match room.kind {
-            RoomAttentionKind::Mention => format!("Mention from {name}"),
-            RoomAttentionKind::Dm | RoomAttentionKind::Message => {
-                format!("Direct message from {name}")
-            }
-        };
+        let name = name.as_str();
+        return notification_text(
+            locale,
+            match room.kind {
+                RoomAttentionKind::Mention => NotificationText::MentionFrom { name },
+                RoomAttentionKind::Dm | RoomAttentionKind::Message => {
+                    NotificationText::DirectMessageFrom { name }
+                }
+            },
+        );
     }
-    let label = safe_label(&room.display_label).unwrap_or_else(|| "Room".to_owned());
+    let label = safe_label(&room.display_label)
+        .unwrap_or_else(|| notification_text(locale, NotificationText::RoomFallback));
     let place = match room.space_labels.iter().find_map(|space| safe_label(space)) {
         Some(space) => format!("{label} · {space}"),
         None => label,
     };
-    match room.kind {
-        RoomAttentionKind::Mention => format!("Mention in {place}"),
-        RoomAttentionKind::Dm => format!("Direct message in {place}"),
-        RoomAttentionKind::Message => format!("Message in {place}"),
-    }
+    let place = place.as_str();
+    notification_text(
+        locale,
+        match room.kind {
+            RoomAttentionKind::Mention => NotificationText::MentionIn { place },
+            RoomAttentionKind::Dm => NotificationText::DirectMessageIn { place },
+            RoomAttentionKind::Message => NotificationText::MessageIn { place },
+        },
+    )
 }
 
 /// The name a direct-message partner is shown by: the local alias when the destination
@@ -419,37 +453,19 @@ fn partner_name(
     alias.or_else(|| safe_label(&partner.user_id))
 }
 
-/// One room's digest line: the headline and the counts.
-fn room_line(room: &QualifyingRoom, names: NotificationDeliveryPartnerLabel) -> String {
-    let headline = room_headline(room, names);
-    let counts = room_counts(room.mentions, room.unread);
+/// One room's digest line: the headline and the counts. The mention count is shown for
+/// every kind, because a direct message can carry a mention too; a zero count is omitted.
+fn room_line(
+    room: &QualifyingRoom,
+    names: NotificationDeliveryPartnerLabel,
+    locale: CatalogLocale,
+) -> String {
+    let headline = room_headline(room, names, locale);
+    let counts = notification_counts(locale, u64::from(room.mentions), u64::from(room.unread));
     if counts.is_empty() {
         headline
     } else {
-        format!("{headline}: {counts}")
-    }
-}
-
-/// A room's mention and unread counts as prose, with a zero count omitted. The
-/// mention count is shown for every kind, because a direct message can carry a
-/// mention too.
-fn room_counts(mentions: u32, unread: u32) -> String {
-    let mut parts = Vec::new();
-    if mentions > 0 {
-        parts.push(format_count(mentions, "mention", "mentions"));
-    }
-    if unread > 0 {
-        parts.push(format_count(unread, "unread", "unread"));
-    }
-    parts.join(", ")
-}
-
-/// One count with its noun, singular at one.
-fn format_count(count: u32, singular: &str, plural: &str) -> String {
-    if count == 1 {
-        format!("1 {singular}")
-    } else {
-        format!("{count} {plural}")
+        format!("{headline}{}{counts}", notification_label_separator(locale))
     }
 }
 
@@ -564,22 +580,6 @@ pub(crate) fn idempotency_key(sink_id: &str, window_id: &str) -> String {
     format!("koushi-notification/{sink_id}/{window_id}")
 }
 
-/// The subject a test send carries.
-///
-/// English, like the digest's own wording and for the same reason: this text never
-/// renders inside the app, it is what the recipient's mail client shows, and the
-/// message catalog owns what the app says, not what this device puts on the wire.
-pub const TEST_DELIVERY_SUBJECT: &str = "Koushi test notification";
-
-/// The body a test send carries: what it is and what it proves, and nothing else.
-///
-/// It names no room, event, sender, or message, because a test send happens before
-/// the user has trusted the channel with any of that
-/// (`docs/architecture/state-machine.md`, "Local Notification Delivery").
-pub const TEST_DELIVERY_BODY: &str = "This is a test notification from Koushi.\n\
-     If you can read it, this device can reach this delivery sink. No room, message, or \
-     account data is included in a test send.";
-
 /// Build the one canned intent a test send delivers through one sink.
 ///
 /// The intent goes through the same sink path, the same credential read, and the same typed
@@ -592,17 +592,22 @@ pub const TEST_DELIVERY_BODY: &str = "This is a test notification from Koushi.\n
 /// be asking them to trust it first. The sink itself is always complete - the settings loader
 /// drops one that is not - so the request it builds is always a request a real send would
 /// have built.
+///
+/// The subject and body say what the send is and what it proves, in `locale`, and nothing
+/// else: they name no room, event, sender, or message, because a test send happens before
+/// the user has trusted the channel with any of that.
 pub fn test_delivery_intent(
     sink: &NotificationSinkSettings,
     window_id: &str,
+    locale: CatalogLocale,
 ) -> NotificationDeliveryIntent {
     NotificationDeliveryIntent {
         sink_id: sink.id.clone(),
         destination: sink.destination.clone(),
         from_address: sink.from_address.clone(),
         sender_name: sink.sender_name.clone(),
-        subject: TEST_DELIVERY_SUBJECT.to_owned(),
-        body: TEST_DELIVERY_BODY.to_owned(),
+        subject: notification_text(locale, NotificationText::TestDeliverySubject),
+        body: notification_text(locale, NotificationText::TestDeliveryBody),
         idempotency_key: idempotency_key(&sink.id, window_id),
     }
 }

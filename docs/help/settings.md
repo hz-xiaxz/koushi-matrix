@@ -55,8 +55,9 @@ The **View** menu also offers **Zoom In**, **Zoom Out**, and **Actual Size**.
 Koushi's native menu labels follow the app language; in Japanese, **View** is **表示**.
 The language list shows each language in its own script. **简体中文** is Simplified
 Chinese, **繁體中文** is Traditional Chinese with Taiwan vocabulary, and **한국어** is
-Korean. Desktop notification titles and bodies are currently English in every
-language.
+Korean. Desktop notification titles and bodies, and the email or WeChat
+notifications Koushi sends, follow the app language; a language change applies
+to the next notification, including one that is waiting to be sent or retried.
 On macOS, **Cmd + Ctrl + F** toggles fullscreen. These window shortcuts
 remain available while an in-app dialog is open.
 

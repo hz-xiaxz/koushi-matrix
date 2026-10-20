@@ -65,6 +65,7 @@ fn banner_body(
             previous_candidate: None,
             message_previews,
             capabilities: NativeAttentionCapabilities::default(),
+            locale: crate::CatalogLocale::En,
         },
         live_room_id,
         live_room_id,
@@ -161,6 +162,7 @@ fn a_room_that_did_not_rise_in_this_observation_never_shows_text() {
         previous_candidate: None,
         message_previews: true,
         capabilities: NativeAttentionCapabilities::default(),
+        locale: crate::CatalogLocale::En,
     });
     assert_eq!(
         projection
@@ -203,6 +205,7 @@ fn the_preview_is_one_bounded_line_and_never_printed() {
             previous_candidate: None,
             message_previews: true,
             capabilities: NativeAttentionCapabilities::default(),
+            locale: crate::CatalogLocale::En,
         },
         Some(ROOM),
         Some(ROOM),
