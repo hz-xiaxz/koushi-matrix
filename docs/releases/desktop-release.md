@@ -56,6 +56,17 @@ Claude Code and OpenCode have equivalent discovery entry points under
   backoff (15s, 30s, 60s, 120s, 120s). The last attempt still decides the gate:
   every signature, ticket, checksum, and Gatekeeper assertion runs unchanged,
   and a failure after the final attempt still fails the job.
+- Tauri (2.12.1) staples the notarized app with `xcrun stapler staple` but
+  ignores its exit status and output, then packs that app into the DMG and the
+  updater archive. v0.29.0's first two release runs shipped an unstapled app
+  into the DMG this way and failed the verification gate. For a signed build
+  with notarization credentials, `scripts/desktop-build-dmg.mjs` therefore puts
+  `scripts/macos/xcrun` first on `PATH`: it retries `stapler staple` and
+  `stapler validate` with the same backoff, logs every attempt (printed by the
+  build script, since Tauri hides it), and passes all other `xcrun` calls
+  through unchanged. After Tauri finishes, the build script validates the
+  app's stapled ticket and fails the build if it is missing. Retire the shim
+  once the pinned Tauri CLI checks the staple result itself.
 - The Windows x64 NSIS installer remains explicitly unsigned until a Windows
   certificate and signing gate are approved.
 - The Windows installer requires WebView2 `155.0.4283.45` or newer and invokes
@@ -261,7 +272,9 @@ gh run view <run-id> --log-failed
   `CloudKit's response is inconsistent`, exit code 65 or 68) is a ticket lookup
   that lost its connection, not a signing defect. The job already retries that
   lookup; if the gate still failed, rerun the failed job instead of touching
-  signing material or weakening the verification.
+  signing material or weakening the verification. `Koushi.app does not have a
+  ticket stapled to it` from the DMG's app means the build-time staple failed;
+  read the build step's `xcrun stapler attempts` log.
 - Do not delete or recreate a draft, tag, or published Release without explicit
   authorization and a verified target. Those operations can break stable links
   or make an existing version ambiguous.

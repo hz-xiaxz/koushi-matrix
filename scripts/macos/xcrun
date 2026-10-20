@@ -1,0 +1,39 @@
+#!/usr/bin/env bash
+# xcrun shim for signed macOS builds (see scripts/desktop-build-dmg.mjs).
+#
+# Tauri 2.12.1 staples the notarized app with `xcrun stapler staple` but
+# discards the exit status and output, so a ticket that Apple's CloudKit
+# ticket service does not return yet leaves an unstapled app that is then
+# packed into the DMG and the updater archive. This shim retries `stapler
+# staple` / `stapler validate` with bounded backoff and records every attempt
+# in $KOUSHI_STAPLE_LOG, because Tauri does not show the command's output.
+# Every other xcrun invocation passes through unchanged.
+set -u
+
+real_xcrun="${KOUSHI_REAL_XCRUN:-/usr/bin/xcrun}"
+
+if [[ "${1:-}" != "stapler" || ( "${2:-}" != "staple" && "${2:-}" != "validate" ) ]]; then
+  exec "$real_xcrun" "$@"
+fi
+
+read -r -a delays <<< "${KOUSHI_STAPLE_RETRY_DELAYS:-15 30 60 120 120}"
+log="${KOUSHI_STAPLE_LOG:-/dev/stderr}"
+attempt=0
+while :; do
+  output="$("$real_xcrun" "$@" 2>&1)"
+  status=$?
+  printf '%s\n' "$output"
+  {
+    printf 'xcrun %s attempt %d exit %d (cwd %s)\n' "$*" "$((attempt + 1))" "$status" "$PWD"
+    printf '%s\n' "$output"
+  } >> "$log"
+  if (( status == 0 )); then
+    exit 0
+  fi
+  if (( attempt >= ${#delays[@]} )); then
+    printf 'xcrun %s failed after %d attempts\n' "$*" "$((attempt + 1))" >> "$log"
+    exit "$status"
+  fi
+  sleep "${delays[$attempt]}"
+  attempt=$((attempt + 1))
+done

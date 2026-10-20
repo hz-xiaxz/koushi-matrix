@@ -1,6 +1,7 @@
 #!/usr/bin/env node
 import { spawnSync } from "node:child_process";
-import { existsSync, readdirSync } from "node:fs";
+import { existsSync, mkdtempSync, readFileSync, readdirSync } from "node:fs";
+import { tmpdir } from "node:os";
 import { dirname, join, resolve } from "node:path";
 import { fileURLToPath } from "node:url";
 import { hostTarget, stageMcpSidecar, withMcpSidecar } from "./desktop-mcp-sidecar.mjs";
@@ -83,13 +84,35 @@ if (args.has("--signed")) {
 }
 
 stageMcpSidecar({ repoRoot, target: target ?? hostTarget(), env: buildEnvironment });
-run("npm", buildCommand, desktopDir);
+// Tauri notarizes when Apple API or Apple ID credentials are present, then
+// staples with `xcrun stapler staple` without checking its exit status. Route
+// xcrun through scripts/macos/xcrun so that staple is retried and logged, and
+// fail below unless the app the DMG and updater archive were built from
+// actually carries its ticket.
+const notarizing =
+  args.has("--signed") && Boolean(buildEnvironment.APPLE_API_KEY || buildEnvironment.APPLE_ID);
+const stapleLog = notarizing
+  ? join(mkdtempSync(join(tmpdir(), "koushi-staple-")), "stapler.log")
+  : null;
+if (notarizing) {
+  buildEnvironment.PATH = `${join(repoRoot, "scripts", "macos")}:${buildEnvironment.PATH ?? ""}`;
+  buildEnvironment.KOUSHI_STAPLE_LOG = stapleLog;
+}
+run("npm", buildCommand, desktopDir, () => printStapleLog(stapleLog));
+printStapleLog(stapleLog);
+const app = join(bundleDir, "macos", "Koushi.app");
+if (notarizing) {
+  run(join(repoRoot, "scripts", "macos", "xcrun"), ["stapler", "validate", app], repoRoot, () => {
+    printStapleLog(stapleLog);
+    console.error(`desktop-build-dmg: the notarized app has no stapled ticket: ${app}`);
+  });
+}
 const launcher = join(bundleDir, "macos", "Koushi.app", "Contents", "MacOS", "koushi-mcp");
 if (!existsSync(launcher)) {
   console.error(`desktop-build-dmg: the koushi-mcp launcher is missing from the app bundle: ${launcher}`);
   process.exit(1);
 }
-run("codesign", ["--verify", "--deep", "--strict", join(bundleDir, "macos", "Koushi.app")], repoRoot);
+run("codesign", ["--verify", "--deep", "--strict", app], repoRoot);
 
 const dmgFiles = listDmgArtifacts();
 if (dmgFiles.length === 0) {
@@ -102,15 +125,24 @@ for (const artifact of dmgFiles) {
   console.log(`  ${artifact}`);
 }
 
-function run(command, commandArgs, cwd) {
+function run(command, commandArgs, cwd, onFailure) {
   const result = spawnSync(command, commandArgs, {
     cwd,
     stdio: "inherit",
     env: buildEnvironment
   });
   if (result.status !== 0) {
+    onFailure?.();
     process.exit(result.status ?? 1);
   }
+}
+
+function printStapleLog(path) {
+  if (!path || !existsSync(path)) {
+    return;
+  }
+  console.log("desktop-build-dmg: xcrun stapler attempts");
+  process.stdout.write(readFileSync(path, "utf8"));
 }
 
 function localSigningEnvironment() {
