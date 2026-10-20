@@ -951,9 +951,13 @@ impl CoreConnection {
         composer_document: Option<koushi_state::ComposerDocument>,
     ) -> Result<u64, crate::media_staging::MediaStagingError> {
         let service = Arc::clone(&self.media_staging);
-        service
-            .stage_upload_bytes_with_composer_document(self, target, items, composer_document)
-            .await
+        Box::pin(service.stage_upload_bytes_with_composer_document(
+            self,
+            target,
+            items,
+            composer_document,
+        ))
+        .await
     }
 
     /// Return the published generation after this operation settles.
@@ -964,9 +968,7 @@ impl CoreConnection {
         selection: koushi_state::StagedUploadOutputSelection,
     ) -> Result<u64, crate::media_staging::MediaStagingError> {
         let service = Arc::clone(&self.media_staging);
-        service
-            .select_staged_upload_output(self, target, staged_id, selection)
-            .await
+        Box::pin(service.select_staged_upload_output(self, target, staged_id, selection)).await
     }
 
     /// Return the published generation after this operation settles.
@@ -976,9 +978,7 @@ impl CoreConnection {
         staged_id: String,
     ) -> Result<u64, crate::media_staging::MediaStagingError> {
         let service = Arc::clone(&self.media_staging);
-        service
-            .retry_staged_upload_preparation(self, target, staged_id)
-            .await
+        Box::pin(service.retry_staged_upload_preparation(self, target, staged_id)).await
     }
 
     /// Return the published generation after this operation settles.
@@ -1014,7 +1014,7 @@ impl CoreConnection {
         staged_id: String,
     ) -> Result<u64, crate::media_staging::MediaStagingError> {
         let service = Arc::clone(&self.media_staging);
-        service.use_original(self, target, staged_id).await
+        Box::pin(service.use_original(self, target, staged_id)).await
     }
 
     /// Return the published generation after this operation settles.
@@ -1051,17 +1051,16 @@ impl CoreConnection {
         crate::media_staging::PreparedUploadSendError,
     > {
         let service = Arc::clone(&self.media_staging);
-        service
-            .send_prepared_uploads(
-                self,
-                expected_account,
-                generation,
-                lease,
-                target,
-                draft_revision,
-                draft_document,
-            )
-            .await
+        Box::pin(service.send_prepared_uploads(
+            self,
+            expected_account,
+            generation,
+            lease,
+            target,
+            draft_revision,
+            draft_document,
+        ))
+        .await
     }
 
     /// Submit a command without a composer lease. Revision-bearing composer

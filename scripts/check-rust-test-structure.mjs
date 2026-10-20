@@ -2148,7 +2148,7 @@ export function checkCoreTimelineUnsubscribeCleanupOrder() {
   const body = timelineItemBody("manager.rs", "pub(super) async fn unsubscribe_timeline");
   const clear = body?.indexOf("self.clear_thread_root_projections_for_room(key).await") ?? -1;
   const remove = body?.indexOf("self.timelines.remove(key)") ?? -1;
-  return branch?.includes("self.unsubscribe_timeline(&key).await") && clear >= 0 && remove >= 0 && clear < remove
+  return branch?.includes("self.unsubscribe_timeline(&key)") && clear >= 0 && remove >= 0 && clear < remove
     ? []
     : [sourceContractFailure(rule, "Room unsubscribe does not clear projection state before dropping the actor")];
 }
@@ -2390,7 +2390,7 @@ export function checkCoreTimelineEnsureSubscribed() {
   const permitted = timelineSection("manager.rs", "async fn handle_command_with_permit", "async fn route_send_to_worker_or_fail");
   const subscribe = timelineSection("manager.rs", "async fn handle_subscribe", "let client = session.client()");
   const failures = [];
-  if (!command?.includes("self.handle_command_with_permit(command, None).await")) failures.push(sourceContractFailure(rule, "plain timeline commands bypass the permit-aware helper"));
+  if (!command?.includes("self.handle_command_with_permit(command, None)")) failures.push(sourceContractFailure(rule, "plain timeline commands bypass the permit-aware helper"));
   for (const marker of ["TimelineCommand::EnsureSubscribed", "replay_existing"]) if (!permitted?.includes(marker)) failures.push(sourceContractFailure(rule, `ensure-subscription route lacks ${marker}`));
   if (!subscribe?.includes("if replay_existing")) failures.push(sourceContractFailure(rule, "existing actors do not honor replay_existing"));
   if (!source.includes("async fn handle_command_with_permit")) failures.push(sourceContractFailure(rule, "permit-aware command helper is missing"));
@@ -2402,7 +2402,7 @@ export function checkCoreTimelineReplaySubscribed() {
   const command = timelineSection("manager.rs", "async fn handle_command_with_permit", "async fn route_send_to_worker_or_fail");
   const replay = timelineSection("manager.rs", "async fn handle_replay_subscribed", "async fn handle_subscribe");
   const failures = [];
-  for (const marker of ["TimelineCommand::ReplaySubscribed { request_id }", "self.handle_replay_subscribed(request_id).await"]) if (!command?.includes(marker)) failures.push(sourceContractFailure(rule, `replay command route lacks ${marker}`));
+  for (const marker of ["TimelineCommand::ReplaySubscribed { request_id }", "self.handle_replay_subscribed(request_id)"]) if (!command?.includes(marker)) failures.push(sourceContractFailure(rule, `replay command route lacks ${marker}`));
   for (const marker of ["for handle in self.timelines.values()", "TimelineActorMessage::ReplayInitialItems", "cause_request_id: None", ".await"]) if (!replay?.includes(marker)) failures.push(sourceContractFailure(rule, `replay handler lacks ${marker}`));
   return failures;
 }
@@ -2577,10 +2577,10 @@ export function checkCoreTimelineSendSupervision() {
   if (spawn < 0 || activate < 0 || action < 0 || release < 0 || !(spawn < activate && activate < action && action < release)) failures.push(sourceContractFailure(rule, "supervised send worker is not permit-blocked through reducer delivery"));
   for (const marker of ["TimelineActorMessage::SendText", "TimelineActorMessage::SendReply", "TimelineActorMessage::UploadAndSendMedia"]) if (outbound.includes(marker) || manager.includes(marker)) failures.push(sourceContractFailure(rule, `replaceable actor owns ${marker}`));
   for (const marker of ["route_send_to_worker_or_fail", "route_submission_to_worker", "route_media_send_to_worker_or_fail"]) if (!outbound.includes(marker)) failures.push(sourceContractFailure(rule, `send path lacks ${marker}`));
-  if (!outbound.includes("enqueue_timeline_send(context, payload).await")) failures.push(sourceContractFailure(rule, "send payloads bypass supervised enqueue"));
+  if (!outbound.includes("enqueue_timeline_send(context, payload)")) failures.push(sourceContractFailure(rule, "send payloads bypass supervised enqueue"));
   const workerPoll = run?.indexOf("worker = self.send_enqueue_workers.tasks.next()") ?? -1;
   const mailbox = run?.indexOf("msg = self.msg_rx.recv()") ?? -1;
-  const join = run?.indexOf("self.join_send_enqueue_workers().await") ?? -1;
+  const join = run?.indexOf("self.join_send_enqueue_workers()") ?? -1;
   const observer = run?.indexOf("self.global_send_completion_observer_future.take()") ?? -1;
   const actors = run?.indexOf("let timeline_actors = self") ?? -1;
   if (!run?.includes("if !self.send_enqueue_workers.tasks.is_empty()") || workerPoll < 0 || mailbox < 0 || workerPoll >= mailbox) failures.push(sourceContractFailure(rule, "manager does not poll nonempty worker futures before its mailbox"));

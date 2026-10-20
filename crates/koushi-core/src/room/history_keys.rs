@@ -171,7 +171,7 @@ impl HistoryKeyRecoveryHandle {
             automatic_attempted: BTreeSet::new(),
         };
         let task = executor::AbortOnDrop::new(executor::spawn(async move {
-            actor.run(&mut rx, network_rx).await;
+            Box::pin(actor.run(&mut rx, network_rx)).await;
             rx.close();
             while let Some(message) = rx.recv().await {
                 if let Message::Request { request_id, .. } = message {
@@ -359,8 +359,11 @@ impl Recovery {
                     let observed_room = serde_json::from_str::<serde_json::Value>(&raw)
                         .ok()
                         .and_then(|v| v["room"].as_str().map(str::to_owned));
-                    let result =
-                        executor::timeout(Duration::from_secs(60), self.incoming(info, raw)).await;
+                    let result = Box::pin(executor::timeout(
+                        Duration::from_secs(60),
+                        self.incoming(info, raw),
+                    ))
+                    .await;
                     if result.is_err() {
                         // Cancellation can interrupt a durable write after it
                         // started. Never issue another write with unknown state.

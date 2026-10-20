@@ -167,6 +167,10 @@ to upstream or revert.
   (`checkDesktopTauriCommandRegistrationContract()` in
   `scripts/check-rust-test-structure.mjs`), run by the CI step "Rust test
   structure checker"; keep it green.
+- Large data does not live on the stack: dispatchers and actor loops box each
+  arm's future, and no production future of 16 KiB or more is awaited, spawned,
+  or stored by value; the "Rust stack budget" clippy gate stays green on Linux
+  and Windows (engineering rules "Async and Runtime" 14).
 - Crate ownership follows engineering rules "Crate Ownership And Projection Authority": `koushi-sdk`,
   `koushi-store`, `koushi-search`, `koushi-media`, `koushi-qa`, and
   `koushi-core-testkit` own only their stated leaf concerns, and product policy

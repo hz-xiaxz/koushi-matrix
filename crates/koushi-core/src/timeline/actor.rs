@@ -2316,14 +2316,14 @@ impl TimelineActor {
                 result,
                 duration_ms,
             } => {
-                self.handle_live_tail_refresh_finished(
+                Box::pin(self.handle_live_tail_refresh_finished(
                     actor_generation,
                     epoch,
                     operation_generation,
                     requested_limit,
                     result,
                     duration_ms,
-                )
+                ))
                 .await;
             }
             TimelineActorMessage::UpdateSubscriptionGeneration(generation) => {
@@ -2368,8 +2368,8 @@ impl TimelineActor {
                         self.gap_repair_scheduler_phase(),
                         self.gap_repair.batches_processed,
                     );
-                    self.start_pending_timeline_gap_inspection().await;
-                    self.publish_authoritative_read_state().await;
+                    Box::pin(self.start_pending_timeline_gap_inspection()).await;
+                    Box::pin(self.publish_authoritative_read_state()).await;
                 }
             }
             TimelineActorMessage::GlobalResponseCommitted(commit) => {
@@ -2379,14 +2379,14 @@ impl TimelineActor {
                 ) {
                     self.gap_repair
                         .queue_inspection(TimelineGapRepairTrigger::LiveEdge);
-                    self.start_pending_timeline_gap_inspection().await;
+                    Box::pin(self.start_pending_timeline_gap_inspection()).await;
                 }
             }
             TimelineActorMessage::InspectTimelineGaps { trigger } => {
                 if matches!(trigger, TimelineGapRepairTrigger::Manual) {
                     self.gap_repair.begin_explicit_demand();
                 }
-                self.request_timeline_gap_inspection(trigger).await;
+                Box::pin(self.request_timeline_gap_inspection(trigger)).await;
             }
             TimelineActorMessage::TimelineGapInspectionFinished {
                 serial,
@@ -2395,13 +2395,13 @@ impl TimelineActor {
                 global_commit,
                 result,
             } => {
-                self.handle_timeline_gap_inspection_finished(
+                Box::pin(self.handle_timeline_gap_inspection_finished(
                     serial,
                     trigger,
                     committed_response,
                     global_commit,
                     result,
-                )
+                ))
                 .await;
             }
             TimelineActorMessage::TimelineGapRepairFinished {
@@ -2410,12 +2410,12 @@ impl TimelineActor {
                 repaired_live_edge_fallback,
                 result,
             } => {
-                self.handle_timeline_gap_repair_finished(
+                Box::pin(self.handle_timeline_gap_repair_finished(
                     serial,
                     trigger,
                     repaired_live_edge_fallback,
                     result,
-                )
+                ))
                 .await;
             }
             TimelineActorMessage::TimelineGapRelaySettlementDue {
@@ -2445,10 +2445,10 @@ impl TimelineActor {
                     if let Some(task) = self.gap_relay_settlement_task.take() {
                         task.abort();
                     }
-                    self.handle_relay_overflow(
+                    Box::pin(self.handle_relay_overflow(
                         self.generation,
                         TimelineResyncReason::GapSettlementTimeout,
-                    )
+                    ))
                     .await;
                 } else {
                     let _ = trigger;
@@ -2459,8 +2459,7 @@ impl TimelineActor {
                 direction,
                 event_count,
             } => {
-                self.handle_paginate(request_id, direction, event_count)
-                    .await;
+                Box::pin(self.handle_paginate(request_id, direction, event_count)).await;
             }
             TimelineActorMessage::CancelPagination { request_id } => {
                 self.handle_cancel_pagination(request_id);
@@ -2481,7 +2480,7 @@ impl TimelineActor {
                 {
                     self.pagination_task = None;
                     self.emit_pagination_completion(request_id, direction, completion);
-                    self.start_pending_timeline_gap_inspection().await;
+                    Box::pin(self.start_pending_timeline_gap_inspection()).await;
                 }
             }
             TimelineActorMessage::ReadReceiptWindow {
@@ -2516,12 +2515,12 @@ impl TimelineActor {
                         self.actor_generation,
                         self.session.info.user_id.as_str(),
                     );
-                    if !super::item_projection::prepare_receipt_window_profiles(
+                    if !Box::pin(super::item_projection::prepare_receipt_window_profiles(
                         &self.session,
                         self.key.room_id(),
                         window,
                         &mut response,
-                    )
+                    ))
                     .await
                     {
                         return;
@@ -2541,23 +2540,23 @@ impl TimelineActor {
                 }
             }
             TimelineActorMessage::OwnReadReceiptChanged => {
-                self.handle_own_read_receipt_changed().await;
+                Box::pin(self.handle_own_read_receipt_changed()).await;
             }
             TimelineActorMessage::ObserveViewport { observation } => {
                 let was_at_bottom = self.viewport_observation.at_bottom;
                 self.viewport_observation = observation;
                 if was_at_bottom && !self.viewport_observation.at_bottom {
-                    self.materialize_hidden_history().await;
+                    Box::pin(self.materialize_hidden_history()).await;
                 }
                 if let Some(target) = self.observe_local_viewed_boundary() {
-                    let _ = self
-                        .manager_tx
-                        .send(TimelineMessage::LocalReadBoundaryObserved {
+                    let _ = Box::pin(self.manager_tx.send(
+                        TimelineMessage::LocalReadBoundaryObserved {
                             key: self.key.clone(),
                             actor_generation: self.actor_generation,
                             target,
-                        })
-                        .await;
+                        },
+                    ))
+                    .await;
                 }
                 self.maybe_hydrate_reply_quotes();
                 self.emit_navigation_if_changed();
@@ -2610,8 +2609,10 @@ impl TimelineActor {
                     GapRepairViewportWakeDecision::Wake { .. }
                         | GapRepairViewportWakeDecision::WakeStaleVisibleDemand
                 ) {
-                    self.request_timeline_gap_inspection(TimelineGapRepairTrigger::Automatic)
-                        .await;
+                    Box::pin(
+                        self.request_timeline_gap_inspection(TimelineGapRepairTrigger::Automatic),
+                    )
+                    .await;
                 }
             }
             TimelineActorMessage::BeginGapRepairDemand => {
@@ -2632,8 +2633,10 @@ impl TimelineActor {
                     self.gap_repair_scheduler_phase(),
                 );
                 if inspection_requested {
-                    self.request_timeline_gap_inspection(TimelineGapRepairTrigger::Automatic)
-                        .await;
+                    Box::pin(
+                        self.request_timeline_gap_inspection(TimelineGapRepairTrigger::Automatic),
+                    )
+                    .await;
                 }
             }
             TimelineActorMessage::EndGapRepairDemand => {
@@ -2646,19 +2649,19 @@ impl TimelineActor {
                 destination_room_id,
                 transaction_id,
             } => {
-                self.handle_forward_message(
+                Box::pin(self.handle_forward_message(
                     request_id,
                     source_event_id,
                     destination_room_id,
                     transaction_id,
-                )
+                ))
                 .await;
             }
             TimelineActorMessage::LoadMessageSource {
                 request_id,
                 event_id,
             } => {
-                self.handle_load_message_source(request_id, event_id).await;
+                Box::pin(self.handle_load_message_source(request_id, event_id)).await;
             }
             TimelineActorMessage::ReplyQuoteOriginalLoaded {
                 event_id,
@@ -2672,29 +2675,27 @@ impl TimelineActor {
             }
             TimelineActorMessage::BindHistoryRecovery(tx) => {
                 self.history_recovery = Some(tx);
-                self.report_history_decryption().await;
+                Box::pin(self.report_history_decryption()).await;
             }
             TimelineActorMessage::RequestRoomKey {
                 request_id,
                 event_id,
                 origin,
             } => {
-                self.handle_request_room_key(request_id, event_id, origin)
-                    .await;
+                Box::pin(self.handle_request_room_key(request_id, event_id, origin)).await;
             }
             TimelineActorMessage::RequestLateDecryption {
                 request_id,
                 trigger,
             } => {
-                self.handle_request_late_decryption(request_id, trigger)
-                    .await;
+                Box::pin(self.handle_request_late_decryption(request_id, trigger)).await;
             }
             TimelineActorMessage::RoomKeyRecoveryTick {
                 session_id,
                 attempt,
                 actor_generation,
             } => {
-                self.handle_room_key_recovery_tick(session_id, attempt, actor_generation)
+                Box::pin(self.handle_room_key_recovery_tick(session_id, attempt, actor_generation))
                     .await;
             }
             TimelineActorMessage::RoomKeyWithheldObserved {
@@ -2763,29 +2764,27 @@ impl TimelineActor {
                 request_id,
                 transaction_id,
             } => {
-                self.handle_retry_send(request_id, transaction_id).await;
+                Box::pin(self.handle_retry_send(request_id, transaction_id)).await;
             }
             TimelineActorMessage::CancelSend {
                 request_id,
                 transaction_id,
             } => {
-                self.handle_cancel_send(request_id, transaction_id).await;
+                Box::pin(self.handle_cancel_send(request_id, transaction_id)).await;
             }
             TimelineActorMessage::DownloadMedia {
                 request_id,
                 event_id,
                 selection,
             } => {
-                self.handle_download_media(request_id, event_id, selection)
-                    .await;
+                Box::pin(self.handle_download_media(request_id, event_id, selection)).await;
             }
             TimelineActorMessage::MediaDownloadFinished {
                 request_id,
                 event_id,
                 outcome,
             } => {
-                self.handle_media_download_finished(request_id, event_id, outcome)
-                    .await;
+                Box::pin(self.handle_media_download_finished(request_id, event_id, outcome)).await;
             }
             TimelineActorMessage::EditText {
                 request_id,
@@ -2793,22 +2792,21 @@ impl TimelineActor {
                 document,
                 formatting_options,
             } => {
-                self.handle_edit_text(request_id, event_id, document, formatting_options)
+                Box::pin(self.handle_edit_text(request_id, event_id, document, formatting_options))
                     .await;
             }
             TimelineActorMessage::Redact {
                 request_id,
                 event_id,
             } => {
-                self.handle_redact(request_id, event_id).await;
+                Box::pin(self.handle_redact(request_id, event_id)).await;
             }
             TimelineActorMessage::SendReaction {
                 request_id,
                 event_id,
                 reaction_key,
             } => {
-                self.handle_send_reaction(request_id, event_id, reaction_key)
-                    .await;
+                Box::pin(self.handle_send_reaction(request_id, event_id, reaction_key)).await;
             }
             TimelineActorMessage::RedactReaction {
                 request_id,
@@ -2816,15 +2814,20 @@ impl TimelineActor {
                 reaction_key,
                 reaction_event_id,
             } => {
-                self.handle_redact_reaction(request_id, event_id, reaction_key, reaction_event_id)
-                    .await;
+                Box::pin(self.handle_redact_reaction(
+                    request_id,
+                    event_id,
+                    reaction_key,
+                    reaction_event_id,
+                ))
+                .await;
             }
             TimelineActorMessage::ApplyReadSuccess {
                 kind,
                 event_id,
                 acknowledged,
             } => {
-                let applied = self.handle_read_success(kind, event_id).await;
+                let applied = Box::pin(self.handle_read_success(kind, event_id)).await;
                 let _ = acknowledged.send(applied);
             }
             TimelineActorMessage::ReadStateProjection {
@@ -2850,9 +2853,9 @@ impl TimelineActor {
                 projections,
                 acknowledged,
             } => {
-                let accepted = self
-                    .refresh_pending_send_projection(actor_generation, projections)
-                    .await;
+                let accepted =
+                    Box::pin(self.refresh_pending_send_projection(actor_generation, projections))
+                        .await;
                 let _ = acknowledged.send(accepted);
             }
             TimelineActorMessage::DisplayPolicyChanged {
@@ -2866,7 +2869,7 @@ impl TimelineActor {
                 if self.hide_redacted != hide_redacted {
                     self.hide_redacted = hide_redacted;
                     let ignored_user_ids = self.ignored_user_ids.clone();
-                    self.reapply_item_visibility(ignored_user_ids).await;
+                    Box::pin(self.reapply_item_visibility(ignored_user_ids)).await;
                 }
                 if self.thread_root_order != thread_root_order {
                     self.thread_root_order = thread_root_order;
@@ -2892,13 +2895,13 @@ impl TimelineActor {
                 self.emit_typing_users_action(user_ids);
             }
             TimelineActorMessage::IgnoredUsersUpdated(user_ids) => {
-                self.handle_ignored_users_updated(user_ids).await;
+                Box::pin(self.handle_ignored_users_updated(user_ids)).await;
             }
             TimelineActorMessage::LoadLinkPreviews {
                 request_id,
                 event_id,
             } => {
-                self.handle_load_link_previews(request_id, event_id).await;
+                Box::pin(self.handle_load_link_previews(request_id, event_id)).await;
             }
             TimelineActorMessage::LinkPreviewsFetched {
                 request_id,
@@ -2909,7 +2912,7 @@ impl TimelineActor {
                 failed_count,
                 elapsed_ms,
             } => {
-                self.handle_link_previews_fetched(
+                Box::pin(self.handle_link_previews_fetched(
                     request_id,
                     event_id,
                     previews,
@@ -2917,45 +2920,45 @@ impl TimelineActor {
                     ready_count,
                     failed_count,
                     elapsed_ms,
-                )
+                ))
                 .await;
             }
             TimelineActorMessage::HideLinkPreview {
                 request_id,
                 event_id,
             } => {
-                self.handle_hide_link_preview(request_id, event_id).await;
+                Box::pin(self.handle_hide_link_preview(request_id, event_id)).await;
             }
             TimelineActorMessage::LinkPreviewPolicyChanged {
                 unencrypted_global_enabled,
                 encrypted_global_enabled,
                 room_enabled,
             } => {
-                self.handle_link_preview_policy_changed(
+                Box::pin(self.handle_link_preview_policy_changed(
                     unencrypted_global_enabled,
                     encrypted_global_enabled,
                     room_enabled,
-                )
+                ))
                 .await;
             }
             TimelineActorMessage::SendQueueUpdate(update) => {
-                self.handle_send_queue_update(update).await;
+                Box::pin(self.handle_send_queue_update(update)).await;
             }
             TimelineActorMessage::SendQueueLagged => {
-                self.handle_send_queue_lagged().await;
-                self.publish_current_canonical_activity().await;
+                Box::pin(self.handle_send_queue_lagged()).await;
+                Box::pin(self.publish_current_canonical_activity()).await;
             }
             TimelineActorMessage::RefreshThreadUnread => {
-                self.refresh_thread_unread_counts(true).await;
+                Box::pin(self.refresh_thread_unread_counts(true)).await;
                 self.schedule_thread_unread_recheck(1);
             }
             TimelineActorMessage::RefreshThreadUnreadRetry { attempt } => {
-                self.refresh_thread_unread_counts(true).await;
+                Box::pin(self.refresh_thread_unread_counts(true)).await;
                 self.schedule_thread_unread_recheck(attempt + 1);
             }
             TimelineActorMessage::ReplayInitialItems { cause_request_id } => {
                 self.handle_replay_initial_items(cause_request_id);
-                self.publish_current_canonical_activity().await;
+                Box::pin(self.publish_current_canonical_activity()).await;
             }
             #[cfg(test)]
             TimelineActorMessage::TestInjectDiff {
@@ -2964,7 +2967,7 @@ impl TimelineActor {
                 acknowledged,
             } => {
                 let provenance = ThreadAttentionBatchProvenance::from_sdk_diffs(&diffs);
-                self.handle_diff_batch(diffs, provenance, projections).await;
+                Box::pin(self.handle_diff_batch(diffs, provenance, projections)).await;
                 let _ = acknowledged.send(());
             }
             #[cfg(test)]

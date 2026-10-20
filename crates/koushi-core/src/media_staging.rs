@@ -232,7 +232,7 @@ impl MediaStagingService {
         target: ComposerTarget,
         items: Vec<StageUploadBytesInput>,
     ) -> Result<u64, MediaStagingError> {
-        self.stage_upload_bytes_with_composer_document(connection, target, items, None)
+        Box::pin(self.stage_upload_bytes_with_composer_document(connection, target, items, None))
             .await
     }
 
@@ -455,7 +455,7 @@ impl MediaStagingService {
                 // Settle the failed pair instead of leaving it pending: a pending
                 // selection has no prepared output, which makes the item
                 // unsendable and offers the user no retry or original fallback.
-                self.publish_lazy_preparation_failure(
+                Box::pin(self.publish_lazy_preparation_failure(
                     connection,
                     account,
                     policy,
@@ -464,7 +464,7 @@ impl MediaStagingService {
                     generation,
                     selection,
                     failure_kind,
-                )
+                ))
                 .await?;
                 return Err(MediaStagingError::PreparationFailed);
             }

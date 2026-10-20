@@ -504,10 +504,10 @@ impl AccountActor {
             return crate::account::RoomEventLookupResult::Failed;
         };
 
-        match crate::executor::timeout(
+        match Box::pin(crate::executor::timeout(
             ROOM_EVENT_CACHE_TIMEOUT,
             room.load_or_fetch_event(&parsed_event_id, None),
-        )
+        ))
         .await
         {
             Ok(Ok(_)) => {

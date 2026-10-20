@@ -524,6 +524,15 @@ jobs:
       # Lint the Windows-only cfg paths Linux CI never compiles (#1035).
       - name: Clippy the Windows Tauri crate
         run: cargo clippy --profile ci -p koushi-desktop --all-targets --locked -- -D warnings
+      # #1554: MSVC frames are larger than Linux's, so run the stack/future
+      # budget gate on Windows too (thresholds in the root clippy.toml).
+      - name: Clippy (Rust stack budget)
+        run: >
+          cargo clippy --release --workspace --locked --
+          -D warnings -D clippy::large_stack_frames -D clippy::large_futures
+      # Behavioral counterpart on a deliberately small worker stack (#1554).
+      - name: Core attachment send fits a small worker stack
+        run: cargo test --release -p koushi-core-testkit --test stack_budget --locked
 
   rust-lint:
     # Workspace formatting and lint gate. Kept in its own job so it runs in
@@ -569,3 +578,12 @@ jobs:
       # release-only).
       - name: Clippy (release configuration)
         run: cargo clippy --release --workspace --locked -- -D warnings
+      # #1554: production dispatchers and futures must stay far below the 2 MiB
+      # Tokio worker stack. Thresholds are in the root clippy.toml.
+      - name: Clippy (Rust stack budget)
+        run: >
+          cargo clippy --release --workspace --locked --
+          -D warnings -D clippy::large_stack_frames -D clippy::large_futures
+      # Behavioral counterpart on a deliberately small worker stack (#1554).
+      - name: Core attachment send fits a small worker stack
+        run: cargo test --release -p koushi-core-testkit --test stack_budget --locked

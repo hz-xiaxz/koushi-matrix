@@ -878,14 +878,14 @@ impl TimelineActor {
                     let key = self.key.clone();
                     let lookup_event_id = event_id.clone();
                     let task = executor::spawn(async move {
-                        let outcome = match executor::timeout(
+                        let outcome = match Box::pin(executor::timeout(
                             REPLY_QUOTE_ATTEMPT_TIMEOUT,
                             super::thread_projection::load_exact_timeline_event_projection(
                                 &session,
                                 &key,
                                 &lookup_event_id,
                             ),
-                        )
+                        ))
                         .await
                         {
                             Ok(Ok(item)) => OriginalLookupOutcome::Loaded(Box::new(item)),

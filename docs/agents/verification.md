@@ -109,12 +109,12 @@ for merging into `main`:
 | --- | --- |
 | `Frontend (typecheck / vitest / build / secret-scan)` | typecheck, vitest, build, secret scan, ESLint import boundaries, Tauri adapter boundary, domain-crate platform deps |
 | `Browser headless (Playwright DOM tier)` | `npx playwright test` — a red spec is a blocked merge |
-| `Rust lint (rustfmt / clippy)` | `cargo fmt --check`, then workspace, QA-binary, and release-configuration clippy with `-D warnings` (see [Rust lint gate](#rust-lint-gate)) |
+| `Rust lint (rustfmt / clippy)` | `cargo fmt --check`, then workspace, QA-binary, and release-configuration clippy with `-D warnings`, the release "Rust stack budget" clippy gate (`-D clippy::large_stack_frames -D clippy::large_futures`), and the 512 KiB worker-stack `stack_budget` test (see [Rust lint gate](#rust-lint-gate)) |
 | `Rust (workspace / src-tauri / wasm)` | submodule and diagnostic-isolation guards, the architecture guards (`check-protocol-qa-boundaries`, `check-domain-crate-platform-deps`, `check-leaf-crate-boundaries`, `check-headless-qa-lanes`, `check-rust-test-structure`, `check-command-snapshot-contract`, `check-retained-reachability`), one feature-unified workspace suite (including the `koushi-core-testkit` integration targets and the `koushi-desktop` DTO/IPC contract tests), wasm build, `cargo-deny`, `cargo-machete`, the CI-cache report, and workspace cargo metrics |
 | `macOS Tauri cargo check` | `cargo check --profile ci -p koushi-desktop` plus `cargo clippy ... -- -D warnings` on macOS, including `#[cfg(target_os = "macos")]` paths excluded by Linux CI, and runs the native ImageIO decoder tests (`--test image_io_decoder`) |
 | `Core invitations (tuwunel)` / `Core invitations (synapse)` | disposable local homeserver `--core --scenario=invites_dm` per server |
 | `Core QA binary tests` | `cargo test -p koushi-qa --features qa-bin --bin headless-core-qa` |
-| `Windows overlay ACL IPC` | `cargo test -p koushi-windows-overlay-acl windows_overlay_ipc_is_authorized`, OIDC launch tests, updater lifecycle/artifact-transfer and Core-before-installer shutdown tests, and desktop clippy with `-D warnings` for Windows-only cfg paths |
+| `Windows overlay ACL IPC` | `cargo test -p koushi-windows-overlay-acl windows_overlay_ipc_is_authorized`, OIDC launch tests, updater lifecycle/artifact-transfer and Core-before-installer shutdown tests, desktop clippy with `-D warnings` for Windows-only cfg paths, plus the Windows "Rust stack budget" clippy gate and 512 KiB worker-stack test (#1554) |
 
 Do not assume a green PR means a homeserver job passed — check the job
 explicitly, and confirm whether it is a required check before treating it as a
@@ -144,10 +144,22 @@ cargo fmt --check
 cargo clippy --workspace --all-targets --locked -- -D warnings
 cargo clippy -p koushi-qa --features qa-bin --all-targets --locked -- -D warnings
 cargo clippy --release --workspace --locked -- -D warnings
+# #1554 "Rust stack budget": production async state machines and futures.
+cargo clippy --release --workspace --locked -- \
+  -D warnings -D clippy::large_stack_frames -D clippy::large_futures
 ```
 
 The release run matters because `cfg(debug_assertions)` QA paths disappear
 there, so imports that only those paths use are unused only in release builds.
+
+The stack-budget run enables two nursery/pedantic lints that are off by
+default; their thresholds live in the root `clippy.toml` (256 KiB frames,
+16 KiB futures). It also runs on Windows CI because MSVC frames are larger.
+Its behavioral counterpart is the 512 KiB worker-stack test:
+
+```bash
+cargo test --release -p koushi-core-testkit --test stack_budget --locked
+```
 
 `cargo fmt` formats workspace members only; do not use `cargo fmt --all`,
 which also rewrites path dependencies such as `vendor/matrix-rust-sdk`. The

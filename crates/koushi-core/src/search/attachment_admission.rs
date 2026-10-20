@@ -175,7 +175,7 @@ impl SearchActor {
             if let Some(id) = message.incoming_edit_id() {
                 ids.push(id.to_owned());
             }
-            let proof = executor::timeout(MUTATION_PROOF_TIMEOUT, async {
+            let proof = Box::pin(executor::timeout(MUTATION_PROOF_TIMEOUT, async {
                 let text = cached_text_replacement(&self.session, room, target).await?;
                 if let Some(text) = &text {
                     ids.push(text.edit_event_id.clone());
@@ -186,7 +186,7 @@ impl SearchActor {
                 let redacted =
                     koushi_sdk::cached_redacted_event_ids(&self.session, room, &ids).await?;
                 Ok::<_, koushi_sdk::MatrixSearchError>((redacted, invalid, text))
-            })
+            }))
             .await;
             match proof {
                 Ok(Ok((redacted, invalid, text))) => {
@@ -250,7 +250,7 @@ impl SearchActor {
                 }
             }
         }
-        let proofs = executor::timeout(FILES_PROOF_TIMEOUT, async {
+        let proofs = Box::pin(executor::timeout(FILES_PROOF_TIMEOUT, async {
             let mut texts = Vec::new();
             for ((room, target), ids) in &mut targets {
                 if let Some(text) = cached_text_replacement(&self.session, room, target).await? {
@@ -279,7 +279,7 @@ impl SearchActor {
                 proofs.insert(room, redacted);
             }
             Ok::<_, koushi_sdk::MatrixSearchError>((proofs, invalid, texts))
-        })
+        }))
         .await;
         let Ok(Ok((proofs, invalid, texts))) = proofs else {
             return false;

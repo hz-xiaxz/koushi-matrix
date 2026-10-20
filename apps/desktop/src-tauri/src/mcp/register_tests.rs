@@ -151,12 +151,16 @@ mod unix {
     async fn a_successful_cli_leaves_nothing_running_and_keeps_its_output() {
         let dir = tempfile::tempdir().expect("tempdir");
         let marker = dir.path().join("survived");
-        // The CLI succeeds but leaves a child holding stdout open.
+        // The CLI succeeds but leaves a child holding stdout open for far
+        // longer than the run's output-read deadline. On timeout the readers
+        // cap the run at ~4s; a prompt return therefore proves the child was
+        // killed with the group, not merely abandoned. The child touches its
+        // marker after a second, well before the cleanup check below.
         let cli = script(
             dir.path(),
             "claude",
             &format!(
-                "echo 'Added koushi'; (sleep 3; touch '{}') & exit 0",
+                "echo 'Added koushi'; (sleep 1; touch '{}'; sleep 30) & exit 0",
                 marker.display()
             ),
         );
