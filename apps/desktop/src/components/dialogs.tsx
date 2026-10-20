@@ -16,7 +16,8 @@ import {
   Image as ImageIcon,
   X
 } from "lucide-react";
-import { type MessageId, t } from "../i18n/messages";
+import { type MessageId, t, tCount } from "../i18n/messages";
+import { uiNumberFormat } from "../domain/intlFormatCache";
 import type {
   CreateRoomVisibility,
   RoomAddressAvailabilityState,
@@ -2004,7 +2005,9 @@ export function DirectoryPreviewDialog({
             {alias ? <div className="directory-preview-alias" dir="auto">{alias}</div> : null}
             {room.topic ? <p className="directory-preview-topic" dir="auto">{room.topic}</p> : null}
             <div className="directory-preview-meta">
-              {t("directory.memberCount", { count: String(room.joined_members) })}
+              {tCount("directory.memberCount", room.joined_members, {
+                count: uiNumberFormat().format(room.joined_members)
+              })}
             </div>
             {joinBlockedReason ? (
               <div className="directory-preview-note">{t(joinBlockedReason)}</div>

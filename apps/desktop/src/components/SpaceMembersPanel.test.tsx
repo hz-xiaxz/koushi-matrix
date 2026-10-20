@@ -121,6 +121,35 @@ function profile(userId: string, avatar: UserProfile["avatar"]): UserProfile {
   };
 }
 
+describe("SpaceMembersPanel member count (#1546)", () => {
+  const baseProps = {
+    canInvite: false,
+    onInviteUser: vi.fn(),
+    onOpenProfile: vi.fn(),
+    onSearchInviteTargets: vi.fn(async () => [])
+  };
+
+  it("shows the joined count as worded, pluralised text like the People panel", () => {
+    const { container, rerender } = render(<SpaceMembersPanel {...baseProps} state={state()} />);
+    const count = container.querySelector(".space-members-count");
+    expect(count?.textContent).toBe("1 joined member");
+    expect(count?.hasAttribute("aria-label")).toBe(false);
+
+    rerender(
+      <SpaceMembersPanel
+        {...baseProps}
+        state={state({
+          space_joined: [
+            member("@alice:example.invalid", "Alice", "space_joined"),
+            member("@dave:example.invalid", "Dave", "space_joined")
+          ]
+        })}
+      />
+    );
+    expect(container.querySelector(".space-members-count")?.textContent).toBe("2 joined members");
+  });
+});
+
 describe("SpaceMembersPanel space invite search (#508)", () => {
   const candidate = (
     status: InviteTargetCandidate["status"] = "selectable",

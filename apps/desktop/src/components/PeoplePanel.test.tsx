@@ -275,6 +275,19 @@ describe("PeoplePanel", () => {
     expect(screen.queryByRole("button", { name: "Open profile for Member 299" })).toBeNull();
   });
 
+  test("uses the singular member count for one member (#1546)", () => {
+    render(
+      <PeoplePanel
+        currentUserId="@current:example.invalid"
+        roomOrSpace={baseRoom}
+        roomManagement={roomManagement([members[0]])}
+        onOpenProfile={() => undefined}
+      />
+    );
+
+    expect(document.querySelector(".people-panel-count")?.textContent).toBe("1 member");
+  });
+
   test("opens the profile when a member row is clicked", () => {
     const onOpenProfile = vi.fn();
     render(

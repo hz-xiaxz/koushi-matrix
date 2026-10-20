@@ -26,6 +26,7 @@ import {
   Smile,
   X
 } from "lucide-react";
+import { useActiveLocaleKey } from "../i18n/activeLocaleContext";
 import { t, type MessageId } from "../i18n/messages";
 import type {
   ComposerDocument,
@@ -186,6 +187,8 @@ export const Composer = memo(function Composer({
    */
   scheduledSendPersistenceFailed?: boolean;
 }) {
+  // #1557: re-render this memoised composer when the catalog locale changes.
+  useActiveLocaleKey();
   const fileInputRef = useRef<HTMLInputElement>(null);
   const emojiButtonRef = useRef<HTMLButtonElement>(null);
   const sendButtonRef = useRef<HTMLButtonElement>(null);
@@ -1310,6 +1313,8 @@ const ThreadComposer = memo(function ThreadComposer({
   onDiagnosticLogEntry?: (entry: DiagnosticLogEntry) => void;
   sendingAccount?: ComposerSendingAccount | null;
 }) {
+  // #1557: the `roomName` default and the labels below are catalog text.
+  useActiveLocaleKey();
   return (
     <Composer
       surface="thread"

@@ -20,7 +20,7 @@ import {
   Users,
   X
 } from "lucide-react";
-import { t } from "../i18n/messages";
+import { t, tCount } from "../i18n/messages";
 import { RoomAccessGlyphIcon } from "./RoomAccessGlyph";
 import { Tooltip } from "./Tooltip";
 import type {
@@ -481,7 +481,7 @@ export function ExplorePane({
                   </p>
                   <div className="directory-result-meta">
                     <span>
-                      {t("directory.memberCount", {
+                      {tCount("directory.memberCount", room.joined_members, {
                         count: uiNumberFormat().format(room.joined_members)
                       })}
                     </span>
