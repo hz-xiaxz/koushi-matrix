@@ -474,6 +474,8 @@ fn compose_sidebar_with_preferences(
         .iter()
         .map(|invite| invite.room_id.as_str())
         .collect();
+    let joined_space_ids: HashSet<&str> =
+        spaces.iter().map(|space| space.space_id.as_str()).collect();
     let mut not_joined_children: Vec<&SpaceChildSummary> = active_space_id
         .map(|space_id| space_children.children_for(space_id))
         .unwrap_or_default()
@@ -483,6 +485,9 @@ fn compose_sidebar_with_preferences(
         // `rooms` long before the next hierarchy fetch would say so, and it
         // must reappear here rather than vanish from the Space entirely.
         .filter(|child| !rooms_by_id.contains_key(child.room_id.as_str()))
+        // #1559: a joined Space is never in the joined room list; it lives in
+        // `spaces` (and on the Space rail), so a joined sub-space is joined too.
+        .filter(|child| !joined_space_ids.contains(child.room_id.as_str()))
         // The hierarchy can contain stale children after every member has
         // left. Keep actionable invitations/knocks and opaque private rooms,
         // but do not expose a described room with no joined members.

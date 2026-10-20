@@ -66,7 +66,11 @@ interface ProfilePanelProps {
     reason: string | null
   ) => void;
   onReportUser?: (userId: string) => void;
+  /** #1540: loads the profile picture thumbnail when it is not ready yet. */
+  onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
   onStartDirectMessage?: (userId: string) => void;
+  /** #1518: Rust is starting a direct message with this person. */
+  startDirectMessagePending?: boolean;
   onSetLocalUserAlias?: (userId: string, alias: string | null) => void;
   onUnignoreUser?: (userId: string) => void;
   onUpdateMemberRole?: (
@@ -354,7 +358,9 @@ export function ProfilePanel({
   onIgnoreUser,
   onModerateMember,
   onReportUser,
+  onRequestAvatarThumbnail,
   onStartDirectMessage,
+  startDirectMessagePending = false,
   onSetLocalUserAlias,
   onUnignoreUser,
   onUpdateMemberRole
@@ -366,7 +372,9 @@ export function ProfilePanel({
   const member = members.find((candidate) => candidate.user_id === userId);
   const profile = profileUsers[userId];
   const displayLabel = member?.display_label ?? profile?.display_label ?? userId;
-  const avatar = member ? null : (profile?.avatar ?? null);
+  // #1540: the room member carries only a raw `avatar_url`; the resolved
+  // picture is the Rust profile projection, in both forms of the panel.
+  const avatar = profile?.avatar ?? null;
   const roomId = roomOrSpace && "room_id" in roomOrSpace ? roomOrSpace.room_id : null;
   const permissions = settings?.permissions ?? null;
   const isCurrentUser = userId === currentUserId;
@@ -427,6 +435,7 @@ export function ProfilePanel({
           className="profile-large-avatar is-user"
           colorSeed={userId}
           fallback={avatarInitial(displayLabel)}
+          onRequestAvatarThumbnail={onRequestAvatarThumbnail}
         />
         <h3 dir="auto">{displayLabel}</h3>
         <p dir="auto">{userId}</p>
@@ -436,6 +445,8 @@ export function ProfilePanel({
           <button
             className="profile-primary-action"
             type="button"
+            disabled={startDirectMessagePending}
+            aria-busy={startDirectMessagePending || undefined}
             onClick={() => onStartDirectMessage(userId)}
           >
             <MessageCircle size={ICON_SIZE.small} aria-hidden="true" />

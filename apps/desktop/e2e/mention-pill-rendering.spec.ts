@@ -133,6 +133,25 @@ test("a message that mentions a user renders that mention as a pill", async ({ p
   await expect(panel).toContainText(MENTIONED_USER_ID);
 });
 
+test("a mention pill opens the room member's full Profile without Room info first", async ({
+  page
+}) => {
+  // #1540: the pill used to open the Profile without asking Rust for the
+  // room's members, so the room section (membership, role, moderation) stayed
+  // missing until Room info happened to load them.
+  await gotoReadyShell(page);
+  await seedTimelineItems(page, [realMentionItem("$pill-profile:example.invalid")]);
+
+  await page
+    .locator('[data-event-id="$pill-profile:example.invalid"] a.message-mention-pill')
+    .click();
+
+  const panel = page.getByRole("complementary", { name: t("panel.context") });
+  await expect(panel.getByRole("heading", { name: t("panel.profile") })).toBeVisible();
+  await expect(panel.getByText(t("people.membership"), { exact: true })).toBeVisible();
+  await expect(panel.getByText(t("room.memberRole"), { exact: true })).toBeVisible();
+});
+
 test("an Element-shaped mention reads as the composer's pill, not as a link", async ({ page }) => {
   await gotoReadyShell(page);
   await seedTimelineItems(page, [elementMentionItem("$element-mention:example.invalid")]);

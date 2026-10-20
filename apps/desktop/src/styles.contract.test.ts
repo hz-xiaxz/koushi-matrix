@@ -611,6 +611,13 @@ describe("styles.css token system", () => {
     );
   });
 
+  test("the Profile picture fills its avatar circle (#1540)", () => {
+    const rule = /\.profile-large-avatar img\s*\{([^}]*)\}/.exec(css)?.[1] ?? "";
+    expect(rule).toContain("inline-size: 100%");
+    expect(rule).toContain("block-size: 100%");
+    expect(rule).toContain("object-fit: cover");
+  });
+
   test("fixed Lucide icon sizes stay centralized in ICON_SIZE", () => {
     expect(uiSharedSource).toContain("const ICON_SIZE");
     // No icon-rendering module may hard-code a numeric `size={N}`; all fixed sizes

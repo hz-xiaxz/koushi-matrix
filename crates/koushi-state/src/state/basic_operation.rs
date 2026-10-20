@@ -8,7 +8,7 @@ use super::OperationFailureKind;
 /// request, and a pending operation can only be settled by a completion whose
 /// `request_id` matches the one carried by the in-flight state. This mirrors the
 /// composer's pending-transaction rule and search's `request_id` correlation.
-#[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Default, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BasicOperationState {
     #[default]
@@ -26,6 +26,44 @@ pub enum BasicOperationState {
         space_id: String,
         child_room_id: String,
     },
+    /// #1518: a `StartDirectMessage` with this account is in flight.
+    StartingDirectMessage {
+        request_id: u64,
+        user_id: String,
+    },
+}
+
+impl fmt::Debug for BasicOperationState {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::Idle => formatter.write_str("Idle"),
+            Self::CreatingRoom { request_id, name } => formatter
+                .debug_struct("CreatingRoom")
+                .field("request_id", request_id)
+                .field("name", name)
+                .finish(),
+            Self::CreatingSpace { request_id, name } => formatter
+                .debug_struct("CreatingSpace")
+                .field("request_id", request_id)
+                .field("name", name)
+                .finish(),
+            Self::LinkingSpaceChild {
+                request_id,
+                space_id,
+                child_room_id,
+            } => formatter
+                .debug_struct("LinkingSpaceChild")
+                .field("request_id", request_id)
+                .field("space_id", space_id)
+                .field("child_room_id", child_room_id)
+                .finish(),
+            Self::StartingDirectMessage { request_id, .. } => formatter
+                .debug_struct("StartingDirectMessage")
+                .field("request_id", request_id)
+                .field("user_id", &"UserId(..)")
+                .finish(),
+        }
+    }
 }
 
 impl BasicOperationState {
@@ -35,7 +73,8 @@ impl BasicOperationState {
             BasicOperationState::Idle => None,
             BasicOperationState::CreatingRoom { request_id, .. }
             | BasicOperationState::CreatingSpace { request_id, .. }
-            | BasicOperationState::LinkingSpaceChild { request_id, .. } => Some(*request_id),
+            | BasicOperationState::LinkingSpaceChild { request_id, .. }
+            | BasicOperationState::StartingDirectMessage { request_id, .. } => Some(*request_id),
         }
     }
 
@@ -48,7 +87,7 @@ impl BasicOperationState {
 /// A requested basic operation: user intent, kept distinct from the resulting
 /// state. The reducer pairs this with a correlation `request_id` to derive the
 /// in-flight `BasicOperationState`; a request never names the target state.
-#[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
+#[derive(Clone, Eq, PartialEq, Serialize, Deserialize)]
 #[serde(tag = "kind", rename_all = "camelCase")]
 pub enum BasicOperationRequest {
     CreateRoom {
@@ -61,6 +100,37 @@ pub enum BasicOperationRequest {
         space_id: String,
         child_room_id: String,
     },
+    /// #1518: start (or reuse) a direct message with `user_id`.
+    StartDirectMessage {
+        user_id: String,
+    },
+}
+
+impl fmt::Debug for BasicOperationRequest {
+    fn fmt(&self, formatter: &mut fmt::Formatter<'_>) -> fmt::Result {
+        match self {
+            Self::CreateRoom { name } => formatter
+                .debug_struct("CreateRoom")
+                .field("name", name)
+                .finish(),
+            Self::CreateSpace { name } => formatter
+                .debug_struct("CreateSpace")
+                .field("name", name)
+                .finish(),
+            Self::LinkSpaceChild {
+                space_id,
+                child_room_id,
+            } => formatter
+                .debug_struct("LinkSpaceChild")
+                .field("space_id", space_id)
+                .field("child_room_id", child_room_id)
+                .finish(),
+            Self::StartDirectMessage { .. } => formatter
+                .debug_struct("StartDirectMessage")
+                .field("user_id", &"UserId(..)")
+                .finish(),
+        }
+    }
 }
 
 /// Latest settlement of parent-side Space child linking per `(Space, room)`
