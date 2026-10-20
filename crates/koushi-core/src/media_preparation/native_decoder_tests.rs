@@ -18,6 +18,7 @@ const FIXTURE: &[u8] = include_bytes!(concat!(
 /// Fake platform decoder. Its output dimensions deliberately differ from the
 /// 64x64 fixture so every assertion proves which decoder produced the pixels.
 struct FakeDecoder {
+    backend: &'static str,
     result: Result<(u32, u32), NativeImageDecodeError>,
     calls: AtomicUsize,
     limits: StdMutex<Vec<DecodeLimits>>,
@@ -34,6 +35,7 @@ impl FakeDecoder {
 
     fn with_result(result: Result<(u32, u32), NativeImageDecodeError>) -> Arc<Self> {
         Arc::new(Self {
+            backend: "fake",
             result,
             calls: AtomicUsize::new(0),
             limits: StdMutex::new(Vec::new()),
@@ -47,7 +49,7 @@ impl FakeDecoder {
 
 impl NativeStillImageDecoder for FakeDecoder {
     fn backend(&self) -> &'static str {
-        "fake"
+        self.backend
     }
 
     fn decode(
@@ -367,7 +369,13 @@ fn native_decoder_is_only_used_for_heif_sources() {
 #[test]
 fn native_decode_diagnostics_are_categorical() {
     let _guard = koushi_diagnostics::test_support::lock();
-    let decoder = FakeDecoder::failing(NativeImageDecodeError::Unsupported);
+    // The lock serializes diagnostic readers, not writers: the other tests in
+    // this file emit `native_decode` records from a "fake" backend in
+    // parallel. A backend name only this test uses identifies its record.
+    let decoder = Arc::new(FakeDecoder {
+        backend: "fake-diagnostics",
+        ..Arc::into_inner(FakeDecoder::failing(NativeImageDecodeError::Unsupported)).unwrap()
+    });
     let mut registry = registry_with(&decoder);
     prepare(&mut registry, input("diagnostic", FIXTURE.to_vec()));
 
@@ -376,7 +384,15 @@ fn native_decode_diagnostics_are_categorical() {
         .iter()
         .rev()
         .find(|record| {
-            record.event.source == "core.media_preparation" && record.event.stage == "native_decode"
+            record.event.source == "core.media_preparation"
+                && record.event.stage == "native_decode"
+                && record.event.fields.iter().any(|field| {
+                    field.key == "backend"
+                        && matches!(
+                            field.value,
+                            koushi_diagnostics::DiagnosticValue::Token("fake-diagnostics")
+                        )
+                })
         })
         .expect("native decode diagnostic")
         .event;
@@ -386,7 +402,7 @@ fn native_decode_diagnostics_are_categorical() {
             _ => None,
         })
     };
-    assert_eq!(token("backend"), Some("fake"));
+    assert_eq!(token("backend"), Some("fake-diagnostics"));
     assert_eq!(token("detected"), Some("heic"));
     assert_eq!(token("outcome"), Some("unsupported"));
     assert!(event.fields.iter().any(|field| field.key == "elapsed_ms"));
