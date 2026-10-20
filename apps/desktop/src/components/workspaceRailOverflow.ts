@@ -57,31 +57,39 @@ function attentionCount(item: RailItemMeasure): number {
 /**
  * Where an item sits relative to the visible range. An item that is only
  * partly visible counts as off-screen on the side it is cut, because its unread
- * badge sits on that edge and may be clipped.
+ * badge sits on that edge and may be clipped. `insetAbove`/`insetBelow` shrink
+ * the visible range by the edge fade on a side that overflows, since a badge
+ * under the fade is washed out.
  */
 export function railItemPlacement(
   item: Pick<RailItemMeasure, "top" | "bottom">,
-  viewport: RailViewport
+  viewport: RailViewport,
+  insetAbove = 0,
+  insetBelow = 0
 ): "above" | "visible" | "below" {
-  const visibleTop = viewport.scrollTop;
-  const visibleBottom = viewport.scrollTop + viewport.clientHeight;
+  const visibleTop = viewport.scrollTop + insetAbove;
+  const visibleBottom = viewport.scrollTop + viewport.clientHeight - insetBelow;
   if (item.top < visibleTop - EDGE_TOLERANCE_PX) return "above";
   if (item.bottom > visibleBottom + EDGE_TOLERANCE_PX) return "below";
   return "visible";
 }
 
+/** `inset` is the edge fade height, applied only on a side that overflows. */
 export function summarizeRailOverflow(
   items: readonly RailItemMeasure[],
-  viewport: RailViewport
+  viewport: RailViewport,
+  inset = 0
 ): RailOverflow {
   const overflowAbove = viewport.scrollTop > EDGE_TOLERANCE_PX;
   const overflowBelow =
     viewport.scrollTop + viewport.clientHeight < viewport.scrollHeight - EDGE_TOLERANCE_PX;
+  const insetAbove = overflowAbove ? inset : 0;
+  const insetBelow = overflowBelow ? inset : 0;
   const above: RailItemMeasure[] = [];
   const below: RailItemMeasure[] = [];
   for (const item of items) {
     if (attentionCount(item) === 0) continue;
-    const placement = railItemPlacement(item, viewport);
+    const placement = railItemPlacement(item, viewport, insetAbove, insetBelow);
     if (placement === "above") above.push(item);
     else if (placement === "below") below.push(item);
   }

@@ -54,6 +54,22 @@ describe("summarizeRailOverflow", () => {
     expect(summary.below).toEqual({ count: 11, hasHighlight: false, nearestSpaceId: "!s15" });
   });
 
+  it("counts a Space under an overflowing edge's fade as off-screen", () => {
+    // Item 3 spans 144..184; the viewport starts at 136, so it is inside the
+    // scrollport but its badge sits under an 18px fade.
+    const viewport = { scrollTop: 136, clientHeight: 200, scrollHeight };
+    const rail = items(20, { 3: [5, 0] });
+    expect(summarizeRailOverflow(rail, viewport).above).toBeNull();
+    expect(summarizeRailOverflow(rail, viewport, 18).above).toEqual({
+      count: 5,
+      hasHighlight: false,
+      nearestSpaceId: "!s3"
+    });
+    // No fade on an edge that does not overflow.
+    const top = { scrollTop: 0, clientHeight: 200, scrollHeight };
+    expect(summarizeRailOverflow(items(20, { 0: [5, 0] }), top, 18).above).toBeNull();
+  });
+
   it("keeps a highlight-only projection visible", () => {
     const summary = summarizeRailOverflow(items(20, { 19: [0, 1] }), {
       scrollTop: 0,

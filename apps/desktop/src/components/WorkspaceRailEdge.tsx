@@ -75,7 +75,7 @@ export function useWorkspaceRailOverflow(rail: readonly SpaceRailItem[]) {
     const list = listRef.current;
     if (!list) return;
     const { items, viewport } = measureWorkspaceRail(list, railRef.current);
-    const next = summarizeRailOverflow(items, viewport);
+    const next = summarizeRailOverflow(items, viewport, workspaceRailEdgeInset(list));
     setOverflow((current) => (sameRailOverflow(current, next) ? current : next));
   }
 
