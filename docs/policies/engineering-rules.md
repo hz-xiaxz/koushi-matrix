@@ -407,6 +407,23 @@ below are the policy those rules do not state.
    observer. The auxiliary signal must not create a second network/sync owner,
    and high-frequency unrelated updates must be proven not to trigger full-view
    normalization.
+14. Large data does not live on the stack. A dispatcher or actor loop — a
+   `match` over commands, actions, or messages with `.await` in its arms —
+   delegates each arm's work to its own async function or async block held
+   through `Box::pin`, so the dispatcher's frame holds a pointer while one arm
+   runs. A future of 16 KiB or more is boxed before it is awaited, spawned, or
+   stored, and large owned payloads stay on the heap instead of being copied
+   between stack locals. Tokio worker and `spawn_blocking` threads get 2 MiB
+   stacks on every platform, Windows MSVC code generation makes frames larger
+   than Linux's, and LLVM does not overlap a dispatcher's per-arm temporaries;
+   a match over many commands therefore sums every arm into one frame far
+   below the worker stack. The "Rust stack budget" gate enforces
+   `clippy::large_stack_frames` (256 KiB) and `clippy::large_futures`
+   (16 KiB) for production library and binary code on Linux and Windows;
+   thresholds live in the root `clippy.toml`. Its behavioral counterpart is
+   `crates/koushi-core-testkit/tests/stack_budget.rs`, which drives the
+   attachment send over a 512 KiB worker stack. Test and QA harness code is
+   outside the gate and does not set the production budget.
 
 ## GUI Automation
 

@@ -1381,6 +1381,13 @@ fn install_oidc_deep_link_handler(_app: &tauri::App) -> tauri::Result<()> {
     Ok(())
 }
 
+// `tauri::generate_context!` expands into an asset/config initializer whose
+// generated closure exceeds the stack budget; it is upstream code, not a
+// Koushi state machine. The rest of this entry point stays linted.
+#[expect(
+    clippy::large_stack_frames,
+    reason = "tauri::generate_context! generates a large closure (#1554)"
+)]
 pub fn run() {
     // #1344: the diagnostic memory audit reports elapsed time since this entry.
     process_memory::mark_process_start();

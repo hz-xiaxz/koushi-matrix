@@ -1,0 +1,23 @@
+# #1554: no production function may keep large state on the stack.
+#
+# Tokio worker and spawn_blocking threads get 2 MiB stacks on every platform,
+# and Windows MSVC code generation makes frames larger than Linux's. Async
+# state machines are therefore gated well below that:
+#
+# - `large_stack_frames` (enabled only by the "Rust stack budget" CI gate) fails
+#   a function whose estimated frame exceeds 256 KiB, one eighth of the worker
+#   stack. The largest production frame after #1554 is ~210 KiB (an account
+#   actor loop that dispatches per-message async work). The issue proposed
+#   128 KiB; 256 KiB is the enforced budget once every dispatcher and effect
+#   loop boxes its per-arm futures, and the 512 KiB worker-stack integration
+#   test (`crates/koushi-core-testkit/tests/stack_budget.rs`) is the tighter
+#   behavioral check for the actual send path.
+# - `large_futures` (same gate) fails an unboxed future of 16 KiB or more held
+#   by value at an `.await`.
+#
+# Both lints are nursery/pedantic (allow by default), so ordinary
+# `cargo clippy` runs are unaffected; only the explicit gate enables them.
+# Test/QA harness code is outside the gate, which lints library and binary
+# production targets.
+stack-size-threshold = 262144
+future-size-threshold = 16384
