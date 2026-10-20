@@ -32,7 +32,8 @@ branch: `cargo fmt --check`; clippy `-D warnings` for koushi-state, koushi-core,
 koushi-mcp, koushi-mcp-host and koushi-desktop; tests for koushi-state,
 koushi-core (lib and integration), koushi-mcp, koushi-mcp-host and
 koushi-desktop lib; frontend typecheck, lint and the full vitest suite; and the
-full Playwright DOM suite (chromium + webkit) before the Rust lanes were merged.
+full Playwright DOM suite (chromium + webkit), all run on the merged branch
+after merging current main.
 
 ## Not covered
 
