@@ -17,6 +17,19 @@ import {
 } from "./messages";
 
 describe("i18n message catalog", () => {
+  test("the assistant attachments approval covers sending and downloading (#1533)", () => {
+    expect(t("mcp.approveAttachmentsTitle", { client: "Agent" }, "en", "none")).toBe(
+      "Allow Agent to send and download attachments?"
+    );
+    expect(catalogs.en["mcp.wantsAttachments"]).toContain("send and download");
+    expect(catalogs.en["mcp.attachmentsExplain"]).toContain("send files");
+    expect(catalogs.en["mcp.allowAttachments"]).not.toContain("download");
+    expect(catalogs.ja["mcp.approveAttachmentsTitle"]).toContain("送信とダウンロード");
+    expect(catalogs.ko["mcp.approveAttachmentsTitle"]).toContain("보내고 다운로드");
+    expect(catalogs["zh-Hans"]["mcp.approveAttachmentsTitle"]).toContain("发送和下载");
+    expect(catalogs["zh-Hant"]["mcp.approveAttachmentsTitle"]).toContain("傳送和下載");
+  });
+
   test("count messages pick the singular for exactly one (#1546)", () => {
     expect(tCount("people.memberCount", 1)).toBe("1 member");
     expect(tCount("people.memberCount", 2)).toBe("2 members");
