@@ -59,7 +59,7 @@ pub(crate) fn new_token() -> std::io::Result<String> {
     Ok(base64url(&bytes))
 }
 
-fn fill_random(bytes: &mut [u8]) -> std::io::Result<()> {
+pub(crate) fn fill_random(bytes: &mut [u8]) -> std::io::Result<()> {
     #[cfg(unix)]
     {
         use std::io::Read;

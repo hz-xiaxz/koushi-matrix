@@ -53,15 +53,35 @@ pub(crate) async fn dispatch_tool_call(
         )),
     };
 
+    Ok(tool_result(result))
+}
+
+/// An MCP tool result. The text content keeps compatibility with clients that
+/// read only text; `structuredContent` carries the same object, or the typed
+/// error (`code`, optional stable `reason`, `message`), so a client can tell a
+/// quiet result from a failure without parsing prose (#1551).
+pub(crate) fn tool_result(result: Result<Value, WireError>) -> Value {
     match result {
-        Ok(value) => Ok(json!({
+        Ok(value) => json!({
             "content": [{ "type": "text", "text": value.to_string() }],
+            "structuredContent": value,
             "isError": false
-        })),
-        Err(error) => Ok(json!({
-            "content": [{ "type": "text", "text": format!("{}: {}", error.code.as_str(), error.message) }],
-            "isError": true
-        })),
+        }),
+        Err(error) => {
+            let mut detail = json!({
+                "code": error.code.as_str(),
+                "message": error.message,
+            });
+            if let Some(reason) = &error.reason {
+                detail["reason"] = json!(reason);
+            }
+            let text = format!("{}: {}", error.code.as_str(), error.message);
+            json!({
+                "content": [{ "type": "text", "text": text }],
+                "structuredContent": { "error": detail },
+                "isError": true
+            })
+        }
     }
 }
 

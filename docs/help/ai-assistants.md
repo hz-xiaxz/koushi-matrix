@@ -19,7 +19,7 @@ account and each permission.
 | `search_messages` | Searches decrypted history and returns room, event id, sender, timestamp, and a snippet. | read |
 | `get_attachment` | Downloads one attachment into Koushi's media cache and returns its path. | attachments |
 | `send_message` | Sends a message, optionally as a reply, or sends local files with an optional caption. | send; also attachments when sending files |
-| `wait_for_events` | Waits for new activity in the account and returns changed rooms. | read |
+| `wait_for_events` | Waits for sampled room changes in the account and returns the changed rooms. | read |
 
 Every tool needs an `account_id`. The assistant gets it from `list_accounts`;
 Koushi never guesses which account you meant. `list_accounts` needs no
@@ -246,13 +246,50 @@ you are drafting.
 ## New-message notification
 
 Koushi cannot wake an idle assistant, so the assistant polls `wait_for_events`.
-While Koushi is running, an internal poller checks room summaries every couple
-of seconds and records rooms whose latest message changed. `wait_for_events`
-returns immediately when something is waiting, otherwise it blocks up to
-`timeout_s` (maximum 50 seconds).
+While Koushi is running, an internal poller samples each joined room about every
+two seconds and records one entry for every room whose latest message changed
+since the previous sample. `wait_for_events` returns immediately when something
+is waiting, otherwise it blocks up to `timeout_s` (default 25, maximum 50
+seconds).
 
-The cursor is valid for the current Koushi run only. After restarting Koushi,
-ask for events without a cursor to start from the newest position.
+This is a change feed, not a message log:
+
+- Several messages posted between two samples become one entry, for the newest
+  of them. Invites are not reported.
+- The first sample after Koushi or the bridge starts only sets a baseline.
+- Koushi keeps at most 500 entries in memory, across all accounts. Reading a
+  room does not remove its entry; the unread counts in an entry are
+  informational.
+- An empty result means no change was sampled, not that nobody posted.
+- Every result carries `"coverage": "sampled_room_changes"` in its structured
+  content, so a client does not have to infer this.
+
+The cursor is opaque and valid only for the account it came from and for the
+current Koushi run. Koushi rejects a cursor it cannot continue from with the
+error `resync_required` and one of these reasons, instead of quietly starting
+over:
+
+| Reason | Meaning |
+| --- | --- |
+| `malformed_cursor` | The cursor was not issued by `wait_for_events` (including the `seq:` cursors of earlier versions). |
+| `previous_run` | The cursor is from before Koushi restarted or the bridge was turned off and on. |
+| `wrong_account` | The cursor was issued for another account. |
+| `future_cursor` | The cursor is ahead of the newest entry. |
+| `expired_cursor` | Entries after the cursor were dropped from the 500-entry window. |
+
+To recover, an assistant:
+
+1. Calls `wait_for_events` without a cursor. This starts at the newest position
+   and does not return earlier changes.
+2. Calls `read_room_messages` for the rooms it cares about to see what it may
+   have missed, following `next` for older pages as far as the room's history
+   allows.
+3. Skips messages it already handled, keyed by account, room, and event id.
+
+A message posted between steps 1 and 2 can appear both in the history and as a
+later change; de-duplicating by event id handles it. `list_rooms` with
+`unread_only` is not a catch-up: a room you already read in Koushi drops out of
+it.
 
 ## What assistant calls never change
 

@@ -2036,10 +2036,17 @@ Invariants:
   permission in addition to `send`. Receiving
   writes through the `media_save` containment policy into an app-managed
   directory. No caller-chosen destination is accepted.
-- **Polling, not push.** MCP cannot wake a host that is not calling. New
-  messages surface through an account-bound, monotonic cursor consumed by a
-  `wait_for_events` long-poll of at most 50 s; the cursor cannot replay
-  another account's events. An approval wait counts against that call's 60 s
+- **Polling, not push.** MCP cannot wake a host that is not calling. Room
+  changes surface through a `wait_for_events` long-poll of at most 50 s over a
+  sampled feed: the host samples each joined room's latest event every 2 s,
+  coalesces bursts into one record per changed room, seeds the first sample
+  silently, reports no invites, and retains at most 500 records in memory.
+  Cursors are opaque and bound to the account and to the feed's random
+  generation, which a bridge start or app restart replaces. A malformed,
+  previous-generation, other-account, future, or expired cursor fails with
+  `resync_required` and a stable reason; it never restarts silently at the
+  head. Results carry `structuredContent` matching the tool's `outputSchema`,
+  including `coverage: sampled_room_changes`. An approval wait counts against that call's 60 s
   budget. Other tools do not share the budget: a send may wait 40 s for
   approval and then for delivery, and a retry with the same
   `client_request_id` is deduplicated.
