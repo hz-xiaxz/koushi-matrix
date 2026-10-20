@@ -40,6 +40,12 @@ pub(crate) fn handle_basic_operation_requested(
             space_id,
             child_room_id,
         },
+        BasicOperationRequest::StartDirectMessage { user_id } => {
+            BasicOperationState::StartingDirectMessage {
+                request_id,
+                user_id,
+            }
+        }
     };
     vec![AppEffect::EmitUiEvent(UiEvent::RoomListChanged)]
 }

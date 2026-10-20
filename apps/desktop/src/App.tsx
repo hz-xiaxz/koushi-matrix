@@ -4794,17 +4794,15 @@ function AccountContent({
 
   async function startDirectMessage(userId: string) {
     const trimmedUserId = userId.trim();
-    if (!trimmedUserId || isBusy) {
+    if (!trimmedUserId) {
       return;
     }
-    setIsBusy(true);
-    try {
-      await settleCommand(api.startDirectMessage(trimmedUserId));
-      setPrimaryView("timeline");
-      await setRightPanelModeClosingFocusedContext("closed");
-    } finally {
-      setIsBusy(false);
-    }
+    // #1518: the pending state is Rust's `basic_operation`, which the Profile
+    // renders; a renderer-wide busy flag would silently drop this press. The
+    // Room actor runs starts one at a time, so a repeat reuses the same chat.
+    await settleCommand(api.startDirectMessage(trimmedUserId));
+    setPrimaryView("timeline");
+    await setRightPanelModeClosingFocusedContext("closed");
   }
 
   /**

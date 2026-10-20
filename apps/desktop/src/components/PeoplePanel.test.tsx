@@ -588,6 +588,33 @@ describe("ProfilePanel", () => {
     expect(onStartDirectMessage).toHaveBeenCalledWith("@ada:example.invalid");
   });
 
+  test("shows Send message as pending while Rust starts the direct message (#1518)", () => {
+    const onStartDirectMessage = vi.fn();
+    const props = {
+      userId: "@ada:example.invalid",
+      currentUserId: "@current:example.invalid",
+      roomOrSpace: baseRoom,
+      roomManagement: roomManagement(members),
+      profileUsers: {},
+      onBack: () => undefined,
+      onStartDirectMessage
+    };
+    const { rerender } = render(<ProfilePanel {...props} startDirectMessagePending />);
+
+    const button = screen.getByRole("button", { name: "Send message" });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    fireEvent.click(button);
+    expect(onStartDirectMessage).not.toHaveBeenCalled();
+
+    rerender(<ProfilePanel {...props} startDirectMessagePending={false} />);
+    const settled = screen.getByRole("button", { name: "Send message" });
+    expect(settled.hasAttribute("disabled")).toBe(false);
+    expect(settled.getAttribute("aria-busy")).toBeNull();
+    fireEvent.click(settled);
+    expect(onStartDirectMessage).toHaveBeenCalledWith("@ada:example.invalid");
+  });
+
   function adaProfile(thumbnail: NonNullable<UserProfile["avatar"]>["thumbnail"]): UserProfile {
     return {
       user_id: "@ada:example.invalid",

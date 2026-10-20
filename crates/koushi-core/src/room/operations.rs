@@ -40,6 +40,8 @@ const CREATE_SPACE_FAILED_MESSAGE: &str = "Space creation failed";
 
 const LINK_SPACE_CHILD_FAILED_MESSAGE: &str = "Linking the room to the space failed";
 
+const START_DIRECT_MESSAGE_FAILED_MESSAGE: &str = "Starting the direct message failed";
+
 /// Bound on one advisory address lookup; a slow server settles `Unknown`.
 const ROOM_ADDRESS_CHECK_TIMEOUT: Duration = Duration::from_secs(8);
 
@@ -1012,12 +1014,23 @@ impl RoomActor {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
         };
+        // #1518: the start is a Rust-owned pending operation, so the renderer
+        // shows it in flight from the snapshot. Every exit below settles it
+        // before the request's outcome event is emitted.
+        self.reduce_reliable(vec![AppAction::BasicOperationRequested {
+            request_id: request_id.sequence,
+            request: BasicOperationRequest::StartDirectMessage {
+                user_id: user_id.clone(),
+            },
+        }])
+        .await;
         // #1494: Core, not the renderer, decides whether a reusable direct
         // chat exists. `Report` creates nothing when none does.
         if missing == DirectMessageMissingPolicy::Report {
             match koushi_sdk::find_direct_message(session, &user_id) {
                 Ok(Some(_)) => {}
                 Ok(None) => {
+                    self.settle_direct_message_start(request_id, true).await;
                     self.emit(CoreEvent::Room(RoomEvent::DirectMessageMissing {
                         request_id,
                     }));
@@ -1025,6 +1038,7 @@ impl RoomActor {
                 }
                 Err(error) => {
                     let kind = classify_room_error(&error);
+                    self.settle_direct_message_start(request_id, false).await;
                     self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
                     return;
                 }
@@ -1038,6 +1052,7 @@ impl RoomActor {
                     "start_dm_returned",
                 ));
                 let room_id_for_projection = room_id.clone();
+                self.settle_direct_message_start(request_id, true).await;
                 self.emit(CoreEvent::Room(RoomEvent::DirectMessageStarted {
                     request_id,
                     room_id,
@@ -1051,9 +1066,25 @@ impl RoomActor {
             }
             Err(error) => {
                 let kind = classify_room_error(&error);
+                self.settle_direct_message_start(request_id, false).await;
                 self.emit_failure(request_id, CoreFailure::RoomOperationFailed { kind });
             }
         }
+    }
+
+    /// #1518: return the basic-operation slot to `Idle` for this start.
+    async fn settle_direct_message_start(&self, request_id: RequestId, succeeded: bool) {
+        let action = if succeeded {
+            AppAction::BasicOperationSucceeded {
+                request_id: request_id.sequence,
+            }
+        } else {
+            AppAction::BasicOperationFailed {
+                request_id: request_id.sequence,
+                message: START_DIRECT_MESSAGE_FAILED_MESSAGE.to_owned(),
+            }
+        };
+        self.reduce_reliable(vec![action]).await;
     }
 
     pub(super) async fn handle_join_room(&self, request_id: RequestId, room_id: String) {
@@ -1633,3 +1664,6 @@ mod space_child_link_tests;
 
 #[cfg(test)]
 mod room_address_check_tests;
+
+#[cfg(test)]
+mod direct_message_start_tests;

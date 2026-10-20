@@ -815,6 +815,10 @@ export function ContextualRightPanel({
             onReportUser={onReportUser}
             onRequestAvatarThumbnail={onRequestMemberAvatarThumbnail}
             onStartDirectMessage={onStartDirectMessage}
+            startDirectMessagePending={
+              snapshot.state.ui.basic_operation.kind === "startingDirectMessage" &&
+              snapshot.state.ui.basic_operation.user_id === selectedProfileUserId
+            }
             onSetLocalUserAlias={onSetLocalUserAlias}
             onUnignoreUser={onUnignoreUser}
             onUpdateMemberRole={onUpdateMemberRole}

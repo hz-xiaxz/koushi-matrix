@@ -68,6 +68,8 @@ interface ProfilePanelProps {
   /** #1540: loads the profile picture thumbnail when it is not ready yet. */
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
   onStartDirectMessage?: (userId: string) => void;
+  /** #1518: Rust is starting a direct message with this person. */
+  startDirectMessagePending?: boolean;
   onSetLocalUserAlias?: (userId: string, alias: string | null) => void;
   onUnignoreUser?: (userId: string) => void;
   onUpdateMemberRole?: (
@@ -355,6 +357,7 @@ export function ProfilePanel({
   onReportUser,
   onRequestAvatarThumbnail,
   onStartDirectMessage,
+  startDirectMessagePending = false,
   onSetLocalUserAlias,
   onUnignoreUser,
   onUpdateMemberRole
@@ -439,6 +442,8 @@ export function ProfilePanel({
           <button
             className="profile-primary-action"
             type="button"
+            disabled={startDirectMessagePending}
+            aria-busy={startDirectMessagePending || undefined}
             onClick={() => onStartDirectMessage(userId)}
           >
             <MessageCircle size={ICON_SIZE.small} aria-hidden="true" />
