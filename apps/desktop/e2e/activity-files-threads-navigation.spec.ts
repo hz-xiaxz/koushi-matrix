@@ -193,6 +193,20 @@ test("Activity shows verified room summaries without inferred read targets", asy
           },
           domain: {
             ...snapshot.state.domain,
+            // #1545: Activity rows name joined rooms, so the opened room has a
+            // summary; without one the main pane is the no-room empty state.
+            rooms: snapshot.state.domain.rooms.some((room) => room.room_id === String(roomId))
+              ? snapshot.state.domain.rooms
+              : [
+                  ...snapshot.state.domain.rooms,
+                  {
+                    ...snapshot.state.domain.rooms[0]!,
+                    room_id: String(roomId),
+                    display_name: "Project Beta",
+                    display_label: "Project Beta",
+                    original_display_label: "Project Beta"
+                  }
+                ],
             thread_attention: { kind: "closed" }
           }
         }

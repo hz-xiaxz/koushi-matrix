@@ -4,7 +4,7 @@ import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 
 import { createDesktopApiFixture } from "../test/desktopApiFixture";
-import { ActivityPane, ExplorePane, InvitesPane } from "./panes";
+import { ActivityPane, ExplorePane, InvitesPane, NoRoomPane } from "./panes";
 import { setActiveLocaleProfile, t } from "../i18n/messages";
 import type {
   ActivityRow,
@@ -439,5 +439,21 @@ describe("InvitesPane actions", () => {
     expect(screen.getByRole("alert").textContent).toBe(
       "This room doesn't exist or the invite is invalid."
     );
+  });
+});
+
+describe("NoRoomPane", () => {
+  afterEach(cleanup);
+
+  // #1545: with no room selected the main pane is an empty state, not a fake
+  // room named "No room selected" with room actions and a composer.
+  it("renders the empty-state message without a composer or room actions", () => {
+    render(<NoRoomPane />);
+
+    const pane = screen.getByRole("main", { name: t("room.noRoomSelected") });
+    expect(pane.textContent).toContain(t("room.noRoomSelected"));
+    expect(screen.queryByRole("textbox")).toBeNull();
+    expect(screen.queryAllByRole("button")).toHaveLength(0);
+    expect(screen.queryByRole("main", { name: t("timeline.conversation") })).toBeNull();
   });
 });

@@ -102,6 +102,21 @@ function activityTimestamp(timestampMs: number): string {
   }).format(new Date(timestampMs));
 }
 
+/**
+ * #1545: the main pane when no room is selected (a Space with no rooms, or Home
+ * after closing Activity). It is an empty state: no room header actions and no
+ * composer, because there is no room to act on or send to.
+ */
+export function NoRoomPane() {
+  return (
+    <main className="main-pane no-room-pane" aria-labelledby="no-room-title">
+      <div className="no-room-empty-state" role="status">
+        <p id="no-room-title">{t("room.noRoomSelected")}</p>
+      </div>
+    </main>
+  );
+}
+
 export function ActivityPane({
   activity,
   onClose,

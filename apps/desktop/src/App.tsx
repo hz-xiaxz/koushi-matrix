@@ -283,6 +283,7 @@ import {
   ActivityPane,
   ExplorePane,
   InvitesPane,
+  NoRoomPane,
   TimelinePane
 } from "./components/panes";
 import { AuthScreen, SlidingSyncCapabilityBlockedScreen } from "./components/auth";
@@ -7544,9 +7545,11 @@ function AccountContent({
             }}
             onNewDm={openNewDmDialog}
           />
+        ) : !activeRoom ? (
+          <NoRoomPane />
         ) : (
           <TimelinePane
-            activeRoomName={activeRoom ? roomDisplayLabel(activeRoom) : t("room.noRoomSelected")}
+            activeRoomName={roomDisplayLabel(activeRoom)}
             sendingAccount={sendingAccount}
             composerDocument={composerDocument}
             composerNotice={
