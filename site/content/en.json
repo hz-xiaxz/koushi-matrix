@@ -57,7 +57,7 @@
   "ai.try.unread": "Which rooms have unread messages? Summarize the Design room.",
   "ai.try.search": "Find the invoice someone sent me last month.",
   "ai.try.reply": "Reply to that message saying I will send the file tomorrow.",
-  "ai.setup": "For technical users in this version: the koushi-mcp launcher is not bundled with the app yet, so you build it from source, and you grant access by editing a JSON file.",
+  "ai.setup": "The koushi-mcp launcher ships with Koushi. The first time an assistant asks for something, Koushi shows an approval dialog, and you can change or remove access later in App Settings → AI assistants.",
   "ai.guide": "Set up an AI assistant",
   "features.heading": "Everyday features",
   "features.e2ee": "End-to-end encrypted chat, with sign-in through your browser (OIDC)",

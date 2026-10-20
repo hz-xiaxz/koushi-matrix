@@ -232,8 +232,8 @@
     "source_hash": "4a392390d2b6"
   },
   "ai.setup": {
-    "text": "当前版本面向技术用户：koushi-mcp 启动器尚未随应用一起提供，需要从源码构建，并通过编辑 JSON 文件来授予访问权限。",
-    "source_hash": "f49d103201bb"
+    "text": "koushi-mcp 启动器已随 Koushi 一起提供。助手第一次提出请求时，Koushi 会显示批准对话框；之后你可以在“应用设置 → AI 助手”中更改或移除访问权限。",
+    "source_hash": "2565e02ab5d0"
   },
   "ai.guide": {
     "text": "设置 AI 助手",
