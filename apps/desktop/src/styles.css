@@ -7698,6 +7698,13 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   font-weight: 800;
 }
 
+/* #1540: scale the picture to the circle instead of clipping its corner. */
+.profile-large-avatar img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
+}
+
 .profile-actions {
   display: flex;
   justify-content: center;

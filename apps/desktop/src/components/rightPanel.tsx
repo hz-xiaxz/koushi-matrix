@@ -813,6 +813,7 @@ export function ContextualRightPanel({
             onIgnoreUser={onIgnoreUser}
             onModerateMember={onModerateMember}
             onReportUser={onReportUser}
+            onRequestAvatarThumbnail={onRequestMemberAvatarThumbnail}
             onStartDirectMessage={onStartDirectMessage}
             onSetLocalUserAlias={onSetLocalUserAlias}
             onUnignoreUser={onUnignoreUser}

@@ -4189,11 +4189,12 @@ function AccountContent({
 
     roomSettingsLoadRef.current = null;
     const next = await settleCommandSnapshot(api.loadRoomSettings(roomId));
+    // #1540: settings that did not load still leave the room open; the
+    // Profile then shows the account-wide profile instead of doing nothing.
     if (
       !isCurrent() ||
       next.state.ui.navigation.active_room_id !== roomId ||
-      next.state.ui.timeline.room_id !== roomId ||
-      !exactRoomSettingsForRoom(next, roomId)
+      next.state.ui.timeline.room_id !== roomId
     ) {
       return;
     }
@@ -4432,6 +4433,14 @@ function AccountContent({
       // #874: a `matrix.to` user permalink — a mention — names an account this
       // client can show in place. Dropping it left mention clicks dead in the
       // main timeline and sent the thread/search panes to the browser.
+      // #1540: with a room open, take the sender-name route so Rust loads the
+      // room's members and the Profile shows membership, role and moderation.
+      const current = getAppStoreSnapshot();
+      const openRoomId = current?.state.ui.navigation.active_room_id ?? null;
+      if (openRoomId && current?.state.ui.timeline.room_id === openRoomId) {
+        await openRoomUserProfile(openRoomId, target.userId);
+        return;
+      }
       setSelectedProfileUserId(target.userId);
       runInBackground(setRightPanelModeClosingFocusedContext("profile"));
       return;
