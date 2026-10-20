@@ -126,16 +126,30 @@ impl CoreFixture {
     }
 }
 
-async fn verify(client: &Client, peer: &Client) -> Result<(), String> {
-    client
+async fn assert_unverified_peer(client: &Client, peer: &Client) -> Result<(), String> {
+    let identity = client
         .encryption()
         .request_user_identity(peer.user_id().ok_or("history recovery: peer unavailable")?)
         .await
         .map_err(|_| "history recovery: identity refresh failed")?
-        .ok_or("history recovery: peer identity missing")?
-        .verify()
+        .ok_or("history recovery: peer identity missing")?;
+    let device = client
+        .encryption()
+        .get_device(
+            peer.user_id().ok_or("history recovery: peer unavailable")?,
+            peer.device_id()
+                .ok_or("history recovery: peer device missing")?,
+        )
         .await
-        .map_err(|_| "history recovery: identity verification failed")?;
+        .map_err(|_| "history recovery: peer device lookup failed")?
+        .ok_or("history recovery: peer device unavailable")?;
+    if identity.is_verified()
+        || identity.has_verification_violation()
+        || !device.is_cross_signed_by_owner()
+        || device.is_verified_with_cross_signing()
+    {
+        return Err("history recovery: expected cross-signed unverified peer".to_owned());
+    }
     Ok(())
 }
 async fn join(participant: &Participant, room: &OwnedRoomId) -> Result<(), String> {
@@ -220,7 +234,7 @@ async fn flow(
         (regular.session().client(), recipient.session().client()),
         (recipient.session().client(), regular.session().client()),
     ] {
-        verify(&client, &peer).await?;
+        assert_unverified_peer(&client, &peer).await?;
     }
     let mut a = CoreFixture::start(sender).await?;
     a.sync(false).await?;
@@ -314,6 +328,9 @@ async fn flow(
         })
         .await?;
         println!("history_recovery_join_without_invite=ok");
+        assert_unverified_peer(&sender.session().client(), &client).await?;
+        assert_unverified_peer(&client, &sender.session().client()).await?;
+        println!("history_recovery_without_manual_verification=ok");
         let large_id = RoomId::parse(
             config
                 .history_large_room
@@ -349,7 +366,7 @@ async fn flow(
         println!("history_recovery_after_window_expiry=ok");
         drop(client);
         drop(sender_client);
-        security::run(sender, recipient, &mut a, &mut b).await?;
+        security::run(config, sender, recipient, &mut a, &mut b).await?;
         Ok(())
     }
     .await;

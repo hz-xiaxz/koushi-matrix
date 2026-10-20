@@ -28,7 +28,9 @@ use matrix_sdk::{
     encryption::identities::Device,
     event_handler::{EventHandlerHandle, RawEvent},
 };
-use matrix_sdk_base::crypto::{CollectStrategy, types::room_history::RoomKeyBundle};
+use matrix_sdk_base::crypto::{
+    CollectStrategy, olm::SenderData, types::room_history::RoomKeyBundle,
+};
 use policy::*;
 use records::*;
 use serde::{Deserialize, Serialize};
@@ -577,23 +579,18 @@ impl Recovery {
         Ok(())
     }
 
-    async fn pin(&self, device: &Device, verified: bool) -> Result<Pin, Failure> {
-        if device.is_blacklisted()
-            || !device.is_cross_signed_by_owner()
-            || (verified && !device.is_verified_with_cross_signing())
-        {
+    fn pin(&self, device: &Device) -> Result<Pin, Failure> {
+        if device.is_blacklisted() {
             return Err(Failure::VerificationRequired);
         }
-        let identity = self
-            .client
-            .encryption()
-            .get_user_identity(device.user_id())
-            .await
-            .map_err(|_| Failure::Network)?
-            .ok_or(Failure::VerificationRequired)?;
-        if identity.has_verification_violation() || (verified && !identity.is_verified()) {
+        // Derive the gate and master key from one device/identity snapshot.
+        // Manual peer verification is optional; unsigned devices and a
+        // previously verified identity change are still ineligible.
+        let (SenderData::SenderUnverified(owner) | SenderData::SenderVerified(owner)) =
+            device.cross_signing_sender_data()
+        else {
             return Err(Failure::VerificationRequired);
-        }
+        };
         Ok(Pin {
             user: device.user_id().to_string(),
             device: device.device_id().to_string(),
@@ -605,12 +602,23 @@ impl Recovery {
                 .ed25519_key()
                 .ok_or(Failure::VerificationRequired)?
                 .to_base64(),
-            master: identity
-                .master_key()
-                .get_first_key()
-                .ok_or(Failure::VerificationRequired)?
-                .to_base64(),
+            master: owner.master_key.to_base64(),
         })
+    }
+
+    async fn pinned_device(&self, pin: &Pin) -> Result<Device, Failure> {
+        let user = UserId::parse(&pin.user).map_err(|_| Failure::InvalidResponse)?;
+        let device = self
+            .client
+            .encryption()
+            .get_device(&user, pin.device.as_str().into())
+            .await
+            .map_err(|_| Failure::Network)?
+            .ok_or(Failure::VerificationRequired)?;
+        if self.pin(&device)? != *pin {
+            return Err(Failure::VerificationRequired);
+        }
+        Ok(device)
     }
 
     async fn request(
@@ -769,7 +777,7 @@ impl Recovery {
                 .map_err(|_| Failure::Network)?
                 .devices()
             {
-                if let Ok(pin) = self.pin(&device, false).await {
+                if let Ok(pin) = self.pin(&device) {
                     pins.push(pin);
                     devices.push(device);
                 }
@@ -884,7 +892,6 @@ impl Recovery {
                             nonce: completed.nonce,
                             response: completed.response,
                         },
-                        false,
                     )
                     .await;
             }
@@ -902,8 +909,7 @@ impl Recovery {
                 nonce: attempt.nonce.clone(),
                 expires: attempt.expires,
             };
-            self.send(std::slice::from_ref(device), &wire, false)
-                .await?;
+            self.send(std::slice::from_ref(device), &wire).await?;
             self.ledger
                 .rooms
                 .get_mut(room)
@@ -920,11 +926,11 @@ impl Recovery {
         self.save().await?;
         Ok(recipients)
     }
-    async fn send(&self, devices: &[Device], wire: &Wire, secret: bool) -> Result<(), Failure> {
+    async fn send(&self, devices: &[Device], wire: &Wire) -> Result<(), Failure> {
         let raw = serde_json::to_string(wire).map_err(|_| Failure::InvalidResponse)?;
-        self.send_raw(devices, raw, secret).await
+        self.send_raw(devices, raw).await
     }
-    async fn send_raw(&self, devices: &[Device], raw: String, secret: bool) -> Result<(), Failure> {
+    async fn send_raw(&self, devices: &[Device], raw: String) -> Result<(), Failure> {
         if raw.len() > MESSAGE_LIMIT {
             return Err(Failure::TooLarge);
         }
@@ -937,11 +943,7 @@ impl Recovery {
                 devices.iter().collect(),
                 EVENT_TYPE,
                 content,
-                if secret {
-                    CollectStrategy::OnlyTrustedDevices
-                } else {
-                    CollectStrategy::IdentityBasedStrategy
-                },
+                CollectStrategy::IdentityBasedStrategy,
             )
             .await
             .map_err(|_| Failure::Network)?;
@@ -951,11 +953,7 @@ impl Recovery {
             Err(Failure::VerificationRequired)
         }
     }
-    async fn authenticated(
-        &self,
-        info: &EncryptionInfo,
-        verified: bool,
-    ) -> Result<(Device, Pin), Failure> {
+    async fn authenticated(&self, info: &EncryptionInfo) -> Result<(Device, Pin), Failure> {
         let AlgorithmInfo::OlmV1Curve25519AesSha2 {
             curve25519_public_key_base64: curve,
         } = &info.algorithm_info
@@ -980,7 +978,7 @@ impl Recovery {
                     .is_some_and(|key| key.to_base64() == *curve)
             })
             .ok_or(Failure::VerificationRequired)?;
-        let pin = self.pin(&device, verified).await?;
+        let pin = self.pin(&device)?;
         Ok((device, pin))
     }
     async fn incoming(&mut self, info: EncryptionInfo, raw: String) -> Result<(), Failure> {
@@ -1038,9 +1036,7 @@ impl Recovery {
                 self.queries.insert(key, now());
             }
         }
-        let (device, pin) = self
-            .authenticated(&info, matches!(&wire, Wire::Chunk { .. }))
-            .await?;
+        let (device, pin) = self.authenticated(&info).await?;
         match wire {
             Wire::Request {
                 room,
@@ -1103,7 +1099,6 @@ impl Recovery {
                                 nonce,
                                 response,
                             },
-                            false,
                         )
                         .await;
                 }
@@ -1157,7 +1152,7 @@ impl Recovery {
             .await
             .map_err(|_| Failure::Network)?
             .ok_or(Failure::VerificationRequired)?;
-        if self.pin(&current, true).await? != *pin {
+        if self.pin(&current)? != *pin {
             return Err(Failure::VerificationRequired);
         }
         let facts = self.facts(room).await?;
@@ -1201,7 +1196,6 @@ impl Recovery {
                             nonce: nonce.to_owned(),
                             response,
                         },
-                        false,
                     )
                     .await;
             }
@@ -1218,11 +1212,12 @@ impl Recovery {
             let _ = reached.send(());
             let _ = resume.await;
         }
+        let current = self.pinned_device(pin).await?;
         self.local_disclosure_allowed(room)?;
         let imported = self
             .client
             .encryption()
-            .import_verified_history_bundle(&id, &current, bundle)
+            .import_history_bundle_from_device(&id, &current, bundle)
             .await
             .map_err(|_| Failure::Storage)?
             .ok_or(Failure::InvalidResponse)?;
@@ -1252,7 +1247,6 @@ impl Recovery {
                     nonce: nonce.to_owned(),
                     response,
                 },
-                false,
             )
             .await?;
         }

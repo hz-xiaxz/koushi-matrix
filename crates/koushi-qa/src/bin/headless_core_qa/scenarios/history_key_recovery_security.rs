@@ -4,6 +4,9 @@ use koushi_state::HistoryKeyRecoveryFailure as Failure;
 use matrix_sdk::encryption::LocalTrust;
 use sha2::{Digest, Sha256};
 
+#[path = "history_key_recovery_identity.rs"]
+mod identity;
+
 async fn no_keys(participant: &Participant, history: &HistoricalRoom) -> Result<bool, String> {
     let client = participant.session().client();
     let machine = client.olm_machine_for_testing().await;
@@ -66,6 +69,7 @@ async fn expect_request_failure(
 }
 
 pub(super) async fn run(
+    config: &QaConfig,
     sender: &mut Participant,
     recipient: &mut Participant,
     a: &mut CoreFixture,
@@ -310,5 +314,6 @@ pub(super) async fn run(
         return Err("history recovery: retired payload row retained".to_owned());
     }
     println!("history_recovery_crash_replay=ok");
+    identity::run(config, sender, recipient, a, b).await?;
     Ok(())
 }

@@ -2065,8 +2065,12 @@ Historical-key recovery follows the guarded, Rust-owned contract in
 [the historical recovery design](../superpowers/specs/2026-10-17-history-key-recovery-design.md).
 Invitation bundles remain eligible for 30 days after acceptance on this
 client. Explicit recovery never shares sessions that lack the SDK's
-shared_history permission, bypasses current membership or verified device
-trust, or treats a queued request as completed recovery.
+shared_history permission, bypasses current membership or owner-cross-signed
+device checks, or treats a queued request as completed recovery. Mutual manual
+user verification is optional: unverified identities are eligible, but blocked
+devices, unsigned devices, verification violations and changed device/master
+pins are rejected. The SDK preserves unverified forwarding provenance rather
+than treating recovery as user verification.
 
 Full prohibitions live in
 [REPOSITORY_RULES.md](../../REPOSITORY_RULES.md) and the detailed policy

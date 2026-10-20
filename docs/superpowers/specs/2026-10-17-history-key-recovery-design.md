@@ -18,9 +18,12 @@ explicitly, rather than silently selecting a subset.
 Requests target only this room's historical keys marked shared_history by the
 SDK. Current shared/world_readable visibility and current membership are
 required. Both sides recheck current room facts and current device identity.
-Key disclosure/import requires verified cross-signing and no verification
-violation. Unverified peers may receive a non-secret request but never keys;
-the UI must explain verification failures. Acquired keys cannot be revoked.
+Key disclosure/import requires an owner-cross-signed, unblocked device and no
+verification violation. Manual verification of the peer's identity is optional.
+The exact device and master-key pins must still match at disclosure/import;
+the SDK retains verified or unverified forwarding provenance. The UI explains
+device-security failures without requiring every peer to complete manual
+verification. Acquired keys cannot be revoked.
 
 Previously recorded unresolved rooms may receive one administrator-only retry
 on startup. Persist an automatic 24-hour cooldown before dispatch, so repeated
@@ -63,10 +66,12 @@ use file import as a substitute for authenticated forwarding.
 
 Failing headless tests precede production implementation. Cover population
 30/31, admin/all selection, retries and stale completions, persistence/restart,
-automatic cooldown, malformed and replayed chunks, identity reset, unverified
+automatic cooldown, malformed and replayed chunks, identity reset, unsigned
 devices, nonmember/left/banned recipients, visibility changes, cross-room keys,
-and fanout/byte/rate bounds. Browser tests cover both entry points, pending text
-and retry, collapsed advanced UI, and account/room switching.
+and fanout/byte/rate bounds. Cross-signed unverified users must recover keys
+without promoting their verification state; unsigned and blocked devices and
+verification violations must remain rejected. Browser tests cover both entry
+points, pending text and retry, collapsed advanced UI, and account/room switching.
 
 Disposable Synapse tests must exercise production Core commands and both
 responders, including a join without individual invite, multiple historical
@@ -139,14 +144,20 @@ cannot distinguish an offline peer from a client without this extension.
 
 ## Security assessment
 
+Amended 2026-10-20 with user authorization: manual peer verification is optional
+for explicit recovery and the existing guarded startup retry.
+
 The principal risk is irreversible disclosure of all available shared-history
 keys to another room member. Current server-authenticated membership and
 history visibility are necessary but cannot prove the server is honest about
-membership. Requiring mutually verified cross-signing, exact device/master
-pins, no local block and no verification violation prevents a homeserver from
-silently substituting a new identity/device. This deliberately requires user
-verification before sharing keys; membership alone is insufficient. Previously
-shared keys cannot be revoked when somebody leaves.
+membership. Owner cross-signatures, exact device/master pins, no local block and
+no verification violation bind each exchange to the admitted identity and
+device. Without prior user verification, these checks cannot distinguish a new
+legitimate member from an identity introduced by a malicious homeserver.
+This tradeoff permits ordinary shared-history recovery without a manual
+verification ceremony. Previously verified identity changes still fail closed,
+as do device/master changes within a pending exchange. Previously shared keys
+cannot be revoked when somebody leaves.
 
 Eligible inbound sessions can include the inbound copy of a session still
 active for sending. An exported Megolm key decrypts subsequent message indices
@@ -156,17 +167,17 @@ pre-share or repair outbound sessions. Normal membership-driven rotation still
 applies. The 30-day invitation acceptance window is not a lifetime for keys
 already obtained.
 
-A verified current member can still retain or redistribute keys it legitimately
-receives. A verified malicious member can consume bounded network, crypto and
+A current member can still retain or redistribute keys it legitimately
+receives. A malicious member can consume bounded network, crypto and
 cache resources. Fanout, export, ingress, egress, episode, chunk, cache and
 rate limits constrain this; they can yield a visible partial/limit failure.
 The main route has no room message, DM, notification prompt or automatic
 all-member broadcast. Small-room manual default fanout trades faster recovery
-for revealing the recovery request to more existing verified members. Startup
+for revealing the recovery request to more eligible existing members. Startup
 is administrator-only and has a persisted 24-hour cooldown.
 
 The implementation must never label a request as successful recovery of every
-historical message: peers may be offline, unsupported, unverified, missing
+historical message: peers may be offline, unsupported, device-ineligible, missing
 keys, or limited by export bounds. Exact queued-request delivery remains a
 homeserver availability assumption. Replay caching covers requester termination
 and saturated ingress; encrypted-store loss/corruption continues to fail closed.

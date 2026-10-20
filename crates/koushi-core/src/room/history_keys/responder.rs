@@ -84,19 +84,6 @@ impl Recovery {
         if !facts.joined.contains(&pin.user) {
             return Err(Failure::MembershipChanged);
         }
-        if !device.is_verified_with_cross_signing() {
-            return self
-                .send(
-                    &[device],
-                    &Wire::Refused {
-                        room,
-                        nonce,
-                        reason: Failure::VerificationRequired,
-                    },
-                    false,
-                )
-                .await;
-        }
         let rate_key = format!("{room}\n{}", pin.user);
         if self
             .ledger
@@ -135,7 +122,6 @@ impl Recovery {
                             nonce,
                             reason,
                         },
-                        false,
                     )
                     .await;
             }
@@ -303,7 +289,7 @@ impl Recovery {
                 .await
                 .map_err(|_| Failure::Network)?
                 .ok_or(Failure::VerificationRequired)?;
-            if self.pin(&current, true).await? != *pin {
+            if self.pin(&current)? != *pin {
                 return Err(Failure::VerificationRequired);
             }
             if now()
@@ -329,8 +315,9 @@ impl Recovery {
             if !facts.joined.contains(&pin.user) {
                 return Err(Failure::MembershipChanged);
             }
+            let current = self.pinned_device(pin).await?;
             self.local_disclosure_allowed(&cached.room)?;
-            self.send_raw(&[current], raw, true).await?;
+            self.send_raw(&[current], raw).await?;
         }
         Ok(())
     }
