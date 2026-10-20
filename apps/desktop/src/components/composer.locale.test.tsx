@@ -107,7 +107,7 @@ describe("composer locale switch (#1557)", () => {
 
     expect(screen.queryByRole("textbox", { name: "Thread composer" })).toBeNull();
     expect(screen.getAllByRole("textbox")).toContain(editor);
-    expect(editor.getAttribute("aria-label")).not.toBe("Thread composer");
+    expect(editor.getAttribute("aria-label")).toBe("スレッド入力欄");
     expect(editor.textContent).toBe("draft @Member 1 kept");
   });
 });
