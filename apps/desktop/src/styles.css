@@ -1282,14 +1282,82 @@ button:disabled {
   align-items: center;
 }
 
+/* #1509: the Space rail scrolls without a scrollbar, so the scroller marks
+   each overflowing edge with a fade and, when an off-screen Space needs
+   attention, an edge indicator. Both stay outside the scrollport. */
+.workspace-space-scroller {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-height: 0;
+}
+
 .workspace-space-list {
+  --workspace-rail-edge-inset: 18px;
+  --workspace-rail-fade-above: 0px;
+  --workspace-rail-fade-below: 0px;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--workspace-rail-fade-above),
+    #000 calc(100% - var(--workspace-rail-fade-below)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--workspace-rail-fade-above),
+    #000 calc(100% - var(--workspace-rail-fade-below)),
+    transparent 100%
+  );
+}
+
+.workspace-space-scroller[data-overflow-above="true"] .workspace-space-list {
+  --workspace-rail-fade-above: var(--workspace-rail-edge-inset);
+}
+
+.workspace-space-scroller[data-overflow-below="true"] .workspace-space-list {
+  --workspace-rail-fade-below: var(--workspace-rail-edge-inset);
 }
 
 .workspace-space-list::-webkit-scrollbar {
   display: none;
+}
+
+.workspace-rail-edge-indicator {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: 50%;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 16px;
+  border: var(--workspace-badge-border-width) solid var(--rail);
+  border-radius: var(--r-pill);
+  color: var(--brand-contrast);
+  background: var(--brand);
+  transform: translateX(-50%);
+}
+
+.workspace-rail-edge-indicator.is-above {
+  inset-block-start: 0;
+}
+
+.workspace-rail-edge-indicator.is-below {
+  inset-block-end: 0;
+}
+
+.workspace-rail-edge-indicator[data-highlight="true"] {
+  background: var(--danger);
+}
+
+.workspace-rail-edge-indicator:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 .workspace-rail-separator {

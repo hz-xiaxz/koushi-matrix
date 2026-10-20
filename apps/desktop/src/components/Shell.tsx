@@ -58,6 +58,7 @@ import { useOutsidePressDismissal } from "./popupDismissal";
 import { Tooltip, type TooltipTriggerProps } from "./Tooltip";
 import { ImeTextField } from "./ImeTextControl";
 import { useRecoverableImageSource } from "./avatarImage";
+import { WorkspaceRailEdgeIndicator, useWorkspaceRailOverflow } from "./WorkspaceRailEdge";
 import {
   ICON_SIZE,
   roomAccessTooltipLabel,
@@ -563,6 +564,9 @@ export function WorkspaceRail({
   const [draggedSpaceId, setDraggedSpaceId] = useState<string | null>(null);
   const [dragOverSpaceId, setDragOverSpaceId] = useState<string | null>(null);
   const spaceIds = snapshot.sidebar.space_rail.map((space) => space.space_id);
+  const { listRef, overflow, onListScroll, revealSpace } = useWorkspaceRailOverflow(
+    snapshot.sidebar.space_rail
+  );
 
   function dropSpaceOn(targetSpaceId: string, event: DragEvent<HTMLButtonElement>) {
     event.preventDefault();
@@ -612,102 +616,121 @@ export function WorkspaceRail({
           </button>
         </div>
         <div className="workspace-rail-separator" role="separator" aria-orientation="horizontal" />
-        <div className="workspace-list workspace-space-list">
-          {snapshot.sidebar.space_rail.map((space) => {
-            const localIcon = space.local_icon?.trim();
-            // #1217: an explicit local name is user text, so the generated tile
-            // renders the whole name. A Space with only a Matrix name keeps the
-            // Element/Compound single-grapheme fallback (#414).
-            const hasLocalName = Boolean(
-              snapshot.state.ui.navigation.space_local_presentations[space.space_id]?.name?.trim()
-            );
-            const fallbackName = space.display_name.trim() || space.space_id || "?";
-            // #1166: the rail item keeps the Space name and explains its access
-            // condition, and a bounded overlay summarises it at the avatar.
-            // #1327: the overlay uses the same glyph vocabulary as every other
-            // surface, so a padlock here also means encryption and nothing else.
-            const spaceAccess =
-              roomAccessIndicator(
-                space.access_join_rule ?? null,
-                space.access_restricted_conditions,
-                {
-                  spaceMembersRoute: space.access_space_members_route,
-                  allowedRoomNames: space.access_allowed_room_names
-                }
-              ) ?? ROOM_ACCESS_CHECKING;
-            const railSummary = spaceAccess.glyph;
-            return (
-            <Tooltip
-              label={`${fallbackName}${t("access.conditionSummarySeparator")}${roomAccessTooltipLabel(
-                spaceAccess.descriptionMessageId,
-                spaceAccess.descriptionAllowedRoomNames,
-                spaceAccess.descriptionSpaceName
-              )}`}
-              key={space.space_id}
-            >
-              {(tooltipProps) => (
-                <button
-                  className={`workspace-button workspace-space-button ${
-                    space.is_active ? "is-active" : ""
-                  }`}
-                  data-dragging={draggedSpaceId === space.space_id || undefined}
-                  data-drag-over={dragOverSpaceId === space.space_id || undefined}
-                  data-count={space.unread_count || undefined}
-                  draggable
-                  type="button"
-                  aria-label={fallbackName}
-                  aria-current={space.is_active ? "page" : undefined}
-                  onClick={() => onSelectSpace(space.space_id)}
-                  onDragStart={(event) => {
-                    setDraggedSpaceId(space.space_id);
-                    event.dataTransfer.effectAllowed = "move";
-                    event.dataTransfer.setData(SPACE_DRAG_TYPE, space.space_id);
-                  }}
-                  onDragOver={(event) => {
-                    event.preventDefault();
-                    event.dataTransfer.dropEffect = "move";
-                    setDragOverSpaceId(space.space_id);
-                  }}
-                  onDragLeave={() => {
-                    setDragOverSpaceId((current) =>
-                      current === space.space_id ? null : current
-                    );
-                  }}
-                  onDrop={(event) => dropSpaceOn(space.space_id, event)}
-                  onDragEnd={() => {
-                    setDraggedSpaceId(null);
-                    setDragOverSpaceId(null);
-                  }}
-                  onContextMenu={(event) =>
-                    onOpenContextMenu(
-                      event,
-                      { kind: "space", spaceId: space.space_id },
-                      contextMenuItems({ kind: "space" })
-                    )
+        <div
+          className="workspace-space-scroller"
+          data-overflow-above={overflow.overflowAbove || undefined}
+          data-overflow-below={overflow.overflowBelow || undefined}
+        >
+          <div
+            className="workspace-list workspace-space-list"
+            ref={listRef}
+            onScroll={onListScroll}
+          >
+            {snapshot.sidebar.space_rail.map((space) => {
+              const localIcon = space.local_icon?.trim();
+              // #1217: an explicit local name is user text, so the generated tile
+              // renders the whole name. A Space with only a Matrix name keeps the
+              // Element/Compound single-grapheme fallback (#414).
+              const hasLocalName = Boolean(
+                snapshot.state.ui.navigation.space_local_presentations[space.space_id]?.name?.trim()
+              );
+              const fallbackName = space.display_name.trim() || space.space_id || "?";
+              // #1166: the rail item keeps the Space name and explains its access
+              // condition, and a bounded overlay summarises it at the avatar.
+              // #1327: the overlay uses the same glyph vocabulary as every other
+              // surface, so a padlock here also means encryption and nothing else.
+              const spaceAccess =
+                roomAccessIndicator(
+                  space.access_join_rule ?? null,
+                  space.access_restricted_conditions,
+                  {
+                    spaceMembersRoute: space.access_space_members_route,
+                    allowedRoomNames: space.access_allowed_room_names
                   }
-                  {...tooltipProps}
-                >
-                  <EntityAvatar
-                    avatar={space.avatar}
-                    className="workspace-button-avatar is-space"
-                    colorSeed={space.space_id}
-                    fallback={localIcon || (hasLocalName ? fallbackName : avatarInitial(fallbackName))}
-                    fallbackMode={localIcon || hasLocalName ? "compactLabel" : "elementSpace"}
-                    onRequestAvatarThumbnail={onRequestAvatarThumbnail}
-                  />
-                  {/* The unread count sits above the avatar; access stays below. */}
-                  <span
-                    className="workspace-access-overlay"
-                    data-space-access={railSummary}
-                    aria-hidden="true"
+                ) ?? ROOM_ACCESS_CHECKING;
+              const railSummary = spaceAccess.glyph;
+              return (
+              <Tooltip
+                label={`${fallbackName}${t("access.conditionSummarySeparator")}${roomAccessTooltipLabel(
+                  spaceAccess.descriptionMessageId,
+                  spaceAccess.descriptionAllowedRoomNames,
+                  spaceAccess.descriptionSpaceName
+                )}`}
+                key={space.space_id}
+              >
+                {(tooltipProps) => (
+                  <button
+                    className={`workspace-button workspace-space-button ${
+                      space.is_active ? "is-active" : ""
+                    }`}
+                    data-dragging={draggedSpaceId === space.space_id || undefined}
+                    data-drag-over={dragOverSpaceId === space.space_id || undefined}
+                    data-count={space.unread_count || undefined}
+                    data-space-id={space.space_id}
+                    draggable
+                    type="button"
+                    aria-label={fallbackName}
+                    aria-current={space.is_active ? "page" : undefined}
+                    onClick={() => onSelectSpace(space.space_id)}
+                    onDragStart={(event) => {
+                      setDraggedSpaceId(space.space_id);
+                      event.dataTransfer.effectAllowed = "move";
+                      event.dataTransfer.setData(SPACE_DRAG_TYPE, space.space_id);
+                    }}
+                    onDragOver={(event) => {
+                      event.preventDefault();
+                      event.dataTransfer.dropEffect = "move";
+                      setDragOverSpaceId(space.space_id);
+                    }}
+                    onDragLeave={() => {
+                      setDragOverSpaceId((current) =>
+                        current === space.space_id ? null : current
+                      );
+                    }}
+                    onDrop={(event) => dropSpaceOn(space.space_id, event)}
+                    onDragEnd={() => {
+                      setDraggedSpaceId(null);
+                      setDragOverSpaceId(null);
+                    }}
+                    onContextMenu={(event) =>
+                      onOpenContextMenu(
+                        event,
+                        { kind: "space", spaceId: space.space_id },
+                        contextMenuItems({ kind: "space" })
+                      )
+                    }
+                    {...tooltipProps}
                   >
-                    <RoomAccessGlyphIcon glyph={railSummary} size={ICON_SIZE.micro} />
-                  </span>
-                </button>
-              )}
-            </Tooltip>
-          );
-          })}
+                    <EntityAvatar
+                      avatar={space.avatar}
+                      className="workspace-button-avatar is-space"
+                      colorSeed={space.space_id}
+                      fallback={localIcon || (hasLocalName ? fallbackName : avatarInitial(fallbackName))}
+                      fallbackMode={localIcon || hasLocalName ? "compactLabel" : "elementSpace"}
+                      onRequestAvatarThumbnail={onRequestAvatarThumbnail}
+                    />
+                    {/* The unread count sits above the avatar; access stays below. */}
+                    <span
+                      className="workspace-access-overlay"
+                      data-space-access={railSummary}
+                      aria-hidden="true"
+                    >
+                      <RoomAccessGlyphIcon glyph={railSummary} size={ICON_SIZE.micro} />
+                    </span>
+                  </button>
+                )}
+              </Tooltip>
+            );
+            })}
+          </div>
+          {/* #1509: outside the scrollport, so the indicators neither scroll
+              away, grow `scrollHeight`, nor become drag-reorder targets. */}
+          {overflow.above ? (
+            <WorkspaceRailEdgeIndicator edge="above" attention={overflow.above} onReveal={revealSpace} />
+          ) : null}
+          {overflow.below ? (
+            <WorkspaceRailEdgeIndicator edge="below" attention={overflow.below} onReveal={revealSpace} />
+          ) : null}
         </div>
       </div>
       <div className="rail-footer">

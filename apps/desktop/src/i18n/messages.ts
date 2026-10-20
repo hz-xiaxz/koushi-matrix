@@ -1910,6 +1910,10 @@ export type MessageId =
   | "workspace.createSpace"
   | "workspace.explore"
   | "workspace.homeAttention"
+  | "workspace.railActivityAbove"
+  | "workspace.railActivityBelow"
+  | "workspace.railMentionsAbove"
+  | "workspace.railMentionsBelow"
   | "workspace.filters"
   | "workspace.home"
   | "workspace.invites"
@@ -4307,6 +4311,10 @@ const en: Catalog = {
   "workspace.createSpace": "Create space",
   "workspace.explore": "Explore",
   "workspace.homeAttention": "{name}, {unread} unread messages, {invites} invites",
+  "workspace.railActivityAbove": "{count} unread messages in Spaces above",
+  "workspace.railActivityBelow": "{count} unread messages in Spaces below",
+  "workspace.railMentionsAbove": "{count} unread messages in Spaces above, including mentions",
+  "workspace.railMentionsBelow": "{count} unread messages in Spaces below, including mentions",
   "workspace.filters": "Filters",
   "workspace.home": "Home",
   "workspace.invites": "Invites",
@@ -6580,6 +6588,10 @@ const ja: Catalog = {
   "workspace.createSpace": "スペースを作成",
   "workspace.explore": "探索",
   "workspace.homeAttention": "{name}、未読メッセージ {unread} 件、招待 {invites} 件",
+  "workspace.railActivityAbove": "上のスペースに未読メッセージ {count} 件",
+  "workspace.railActivityBelow": "下のスペースに未読メッセージ {count} 件",
+  "workspace.railMentionsAbove": "上のスペースに未読メッセージ {count} 件（メンションを含む）",
+  "workspace.railMentionsBelow": "下のスペースに未読メッセージ {count} 件（メンションを含む）",
   "workspace.filters": "フィルター",
   "workspace.home": "ホーム",
   "workspace.invites": "招待",
