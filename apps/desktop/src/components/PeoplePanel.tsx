@@ -1,6 +1,7 @@
 import { ChevronLeft, MessageCircle, UserPlus, X } from "lucide-react";
 import { useEffect, useMemo, useRef, useState, type UIEvent } from "react";
-import { t } from "../i18n/messages";
+import { t, tCount } from "../i18n/messages";
+import { uiNumberFormat } from "../domain/intlFormatCache";
 import { ImeSafeForm, ImeTextField } from "./ImeTextControl";
 import type {
   ContactSecurityState,
@@ -147,7 +148,9 @@ export function PeoplePanel(props: PeoplePanelProps) {
       <header className="people-panel-header">
         <h2 id="people-title">{t("panel.people")}</h2>
         <span className="people-panel-count">
-          {t("people.memberCount", { count: String(rosterMembers.length) })}
+          {tCount("people.memberCount", rosterMembers.length, {
+            count: uiNumberFormat().format(rosterMembers.length)
+          })}
         </span>
         <Tooltip
           label={t("action.close", { title: t("panel.people") })}

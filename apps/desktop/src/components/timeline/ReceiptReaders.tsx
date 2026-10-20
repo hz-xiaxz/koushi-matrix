@@ -1,5 +1,6 @@
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
+import { useActiveLocaleKey } from "../../i18n/activeLocaleContext";
 import { getActiveLocale, localeLanguageTag, t } from "../../i18n/messages";
 import { avatarInitial, peopleFacingLabel } from "../../app/uiShared";
 import {
@@ -83,7 +84,10 @@ export function ReceiptReaders({
   const [readerWindowSequence, setReaderWindowSequence] = useState("0");
   const [focusedReaderUserId, setFocusedReaderUserId] = useState<string | null>(null);
   const [readerState, setReaderState] = useState<"loading" | "ready" | "failed">("loading");
-  const compactRows = useMemo(() => receipts.map(compactReaderRow), [receipts]);
+  // #1557: the rows capture the catalog locale for their timestamps, so a
+  // locale switch must rebuild them.
+  const localeKey = useActiveLocaleKey();
+  const compactRows = useMemo(() => receipts.map(compactReaderRow), [receipts, localeKey]);
   const compactDetails = compactRows.map(formatReaderRow);
   if (overflowCount > 0) {
     compactDetails.push(t("timeline.readReceiptOverflow", { count: overflowCount }));

@@ -58,6 +58,7 @@ import {
 import type { MatrixPermalinkTarget } from "./domain/matrixPermalink";
 import { resolveDirectorySubmission } from "./domain/directorySubmission";
 import { serverNameFromMatrixId } from "./domain/matrixPermalink";
+import { ActiveLocaleContext, activeLocaleKey } from "./i18n/activeLocaleContext";
 import { setActiveLocaleProfile, t } from "./i18n/messages";
 
 export function reconcileComposerSubmissionSnapshot(
@@ -7064,6 +7065,12 @@ function AccountContent({
     snapshot.state.domain.locale_profile.catalog_locale,
     snapshot.state.domain.locale_profile.pseudo_locale
   );
+  // #1557: memoised children subscribe to this key, so a locale switch
+  // re-renders them with the catalog activated above.
+  const localeContextKey = activeLocaleKey(
+    snapshot.state.domain.locale_profile.catalog_locale,
+    snapshot.state.domain.locale_profile.pseudo_locale
+  );
 
   const verificationGate =
     [
@@ -7340,6 +7347,7 @@ function AccountContent({
   }
 
   return (
+    <ActiveLocaleContext.Provider value={localeContextKey}>
     <TimelineStoreContext.Provider value={timelineStoreContextValue}>
       <div
         className="desktop"
@@ -8358,6 +8366,7 @@ function AccountContent({
       })() : null}
       </div>
     </TimelineStoreContext.Provider>
+    </ActiveLocaleContext.Provider>
   );
 }
 

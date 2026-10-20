@@ -94,6 +94,9 @@ describe("ThreadsListView", () => {
 
     expect(screen.getAllByText(/Unknown user/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/@private-(root|reply):example\.invalid/)).toBeNull();
+    // #1546: a single reply uses the singular, as the timeline thread chip does.
+    expect(document.body.textContent).toContain("1 reply");
+    expect(document.body.textContent).not.toContain("1 replies");
   });
 
   it("resolves each remote string independently in mixed-direction rows", () => {

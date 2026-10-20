@@ -1,6 +1,7 @@
 import { MessageCircle } from "lucide-react";
 
-import { t } from "../i18n/messages";
+import { t, tCount } from "../i18n/messages";
+import { uiNumberFormat } from "../domain/intlFormatCache";
 import { peopleFacingLabel } from "../app/uiShared";
 import type {
   ThreadOpenIntent,
@@ -112,7 +113,9 @@ function ThreadsListRow({
               </>
             ) : null}
             {" · "}
-            {t("threads.replyCount", { count: item.reply_count })}
+            {tCount("threads.replyCount", item.reply_count, {
+              count: uiNumberFormat().format(item.reply_count)
+            })}
           </span> : null}
         </span>
         {/* #1259: the same per-root unread value the room timeline chip shows. */}

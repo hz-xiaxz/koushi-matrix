@@ -421,6 +421,7 @@ export type MessageId =
   | "directory.joining"
   | "directory.joinRoom"
   | "directory.memberCount"
+  | "directory.memberCountOne"
   | "directory.noAlias"
   | "directory.previewAlreadyJoined"
   | "directory.previewCancel"
@@ -501,6 +502,7 @@ export type MessageId =
   | "people.knockAccept"
   | "people.knockDecline"
   | "people.memberCount"
+  | "people.memberCountOne"
   | "people.memberActions"
   | "people.openProfile"
   | "people.searchMembers"
@@ -1955,9 +1957,9 @@ export type MessageId =
   | "spaceMembers.title"
   | "spaceMembers.search"
   | "spaceMembers.navLabel"
-  | "spaceMembers.navCount"
   | "spaceMembers.navAccessible"
   | "spaceMembers.joinedCount"
+  | "spaceMembers.joinedCountOne"
   | "spaceMembers.sectionJoined"
   | "spaceMembers.sectionInvited"
   | "spaceMembers.sectionChildOnly"
@@ -1988,6 +1990,7 @@ export type MessageId =
   | "threads.loading"
   | "threads.open"
   | "threads.replyCount"
+  | "threads.replyCountOne"
   | "threads.openUnreadRoot"
   | "threads.title"
   | "settings.searchHistory"
@@ -2662,6 +2665,7 @@ const en: Catalog = {
   "directory.joining": "Joining",
   "directory.joinRoom": "Join {name}",
   "directory.memberCount": "{count} members",
+  "directory.memberCountOne": "{count} member",
   "directory.noAlias": "No canonical alias",
   "directory.previewAlreadyJoined": "You are already in this room",
   "directory.previewCancel": "Cancel",
@@ -2742,6 +2746,7 @@ const en: Catalog = {
   "people.knockAccept": "Accept",
   "people.knockDecline": "Decline",
   "people.memberCount": "{count} members",
+  "people.memberCountOne": "{count} member",
   "people.memberActions": "Member actions",
   "people.openProfile": "Open profile for {name}",
   "people.searchMembers": "Search room members",
@@ -4352,9 +4357,9 @@ const en: Catalog = {
   "spaceMembers.title": "Space members",
   "spaceMembers.search": "Search space members",
   "spaceMembers.navLabel": "Members",
-  "spaceMembers.navCount": "{joined} · +{childOnly}",
   "spaceMembers.navAccessible": "Members, {joined} joined, {childOnly} only in child rooms",
   "spaceMembers.joinedCount": "{count} joined members",
+  "spaceMembers.joinedCountOne": "{count} joined member",
   "spaceMembers.sectionJoined": "Space members",
   "spaceMembers.sectionInvited": "Invitation pending",
   "spaceMembers.sectionChildOnly": "Not in Space",
@@ -4385,6 +4390,7 @@ const en: Catalog = {
   "threads.loading": "Loading threads…",
   "threads.open": "Open thread",
   "threads.replyCount": "{count} replies",
+  "threads.replyCountOne": "{count} reply",
   "threads.openUnreadRoot": "Open unread thread",
   "threads.title": "Threads",
   "settings.searchHistory": "Search history",
@@ -4950,6 +4956,7 @@ const ja: Catalog = {
   "directory.joining": "参加中",
   "directory.joinRoom": "{name}に参加",
   "directory.memberCount": "メンバー {count} 人",
+  "directory.memberCountOne": "メンバー {count} 人",
   "directory.noAlias": "正規エイリアスなし",
   "directory.previewAlreadyJoined": "すでに参加しています",
   "directory.previewCancel": "キャンセル",
@@ -5029,7 +5036,8 @@ const ja: Catalog = {
   "people.knockRequests": "参加リクエスト",
   "people.knockAccept": "承認",
   "people.knockDecline": "拒否",
-  "people.memberCount": "メンバー {count}人",
+  "people.memberCount": "{count} 人",
+  "people.memberCountOne": "{count} 人",
   "people.memberActions": "メンバー操作",
   "people.openProfile": "{name}のプロフィールを開く",
   "people.searchMembers": "メンバーを検索",
@@ -6625,9 +6633,9 @@ const ja: Catalog = {
   "spaceMembers.title": "スペースのメンバー",
   "spaceMembers.search": "スペースのメンバーを検索",
   "spaceMembers.navLabel": "メンバー",
-  "spaceMembers.navCount": "参加 {joined} 人 · +{childOnly}",
   "spaceMembers.navAccessible": "メンバー、参加 {joined} 人、子ルームのみ {childOnly} 人",
-  "spaceMembers.joinedCount": "参加メンバー {count} 人",
+  "spaceMembers.joinedCount": "参加 {count} 人",
+  "spaceMembers.joinedCountOne": "参加 {count} 人",
   "spaceMembers.sectionJoined": "スペースのメンバー",
   "spaceMembers.sectionInvited": "招待保留",
   "spaceMembers.sectionChildOnly": "スペース未参加",
@@ -6657,7 +6665,8 @@ const ja: Catalog = {
   "threads.error": "スレッドを読み込めませんでした",
   "threads.loading": "スレッドを読み込み中…",
   "threads.open": "スレッドを開く",
-  "threads.replyCount": "{count}件の返信",
+  "threads.replyCount": "返信 {count} 件",
+  "threads.replyCountOne": "返信 {count} 件",
   "threads.openUnreadRoot": "未読スレッドを開く",
   "threads.title": "スレッド",
   "settings.searchHistory": "検索履歴",
@@ -6824,6 +6833,21 @@ export function tInvariant(id: MessageId): string {
  * interpolates.
  */
 export const MESSAGE_PLACEHOLDER_PATTERN = /\{([a-zA-Z0-9_]+)\}/g;
+
+/** A count message whose singular form is the `…One` sibling id (#1546). */
+export type CountMessageId = {
+  [K in MessageId]: `${K}One` extends MessageId ? K : never;
+}[MessageId];
+
+/**
+ * #1546: render a count message, choosing the `…One` form for exactly 1. The
+ * key is chosen on the numeric `count`; `values.count` may carry its formatted
+ * text, and defaults to the number.
+ */
+export function tCount(id: CountMessageId, count: number, values: MessageValues = {}): string {
+  const selected: MessageId = count === 1 ? `${id}One` : id;
+  return t(selected, { count, ...values });
+}
 
 export function t(
   id: MessageId,
