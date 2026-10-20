@@ -586,3 +586,37 @@ fn not_joined_lane_keeps_the_empty_room_placeholder() {
         ]
     );
 }
+
+#[test]
+fn a_joined_subspace_is_never_in_the_not_joined_lane() {
+    // Issue #1559: joined Spaces live in `AppState.spaces`, never in the joined
+    // room list, so the lane must consult both before calling a child not
+    // joined. A sub-space the account is not in stays in the lane.
+    let mut subspace = child(
+        "!subspace:example.invalid",
+        "Engineering",
+        SpaceChildMembership::Joined,
+    );
+    subspace.is_space = true;
+    let mut other_subspace = child(
+        "!other-subspace:example.invalid",
+        "Design",
+        SpaceChildMembership::NotJoined,
+    );
+    other_subspace.is_space = true;
+    let mut state = state_with_children(vec![subspace, other_subspace]);
+    state.spaces.push(SpaceSummary {
+        space_id: "!subspace:example.invalid".to_owned(),
+        raw_name: Some("Engineering".to_owned()),
+        display_name: "Engineering".to_owned(),
+        avatar: None,
+        join_rule: None,
+        child_room_ids: Vec::new(),
+        parent_side_child_room_ids: Vec::new(),
+    });
+
+    let sidebar = compose_sidebar_for_state(&state);
+
+    assert_eq!(names(&sidebar.sections.not_joined), ["Design"]);
+    assert_eq!(names(&sidebar.sections.rooms), ["Joined Room"]);
+}
