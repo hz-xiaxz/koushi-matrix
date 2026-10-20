@@ -1,3 +1,4 @@
+import { readFileSync } from "node:fs";
 import { describe, expect, test } from "vitest";
 import { COMPOSER_DRAFT_REVISION_ZERO } from "./composerDraftRevision";
 
@@ -275,6 +276,17 @@ describe("diagnosticReport", () => {
     });
 
     expect(report).toContain("Koushi diagnostics");
+    // #1487: the saved report identifies the build it came from. The desktop
+    // package version is the release version the release check keeps in sync
+    // with tauri.conf.json and Cargo.toml.
+    const desktopPackage = JSON.parse(
+      readFileSync(new URL("../../package.json", import.meta.url), "utf8")
+    ) as { version: string };
+    expect(desktopPackage.version).toMatch(/^\d+\.\d+\.\d+/);
+    expect(report.split("\n").slice(0, 2)).toEqual([
+      "Koushi diagnostics",
+      `Koushi version: ${desktopPackage.version}`
+    ]);
     expect(report).toContain("Generated at:");
     expect(report).toContain(
       "Room classification: domain_dms=1 sidebar_dms=1 room_list_items=1 room_list_dm_items=0 active_filter=rooms"

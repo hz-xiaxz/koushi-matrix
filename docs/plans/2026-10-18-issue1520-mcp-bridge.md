@@ -27,7 +27,9 @@ instead of promising push.
 In v1:
 
 - `list_accounts`, `list_rooms`, `search_messages`, `get_attachment`
-- `send_message` with text, reply relation, and staged attachments
+- `send_message` with text, reply relation, and local-file attachments (Core
+  local-upload preparation + `UploadAndSendMedia`, not composer staging; see
+  the overview and #1533)
 - `wait_for_events` (long-poll) with an opaque cursor, for `new_message` and
   `room_invite`
 - One connection policy per client: accounts, room scope, read/write,

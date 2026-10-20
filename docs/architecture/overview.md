@@ -2027,14 +2027,26 @@ Invariants:
   launcher to the app and is generated per app launch, held in a `0600`
   endpoint file, and never written to argv, logs, or events. Matrix
   credentials, store keys, and index keys never cross the socket.
-- **Attachments follow existing policy.** Sending passes local paths to Core,
-  which reads and encrypts them through the staged-upload path. Receiving
+- **Attachments follow existing policy.** Sending passes absolute local paths
+  to Core (`koushi_core::local_upload`), which checks the count and size limits,
+  reads the files off the async runtime, and runs the staged-upload media
+  preparation in a detached registry; each file is then sent with the composer's
+  own `TimelineCommand::UploadAndSendMedia`. No composer target, staged-upload
+  state, or `AppAction` is touched. Sending files needs the `attachments`
+  permission in addition to `send`. Receiving
   writes through the `media_save` containment policy into an app-managed
   directory. No caller-chosen destination is accepted.
-- **Polling, not push.** MCP cannot wake a host that is not calling. New
-  messages surface through an account-bound, monotonic cursor consumed by a
-  `wait_for_events` long-poll of at most 50 s; the cursor cannot replay
-  another account's events. An approval wait counts against that call's 60 s
+- **Polling, not push.** MCP cannot wake a host that is not calling. Room
+  changes surface through a `wait_for_events` long-poll of at most 50 s over a
+  sampled feed: the host samples each joined room's latest event every 2 s,
+  coalesces bursts into one record per changed room, seeds the first sample
+  silently, reports no invites, and retains at most 500 records in memory.
+  Cursors are opaque and bound to the account and to the feed's random
+  generation, which a bridge start or app restart replaces. A malformed,
+  previous-generation, other-account, future, or expired cursor fails with
+  `resync_required` and a stable reason; it never restarts silently at the
+  head. Results carry `structuredContent` matching the tool's `outputSchema`,
+  including `coverage: sampled_room_changes`. An approval wait counts against that call's 60 s
   budget. Other tools do not share the budget: a send may wait 40 s for
   approval and then for delivery, and a retry with the same
   `client_request_id` is deduplicated.

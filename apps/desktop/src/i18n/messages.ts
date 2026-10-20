@@ -421,6 +421,7 @@ export type MessageId =
   | "directory.joining"
   | "directory.joinRoom"
   | "directory.memberCount"
+  | "directory.memberCountOne"
   | "directory.noAlias"
   | "directory.previewAlreadyJoined"
   | "directory.previewCancel"
@@ -501,6 +502,7 @@ export type MessageId =
   | "people.knockAccept"
   | "people.knockDecline"
   | "people.memberCount"
+  | "people.memberCountOne"
   | "people.memberActions"
   | "people.openProfile"
   | "people.searchMembers"
@@ -1910,6 +1912,10 @@ export type MessageId =
   | "workspace.createSpace"
   | "workspace.explore"
   | "workspace.homeAttention"
+  | "workspace.railActivityAbove"
+  | "workspace.railActivityBelow"
+  | "workspace.railMentionsAbove"
+  | "workspace.railMentionsBelow"
   | "workspace.filters"
   | "workspace.home"
   | "workspace.invites"
@@ -1955,9 +1961,9 @@ export type MessageId =
   | "spaceMembers.title"
   | "spaceMembers.search"
   | "spaceMembers.navLabel"
-  | "spaceMembers.navCount"
   | "spaceMembers.navAccessible"
   | "spaceMembers.joinedCount"
+  | "spaceMembers.joinedCountOne"
   | "spaceMembers.sectionJoined"
   | "spaceMembers.sectionInvited"
   | "spaceMembers.sectionChildOnly"
@@ -1988,6 +1994,7 @@ export type MessageId =
   | "threads.loading"
   | "threads.open"
   | "threads.replyCount"
+  | "threads.replyCountOne"
   | "threads.openUnreadRoot"
   | "threads.title"
   | "settings.searchHistory"
@@ -2662,6 +2669,7 @@ const en: Catalog = {
   "directory.joining": "Joining",
   "directory.joinRoom": "Join {name}",
   "directory.memberCount": "{count} members",
+  "directory.memberCountOne": "{count} member",
   "directory.noAlias": "No canonical alias",
   "directory.previewAlreadyJoined": "You are already in this room",
   "directory.previewCancel": "Cancel",
@@ -2742,6 +2750,7 @@ const en: Catalog = {
   "people.knockAccept": "Accept",
   "people.knockDecline": "Decline",
   "people.memberCount": "{count} members",
+  "people.memberCountOne": "{count} member",
   "people.memberActions": "Member actions",
   "people.openProfile": "Open profile for {name}",
   "people.searchMembers": "Search room members",
@@ -3204,11 +3213,11 @@ const en: Catalog = {
   "settings.assistantsLauncherEphemeral": "Koushi could not copy its launcher to a permanent location, so assistants cannot use it. Check free disk space and restart Koushi.",
   "mcp.approveReadTitle": "Allow {client} to read your messages?",
   "mcp.approveSendTitle": "Allow {client} to send messages?",
-  "mcp.approveAttachmentsTitle": "Allow {client} to download attachments?",
+  "mcp.approveAttachmentsTitle": "Allow {client} to send and download attachments?",
   "mcp.requestedBy": "Requested by a program on this computer",
   "mcp.wantsRead": "wants to read {account}",
   "mcp.wantsSend": "wants to send as {account}",
-  "mcp.wantsAttachments": "wants to download attachments from {account}",
+  "mcp.wantsAttachments": "wants to send and download attachments in {account}",
   "mcp.readCan": "If you allow, {client} can:",
   "mcp.readCanRooms": "List the rooms in {account}, with unread counts",
   "mcp.readCanMessages": "Read recent messages, including encrypted rooms",
@@ -3218,13 +3227,13 @@ const en: Catalog = {
   "mcp.sendPreviewHeadingRoom": "The message it is waiting to send, in {room}:",
   "mcp.sendNoLongerWaiting": "The assistant stopped waiting, so that message will not be sent. Your answer still applies to its future messages.",
   "mcp.sendExplain": "If you allow, {client} can send messages and replies from {account} without asking again. They look like messages you wrote. You can turn this off in App Settings → AI assistants.",
-  "mcp.attachmentsExplain": "If you allow, {client} can download attachments from {account} into Koushi's media cache without asking again.",
+  "mcp.attachmentsExplain": "If you allow, {client} can send files from this computer as attachments from {account}, and download attachments from {account} into Koushi's media cache, without asking again.",
   "mcp.attachmentsRoom": "Requested for a file in {room}.",
   "mcp.selfDeclared": "“{client}” is the name the assistant gave itself. Allow it only if you just set up or asked that assistant.",
   "mcp.deny": "Deny",
   "mcp.allowRead": "Allow reading {account}",
   "mcp.allowSend": "Allow sending from {account}",
-  "mcp.allowAttachments": "Allow downloads from {account}",
+  "mcp.allowAttachments": "Allow attachments for {account}",
   "mcp.moreWaiting": "More requests waiting: {count}",
   "mcp.saveFailed": "Koushi could not save this approval. See App Settings → AI assistants.",
   "mcp.moreMessagesWaiting": "Other calls from this assistant waiting for this answer: {count}",
@@ -4307,6 +4316,10 @@ const en: Catalog = {
   "workspace.createSpace": "Create space",
   "workspace.explore": "Explore",
   "workspace.homeAttention": "{name}, {unread} unread messages, {invites} invites",
+  "workspace.railActivityAbove": "{count} unread messages in Spaces above",
+  "workspace.railActivityBelow": "{count} unread messages in Spaces below",
+  "workspace.railMentionsAbove": "{count} unread messages in Spaces above, including mentions",
+  "workspace.railMentionsBelow": "{count} unread messages in Spaces below, including mentions",
   "workspace.filters": "Filters",
   "workspace.home": "Home",
   "workspace.invites": "Invites",
@@ -4352,9 +4365,9 @@ const en: Catalog = {
   "spaceMembers.title": "Space members",
   "spaceMembers.search": "Search space members",
   "spaceMembers.navLabel": "Members",
-  "spaceMembers.navCount": "{joined} · +{childOnly}",
   "spaceMembers.navAccessible": "Members, {joined} joined, {childOnly} only in child rooms",
   "spaceMembers.joinedCount": "{count} joined members",
+  "spaceMembers.joinedCountOne": "{count} joined member",
   "spaceMembers.sectionJoined": "Space members",
   "spaceMembers.sectionInvited": "Invitation pending",
   "spaceMembers.sectionChildOnly": "Not in Space",
@@ -4385,6 +4398,7 @@ const en: Catalog = {
   "threads.loading": "Loading threads…",
   "threads.open": "Open thread",
   "threads.replyCount": "{count} replies",
+  "threads.replyCountOne": "{count} reply",
   "threads.openUnreadRoot": "Open unread thread",
   "threads.title": "Threads",
   "settings.searchHistory": "Search history",
@@ -4950,6 +4964,7 @@ const ja: Catalog = {
   "directory.joining": "参加中",
   "directory.joinRoom": "{name}に参加",
   "directory.memberCount": "メンバー {count} 人",
+  "directory.memberCountOne": "メンバー {count} 人",
   "directory.noAlias": "正規エイリアスなし",
   "directory.previewAlreadyJoined": "すでに参加しています",
   "directory.previewCancel": "キャンセル",
@@ -5029,7 +5044,8 @@ const ja: Catalog = {
   "people.knockRequests": "参加リクエスト",
   "people.knockAccept": "承認",
   "people.knockDecline": "拒否",
-  "people.memberCount": "メンバー {count}人",
+  "people.memberCount": "{count} 人",
+  "people.memberCountOne": "{count} 人",
   "people.memberActions": "メンバー操作",
   "people.openProfile": "{name}のプロフィールを開く",
   "people.searchMembers": "メンバーを検索",
@@ -5491,11 +5507,11 @@ const ja: Catalog = {
   "settings.assistantsLauncherEphemeral": "Koushi はランチャーを固定の場所にコピーできなかったため、アシスタントが使えません。空き容量を確認して Koushi を再起動してください。",
   "mcp.approveReadTitle": "{client} にメッセージの読み取りを許可しますか？",
   "mcp.approveSendTitle": "{client} にメッセージの送信を許可しますか？",
-  "mcp.approveAttachmentsTitle": "{client} に添付ファイルのダウンロードを許可しますか？",
+  "mcp.approveAttachmentsTitle": "{client} に添付ファイルの送信とダウンロードを許可しますか？",
   "mcp.requestedBy": "このコンピューター上のプログラムからの要求です",
   "mcp.wantsRead": "{account} の読み取りを求めています",
   "mcp.wantsSend": "{account} として送信しようとしています",
-  "mcp.wantsAttachments": "{account} の添付ファイルのダウンロードを求めています",
+  "mcp.wantsAttachments": "{account} での添付ファイルの送信とダウンロードを求めています",
   "mcp.readCan": "許可すると、{client} は次のことができます。",
   "mcp.readCanRooms": "{account} のルームを未読数つきで一覧する",
   "mcp.readCanMessages": "暗号化ルームを含む最近のメッセージを読む",
@@ -5505,13 +5521,13 @@ const ja: Catalog = {
   "mcp.sendPreviewHeadingRoom": "{room} への送信を待っているメッセージ：",
   "mcp.sendNoLongerWaiting": "アシスタントが待つのをやめたため、そのメッセージは送信されません。ここでの回答は今後のメッセージに適用されます。",
   "mcp.sendExplain": "許可すると、{client} は今後確認なしで {account} からメッセージや返信を送れます。あなたが書いたメッセージと同じように見えます。アプリ設定 → AI アシスタントでいつでもオフにできます。",
-  "mcp.attachmentsExplain": "許可すると、{client} は今後確認なしで {account} の添付ファイルを Koushi のメディアキャッシュにダウンロードできます。",
+  "mcp.attachmentsExplain": "許可すると、{client} は今後確認なしで、このコンピューター上のファイルを {account} から添付ファイルとして送信し、{account} の添付ファイルを Koushi のメディアキャッシュにダウンロードできます。",
   "mcp.attachmentsRoom": "{room} のファイルについての要求です。",
   "mcp.selfDeclared": "「{client}」はアシスタントの自己申告による名前です。そのアシスタントを設定した直後や、頼みごとをした場合にだけ許可してください。",
   "mcp.deny": "拒否",
   "mcp.allowRead": "{account} の読み取りを許可",
   "mcp.allowSend": "{account} からの送信を許可",
-  "mcp.allowAttachments": "{account} からのダウンロードを許可",
+  "mcp.allowAttachments": "{account} の添付ファイルを許可",
   "mcp.moreWaiting": "ほかに待っている要求：{count} 件",
   "mcp.saveFailed": "この承認を保存できませんでした。アプリ設定 → AI アシスタントを確認してください。",
   "mcp.moreMessagesWaiting": "この回答を待っている、このアシスタントのほかの呼び出し：{count} 件",
@@ -6580,6 +6596,10 @@ const ja: Catalog = {
   "workspace.createSpace": "スペースを作成",
   "workspace.explore": "探索",
   "workspace.homeAttention": "{name}、未読メッセージ {unread} 件、招待 {invites} 件",
+  "workspace.railActivityAbove": "上のスペースに未読メッセージ {count} 件",
+  "workspace.railActivityBelow": "下のスペースに未読メッセージ {count} 件",
+  "workspace.railMentionsAbove": "上のスペースに未読メッセージ {count} 件（メンションを含む）",
+  "workspace.railMentionsBelow": "下のスペースに未読メッセージ {count} 件（メンションを含む）",
   "workspace.filters": "フィルター",
   "workspace.home": "ホーム",
   "workspace.invites": "招待",
@@ -6625,9 +6645,9 @@ const ja: Catalog = {
   "spaceMembers.title": "スペースのメンバー",
   "spaceMembers.search": "スペースのメンバーを検索",
   "spaceMembers.navLabel": "メンバー",
-  "spaceMembers.navCount": "参加 {joined} 人 · +{childOnly}",
   "spaceMembers.navAccessible": "メンバー、参加 {joined} 人、子ルームのみ {childOnly} 人",
-  "spaceMembers.joinedCount": "参加メンバー {count} 人",
+  "spaceMembers.joinedCount": "参加 {count} 人",
+  "spaceMembers.joinedCountOne": "参加 {count} 人",
   "spaceMembers.sectionJoined": "スペースのメンバー",
   "spaceMembers.sectionInvited": "招待保留",
   "spaceMembers.sectionChildOnly": "スペース未参加",
@@ -6657,7 +6677,8 @@ const ja: Catalog = {
   "threads.error": "スレッドを読み込めませんでした",
   "threads.loading": "スレッドを読み込み中…",
   "threads.open": "スレッドを開く",
-  "threads.replyCount": "{count}件の返信",
+  "threads.replyCount": "返信 {count} 件",
+  "threads.replyCountOne": "返信 {count} 件",
   "threads.openUnreadRoot": "未読スレッドを開く",
   "threads.title": "スレッド",
   "settings.searchHistory": "検索履歴",
@@ -6824,6 +6845,21 @@ export function tInvariant(id: MessageId): string {
  * interpolates.
  */
 export const MESSAGE_PLACEHOLDER_PATTERN = /\{([a-zA-Z0-9_]+)\}/g;
+
+/** A count message whose singular form is the `…One` sibling id (#1546). */
+export type CountMessageId = {
+  [K in MessageId]: `${K}One` extends MessageId ? K : never;
+}[MessageId];
+
+/**
+ * #1546: render a count message, choosing the `…One` form for exactly 1. The
+ * key is chosen on the numeric `count`; `values.count` may carry its formatted
+ * text, and defaults to the number.
+ */
+export function tCount(id: CountMessageId, count: number, values: MessageValues = {}): string {
+  const selected: MessageId = count === 1 ? `${id}One` : id;
+  return t(selected, { count, ...values });
+}
 
 export function t(
   id: MessageId,

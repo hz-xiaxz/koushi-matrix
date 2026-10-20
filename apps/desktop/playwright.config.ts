@@ -75,7 +75,12 @@ export default defineConfig({
         /thread-summary-bidi\.spec\.ts$/,
         /mention-pill-rendering\.spec\.ts$/,
         /thread-mention-pill\.spec\.ts$/,
-        /upload-staging-scroll\.spec\.ts$/
+        /upload-staging-scroll\.spec\.ts$/,
+        // The account-tab spinner shape (#1544) was reported on macOS WebKit.
+        /account-tab-spinner\.spec\.ts$/,
+        // The scrollbar-less Space rail's scroll-into-view and edge
+        // indicators (#1509) depend on the engine's scrollport geometry.
+        /workspace-rail-overflow\.spec\.ts$/
       ]
     }
   ],

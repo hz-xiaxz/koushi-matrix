@@ -190,6 +190,7 @@ fn native_attention_candidate_uses_verified_room_unread_and_generic_kind() {
         previous_candidate: None,
         message_previews: false,
         capabilities: available_capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     assert_eq!(state.summary.unread_count, 12);
@@ -225,6 +226,7 @@ fn native_attention_includes_plain_unread_counts_in_content_and_badge_totals() {
         previous_candidate: None,
         message_previews: false,
         capabilities: available_capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     assert_eq!(state.summary.unread_count, 5);
@@ -262,6 +264,7 @@ fn native_attention_tracks_plain_unread_count_transitions() {
             previous_candidate: None,
             message_previews: false,
             capabilities: available_capabilities(),
+            locale: koushi_state::CatalogLocale::En,
         });
 
         assert_eq!(state.summary.unread_count, unread_count);
@@ -305,6 +308,7 @@ fn native_attention_badge_deduplicates_rooms_without_inventing_manual_counts() {
         previous_candidate: None,
         message_previews: false,
         capabilities: available_capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     assert_eq!(state.summary.badge_count, 3);
@@ -326,6 +330,7 @@ fn native_attention_candidate_uses_projected_room_display_label() {
         previous_candidate: None,
         message_previews: false,
         capabilities: available_capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     assert_eq!(
@@ -352,6 +357,7 @@ fn native_attention_candidate_serialization_omits_room_identity() {
         previous_candidate: None,
         message_previews: false,
         capabilities: available_capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     let value = serde_json::to_value(state).expect("serialize native attention");
@@ -391,6 +397,7 @@ fn native_attention_suppresses_initial_backfill_self_and_focused_room() {
             previous_candidate: None,
             message_previews: false,
             capabilities: available_capabilities(),
+            locale: koushi_state::CatalogLocale::En,
         });
 
         assert_eq!(
@@ -411,6 +418,7 @@ fn native_attention_suppresses_initial_backfill_self_and_focused_room() {
         previous_candidate: None,
         message_previews: false,
         capabilities: available_capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     assert_eq!(
@@ -441,6 +449,7 @@ fn native_attention_projection_excludes_explicit_muting_and_low_priority_from_th
         previous_candidate: None,
         message_previews: false,
         capabilities: available_capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     // #955: low priority no longer contributes to the persistent Dock badge.
@@ -468,6 +477,7 @@ fn native_attention_projection_excludes_effectively_muted_rooms_from_badge() {
         previous_candidate: None,
         message_previews: false,
         capabilities: available_capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     assert_eq!(state.summary.badge_count, 0);
@@ -516,6 +526,7 @@ fn native_attention_badge_policy_preserves_non_muted_conversation_attention() {
             previous_candidate: None,
             message_previews: false,
             capabilities: available_capabilities(),
+            locale: koushi_state::CatalogLocale::En,
         });
 
         assert_eq!(state.summary.badge_count, expected_badge);
@@ -542,6 +553,7 @@ fn native_attention_capability_unavailable_and_duplicate_candidates_are_suppress
         previous_candidate: None,
         message_previews: false,
         capabilities: unavailable,
+        locale: koushi_state::CatalogLocale::En,
     });
 
     assert_eq!(state.summary.badge_count, 2);
@@ -570,6 +582,7 @@ fn native_attention_capability_unavailable_and_duplicate_candidates_are_suppress
         previous_candidate: Some(&previous),
         message_previews: false,
         capabilities: available_capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     assert_eq!(duplicate.summary.candidate, None);
@@ -595,6 +608,7 @@ fn native_attention_reducer_preserves_dispatch_state_not_only_summary() {
         previous_candidate: None,
         message_previews: false,
         capabilities: available_capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     let mut app_state = ready_state();

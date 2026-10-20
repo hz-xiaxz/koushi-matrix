@@ -13,7 +13,8 @@ import type {
   UserProfile
 } from "../domain/types";
 import { contextMenuItems } from "../domain/contextMenus";
-import { t } from "../i18n/messages";
+import { t, tCount } from "../i18n/messages";
+import { uiNumberFormat } from "../domain/intlFormatCache";
 import { avatarInitial, ICON_SIZE, operationFailureLabel, type OpenContextMenu } from "../app/uiShared";
 import { ImeTextField } from "./ImeTextControl";
 import { EntityAvatar } from "./Shell";
@@ -401,10 +402,11 @@ export function SpaceMembersPanel({
     >
       <header className="space-members-header">
         <h2 id="space-members-title" dir="auto">{inviteMode ? (spaceName ? t("dialog.invitePeopleTitle", { name: spaceName }) : t("room.invitePeople")) : t("spaceMembers.title")}</h2>
-        {!inviteMode && <span className="space-members-count" aria-label={t("spaceMembers.joinedCount", {
-          count: state.space_joined.length
-        })}>
-          {state.space_joined.length}
+        {/* #1546: the same worded, pluralised count as the People panel. */}
+        {!inviteMode && <span className="space-members-count">
+          {tCount("spaceMembers.joinedCount", state.space_joined.length, {
+            count: uiNumberFormat().format(state.space_joined.length)
+          })}
         </span>}
         {headerInviteVisible && !inviteMode ? (
           <Tooltip

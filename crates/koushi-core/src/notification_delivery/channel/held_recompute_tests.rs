@@ -58,7 +58,9 @@ fn hold_behind_interval(
     observe(channel, settings, rearmed, held);
     observe(channel, settings, rearmed + DWELL, held);
     assert!(
-        channel.take_send_jobs(settings, rearmed + DWELL).is_empty(),
+        channel
+            .take_send_jobs(settings, rearmed + DWELL, koushi_state::CatalogLocale::En)
+            .is_empty(),
         "held by the interval"
     );
     let deadline = sent_at + INTERVAL;
@@ -89,11 +91,15 @@ fn a_held_room_edited_before_its_send_carries_the_current_text_counts_and_label(
         )],
     );
     // A newer observation of a held room does not move its window.
-    assert!(channel.take_send_jobs(&settings, edited_at).is_empty());
+    assert!(
+        channel
+            .take_send_jobs(&settings, edited_at, koushi_state::CatalogLocale::En)
+            .is_empty()
+    );
     assert_eq!(channel.next_wake_at(&settings), Some(deadline));
 
     // The wake-up at the deadline sends from the newest observation.
-    let jobs = channel.take_send_jobs(&settings, deadline);
+    let jobs = channel.take_send_jobs(&settings, deadline, koushi_state::CatalogLocale::En);
     assert_eq!(jobs.len(), 1);
     let intent = &jobs[0].intent;
     assert!(intent.body.contains("> revised text"), "{}", intent.body);
@@ -132,7 +138,7 @@ fn a_held_room_whose_latest_message_is_redacted_sends_no_prefix() {
         deadline - Duration::from_secs(1),
         &[dm(ROOM, 1)],
     );
-    let jobs = channel.take_send_jobs(&settings, deadline);
+    let jobs = channel.take_send_jobs(&settings, deadline, koushi_state::CatalogLocale::En);
     assert_eq!(jobs.len(), 1);
     let body = &jobs[0].intent.body;
     assert!(!body.contains("original text"), "{body}");
@@ -159,7 +165,11 @@ fn a_held_room_that_stops_qualifying_contributes_nothing_to_the_send() {
         deadline - Duration::from_secs(1),
         &[],
     );
-    assert!(channel.take_send_jobs(&settings, deadline).is_empty());
+    assert!(
+        channel
+            .take_send_jobs(&settings, deadline, koushi_state::CatalogLocale::En)
+            .is_empty()
+    );
     assert!(!channel.has_pending_work());
 
     let mut channel = self::channel(&settings);
@@ -174,7 +184,7 @@ fn a_held_room_that_stops_qualifying_contributes_nothing_to_the_send() {
         deadline - Duration::from_secs(1),
         &both[1..],
     );
-    let jobs = channel.take_send_jobs(&settings, deadline);
+    let jobs = channel.take_send_jobs(&settings, deadline, koushi_state::CatalogLocale::En);
     assert_eq!(jobs.len(), 1);
     let body = &jobs[0].intent.body;
     assert!(body.contains("> other text"), "{body}");
@@ -193,7 +203,7 @@ fn a_retry_after_a_redaction_never_resends_the_redacted_prefix() {
     let original = [dm_with_text(ROOM, 2, "original text")];
     observe(&mut channel, &settings, start, &original);
     observe(&mut channel, &settings, sent_at, &original);
-    let jobs = channel.take_send_jobs(&settings, sent_at);
+    let jobs = channel.take_send_jobs(&settings, sent_at, koushi_state::CatalogLocale::En);
     assert_eq!(jobs.len(), 1);
     assert!(jobs[0].intent.body.contains("> original text"));
     channel.record_outcome(
@@ -213,7 +223,7 @@ fn a_retry_after_a_redaction_never_resends_the_redacted_prefix() {
     );
     let due_at = sent_at + INTERVAL;
     assert_eq!(channel.next_wake_at(&settings), Some(due_at));
-    let retries = channel.take_due_retries(&settings, due_at);
+    let retries = channel.take_due_retries(&settings, due_at, koushi_state::CatalogLocale::En);
     assert_eq!(retries.len(), 1);
     let intent = &retries[0].intent;
     assert!(!intent.body.contains("original text"), "{}", intent.body);
@@ -254,7 +264,7 @@ fn a_retry_drops_a_room_that_stopped_qualifying_and_its_text() {
     ];
     observe(&mut channel, &settings, start, &both);
     observe(&mut channel, &settings, sent_at, &both);
-    let jobs = channel.take_send_jobs(&settings, sent_at);
+    let jobs = channel.take_send_jobs(&settings, sent_at, koushi_state::CatalogLocale::En);
     assert_eq!(jobs.len(), 1);
     channel.record_outcome(
         &settings,
@@ -267,7 +277,7 @@ fn a_retry_drops_a_room_that_stopped_qualifying_and_its_text() {
 
     let due_at = sent_at + INTERVAL;
     observe(&mut channel, &settings, due_at, &both[1..]);
-    let retries = channel.take_due_retries(&settings, due_at);
+    let retries = channel.take_due_retries(&settings, due_at, koushi_state::CatalogLocale::En);
     assert_eq!(retries.len(), 1);
     let body = &retries[0].intent.body;
     assert!(body.contains("> other text"), "{body}");

@@ -1551,7 +1551,9 @@ stateDiagram-v2
   `RoomEvent::DirectMessageMissing`, which settles at once as a benign no-op
   without waiting for a projection. These
   commands carry normal request ids; GUI pending/settle feedback must come from
-  Rust events/snapshots.
+  Rust events/snapshots. A direct-message start is pending in
+  `AppState.basic_operation` (`StartingDirectMessage`, #1518; see Basic
+  Operations).
 - `RoomActor` owns projection from the single live `SyncService` and its
   `RoomListService`. The entries adapter uses the non-left filter so
   visible invited-room diffs wake projection. A bounded entries head is not a
@@ -3963,9 +3965,10 @@ offline send failures and reports only private-data-free tokens:
 `send_fail=ok`, `resend=ok`, `cancel_send=ok`, `fifo=ok`, and
 `unsent_restart=ok`.
 
-## Basic Operations (Room / Space Creation, Space Linking)
+## Basic Operations (Room / Space Creation, Space Linking, Direct Message Start)
 
-Room creation, space creation, and space-child linking share one in-flight slot,
+Room creation, space creation, space-child linking, and direct-message start
+(#1518) share one in-flight slot,
 `AppState.basic_operation`, modeled as a guarded, request-correlated state
 machine — the same shape as the composer's pending transaction and search's
 `request_id` correlation:
@@ -3976,9 +3979,11 @@ stateDiagram-v2
     Idle --> CreatingRoom: BasicOperationRequested(CreateRoom)
     Idle --> CreatingSpace: BasicOperationRequested(CreateSpace)
     Idle --> LinkingSpaceChild: BasicOperationRequested(LinkSpaceChild)
+    Idle --> StartingDirectMessage: BasicOperationRequested(StartDirectMessage)
     CreatingRoom --> Idle: BasicOperationSucceeded / BasicOperationFailed
     CreatingSpace --> Idle: BasicOperationSucceeded / BasicOperationFailed
     LinkingSpaceChild --> Idle: BasicOperationSucceeded / BasicOperationFailed
+    StartingDirectMessage --> Idle: BasicOperationSucceeded / BasicOperationFailed
 ```
 
 - Start guard: `BasicOperationRequested { request_id, request }` is accepted only
@@ -3994,8 +3999,19 @@ stateDiagram-v2
 - Event vs. state: `BasicOperationRequest` describes intent; the reducer derives
   the resulting `BasicOperationState`. An action never carries the target state.
 - Producer: in production `koushi-core`'s `RoomActor` dispatches these
-  events around the `CreateRoom` / `CreateSpace` / `SetSpaceChild` SDK calls,
-  using the command's `request_id` (its `sequence`) as the correlation id.
+  events around the `CreateRoom` / `CreateSpace` / `SetSpaceChild` /
+  `StartDirectMessage` SDK calls, using the command's `request_id` (its
+  `sequence`) as the correlation id.
+- Direct-message start (#1518): `StartingDirectMessage { request_id, user_id }`
+  is the pending state the profile's Send message action renders (disabled,
+  `aria-busy`) for that `user_id`; the renderer has no busy flag of its own for
+  it. The Room actor settles the slot on every exit before emitting the
+  request's outcome: `BasicOperationSucceeded` before `DirectMessageStarted` or
+  `DirectMessageMissing`, `BasicOperationFailed` before `OperationFailed`. Its
+  `Debug` output redacts `user_id`. Because the slot is shared, a start that
+  arrives while another basic operation is in flight is not shown as pending;
+  the Room actor still runs it, one command at a time, so a repeated press
+  reuses the same direct chat.
 
 ### Space child linking settlements (#1007)
 

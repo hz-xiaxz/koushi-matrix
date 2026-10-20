@@ -919,9 +919,15 @@ button:disabled {
   text-align: center;
 }
 
+/* A fixed, non-shrinking square: as a flex item beside a long account label it
+   used to shrink horizontally into an oval that wobbled while rotating (#1544). */
 .account-tab-spinner {
+  display: block;
+  flex: 0 0 13px;
   inline-size: 13px;
+  min-inline-size: 13px;
   block-size: 13px;
+  transform-origin: 50% 50%;
   border: 2px solid var(--line);
   border-block-start-color: var(--brand);
   border-radius: 50%;
@@ -1282,14 +1288,82 @@ button:disabled {
   align-items: center;
 }
 
+/* #1509: the Space rail scrolls without a scrollbar, so the scroller marks
+   each overflowing edge with a fade and, when an off-screen Space needs
+   attention, an edge indicator. Both stay outside the scrollport. */
+.workspace-space-scroller {
+  position: relative;
+  display: flex;
+  flex-direction: column;
+  align-self: stretch;
+  min-height: 0;
+}
+
 .workspace-space-list {
+  --workspace-rail-edge-inset: 18px;
+  --workspace-rail-fade-above: 0px;
+  --workspace-rail-fade-below: 0px;
   min-height: 0;
   overflow-y: auto;
   scrollbar-width: none;
+  -webkit-mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--workspace-rail-fade-above),
+    #000 calc(100% - var(--workspace-rail-fade-below)),
+    transparent 100%
+  );
+  mask-image: linear-gradient(
+    to bottom,
+    transparent 0,
+    #000 var(--workspace-rail-fade-above),
+    #000 calc(100% - var(--workspace-rail-fade-below)),
+    transparent 100%
+  );
+}
+
+.workspace-space-scroller[data-overflow-above="true"] .workspace-space-list {
+  --workspace-rail-fade-above: var(--workspace-rail-edge-inset);
+}
+
+.workspace-space-scroller[data-overflow-below="true"] .workspace-space-list {
+  --workspace-rail-fade-below: var(--workspace-rail-edge-inset);
 }
 
 .workspace-space-list::-webkit-scrollbar {
   display: none;
+}
+
+.workspace-rail-edge-indicator {
+  position: absolute;
+  z-index: 1;
+  inset-inline-start: 50%;
+  display: grid;
+  place-items: center;
+  width: 28px;
+  height: 16px;
+  border: var(--workspace-badge-border-width) solid var(--rail);
+  border-radius: var(--r-pill);
+  color: var(--brand-contrast);
+  background: var(--brand);
+  transform: translateX(-50%);
+}
+
+.workspace-rail-edge-indicator.is-above {
+  inset-block-start: 0;
+}
+
+.workspace-rail-edge-indicator.is-below {
+  inset-block-end: 0;
+}
+
+.workspace-rail-edge-indicator[data-highlight="true"] {
+  background: var(--danger);
+}
+
+.workspace-rail-edge-indicator:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
 }
 
 .workspace-rail-separator {
@@ -2287,6 +2361,22 @@ button:disabled {
   min-width: 0;
   min-height: 0;
   background: var(--surface);
+}
+
+/* #1545: the main pane with no room selected is a centered empty state with
+   no room header or composer. */
+.no-room-empty-state {
+  display: flex;
+  flex: 1;
+  align-items: center;
+  justify-content: center;
+  padding: 24px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+.no-room-empty-state p {
+  margin: 0;
 }
 
 .channel-header {
@@ -7696,6 +7786,13 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   background: var(--avatar-8);
   font-size: 28px;
   font-weight: 800;
+}
+
+/* #1540: scale the picture to the circle instead of clipping its corner. */
+.profile-large-avatar img {
+  inline-size: 100%;
+  block-size: 100%;
+  object-fit: cover;
 }
 
 .profile-actions {

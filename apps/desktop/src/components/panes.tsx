@@ -20,7 +20,7 @@ import {
   Users,
   X
 } from "lucide-react";
-import { t } from "../i18n/messages";
+import { t, tCount } from "../i18n/messages";
 import { RoomAccessGlyphIcon } from "./RoomAccessGlyph";
 import { Tooltip } from "./Tooltip";
 import type {
@@ -100,6 +100,21 @@ function activityTimestamp(timestampMs: number): string {
     dateStyle: "medium",
     timeStyle: "short"
   }).format(new Date(timestampMs));
+}
+
+/**
+ * #1545: the main pane when no room is selected (a Space with no rooms, or Home
+ * after closing Activity). It is an empty state: no room header actions and no
+ * composer, because there is no room to act on or send to.
+ */
+export function NoRoomPane() {
+  return (
+    <main className="main-pane no-room-pane" aria-labelledby="no-room-title">
+      <div className="no-room-empty-state" role="status">
+        <p id="no-room-title">{t("room.noRoomSelected")}</p>
+      </div>
+    </main>
+  );
 }
 
 export function ActivityPane({
@@ -481,7 +496,7 @@ export function ExplorePane({
                   </p>
                   <div className="directory-result-meta">
                     <span>
-                      {t("directory.memberCount", {
+                      {tCount("directory.memberCount", room.joined_members, {
                         count: uiNumberFormat().format(room.joined_members)
                       })}
                     </span>

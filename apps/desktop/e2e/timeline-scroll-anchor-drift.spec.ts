@@ -293,11 +293,19 @@ test("crossing the virtualization threshold keeps the reading row mounted", asyn
   const timeline = page.locator("[data-testid=timeline-view]");
   await expect(timeline).not.toHaveAttribute("data-virtualized", "true");
   const anchorEventId = "$scroll-anchor-item-0070:example.invalid";
-  await timeline.evaluate((node) => {
+  // Scroll the reading row to the viewport top from its measured position.
+  // Row height follows the host's resolved system font (e.g. Noto Sans CJK has
+  // a much taller `normal` line-height than DejaVu), so a fixed per-row pixel
+  // height would leave the row outside the viewport on some machines.
+  await timeline.evaluate((node, eventId) => {
+    const row = node.querySelector<HTMLElement>(`[data-event-id="${CSS.escape(eventId)}"]`);
+    if (!row) throw new Error("missing initial anchor");
+    const rowTop =
+      node.scrollTop + row.getBoundingClientRect().top - node.getBoundingClientRect().top;
     node.dispatchEvent(new WheelEvent("wheel", { bubbles: true, deltaY: -500 }));
-    node.scrollTop = 18 * 72;
+    node.scrollTop = Math.round(rowTop);
     node.dispatchEvent(new Event("scroll", { bubbles: true }));
-  });
+  }, anchorEventId);
   const anchor = page.locator(`[data-event-id="${anchorEventId}"]`);
   await expect(anchor).toBeInViewport();
   const originalOffset = await anchorOffsetFromContainer(page, anchorEventId);

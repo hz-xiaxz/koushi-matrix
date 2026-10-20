@@ -275,6 +275,19 @@ describe("PeoplePanel", () => {
     expect(screen.queryByRole("button", { name: "Open profile for Member 299" })).toBeNull();
   });
 
+  test("uses the singular member count for one member (#1546)", () => {
+    render(
+      <PeoplePanel
+        currentUserId="@current:example.invalid"
+        roomOrSpace={baseRoom}
+        roomManagement={roomManagement([members[0]])}
+        onOpenProfile={() => undefined}
+      />
+    );
+
+    expect(document.querySelector(".people-panel-count")?.textContent).toBe("1 member");
+  });
+
   test("opens the profile when a member row is clicked", () => {
     const onOpenProfile = vi.fn();
     render(
@@ -586,6 +599,102 @@ describe("ProfilePanel", () => {
 
     fireEvent.click(screen.getByRole("button", { name: "Send message" }));
     expect(onStartDirectMessage).toHaveBeenCalledWith("@ada:example.invalid");
+  });
+
+  test("shows Send message as pending while Rust starts the direct message (#1518)", () => {
+    const onStartDirectMessage = vi.fn();
+    const props = {
+      userId: "@ada:example.invalid",
+      currentUserId: "@current:example.invalid",
+      roomOrSpace: baseRoom,
+      roomManagement: roomManagement(members),
+      profileUsers: {},
+      onBack: () => undefined,
+      onStartDirectMessage
+    };
+    const { rerender } = render(<ProfilePanel {...props} startDirectMessagePending />);
+
+    const button = screen.getByRole("button", { name: "Send message" });
+    expect(button.hasAttribute("disabled")).toBe(true);
+    expect(button.getAttribute("aria-busy")).toBe("true");
+    fireEvent.click(button);
+    expect(onStartDirectMessage).not.toHaveBeenCalled();
+
+    rerender(<ProfilePanel {...props} startDirectMessagePending={false} />);
+    const settled = screen.getByRole("button", { name: "Send message" });
+    expect(settled.hasAttribute("disabled")).toBe(false);
+    expect(settled.getAttribute("aria-busy")).toBeNull();
+    fireEvent.click(settled);
+    expect(onStartDirectMessage).toHaveBeenCalledWith("@ada:example.invalid");
+  });
+
+  function adaProfile(thumbnail: NonNullable<UserProfile["avatar"]>["thumbnail"]): UserProfile {
+    return {
+      user_id: "@ada:example.invalid",
+      display_name: "Ada Lovelace",
+      display_label: "Ada Lovelace",
+      original_display_label: "Ada Lovelace",
+      mention_search_terms: [],
+      avatar: { mxc_uri: "mxc://example.invalid/ada-avatar", thumbnail }
+    };
+  }
+
+  test("shows the profile picture when the room member is known (#1540)", () => {
+    const { container } = render(
+      <ProfilePanel
+        userId="@ada:example.invalid"
+        currentUserId="@current:example.invalid"
+        roomOrSpace={baseRoom}
+        roomManagement={roomManagement(members)}
+        profileUsers={{
+          "@ada:example.invalid": adaProfile({
+            kind: "ready",
+            source_ref: "asset://ada-avatar",
+            width: null,
+            height: null,
+            mime_type: null
+          })
+        }}
+        onBack={() => undefined}
+      />
+    );
+
+    // The full form (room section present) keeps the person's picture.
+    expect(screen.getByText("Membership")).toBeTruthy();
+    const image = container.querySelector(".profile-large-avatar img");
+    expect(image?.getAttribute("src")).toBe("asset://ada-avatar");
+  });
+
+  test("requests the profile picture thumbnail when it is not loaded yet (#1540)", () => {
+    const onRequestAvatarThumbnail = vi.fn();
+    class VisibleObserver {
+      constructor(private readonly callback: IntersectionObserverCallback) {}
+      observe() {
+        this.callback(
+          [{ isIntersecting: true } as IntersectionObserverEntry],
+          this as unknown as IntersectionObserver
+        );
+      }
+      disconnect() {}
+      unobserve() {}
+    }
+    vi.stubGlobal("IntersectionObserver", VisibleObserver);
+    try {
+      render(
+        <ProfilePanel
+          userId="@ada:example.invalid"
+          currentUserId="@current:example.invalid"
+          roomOrSpace={baseRoom}
+          roomManagement={roomManagement(members)}
+          profileUsers={{ "@ada:example.invalid": adaProfile({ kind: "notRequested" }) }}
+          onBack={() => undefined}
+          onRequestAvatarThumbnail={onRequestAvatarThumbnail}
+        />
+      );
+      expect(onRequestAvatarThumbnail).toHaveBeenCalledWith("mxc://example.invalid/ada-avatar");
+    } finally {
+      vi.unstubAllGlobals();
+    }
   });
 
   test("updates room power level from the profile", () => {

@@ -125,6 +125,7 @@ import {
   type OpenContextMenu
 } from "../app/uiShared";
 import type { DiagnosticLogEntry } from "../domain/diagnostics";
+import { useActiveLocaleKey } from "../i18n/activeLocaleContext";
 import { t } from "../i18n/messages";
 
 import type {
@@ -501,6 +502,8 @@ export const TimelineView = memo(function TimelineView({
     query: string | null
   ) => void;
 }) {
+  // #1557: re-render this memoised view when the catalog locale changes.
+  useActiveLocaleKey();
   // Persisted restart anchors are intentionally ignored for restoration:
   // first entry after app startup goes to live edge, while in-session room
   // switches use timelineViewportSessionMemory. persistViewportAnchor still

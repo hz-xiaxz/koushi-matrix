@@ -43,6 +43,7 @@ import {
   type DocumentSelection
 } from "../domain/composerDocument";
 import type { ComposerDocument, ComposerInline } from "../domain/types";
+import { useActiveLocaleKey } from "../i18n/activeLocaleContext";
 import { t } from "../i18n/messages";
 
 interface ImeSubmitFence {
@@ -375,6 +376,25 @@ export const ImeInlineMentionEditor = forwardRef<
       pendingSelectionRef.current = null;
       restoreDocumentSelection(control, selection);
     }, [document, syncKey]);
+
+    // #1557: mention pills are built imperatively, so their accessible names
+    // keep the catalog of their last rebuild. Relabel them in place on a locale
+    // change; attribute writes leave the draft, selection and IME composition
+    // untouched, unlike a rebuild.
+    const localeKey = useActiveLocaleKey();
+    const relabeledLocaleKeyRef = useRef(localeKey);
+    useLayoutEffect(() => {
+      if (relabeledLocaleKeyRef.current === localeKey) return;
+      relabeledLocaleKeyRef.current = localeKey;
+      const control = controlRef.current;
+      if (!control) return;
+      control.querySelectorAll<HTMLElement>("[data-composer-mention]").forEach((node) => {
+        const inline = renderedDocumentRef.current?.inlines[Number(node.dataset.composerMention)];
+        if (inline?.kind === "mention") {
+          node.setAttribute("aria-label", t("composer.inlineMention", { label: inline.display_label }));
+        }
+      });
+    }, [localeKey]);
 
     const publish = useCallback(
       (mutation: DocumentMutation) => {

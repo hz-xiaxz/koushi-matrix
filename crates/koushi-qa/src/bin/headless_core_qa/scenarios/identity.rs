@@ -2053,6 +2053,7 @@ pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Res
         previous_candidate: None,
         message_previews: false,
         capabilities,
+        locale: koushi_state::CatalogLocale::En,
     });
 
     let candidate = attention
@@ -2087,6 +2088,7 @@ pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Res
         previous_candidate: None,
         message_previews: false,
         capabilities,
+        locale: koushi_state::CatalogLocale::En,
     });
     if focused.summary.candidate.is_some()
         || focused.dispatch
@@ -2118,6 +2120,7 @@ pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Res
         previous_candidate: None,
         message_previews: false,
         capabilities,
+        locale: koushi_state::CatalogLocale::En,
     });
     if with_modes.summary.unread_count != 1
         || with_modes.summary.highlight_count != 1
@@ -2144,6 +2147,7 @@ pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Res
         previous_candidate: attention.summary.candidate.as_ref(),
         message_previews: false,
         capabilities,
+        locale: koushi_state::CatalogLocale::En,
     });
     if clear.summary.badge_count != 0 || clear.summary.candidate.is_some() {
         return Err("native attention clear state retained badge or candidate".to_owned());

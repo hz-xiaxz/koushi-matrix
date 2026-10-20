@@ -58,6 +58,7 @@ import {
 import type { MatrixPermalinkTarget } from "./domain/matrixPermalink";
 import { resolveDirectorySubmission } from "./domain/directorySubmission";
 import { serverNameFromMatrixId } from "./domain/matrixPermalink";
+import { ActiveLocaleContext, activeLocaleKey } from "./i18n/activeLocaleContext";
 import { setActiveLocaleProfile, t } from "./i18n/messages";
 
 export function reconcileComposerSubmissionSnapshot(
@@ -282,6 +283,7 @@ import {
   ActivityPane,
   ExplorePane,
   InvitesPane,
+  NoRoomPane,
   TimelinePane
 } from "./components/panes";
 import { AuthScreen, SlidingSyncCapabilityBlockedScreen } from "./components/auth";
@@ -4189,11 +4191,12 @@ function AccountContent({
 
     roomSettingsLoadRef.current = null;
     const next = await settleCommandSnapshot(api.loadRoomSettings(roomId));
+    // #1540: settings that did not load still leave the room open; the
+    // Profile then shows the account-wide profile instead of doing nothing.
     if (
       !isCurrent() ||
       next.state.ui.navigation.active_room_id !== roomId ||
-      next.state.ui.timeline.room_id !== roomId ||
-      !exactRoomSettingsForRoom(next, roomId)
+      next.state.ui.timeline.room_id !== roomId
     ) {
       return;
     }
@@ -4432,6 +4435,14 @@ function AccountContent({
       // #874: a `matrix.to` user permalink — a mention — names an account this
       // client can show in place. Dropping it left mention clicks dead in the
       // main timeline and sent the thread/search panes to the browser.
+      // #1540: with a room open, take the sender-name route so Rust loads the
+      // room's members and the Profile shows membership, role and moderation.
+      const current = getAppStoreSnapshot();
+      const openRoomId = current?.state.ui.navigation.active_room_id ?? null;
+      if (openRoomId && current?.state.ui.timeline.room_id === openRoomId) {
+        await openRoomUserProfile(openRoomId, target.userId);
+        return;
+      }
       setSelectedProfileUserId(target.userId);
       runInBackground(setRightPanelModeClosingFocusedContext("profile"));
       return;
@@ -4785,17 +4796,15 @@ function AccountContent({
 
   async function startDirectMessage(userId: string) {
     const trimmedUserId = userId.trim();
-    if (!trimmedUserId || isBusy) {
+    if (!trimmedUserId) {
       return;
     }
-    setIsBusy(true);
-    try {
-      await settleCommand(api.startDirectMessage(trimmedUserId));
-      setPrimaryView("timeline");
-      await setRightPanelModeClosingFocusedContext("closed");
-    } finally {
-      setIsBusy(false);
-    }
+    // #1518: the pending state is Rust's `basic_operation`, which the Profile
+    // renders; a renderer-wide busy flag would silently drop this press. The
+    // Room actor runs starts one at a time, so a repeat reuses the same chat.
+    await settleCommand(api.startDirectMessage(trimmedUserId));
+    setPrimaryView("timeline");
+    await setRightPanelModeClosingFocusedContext("closed");
   }
 
   /**
@@ -7064,6 +7073,12 @@ function AccountContent({
     snapshot.state.domain.locale_profile.catalog_locale,
     snapshot.state.domain.locale_profile.pseudo_locale
   );
+  // #1557: memoised children subscribe to this key, so a locale switch
+  // re-renders them with the catalog activated above.
+  const localeContextKey = activeLocaleKey(
+    snapshot.state.domain.locale_profile.catalog_locale,
+    snapshot.state.domain.locale_profile.pseudo_locale
+  );
 
   const verificationGate =
     [
@@ -7340,6 +7355,7 @@ function AccountContent({
   }
 
   return (
+    <ActiveLocaleContext.Provider value={localeContextKey}>
     <TimelineStoreContext.Provider value={timelineStoreContextValue}>
       <div
         className="desktop"
@@ -7536,9 +7552,11 @@ function AccountContent({
             }}
             onNewDm={openNewDmDialog}
           />
+        ) : !activeRoom ? (
+          <NoRoomPane />
         ) : (
           <TimelinePane
-            activeRoomName={activeRoom ? roomDisplayLabel(activeRoom) : t("room.noRoomSelected")}
+            activeRoomName={roomDisplayLabel(activeRoom)}
             sendingAccount={sendingAccount}
             composerDocument={composerDocument}
             composerNotice={
@@ -8358,6 +8376,7 @@ function AccountContent({
       })() : null}
       </div>
     </TimelineStoreContext.Provider>
+    </ActiveLocaleContext.Provider>
   );
 }
 

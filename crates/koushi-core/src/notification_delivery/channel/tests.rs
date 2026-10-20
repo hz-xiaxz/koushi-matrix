@@ -101,7 +101,7 @@ pub(super) fn send_after_dwell(
     let sent_at = start + DWELL;
     observe(channel, settings, start, &[dm(ROOM, 2)]);
     observe(channel, settings, sent_at, &[dm(ROOM, 2)]);
-    let jobs = channel.take_send_jobs(settings, sent_at);
+    let jobs = channel.take_send_jobs(settings, sent_at, koushi_state::CatalogLocale::En);
     (sent_at, jobs)
 }
 
@@ -134,7 +134,11 @@ fn a_room_sends_only_after_its_dwell() {
     let start = Instant::now();
 
     observe(&mut channel, &settings, start, &[dm(ROOM, 2)]);
-    assert!(channel.take_send_jobs(&settings, start).is_empty());
+    assert!(
+        channel
+            .take_send_jobs(&settings, start, koushi_state::CatalogLocale::En)
+            .is_empty()
+    );
     assert_eq!(channel.next_wake_at(&settings), Some(start + DWELL));
     assert!(channel.has_pending_work());
 
@@ -163,7 +167,11 @@ fn a_room_read_here_or_on_another_device_re_arms_instead_of_sending() {
     assert!(channel.next_wake_at(&settings).is_none());
     assert!(
         channel
-            .take_send_jobs(&settings, start + Duration::from_secs(120))
+            .take_send_jobs(
+                &settings,
+                start + Duration::from_secs(120),
+                koushi_state::CatalogLocale::En
+            )
             .is_empty()
     );
 }
@@ -192,7 +200,9 @@ fn a_held_room_read_elsewhere_before_the_window_opens_is_never_sent() {
     );
     observe(&mut channel, &settings, due, &[dm(ROOM, 2), dm(other, 1)]);
     assert!(
-        channel.take_send_jobs(&settings, due).is_empty(),
+        channel
+            .take_send_jobs(&settings, due, koushi_state::CatalogLocale::En)
+            .is_empty(),
         "held by the interval"
     );
 
@@ -206,7 +216,11 @@ fn a_held_room_read_elsewhere_before_the_window_opens_is_never_sent() {
     assert!(!channel.has_pending_work());
     assert!(
         channel
-            .take_send_jobs(&settings, sent_at + INTERVAL)
+            .take_send_jobs(
+                &settings,
+                sent_at + INTERVAL,
+                koushi_state::CatalogLocale::En
+            )
             .is_empty()
     );
 }
@@ -237,7 +251,11 @@ fn a_held_batch_wakes_the_channel_at_the_coalescing_deadline() {
     observe(&mut channel, &settings, rearmed, &[dm(ROOM, 1)]);
     observe(&mut channel, &settings, second_due, &[dm(ROOM, 1)]);
     // It came due inside the minimum interval, so it is held and the window does not move.
-    assert!(channel.take_send_jobs(&settings, second_due).is_empty());
+    assert!(
+        channel
+            .take_send_jobs(&settings, second_due, koushi_state::CatalogLocale::En)
+            .is_empty()
+    );
     assert!(channel.has_pending_work());
 
     // The only thing left to wait for is the interval, and the timer is armed for it.
@@ -246,7 +264,7 @@ fn a_held_batch_wakes_the_channel_at_the_coalescing_deadline() {
 
     // The wake-up observes nothing new and still releases the batch, under a new window.
     observe(&mut channel, &settings, deadline, &[dm(ROOM, 1)]);
-    let jobs = channel.take_send_jobs(&settings, deadline);
+    let jobs = channel.take_send_jobs(&settings, deadline, koushi_state::CatalogLocale::En);
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].intent.idempotency_key, key(2));
 }
@@ -265,9 +283,13 @@ fn a_destination_without_a_credential_holds_nothing_and_anchors_afresh_once_save
     // the room anchors on this observation and waits its own dwell.
     channel.record_credential(&settings.sinks[0], true);
     observe(&mut channel, &settings, sent_at, &[dm(ROOM, 2)]);
-    assert!(channel.take_send_jobs(&settings, sent_at).is_empty());
+    assert!(
+        channel
+            .take_send_jobs(&settings, sent_at, koushi_state::CatalogLocale::En)
+            .is_empty()
+    );
     observe(&mut channel, &settings, sent_at + DWELL, &[dm(ROOM, 2)]);
-    let jobs = channel.take_send_jobs(&settings, sent_at + DWELL);
+    let jobs = channel.take_send_jobs(&settings, sent_at + DWELL, koushi_state::CatalogLocale::En);
     assert_eq!(jobs.len(), 1);
     assert_eq!(jobs[0].intent.idempotency_key, key(1));
 }
@@ -336,7 +358,11 @@ fn terminal_failures_are_never_retried() {
         assert!(channel.next_wake_at(&settings).is_none());
         assert!(
             channel
-                .take_due_retries(&settings, sent_at + Duration::from_secs(86_400))
+                .take_due_retries(
+                    &settings,
+                    sent_at + Duration::from_secs(86_400),
+                    koushi_state::CatalogLocale::En
+                )
                 .is_empty()
         );
         // The verdict is still the sink's last, so a sink that failed a terminal way cannot
@@ -372,11 +398,15 @@ fn an_unchanged_retry_repeats_the_message_under_the_same_key() {
         assert_eq!(channel.next_wake_at(&settings), Some(due_at));
         assert!(
             channel
-                .take_due_retries(&settings, due_at - Duration::from_secs(1))
+                .take_due_retries(
+                    &settings,
+                    due_at - Duration::from_secs(1),
+                    koushi_state::CatalogLocale::En
+                )
                 .is_empty()
         );
         observe(&mut channel, &settings, due_at, &[dm(ROOM, 2)]);
-        let retries = channel.take_due_retries(&settings, due_at);
+        let retries = channel.take_due_retries(&settings, due_at, koushi_state::CatalogLocale::En);
         assert_eq!(retries.len(), 1);
         // Byte-identical, so a provider that already accepted it can deduplicate.
         assert_eq!(retries[0].intent, intent);
@@ -407,7 +437,7 @@ fn a_retry_carries_the_current_state_under_a_new_key_when_it_changed() {
         sent_at,
         &[dm_with_text(ROOM, 1, "meet at 10")],
     );
-    let jobs = channel.take_send_jobs(&settings, sent_at);
+    let jobs = channel.take_send_jobs(&settings, sent_at, koushi_state::CatalogLocale::En);
     assert_eq!(jobs.len(), 1);
     assert!(jobs[0].intent.body.contains("> meet at 10"));
     channel.record_outcome(
@@ -427,7 +457,7 @@ fn a_retry_carries_the_current_state_under_a_new_key_when_it_changed() {
         due_at,
         &[dm_with_text(ROOM, 2, "meet at 11")],
     );
-    let retries = channel.take_due_retries(&settings, due_at);
+    let retries = channel.take_due_retries(&settings, due_at, koushi_state::CatalogLocale::En);
     assert_eq!(retries.len(), 1);
     let body = &retries[0].intent.body;
     assert!(body.contains("> meet at 11"), "{body}");
@@ -464,7 +494,11 @@ fn a_retry_whose_rooms_were_all_read_elsewhere_is_cancelled() {
     assert!(channel.next_wake_at(&settings).is_none());
     assert!(
         channel
-            .take_due_retries(&settings, sent_at + INTERVAL)
+            .take_due_retries(
+                &settings,
+                sent_at + INTERVAL,
+                koushi_state::CatalogLocale::En
+            )
             .is_empty()
     );
 }
@@ -502,7 +536,7 @@ fn a_retry_loop_is_bounded_by_the_attempt_cap() {
     for attempt in 2..=MAX_NOTIFICATION_DELIVERY_ATTEMPTS {
         now += INTERVAL;
         observe(&mut channel, &settings, now, &[dm(ROOM, 2)]);
-        let jobs = channel.take_due_retries(&settings, now);
+        let jobs = channel.take_due_retries(&settings, now, koushi_state::CatalogLocale::En);
         assert_eq!(jobs.len(), 1, "attempt {attempt} was not armed");
         assert_eq!(jobs[0].intent.idempotency_key, key(1));
         channel.record_outcome(&settings, now, SINK, &key(1), &failure, 7);
@@ -645,7 +679,7 @@ fn each_destination_keeps_its_own_lane_and_interval() {
         sent_at + DWELL,
         &[dm(ROOM, 2), dm(other, 1)],
     );
-    let jobs = channel.take_send_jobs(&settings, sent_at + DWELL);
+    let jobs = channel.take_send_jobs(&settings, sent_at + DWELL, koushi_state::CatalogLocale::En);
     let sinks: Vec<&str> = jobs.iter().map(|job| job.sink_id.as_str()).collect();
     assert_eq!(sinks, vec!["wechat"]);
 }

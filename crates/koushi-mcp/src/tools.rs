@@ -14,6 +14,8 @@ pub struct ToolDefinition {
     pub description: &'static str,
     pub input_schema: Value,
     pub read_only: bool,
+    /// The `outputSchema` of a tool whose result is typed structured content.
+    pub output_schema: Option<Value>,
 }
 
 fn account_id_property() -> Value {
@@ -32,6 +34,43 @@ fn limit_property(maximum: u32) -> Value {
     })
 }
 
+/// The structured result of `wait_for_events` (#1551).
+fn wait_for_events_output_schema() -> Value {
+    let nullable_string = json!({ "type": ["string", "null"] });
+    json!({
+        "type": "object",
+        "properties": {
+            "events": {
+                "type": "array",
+                "description": "One entry per sampled room change after the cursor, oldest first.",
+                "items": {
+                    "type": "object",
+                    "properties": {
+                        "cursor": { "type": "string", "description": "Opaque position of this entry." },
+                        "account_id": { "type": "string" },
+                        "room_id": { "type": "string" },
+                        "room_name": { "type": "string" },
+                        "event_id": nullable_string,
+                        "sender_id": nullable_string,
+                        "sender_label": nullable_string,
+                        "unread_count": { "type": "integer", "description": "The room's unread count when sampled; informational." },
+                        "highlight_count": { "type": "integer" },
+                        "recency_stamp": { "type": ["integer", "null"] }
+                    },
+                    "required": ["cursor", "account_id", "room_id", "event_id"]
+                }
+            },
+            "cursor": { "type": "string", "description": "Opaque position to pass to the next call." },
+            "coverage": {
+                "type": "string",
+                "enum": ["sampled_room_changes"],
+                "description": "Always sampled_room_changes: entries coalesce bursts and are not a complete message log."
+            }
+        },
+        "required": ["events", "cursor", "coverage"]
+    })
+}
+
 /// Every tool this build advertises. Order is stable so `tools/list` diffs are
 /// meaningful across runs.
 pub fn definitions() -> Vec<ToolDefinition> {
@@ -45,6 +84,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
             read_only: true,
+            output_schema: None,
         },
         ToolDefinition {
             name: "list_rooms",
@@ -61,6 +101,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
             read_only: true,
+            output_schema: None,
         },
         ToolDefinition {
             name: "search_messages",
@@ -81,6 +122,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
             read_only: true,
+            output_schema: None,
         },
         ToolDefinition {
             name: "read_room_messages",
@@ -97,6 +139,7 @@ pub fn definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
             read_only: true,
+            output_schema: None,
         },
         ToolDefinition {
             name: "get_attachment",
@@ -113,23 +156,25 @@ pub fn definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
             read_only: true,
+            output_schema: None,
         },
         ToolDefinition {
             name: "send_message",
-            description: "Send a message through the account's verified encrypted session. Accepts an optional reply target and local file paths. client_request_id makes a retry idempotent.",
+            description: "Send a message through the account's verified encrypted session. body is plain text. attachments are absolute local file paths (at most 10, 50 MB each, 100 MB per call) that Koushi reads and sends as one media message per file, with body as the first file's caption; every file is checked and read before the first is sent. Sending files needs the account's attachments permission as well as send. reply_to_event_id cannot be combined with attachments. Returns event_id and transaction_id of the first message and, when files were sent, an attachments list with one event_id and transaction_id per file. client_request_id makes a retry idempotent.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "account_id": account_id_property(),
                     "room_id": { "type": "string" },
-                    "body": { "type": "string", "description": "Plain text body. Required unless attachments are present." },
-                    "reply_to_event_id": { "type": "string" },
+                    "body": { "type": "string", "description": "Plain text body. Required unless attachments are present; with attachments it captions the first file." },
+                    "reply_to_event_id": { "type": "string", "description": "Event to reply to. Not allowed together with attachments." },
                     "attachments": {
                         "type": "array",
                         "maxItems": 10,
+                        "description": "Local files to send, each as its own media message, in this order.",
                         "items": {
                             "type": "object",
-                            "properties": { "path": { "type": "string" } },
+                            "properties": { "path": { "type": "string", "description": "Absolute path of a regular file readable by Koushi." } },
                             "required": ["path"],
                             "additionalProperties": false
                         }
@@ -143,21 +188,23 @@ pub fn definitions() -> Vec<ToolDefinition> {
                 "additionalProperties": false
             }),
             read_only: false,
+            output_schema: None,
         },
         ToolDefinition {
             name: "wait_for_events",
-            description: "Wait up to timeout_s for new messages or invites in the account. Returns immediately when events are pending, otherwise at the timeout. The returned cursor is the next position.",
+            description: "Wait up to timeout_s for sampled room changes in the account. This is a change feed, not a message log: Koushi samples each joined room's latest event about every 2 seconds and records one entry per room whose latest event changed since the previous sample, so several messages posted between samples coalesce into one entry. Invites are not reported. The first sample after Koushi or the bridge starts only sets a baseline. Entries are ordered by cursor, kept in memory only (at most 500 across all accounts), and are not removed when a room is read; unread counts are informational. Returns at once when entries are pending, otherwise at the timeout. An empty events list means no change was sampled, not that no message was posted. Omit cursor to start at the newest position (this does not recover earlier history); pass the returned cursor to continue. A cursor is opaque and valid only for this account and this Koushi run: a malformed, future, expired (older than the retained entries), other-account, or previous-run cursor fails with resync_required. To recover, call again without a cursor and use read_room_messages for the rooms you need, de-duplicating by account, room, and event id.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "account_id": account_id_property(),
-                    "cursor": { "type": "string", "description": "Cursor from the previous call; omit to start at the newest event." },
-                    "timeout_s": { "type": "integer", "minimum": 0, "maximum": 50 }
+                    "cursor": { "type": "string", "description": "Opaque cursor from the previous result. Omit to start at the newest position." },
+                    "timeout_s": { "type": "integer", "minimum": 0, "maximum": 50, "description": "Seconds to wait when nothing is pending. Defaults to 25; an approval wait counts against a 60-second call budget." }
                 },
                 "required": ["account_id"],
                 "additionalProperties": false
             }),
             read_only: true,
+            output_schema: Some(wait_for_events_output_schema()),
         },
     ]
 }
@@ -268,6 +315,52 @@ mod tests {
         assert!(
             validate_arguments("search_messages", &json!({"account_id": "a", "query": "x"}))
                 .is_ok()
+        );
+    }
+
+    #[test]
+    fn wait_for_events_publishes_its_coverage_and_cursor_contract() {
+        let tool = find("wait_for_events").expect("tool");
+        for phrase in [
+            "not a message log",
+            "coalesce",
+            "Invites are not reported",
+            "only sets a baseline",
+            "at most 500",
+            "not removed when a room is read",
+            "not that no message was posted",
+            "resync_required",
+            "read_room_messages",
+        ] {
+            assert!(tool.description.contains(phrase), "{phrase}");
+        }
+        let schema = tool.output_schema.expect("output schema");
+        assert_eq!(
+            schema["properties"]["coverage"]["enum"],
+            json!(["sampled_room_changes"])
+        );
+        let others_typed = definitions()
+            .iter()
+            .filter(|tool| tool.output_schema.is_some())
+            .count();
+        assert_eq!(others_typed, 1);
+    }
+
+    #[test]
+    fn send_message_describes_its_attachment_contract() {
+        let tool = find("send_message").expect("tool");
+        for phrase in [
+            "absolute local file paths",
+            "attachments permission",
+            "caption",
+        ] {
+            assert!(tool.description.contains(phrase), "{phrase}");
+        }
+        let path = &tool.input_schema["properties"]["attachments"]["items"]["properties"]["path"];
+        assert!(
+            path["description"]
+                .as_str()
+                .is_some_and(|text| text.starts_with("Absolute"))
         );
     }
 

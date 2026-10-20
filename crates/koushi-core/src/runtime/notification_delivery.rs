@@ -209,8 +209,16 @@ impl AppActor {
         self.notification_delivery
             .observe(&settings, now, &candidates, focused);
 
-        let mut jobs = self.notification_delivery.take_due_retries(&settings, now);
-        jobs.extend(self.notification_delivery.take_send_jobs(&settings, now));
+        // The wording follows the locale selected now, not when the rooms were held, so a
+        // held window or a retry is written in the current language (#1476).
+        let locale = koushi_state::resolve_catalog_locale(&self.state.settings.values.locale);
+        let mut jobs = self
+            .notification_delivery
+            .take_due_retries(&settings, now, locale);
+        jobs.extend(
+            self.notification_delivery
+                .take_send_jobs(&settings, now, locale),
+        );
         self.spawn_notification_delivery_sends(jobs, &settings);
         changed | self.refresh_notification_delivery_projection().await
     }
@@ -802,7 +810,11 @@ impl AppActor {
                 kind: NotificationDeliveryFailureKind::SecretMissing,
             });
         }
-        let intent = test_delivery_intent(&sink, &window_id);
+        let intent = test_delivery_intent(
+            &sink,
+            &window_id,
+            koushi_state::resolve_catalog_locale(&self.state.settings.values.locale),
+        );
         let store = self.composer_draft_store_actor.clone();
         let configured = executor::spawn_blocking({
             let key_id = key_id.clone();

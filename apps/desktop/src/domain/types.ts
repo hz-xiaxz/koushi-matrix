@@ -2652,7 +2652,9 @@ export type BasicOperationState =
   | { kind: "idle" }
   | { kind: "creatingRoom"; request_id: number; name: string }
   | { kind: "creatingSpace"; request_id: number; name: string }
-  | { kind: "linkingSpaceChild"; request_id: number; space_id: string; child_room_id: string };
+  | { kind: "linkingSpaceChild"; request_id: number; space_id: string; child_room_id: string }
+  /** #1518: a direct-message start with `user_id` is in flight. */
+  | { kind: "startingDirectMessage"; request_id: number; user_id: string };
 
 export interface LiveSignalsState {
   rooms: Record<string, RoomLiveSignals>;

@@ -56,6 +56,7 @@ fn candidate_of(room: &RoomSummary) -> RoomAttentionCandidate {
         previous_candidate: None,
         message_previews: true,
         capabilities: NativeAttentionCapabilities::default(),
+        locale: crate::CatalogLocale::En,
     });
     assert_eq!(candidates.len(), 1, "the fixture room is one candidate");
     candidates.remove(0)
@@ -140,6 +141,7 @@ fn project(observation: NativeAttentionObservationKind) -> NativeAttentionProjec
         previous_candidate: None,
         message_previews: false,
         capabilities: NativeAttentionCapabilities::default(),
+        locale: crate::CatalogLocale::En,
     })
 }
 
@@ -203,6 +205,7 @@ fn native_badge_diagnostics_count_only_unique_non_muted_rooms() {
         previous_candidate: None,
         message_previews: false,
         capabilities: NativeAttentionCapabilities::default(),
+        locale: crate::CatalogLocale::En,
     });
 
     assert_eq!(projection.state.summary.badge_count, 2);

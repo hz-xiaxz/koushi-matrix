@@ -658,7 +658,10 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   joined to, the `/hierarchy` joined-member count is authoritative over the
   frozen local member list; one `can_join` rule serves hierarchy-described and
   locally known children, and knock-only rules never offer a plain join (#1053). The joined room list stays authoritative: a child that
-  is already a joined room never appears in the lane, and a pending invitation is
+  is already a joined room never appears in the lane, and neither does a joined
+  sub-space, which lives in `AppState.spaces` rather than the room list (#1559;
+  showing joined sub-spaces nested under the parent, as Element does, is not
+  yet specified), and a pending invitation is
   reported from `AppState.invites`, not from the server summary. A child the
   server did not describe is `unknown` with no join action — the permission model
   is never worked around.
