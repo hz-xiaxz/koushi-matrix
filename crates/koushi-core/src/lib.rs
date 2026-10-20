@@ -28,6 +28,7 @@ pub mod executor;
 pub mod link_preview;
 mod live_catchup;
 mod live_tail_freshness;
+pub mod local_upload;
 #[cfg(any(test, feature = "test-hooks"))]
 pub mod login_store_test_support;
 pub mod media_preparation;

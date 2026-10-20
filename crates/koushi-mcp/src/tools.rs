@@ -116,20 +116,21 @@ pub fn definitions() -> Vec<ToolDefinition> {
         },
         ToolDefinition {
             name: "send_message",
-            description: "Send a message through the account's verified encrypted session. Accepts an optional reply target and local file paths. client_request_id makes a retry idempotent.",
+            description: "Send a message through the account's verified encrypted session. body is plain text. attachments are absolute local file paths (at most 10, 50 MB each, 100 MB per call) that Koushi reads and sends as one media message per file, with body as the first file's caption; every file is checked and read before the first is sent. Sending files needs the account's attachments permission as well as send. reply_to_event_id cannot be combined with attachments. Returns event_id and transaction_id of the first message and, when files were sent, an attachments list with one event_id and transaction_id per file. client_request_id makes a retry idempotent.",
             input_schema: json!({
                 "type": "object",
                 "properties": {
                     "account_id": account_id_property(),
                     "room_id": { "type": "string" },
-                    "body": { "type": "string", "description": "Plain text body. Required unless attachments are present." },
-                    "reply_to_event_id": { "type": "string" },
+                    "body": { "type": "string", "description": "Plain text body. Required unless attachments are present; with attachments it captions the first file." },
+                    "reply_to_event_id": { "type": "string", "description": "Event to reply to. Not allowed together with attachments." },
                     "attachments": {
                         "type": "array",
                         "maxItems": 10,
+                        "description": "Local files to send, each as its own media message, in this order.",
                         "items": {
                             "type": "object",
-                            "properties": { "path": { "type": "string" } },
+                            "properties": { "path": { "type": "string", "description": "Absolute path of a regular file readable by Koushi." } },
                             "required": ["path"],
                             "additionalProperties": false
                         }
@@ -268,6 +269,24 @@ mod tests {
         assert!(
             validate_arguments("search_messages", &json!({"account_id": "a", "query": "x"}))
                 .is_ok()
+        );
+    }
+
+    #[test]
+    fn send_message_describes_its_attachment_contract() {
+        let tool = find("send_message").expect("tool");
+        for phrase in [
+            "absolute local file paths",
+            "attachments permission",
+            "caption",
+        ] {
+            assert!(tool.description.contains(phrase), "{phrase}");
+        }
+        let path = &tool.input_schema["properties"]["attachments"]["items"]["properties"]["path"];
+        assert!(
+            path["description"]
+                .as_str()
+                .is_some_and(|text| text.starts_with("Absolute"))
         );
     }
 

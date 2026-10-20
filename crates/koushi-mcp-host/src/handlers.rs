@@ -400,18 +400,34 @@ async fn send_message(
         .and_then(Value::as_str)
         .unwrap_or_default()
         .to_owned();
-    if body.trim().is_empty() {
-        return Err(WireError::new(ErrorCode::Unsupported, "body is empty"));
+    let attachments = attachment_paths(arguments)?;
+    if attachments.is_empty() && body.trim().is_empty() {
+        return Err(WireError::new(
+            ErrorCode::Unsupported,
+            "body is empty and no attachments were given",
+        ));
     }
     let in_reply_to = arguments
         .get("reply_to_event_id")
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty())
         .map(str::to_owned);
+    if in_reply_to.is_some() && !attachments.is_empty() {
+        return Err(WireError::new(
+            ErrorCode::Unsupported,
+            "reply_to_event_id cannot be combined with attachments; send the reply and the files separately",
+        ));
+    }
     let client_request_id = arguments
         .get("client_request_id")
         .and_then(Value::as_str)
         .filter(|id| !id.is_empty());
+    // A call that can never succeed (relative path, missing file, over the
+    // limits) fails before it raises an approval. Contents are read only after
+    // consent.
+    if !attachments.is_empty() {
+        koushi_core::local_upload::check_local_paths(&attachments).map_err(local_upload_failure)?;
+    }
 
     // The approval shows the message as context, and the room only when it is
     // one this account has joined. Whether the room exists is decided after
@@ -425,11 +441,27 @@ async fn send_message(
             &account_id,
             Need::Send,
             ConsentContext {
-                room_label,
-                message_preview: Some(body.clone()),
+                room_label: room_label.clone(),
+                message_preview: (!body.trim().is_empty()).then(|| body.clone()),
             },
         )
         .await?;
+    // Sending local files is file access: it also needs the attachments
+    // permission, asked separately like every other permission.
+    if !attachments.is_empty() {
+        shared
+            .broker
+            .authorize(
+                client,
+                &account_id,
+                Need::Attachments,
+                ConsentContext {
+                    room_label,
+                    message_preview: None,
+                },
+            )
+            .await?;
+    }
     let snapshot = connection.snapshot();
     let account_key = account_key_from_snapshot(&snapshot);
     if account_key.0.is_empty() {
@@ -439,6 +471,23 @@ async fn send_message(
         ));
     }
     let key = TimelineKey::room(account_key, room_id.clone());
+    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+    if !attachments.is_empty() {
+        return Box::pin(send_attachments(
+            &mut connection,
+            &snapshot,
+            AttachmentSend {
+                key,
+                room_id,
+                body,
+                paths: attachments,
+                client_request_id,
+                deadline,
+            },
+        ))
+        .await;
+    }
+
     let request_id = connection.next_request_id();
     // Caller-supplied ids make a retried send idempotent at the core.
     let transaction_id = client_request_id
@@ -464,8 +513,171 @@ async fn send_message(
         .command(CoreCommand::Timeline(command))
         .await
         .map_err(|_| WireError::new(ErrorCode::Internal, "send could not be submitted"))?;
+    let (transaction_id, event_id) =
+        wait_send_completed(&mut connection, request_id, &key, deadline).await?;
+    Ok(json!({
+        "room_id": room_id,
+        "event_id": event_id,
+        "transaction_id": transaction_id,
+    }))
+}
 
-    let deadline = tokio::time::Instant::now() + std::time::Duration::from_secs(60);
+/// `attachments[].path`, in order. An absent or empty array means none.
+fn attachment_paths(arguments: &Value) -> Result<Vec<std::path::PathBuf>, WireError> {
+    let Some(list) = arguments.get("attachments") else {
+        return Ok(Vec::new());
+    };
+    let list = list
+        .as_array()
+        .ok_or_else(|| WireError::new(ErrorCode::Unsupported, "attachments must be an array"))?;
+    list.iter()
+        .map(|item| {
+            item.get("path")
+                .and_then(Value::as_str)
+                .filter(|path| !path.is_empty())
+                .map(std::path::PathBuf::from)
+                .ok_or_else(|| {
+                    WireError::new(
+                        ErrorCode::Unsupported,
+                        "every attachment needs a non-empty path",
+                    )
+                })
+        })
+        .collect()
+}
+
+fn local_upload_failure(failure: koushi_core::local_upload::LocalUploadFailure) -> WireError {
+    use koushi_core::local_upload::LocalUploadFailure as Failure;
+    let (code, message) = match failure {
+        Failure::NoFiles => (ErrorCode::Unsupported, "no attachments were given"),
+        Failure::TooManyFiles => (
+            ErrorCode::Unsupported,
+            "at most 10 attachments can be sent per call",
+        ),
+        Failure::NotAbsolute => (ErrorCode::Unsupported, "attachment paths must be absolute"),
+        Failure::NotARegularFile => (
+            ErrorCode::Unsupported,
+            "an attachment path is not a regular file",
+        ),
+        Failure::Unreadable => (ErrorCode::Unsupported, "an attachment file cannot be read"),
+        Failure::TooLarge => (
+            ErrorCode::AttachmentTooLarge,
+            "attachments are limited to 50 MB per file and 100 MB per call",
+        ),
+        Failure::Empty => (ErrorCode::Unsupported, "an attachment file is empty"),
+        Failure::PreparationFailed => (
+            ErrorCode::Internal,
+            "Koushi could not prepare an attachment for upload",
+        ),
+    };
+    WireError::new(code, message)
+}
+
+/// One attachment send request, after consent.
+struct AttachmentSend<'a> {
+    key: TimelineKey,
+    room_id: String,
+    body: String,
+    paths: Vec<std::path::PathBuf>,
+    client_request_id: Option<&'a str>,
+    deadline: tokio::time::Instant,
+}
+
+/// Sends each local file as its own media message through the Core upload
+/// command the composer's staged uploads end in, without touching composer
+/// state. Every file is read and prepared before the first one is sent, so a
+/// bad file sends nothing; a delivery failure part-way says how many were
+/// already sent.
+async fn send_attachments(
+    connection: &mut koushi_core::CoreConnection,
+    snapshot: &koushi_state::AppState,
+    send: AttachmentSend<'_>,
+) -> Result<Value, WireError> {
+    let AttachmentSend {
+        key,
+        room_id,
+        body,
+        paths,
+        client_request_id,
+        deadline,
+    } = send;
+    let SessionState::Ready(info) = &snapshot.session else {
+        return Err(WireError::new(
+            ErrorCode::AccountUnavailable,
+            "account is not ready to send",
+        ));
+    };
+    let expected_account = koushi_core::store::session_key_id_from_info(info);
+    let caption = (!body.trim().is_empty()).then(|| ComposerDocument::from_plain_text(body));
+    let requests = koushi_core::local_upload::prepare_local_uploads(
+        paths,
+        caption,
+        snapshot.settings.values.composer.formatting_options(),
+        snapshot
+            .settings
+            .values
+            .media
+            .image_upload_compression_policy,
+        None,
+    )
+    .await
+    .map_err(local_upload_failure)?;
+    let total = requests.len();
+    let base = client_request_id
+        .map(|id| format!("mcp-{id}"))
+        .unwrap_or_else(|| format!("mcp-{}", connection.next_request_id().sequence));
+    let mut sent = Vec::with_capacity(total);
+    for (index, request) in requests.into_iter().enumerate() {
+        let request_id = connection.next_request_id();
+        let submitted = connection
+            .command(CoreCommand::Timeline(TimelineCommand::UploadAndSendMedia {
+                request_id,
+                expected_account: expected_account.clone(),
+                key: key.clone(),
+                transaction_id: format!("{base}-{index}"),
+                request,
+            }))
+            .await
+            .map_err(|_| WireError::new(ErrorCode::Internal, "send could not be submitted"));
+        let outcome = match submitted {
+            Ok(()) => wait_send_completed(connection, request_id, &key, deadline).await,
+            Err(error) => Err(error),
+        };
+        match outcome {
+            Ok((transaction_id, event_id)) => sent.push(json!({
+                "event_id": event_id,
+                "transaction_id": transaction_id,
+            })),
+            Err(error) if sent.is_empty() => return Err(error),
+            Err(error) => {
+                return Err(WireError::new(
+                    error.code,
+                    format!(
+                        "{} after {} of {total} attachments were sent",
+                        error.message,
+                        sent.len()
+                    ),
+                ));
+            }
+        }
+    }
+    let first = sent.first().cloned().unwrap_or(Value::Null);
+    Ok(json!({
+        "room_id": room_id,
+        "event_id": first["event_id"],
+        "transaction_id": first["transaction_id"],
+        "attachments": sent,
+    }))
+}
+
+/// Waits for this request's `SendCompleted` and returns its transaction and
+/// event ids, or the typed failure.
+async fn wait_send_completed(
+    connection: &mut koushi_core::CoreConnection,
+    request_id: koushi_protocol::ids::RequestId,
+    key: &TimelineKey,
+    deadline: tokio::time::Instant,
+) -> Result<(String, String), WireError> {
     loop {
         let event = tokio::time::timeout_at(deadline, connection.recv_event())
             .await
@@ -476,12 +688,8 @@ async fn send_message(
                 key: completed_key,
                 transaction_id,
                 event_id,
-            })) if completed == request_id && completed_key == key => {
-                return Ok(json!({
-                    "room_id": room_id,
-                    "event_id": event_id,
-                    "transaction_id": transaction_id,
-                }));
+            })) if completed == request_id && &completed_key == key => {
+                return Ok((transaction_id, event_id));
             }
             Ok(CoreEvent::OperationFailed {
                 request_id: completed,

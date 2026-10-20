@@ -2027,8 +2027,13 @@ Invariants:
   launcher to the app and is generated per app launch, held in a `0600`
   endpoint file, and never written to argv, logs, or events. Matrix
   credentials, store keys, and index keys never cross the socket.
-- **Attachments follow existing policy.** Sending passes local paths to Core,
-  which reads and encrypts them through the staged-upload path. Receiving
+- **Attachments follow existing policy.** Sending passes absolute local paths
+  to Core (`koushi_core::local_upload`), which checks the count and size limits,
+  reads the files off the async runtime, and runs the staged-upload media
+  preparation in a detached registry; each file is then sent with the composer's
+  own `TimelineCommand::UploadAndSendMedia`. No composer target, staged-upload
+  state, or `AppAction` is touched. Sending files needs the `attachments`
+  permission in addition to `send`. Receiving
   writes through the `media_save` containment policy into an app-managed
   directory. No caller-chosen destination is accepted.
 - **Polling, not push.** MCP cannot wake a host that is not calling. New

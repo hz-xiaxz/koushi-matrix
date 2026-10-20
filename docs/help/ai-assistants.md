@@ -18,7 +18,7 @@ account and each permission.
 | `read_room_messages` | Reads a room's recent messages, newest first, with sender, time, and text. | read |
 | `search_messages` | Searches decrypted history and returns room, event id, sender, timestamp, and a snippet. | read |
 | `get_attachment` | Downloads one attachment into Koushi's media cache and returns its path. | attachments |
-| `send_message` | Sends a message, optionally as a reply. | send |
+| `send_message` | Sends a message, optionally as a reply, or sends local files with an optional caption. | send; also attachments when sending files |
 | `wait_for_events` | Waits for new activity in the account and returns changed rooms. | read |
 
 Every tool needs an `account_id`. The assistant gets it from `list_accounts`;
@@ -165,9 +165,11 @@ assistant's call waits for your answer (up to 40 seconds):
 - **Per account.** The first call that touches an account asks about that
   account only. Other accounts stay hidden until the assistant uses them and you
   approve them too.
-- **Per permission.** Reading, sending, and downloading attachments are asked
-  separately, when first needed. An assistant you allowed to read asks again the
-  first time it sends.
+- **Per permission.** Reading, sending, and attachments are asked separately,
+  when first needed. An assistant you allowed to read asks again the first time
+  it sends. The attachments permission covers both downloading attachments and
+  sending files from your computer, so an assistant allowed to send text asks
+  again the first time it sends a file.
 - **Allow** keeps that permission for that account. After you allow sending,
   later messages are sent without asking again.
 - **Deny** refuses that permission. Koushi remembers the denial until you turn
@@ -234,6 +236,7 @@ Ask in normal language, for example:
 - "Summarise what was said in the Design room today."
 - "Reply to that message saying I will send the file tomorrow."
 - "Download the attachment on that message."
+- "Send report.pdf from my Documents folder to the Design room."
 
 Sending is a normal message from your account. Koushi does not mark it as
 written by an assistant. Sending and replying work even when the target room
@@ -306,6 +309,12 @@ Two failures look similar and mean different things:
   may not be searchable yet. `read_room_messages` reads the room directly and
   does not depend on the crawl.
 - Replies are supported with `reply_to_event_id`; starting a new thread is not.
+- `send_message` sends files from absolute local paths that Koushi can read: at
+  most 10 files, 50 MB each and 100 MB per call. Each file becomes its own
+  message, and `body` captions the first one. A file cannot be sent as a reply,
+  and files are sent as they are, without resizing. Koushi checks and reads every
+  file before sending the first; if a later file fails to send, the error says
+  how many were already sent.
 - `get_attachment` returns one file per call, always the first attachment of the
   message. Koushi chooses the destination inside its media cache; the assistant
   cannot write elsewhere.
