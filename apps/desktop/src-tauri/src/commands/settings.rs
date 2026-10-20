@@ -135,7 +135,14 @@ pub async fn preview_notification_delivery(
         NotificationDeliveryPreviewSample, preview_digest,
     };
     let locale = koushi_state::resolve_catalog_locale(
-        &state.connection.lock().await.snapshot().settings.values.locale,
+        &state
+            .connection
+            .lock()
+            .await
+            .snapshot()
+            .settings
+            .values
+            .locale,
     );
     let preview = preview_digest(
         &sink,
