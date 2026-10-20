@@ -73,9 +73,10 @@ so it never holds your encryption keys. Then just ask:
 claude mcp add --scope user koushi -- /path/to/koushi-mcp --client-name claude-code
 ```
 
-For technical users in this version: the `koushi-mcp` launcher is not bundled
-with the app yet, so you build it from source, and you grant access by editing a
-JSON file. See [Connect an AI assistant](docs/help/ai-assistants.md) for Claude
+The `koushi-mcp` launcher ships with Koushi, and **App Settings → AI
+assistants** shows its path ready to copy. The first time an assistant asks for
+something, Koushi shows an approval dialog; you can change or remove access
+later on the same settings page. See [Connect an AI assistant](docs/help/ai-assistants.md) for Claude
 Code, Codex, other MCP clients, and URL-only connectors.
 
 ## Downloads

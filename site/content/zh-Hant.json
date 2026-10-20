@@ -232,8 +232,8 @@
     "source_hash": "4a392390d2b6"
   },
   "ai.setup": {
-    "text": "目前版本適合技術使用者：koushi-mcp 啟動器尚未隨應用程式提供，需要從原始碼建置，並透過編輯 JSON 檔案來授予存取權限。",
-    "source_hash": "f49d103201bb"
+    "text": "koushi-mcp 啟動器已隨 Koushi 一併提供。助理第一次提出請求時，Koushi 會顯示核准對話框；之後你可以在「應用程式設定 → AI 助理」中變更或移除存取權限。",
+    "source_hash": "2565e02ab5d0"
   },
   "ai.guide": {
     "text": "設定 AI 助理",

@@ -232,8 +232,8 @@
     "source_hash": "4a392390d2b6"
   },
   "ai.setup": {
-    "text": "현재 버전은 기술 사용자용입니다. koushi-mcp 런처가 아직 앱에 포함되어 있지 않아 소스에서 빌드해야 하며, 접근 권한은 JSON 파일을 편집해 부여합니다.",
-    "source_hash": "f49d103201bb"
+    "text": "koushi-mcp 런처는 Koushi에 포함되어 있습니다. 어시스턴트가 처음 무언가를 요청하면 Koushi가 승인 대화상자를 표시하며, 나중에 앱 설정 → AI 어시스턴트에서 접근 권한을 변경하거나 제거할 수 있습니다.",
+    "source_hash": "2565e02ab5d0"
   },
   "ai.guide": {
     "text": "AI 어시스턴트 설정하기",

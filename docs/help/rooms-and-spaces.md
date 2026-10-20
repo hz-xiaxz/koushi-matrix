@@ -59,13 +59,19 @@ Use **Create room** in the sidebar header, optionally enter a name, and choose
 
 - **Members of *Space*** (only when a Space is selected): anyone in that Space
   can find and join the room. You can also allow members of your other Spaces.
+- **Ask to join** (only when Koushi reports that the room it will create
+  supports knocking): people can send a request to join, and a room admin
+  approves or declines each request. Inside a Space this choice reads
+  **Members of *Space* can join directly; others can ask to join**: Space
+  members join without asking, and everyone else can ask to join.
 - **Only people you invite**.
 - **Anyone**: a public room. Anyone, including people outside your Spaces, can
   find it in the public room directory and join it. A public room is never
   encrypted.
 
-A room created from **Home** is not part of any Space, so it offers only
-**Only people you invite** and **Anyone**. When the selected Space is public,
+A room created from **Home** is not part of any Space, so it never offers
+**Members of *Space***; it offers **Only people you invite** and **Anyone**,
+plus **Ask to join** when knocking is available. When the selected Space is public,
 the dialog starts with **Anyone** selected.
 
 Under **Earlier messages**, choose whether new members can read messages sent
