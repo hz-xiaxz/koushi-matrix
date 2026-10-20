@@ -60,8 +60,10 @@ clients. Credential UI installation alone uses a narrow fixture hook; key
 requests, authorization, Olm transport, responder export, import and state
 projection are production code. Core owns each active Simplified Sliding Sync
 service. A third bootstrapped regular member makes the small-room manual target
-set differ from administrator-only startup. The Node fixture prepares 30 joined
-members in a public room; the requester joins as 31. Lazy client membership
+set differ from administrator-only startup. These accounts have owner-signed
+devices but never manually verify each other; assertions before and after
+recovery require their identities to remain unverified. The Node fixture prepares
+30 joined members in a public room; the requester joins as 31. Lazy client membership
 cannot substitute for the authoritative server member population.
 
 The requester restarts twice from its encrypted same-device store while the
@@ -72,7 +74,7 @@ administrator's Core sync resumes, both distinct historical sessions decrypt.
 An explicit request also recovers the original 30-day-expired invitation room.
 
 Negative cases change the real server's history visibility and membership,
-and locally block a previously verified requester device. Count-only Core
+and locally block an owner-signed requester device. Count-only Core
 observations prove the affected room's incoming request was refused before the
 oracle requires an empty recipient key store. A final pause occurs after a
 real chunk's durable reservation but before SDK import: both clients restart,
@@ -88,6 +90,7 @@ Additional required tokens:
 - `history_recovery_startup_admin_retry=ok`
 - `history_recovery_restart_cooldown=ok`
 - `history_recovery_join_without_invite=ok`
+- `history_recovery_without_manual_verification=ok`
 - `history_recovery_31_members_admin=ok`
 - `history_recovery_force_all=ok`
 - `history_recovery_after_window_expiry=ok`
@@ -98,3 +101,7 @@ Additional required tokens:
 
 - `history_recovery_policy_race_guard=ok`: a requester leaving after the final
   identity refresh and before disclosure receives no historical keys.
+- `history_recovery_identity_race_guard=ok`: rotating only the owner master
+  identity while retaining device keys rejects a paused disclosure and a paused
+  import. The newly queried identities remain cross-signed and unverified, so
+  rejection proves exact pin checks rather than verification-violation handling.

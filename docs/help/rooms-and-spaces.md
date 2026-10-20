@@ -336,9 +336,10 @@ The **Access** entry at the bottom of **Space info** moves to this section.
 On a message that cannot be decrypted, choose **Request decryption keys for past
 messages**. **Requested** means the encrypted request was sent; it does not mean
 all keys have arrived. You can still choose **Retry**. A responding member's
-Koushi shares available keys when it comes online and responds. Both sides must
-have verified each other's encryption identities. Element X does not handle
-this Koushi extension; no reply can mean an offline or unsupported client.
+Koushi shares available keys when it comes online and responds. You do not need
+to manually verify each other first. Each device must be signed by its own
+account, unblocked, and free of a previously verified identity change. Element X
+does not handle this Koushi extension; no reply can mean an offline or unsupported client.
 
 This works after joining a room through a Space or public-room link, and after
 the invitation's 30-day import window. The room must still allow shared history,

@@ -33,6 +33,7 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
     "history_recovery_startup_admin_retry=ok",
     "history_recovery_restart_cooldown=ok",
     "history_recovery_join_without_invite=ok",
+    "history_recovery_without_manual_verification=ok",
     "history_recovery_31_members_admin=ok",
     "history_recovery_force_all=ok",
     "history_recovery_after_window_expiry=ok",
@@ -41,6 +42,7 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
     "history_recovery_blocked_device_guard=ok",
     "history_recovery_crash_replay=ok",
     "history_recovery_policy_race_guard=ok",
+    "history_recovery_identity_race_guard=ok",
     "history_window_cleanup=ok",
     "history_key_recovery_window=ok"
   ]),

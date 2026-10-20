@@ -6979,6 +6979,11 @@ an older attempt cannot replace a retry, and delayed Sending cannot regress a
 settled state in the same generation. A session reset removes the projection.
 Wire nonces, public device pins and chunk receipts live only in the encrypted
 SDK crypto store and Core actor. Private keys never enter this state.
+Manual verification of a peer identity is not a start, disclosure or import
+guard. Its device must be signed by its owner, unblocked, without a verification
+violation, and match the pinned device and master keys. These guards apply to
+cached replies and late imports as well. SDK forwarding provenance retains the
+peer's actual verification state.
 
 ```mermaid
 stateDiagram-v2
@@ -6997,8 +7002,8 @@ stateDiagram-v2
 
 Requested means exactly 「要求済みです」, with manual retry still available.
 Reply chunks never cause a success claim about all room history: peers may be
-offline, unsupported, unverified, or missing keys. Default peer selection and
-startup administrator-only cooldown follow the historical recovery design.
+offline, unsupported, device-ineligible, or missing keys. Default peer selection
+and startup administrator-only cooldown follow the historical recovery design.
 Unanswered per-device nonces and fixed expiry survive retries and restart;
 admission and successful import are separate durable records. Completion
 tombstones re-acknowledge replayed replies even after target narrowing. Storage

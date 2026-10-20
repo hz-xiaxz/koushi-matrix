@@ -1,6 +1,7 @@
 // @vitest-environment jsdom
 import { cleanup, fireEvent, render, screen } from "@testing-library/react";
 import { afterEach, expect, test, vi } from "vitest";
+import { t } from "../i18n/messages";
 import { HistoryKeyRecoveryControl } from "./HistoryKeyRecoveryControl";
 
 afterEach(cleanup);
@@ -24,6 +25,6 @@ test("request acknowledgement comes only from Rust and keeps Retry available", (
 
 test("partial failure remains visible and advanced action names its broad audience", () => {
   render(<HistoryKeyRecoveryControl onRequest={vi.fn()} forceAll state={{ generation: 2, status: { kind: "partial", received_keys: 1, reason: "verificationRequired" } }} />);
-  expect(screen.getByText(/Verify/)).toBeTruthy();
+  expect(screen.getByText(t("historyKeys.verify"))).toBeTruthy();
   expect(screen.getByRole("button", { name: "Request keys from everyone" })).toBeTruthy();
 });

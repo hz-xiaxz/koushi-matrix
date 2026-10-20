@@ -56,14 +56,18 @@ or SDK boundary without logging private Matrix payloads.
   custom request protocol, authorization, retries and UI remain in Koushi Core.
   The SDK fork adds generic access to application metadata in the encrypted
   crypto store, bounded shared-history bundle export, and room-scoped import
-  from a currently cross-signing-verified, unblocked forwarder. Import derives
-  forwarding provenance inside the SDK and retains its normal merge behavior;
+  from an owner-cross-signed, unblocked forwarder without a verification
+  violation. As amended on 2026-10-20, manual peer verification is optional;
+  current device/master pins must still match. Import derives actual verified
+  or unverified forwarding provenance inside the SDK and retains its normal
+  merge behavior;
   it does not treat file import as authenticated sharing. The public wrappers
   are gated by the existing experimental custom-to-device feature. The generic
   bounded store accessor defaults to unsupported, never an unbounded fallback;
   MemoryStore checks the count under its read lock and SQLite applies SQL
   LIMIT before decrypting/unpickling rows. Other custom stores can opt in.
-  Count/byte overflow, unverified/blocked forwarders, cross-room rejection,
+  Count/byte overflow, unsigned/blocked or verification-violating forwarders,
+  cross-room rejection,
   idempotence and encrypted SQLite retrieval have focused coverage. Import
   diagnostics now log counts instead of the imported room/session map.
   Upstream intent: propose these small generic primitives separately from
