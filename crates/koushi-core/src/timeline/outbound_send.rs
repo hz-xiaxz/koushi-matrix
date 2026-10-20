@@ -966,7 +966,7 @@ impl TimelineManagerActor {
         self.send_enqueue_workers.tasks.push(Box::pin(async move {
             let worker = async move {
                 let mut changed_key = None;
-                let outcome = async {
+                let outcome = Box::pin(async {
                     if !await_submission_admission(admission).await {
                         return Err(TimelineFailureKind::QueueOverflow);
                     }
@@ -987,8 +987,8 @@ impl TimelineManagerActor {
                         trace.stage("sdk_enqueue_started");
                     }
                     context.set_diagnostic_trace(registration.lifecycle_trace.as_ref().cloned());
-                    enqueue_timeline_send(context, payload).await
-                }
+                    Box::pin(enqueue_timeline_send(context, payload)).await
+                })
                 .await;
                 match outcome {
                     Ok(success) => {
@@ -1023,7 +1023,10 @@ impl TimelineManagerActor {
                 }
                 changed_key
             };
-            let changed_key = AssertUnwindSafe(worker).catch_unwind().await.ok().flatten();
+            let changed_key = Box::pin(AssertUnwindSafe(worker).catch_unwind())
+                .await
+                .ok()
+                .flatten();
             SendEnqueueWorkerCompletion {
                 changed_key,
                 hydration: None,

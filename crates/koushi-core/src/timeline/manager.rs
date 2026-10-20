@@ -864,6 +864,8 @@ impl TimelineManagerActor {
         let mut live_tail_completion_dispatches = 0;
         #[cfg(test)]
         let mut navigation_projection_completion_dispatches = None;
+        // #1554: each awaited step is boxed so this loop's frame holds pointers
+        // instead of every select branch's temporary futures.
         loop {
             let msg = tokio::select! {
                 biased;
@@ -925,14 +927,14 @@ impl TimelineManagerActor {
                             navigation_projection_completion_dispatches =
                                 Some(live_tail_completion_dispatches);
                         }
-                        self.handle_navigation_projection(projection).await;
+                        Box::pin(self.handle_navigation_projection(projection)).await;
                     }
                     continue;
                 }
                 completion = self.focused_builds.tasks.next(),
                     if !self.focused_builds.tasks.is_empty() => {
                     if let Some(completion) = completion {
-                        self.handle_focused_build_completion(completion).await;
+                        Box::pin(self.handle_focused_build_completion(completion)).await;
                     }
                     continue;
                 }
@@ -986,14 +988,13 @@ impl TimelineManagerActor {
                     response,
                 } => {
                     if let Some(handle) = self.timelines.get(&source.timeline.key) {
-                        let _ = handle
-                            .send(TimelineActorMessage::ReadReceiptWindow {
-                                source,
-                                start,
-                                limit,
-                                response,
-                            })
-                            .await;
+                        let _ = Box::pin(handle.send(TimelineActorMessage::ReadReceiptWindow {
+                            source,
+                            start,
+                            limit,
+                            response,
+                        }))
+                        .await;
                     } else {
                         let _ = response.send(Err(
                             crate::view_scope_lifecycle::ScopeError::SourceUnavailable,
@@ -1008,8 +1009,7 @@ impl TimelineManagerActor {
                     room_list_service,
                     core_generation,
                 } => {
-                    self.handle_sync_started(room_list_service, core_generation)
-                        .await;
+                    Box::pin(self.handle_sync_started(room_list_service, core_generation)).await;
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 TimelineMessage::ResidencyTestSnapshot { response } => {
@@ -1020,14 +1020,13 @@ impl TimelineManagerActor {
                     core_generation,
                     room_ids,
                 } => {
-                    self.handle_visible_rooms_observed(core_generation, room_ids)
-                        .await;
+                    Box::pin(self.handle_visible_rooms_observed(core_generation, room_ids)).await;
                 }
                 TimelineMessage::RoomMembershipObserved {
                     core_generation,
                     transitions,
                 } => {
-                    self.handle_room_membership_observed(core_generation, transitions)
+                    Box::pin(self.handle_room_membership_observed(core_generation, transitions))
                         .await;
                 }
                 TimelineMessage::RoomLeft {
@@ -1035,28 +1034,33 @@ impl TimelineManagerActor {
                     cause,
                     acknowledged,
                 } => {
-                    self.handle_room_left(room_id, cause).await;
+                    Box::pin(self.handle_room_left(room_id, cause)).await;
                     let _ = acknowledged.send(());
                 }
                 TimelineMessage::RoomRejoined {
                     room_id,
                     acknowledged,
                 } => {
-                    self.handle_room_rejoined(room_id).await;
+                    Box::pin(self.handle_room_rejoined(room_id)).await;
                     let _ = acknowledged.send(());
                 }
                 TimelineMessage::AllRoomsResponseCommitted {
                     core_generation,
                     response_sequence,
                 } => {
-                    self.handle_all_rooms_response_committed(core_generation, response_sequence)
-                        .await;
+                    Box::pin(
+                        self.handle_all_rooms_response_committed(
+                            core_generation,
+                            response_sequence,
+                        ),
+                    )
+                    .await;
                 }
                 TimelineMessage::RoomSubscriptionCheckpoint {
                     service_epoch,
                     checkpoint,
                 } => {
-                    self.handle_room_subscription_checkpoint(service_epoch, checkpoint)
+                    Box::pin(self.handle_room_subscription_checkpoint(service_epoch, checkpoint))
                         .await;
                 }
                 TimelineMessage::LiveTailRefreshCompleted {
@@ -1074,7 +1078,7 @@ impl TimelineManagerActor {
                         live_tail_completion_dispatches += 1;
                     }
                     let hydration_key = key.clone();
-                    self.handle_live_tail_refresh_completed(
+                    Box::pin(self.handle_live_tail_refresh_completed(
                         key,
                         actor_generation,
                         epoch,
@@ -1083,7 +1087,7 @@ impl TimelineManagerActor {
                         requested_limit,
                         returned_events,
                         duration_ms,
-                    )
+                    ))
                     .await;
                     self.retry_pending_send_hydrations(&hydration_key);
                 }
@@ -1105,7 +1109,7 @@ impl TimelineManagerActor {
                     let _ = response.send(self.focused_build_probe(&key));
                 }
                 TimelineMessage::IgnoredUsersUpdated { user_ids } => {
-                    self.handle_ignored_users_updated(user_ids).await;
+                    Box::pin(self.handle_ignored_users_updated(user_ids)).await;
                 }
                 TimelineMessage::ThreadRootProjectionFetchFinished {
                     key,
@@ -1113,12 +1117,12 @@ impl TimelineManagerActor {
                     activity,
                     result,
                 } => {
-                    self.handle_thread_root_projection_fetch_finished(
+                    Box::pin(self.handle_thread_root_projection_fetch_finished(
                         key,
                         actor_generation,
                         activity,
                         result,
-                    )
+                    ))
                     .await;
                 }
                 TimelineMessage::StartAggregateRefresh {
@@ -1127,12 +1131,12 @@ impl TimelineManagerActor {
                     own_user_id,
                     refreshes,
                 } => {
-                    self.handle_aggregate_refresh_start(
+                    Box::pin(self.handle_aggregate_refresh_start(
                         key,
                         actor_generation,
                         own_user_id,
                         refreshes,
-                    )
+                    ))
                     .await;
                 }
                 TimelineMessage::AggregateRefreshFinished {
@@ -1141,8 +1145,13 @@ impl TimelineManagerActor {
                     refresh,
                     result,
                 } => {
-                    self.handle_aggregate_refresh_finished(key, actor_generation, refresh, result)
-                        .await;
+                    Box::pin(self.handle_aggregate_refresh_finished(
+                        key,
+                        actor_generation,
+                        refresh,
+                        result,
+                    ))
+                    .await;
                 }
                 TimelineMessage::ThreadSummaryActivityObserved {
                     key,
@@ -1161,12 +1170,12 @@ impl TimelineManagerActor {
                     read_key,
                     event_id,
                 } => {
-                    self.handle_authoritative_read_state_observed(
+                    Box::pin(self.handle_authoritative_read_state_observed(
                         &key,
                         actor_generation,
                         read_key,
                         event_id,
-                    )
+                    ))
                     .await;
                 }
                 TimelineMessage::LocalReadBoundaryObserved {
@@ -1174,46 +1183,51 @@ impl TimelineManagerActor {
                     actor_generation,
                     target,
                 } => {
-                    self.handle_local_read_boundary_observed(key, actor_generation, target)
-                        .await;
+                    Box::pin(self.handle_local_read_boundary_observed(
+                        key,
+                        actor_generation,
+                        target,
+                    ))
+                    .await;
                 }
                 TimelineMessage::RefreshThreadUnread { key } => {
                     if let Some(handle) = self.timelines.get(&key) {
                         let deadline = executor::Instant::now() + LIVE_TAIL_CANCELLATION_DEADLINE;
-                        let _ = executor::timeout_at(
+                        let _ = Box::pin(executor::timeout_at(
                             deadline,
                             handle.send_control(TimelineActorControl::RefreshThreadUnread),
-                        )
+                        ))
                         .await;
                     }
                 }
                 TimelineMessage::Command(command) => {
-                    self.handle_command(command).await;
+                    Box::pin(self.handle_command(command)).await;
                 }
                 TimelineMessage::CommandWithComposerFormatting {
                     command,
                     formatting_options,
                 } => {
-                    self.handle_command_with_formatting_options(command, formatting_options)
-                        .await;
+                    Box::pin(
+                        self.handle_command_with_formatting_options(command, formatting_options),
+                    )
+                    .await;
                 }
                 TimelineMessage::LeasedCommand {
                     command,
                     composer_permit,
                 } => {
-                    self.handle_command_with_permit(command, Some(composer_permit))
-                        .await;
+                    Box::pin(self.handle_command_with_permit(command, Some(composer_permit))).await;
                 }
                 TimelineMessage::LeasedCommandWithComposerFormatting {
                     command,
                     composer_permit,
                     formatting_options,
                 } => {
-                    self.handle_command_with_formatting_context(
+                    Box::pin(self.handle_command_with_formatting_context(
                         command,
                         Some(composer_permit),
                         formatting_options,
-                    )
+                    ))
                     .await;
                 }
             }
@@ -1227,7 +1241,7 @@ impl TimelineManagerActor {
         // Stop accepting commands, then join session-owned enqueue workers
         // while the sole global terminal observer remains live. A worker may
         // still bind a durably saved SDK transaction during this phase.
-        self.focused_builds.cancel_all().await;
+        Box::pin(self.focused_builds.cancel_all()).await;
         self.read_workers.cancel_all();
         self.read_workers.publish_persistence();
         self.settle_typing_lane();
@@ -1245,7 +1259,7 @@ impl TimelineManagerActor {
                 },
             );
         }
-        self.join_send_enqueue_workers().await;
+        Box::pin(self.join_send_enqueue_workers()).await;
         // Once enqueue workers are quiescent, stop the observer before actor
         // presentation producers. Every remaining bound request then receives
         // one explicit observation-loss settlement before ingress closes.
@@ -1256,7 +1270,7 @@ impl TimelineManagerActor {
             .map(|(_, handle)| handle)
             .collect::<Vec<_>>();
         for handle in timeline_actors {
-            handle.stop().await;
+            Box::pin(handle.stop()).await;
         }
         apply_send_completion_observation_loss_and_handoff(
             &self.send_completion,
@@ -1268,13 +1282,13 @@ impl TimelineManagerActor {
         // reducer channel has accepted every action-required terminal in FIFO order.
         self.terminal_ingress
             .close_for_shutdown(&mut self.terminal_rx);
-        while let Some(terminal) = self.terminal_rx.recv().await {
-            self.handle_send_terminal_handoff(terminal).await;
+        while let Some(terminal) = Box::pin(self.terminal_rx.recv()).await {
+            Box::pin(self.handle_send_terminal_handoff(terminal)).await;
         }
         for key in room_keys {
-            self.clear_thread_root_projections_for_room(&key).await;
+            Box::pin(self.clear_thread_root_projections_for_room(&key)).await;
         }
-        self.thread_root_projection_fetches.abort_all().await;
+        Box::pin(self.thread_root_projection_fetches.abort_all()).await;
         if let Some(task) = self.room_subscription_checkpoint_task.take() {
             task.abort();
         }
@@ -1283,14 +1297,14 @@ impl TimelineManagerActor {
         }
     }
     pub(super) async fn handle_command(&mut self, command: TimelineCommand) {
-        self.handle_command_with_permit(command, None).await;
+        Box::pin(self.handle_command_with_permit(command, None)).await;
     }
     async fn handle_command_with_formatting_options(
         &mut self,
         command: TimelineCommand,
         formatting_options: ComposerFormattingOptions,
     ) {
-        self.handle_command_with_formatting_context(command, None, formatting_options)
+        Box::pin(self.handle_command_with_formatting_context(command, None, formatting_options))
             .await;
     }
     async fn handle_command_with_formatting_context(
@@ -1301,8 +1315,7 @@ impl TimelineManagerActor {
     ) {
         let previous_options = self.composer_formatting_options;
         self.composer_formatting_options = formatting_options;
-        self.handle_command_with_permit(command, composer_permit)
-            .await;
+        Box::pin(self.handle_command_with_permit(command, composer_permit)).await;
         self.composer_formatting_options = previous_options;
     }
     pub(super) async fn handle_command_with_permit(
@@ -1317,7 +1330,7 @@ impl TimelineManagerActor {
                 initial_backfill,
             } => {
                 trace_timeline_route("manager_received", "subscribe", request_id, &key);
-                self.handle_subscribe(request_id, key, true, true, initial_backfill)
+                Box::pin(self.handle_subscribe(request_id, key, true, true, initial_backfill))
                     .await;
             }
             TimelineCommand::EnsureSubscribed {
@@ -1327,8 +1340,13 @@ impl TimelineManagerActor {
             } => {
                 trace_timeline_route("manager_received", "ensure_subscribed", request_id, &key);
                 if matches!(key.kind, TimelineKind::Room { .. }) {
-                    self.handle_committed_room_selection(request_id, key, replay_existing, true)
-                        .await;
+                    Box::pin(self.handle_committed_room_selection(
+                        request_id,
+                        key,
+                        replay_existing,
+                        true,
+                    ))
+                    .await;
                 } else if matches!(key.kind, TimelineKind::Thread { .. })
                     && !self.timelines.contains_key(&key)
                 {
@@ -1345,22 +1363,22 @@ impl TimelineManagerActor {
                         },
                     );
                 } else {
-                    self.handle_subscribe(
+                    Box::pin(self.handle_subscribe(
                         request_id,
                         key,
                         replay_existing,
                         true,
                         InitialBackfillPolicy::Disabled,
-                    )
+                    ))
                     .await;
                 }
             }
             TimelineCommand::ReplaySubscribed { request_id } => {
-                self.handle_replay_subscribed(request_id).await;
+                Box::pin(self.handle_replay_subscribed(request_id)).await;
             }
             TimelineCommand::Unsubscribe { request_id, key } => {
                 trace_timeline_route("manager_received", "unsubscribe", request_id, &key);
-                self.unsubscribe_timeline(&key).await;
+                Box::pin(self.unsubscribe_timeline(&key)).await;
             }
             TimelineCommand::Paginate {
                 request_id,
@@ -1369,7 +1387,7 @@ impl TimelineManagerActor {
                 event_count,
             } => {
                 trace_timeline_route("manager_received", "paginate", request_id, &key);
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::Paginate {
@@ -1377,23 +1395,25 @@ impl TimelineManagerActor {
                         direction,
                         event_count,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::CancelPagination { request_id, key } => {
                 trace_timeline_route("manager_received", "cancel_pagination", request_id, &key);
                 if let Some(handle) = self.timelines.get(&key) {
-                    let _ = handle
-                        .send(TimelineActorMessage::CancelPagination { request_id })
-                        .await;
+                    let _ = Box::pin(
+                        handle.send(TimelineActorMessage::CancelPagination { request_id }),
+                    )
+                    .await;
                 }
             }
             TimelineCommand::CancelLinkPreviews { request_id, key } => {
                 trace_timeline_route("manager_received", "cancel_link_previews", request_id, &key);
                 if let Some(handle) = self.timelines.get(&key) {
-                    let _ = handle
-                        .send(TimelineActorMessage::CancelLinkPreviews { request_id })
-                        .await;
+                    let _ = Box::pin(
+                        handle.send(TimelineActorMessage::CancelLinkPreviews { request_id }),
+                    )
+                    .await;
                 }
             }
             TimelineCommand::ObserveViewport {
@@ -1401,22 +1421,22 @@ impl TimelineManagerActor {
                 key,
                 observation,
             } => {
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::ObserveViewport { observation },
-                )
+                ))
                 .await;
             }
             TimelineCommand::RepairGaps { request_id, key } => {
                 record_timeline_gap_repair("requested", "manual", 0, 0, 0, "queued");
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::InspectTimelineGaps {
                         trigger: TimelineGapRepairTrigger::Manual,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::SendText {
@@ -1430,7 +1450,7 @@ impl TimelineManagerActor {
                     self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
                     return;
                 }
-                self.route_send_to_worker_or_fail(
+                Box::pin(self.route_send_to_worker_or_fail(
                     request_id,
                     &key,
                     transaction_id.clone(),
@@ -1440,7 +1460,7 @@ impl TimelineManagerActor {
                         document,
                         formatting_options: self.composer_formatting_options,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::SubmitText {
@@ -1462,7 +1482,7 @@ impl TimelineManagerActor {
                     }));
                     return;
                 }
-                self.route_submission_to_worker(
+                Box::pin(self.route_submission_to_worker(
                     request_id,
                     submission_id.clone(),
                     &key,
@@ -1475,7 +1495,7 @@ impl TimelineManagerActor {
                         formatting_options: self.composer_formatting_options,
                     },
                     composer_permit.take(),
-                )
+                ))
                 .await;
             }
             TimelineCommand::SendReply {
@@ -1490,7 +1510,7 @@ impl TimelineManagerActor {
                     self.emit_failure(request_id, CoreFailure::TimelineOperationFailed { kind });
                     return;
                 }
-                self.route_send_to_worker_or_fail(
+                Box::pin(self.route_send_to_worker_or_fail(
                     request_id,
                     &key,
                     transaction_id.clone(),
@@ -1501,7 +1521,7 @@ impl TimelineManagerActor {
                         document,
                         formatting_options: self.composer_formatting_options,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::SubmitReply {
@@ -1524,7 +1544,7 @@ impl TimelineManagerActor {
                     }));
                     return;
                 }
-                self.route_submission_to_worker(
+                Box::pin(self.route_submission_to_worker(
                     request_id,
                     submission_id.clone(),
                     &key,
@@ -1538,7 +1558,7 @@ impl TimelineManagerActor {
                         formatting_options: self.composer_formatting_options,
                     },
                     composer_permit.take(),
-                )
+                ))
                 .await;
             }
             TimelineCommand::ForwardMessage {
@@ -1548,7 +1568,7 @@ impl TimelineManagerActor {
                 destination_room_id,
                 transaction_id,
             } => {
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::ForwardMessage {
@@ -1557,7 +1577,7 @@ impl TimelineManagerActor {
                         destination_room_id,
                         transaction_id,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::LoadMessageSource {
@@ -1565,14 +1585,14 @@ impl TimelineManagerActor {
                 key,
                 event_id,
             } => {
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::LoadMessageSource {
                         request_id,
                         event_id,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::RequestRoomKey {
@@ -1581,7 +1601,7 @@ impl TimelineManagerActor {
                 event_id,
                 origin,
             } => {
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::RequestRoomKey {
@@ -1589,18 +1609,18 @@ impl TimelineManagerActor {
                         event_id,
                         origin,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::RequestLateDecryption { request_id, key } => {
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::RequestLateDecryption {
                         request_id: Some(request_id),
                         trigger: crate::room_key_receive::RECEIVE_SUMMARY_TRIGGER_MANUAL,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::RetrySend {
@@ -1608,14 +1628,14 @@ impl TimelineManagerActor {
                 key,
                 transaction_id,
             } => {
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::RetrySend {
                         request_id,
                         transaction_id,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::CancelSend {
@@ -1623,14 +1643,14 @@ impl TimelineManagerActor {
                 key,
                 transaction_id,
             } => {
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::CancelSend {
                         request_id,
                         transaction_id,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::UploadAndSendMedia {
@@ -1640,7 +1660,7 @@ impl TimelineManagerActor {
                 request,
                 ..
             } => {
-                self.route_media_send_to_worker_or_fail(
+                Box::pin(self.route_media_send_to_worker_or_fail(
                     request_id,
                     &key,
                     transaction_id.clone(),
@@ -1649,7 +1669,7 @@ impl TimelineManagerActor {
                         client_transaction_id: transaction_id,
                         request,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::DownloadMedia {
@@ -1658,7 +1678,7 @@ impl TimelineManagerActor {
                 event_id,
                 selection,
             } => {
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::DownloadMedia {
@@ -1666,7 +1686,7 @@ impl TimelineManagerActor {
                         event_id,
                         selection,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::EditText {
@@ -1679,7 +1699,7 @@ impl TimelineManagerActor {
                 // same composer formatting options the send path uses. Without
                 // this an edit re-formatted the body with the defaults and math
                 // mode OFF was silently ignored.
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::EditText {
@@ -1688,7 +1708,7 @@ impl TimelineManagerActor {
                         document,
                         formatting_options: self.composer_formatting_options,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::Redact {
@@ -1696,14 +1716,14 @@ impl TimelineManagerActor {
                 key,
                 event_id,
             } => {
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::Redact {
                         request_id,
                         event_id,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::SendReaction {
@@ -1713,7 +1733,7 @@ impl TimelineManagerActor {
                 reaction_key,
             } => {
                 trace_timeline_route("manager_received", "send_reaction", request_id, &key);
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::SendReaction {
@@ -1721,7 +1741,7 @@ impl TimelineManagerActor {
                         event_id,
                         reaction_key,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::RedactReaction {
@@ -1732,7 +1752,7 @@ impl TimelineManagerActor {
                 reaction_event_id,
             } => {
                 trace_timeline_route("manager_received", "redact_reaction", request_id, &key);
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::RedactReaction {
@@ -1741,7 +1761,7 @@ impl TimelineManagerActor {
                         reaction_key,
                         reaction_event_id,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::SendReadReceipt {
@@ -1750,8 +1770,13 @@ impl TimelineManagerActor {
                 event_id,
             } => {
                 trace_timeline_route("manager_received", "send_read_receipt", request_id, &key);
-                self.route_read_command(request_id, key, event_id, ReadCommandKind::Receipt)
-                    .await;
+                Box::pin(self.route_read_command(
+                    request_id,
+                    key,
+                    event_id,
+                    ReadCommandKind::Receipt,
+                ))
+                .await;
             }
             TimelineCommand::SetFullyRead {
                 request_id,
@@ -1759,8 +1784,13 @@ impl TimelineManagerActor {
                 event_id,
             } => {
                 trace_timeline_route("manager_received", "set_fully_read", request_id, &key);
-                self.route_read_command(request_id, key, event_id, ReadCommandKind::FullyRead)
-                    .await;
+                Box::pin(self.route_read_command(
+                    request_id,
+                    key,
+                    event_id,
+                    ReadCommandKind::FullyRead,
+                ))
+                .await;
             }
             TimelineCommand::SetTyping {
                 request_id,
@@ -1776,14 +1806,14 @@ impl TimelineManagerActor {
                 event_id,
             } => {
                 trace_timeline_route("manager_received", "load_link_previews", request_id, &key);
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::LoadLinkPreviews {
                         request_id,
                         event_id,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::HideLinkPreview {
@@ -1791,14 +1821,14 @@ impl TimelineManagerActor {
                 key,
                 event_id,
             } => {
-                self.route_to_actor_or_fail(
+                Box::pin(self.route_to_actor_or_fail(
                     request_id,
                     &key,
                     TimelineActorMessage::HideLinkPreview {
                         request_id,
                         event_id,
                     },
-                )
+                ))
                 .await;
             }
             TimelineCommand::BroadcastLinkPreviewPolicy {
@@ -1815,13 +1845,12 @@ impl TimelineManagerActor {
                         .room_overrides
                         .get(key.room_id())
                         .copied();
-                    let _ = handle
-                        .send(TimelineActorMessage::LinkPreviewPolicyChanged {
-                            unencrypted_global_enabled,
-                            encrypted_global_enabled,
-                            room_enabled,
-                        })
-                        .await;
+                    let _ = Box::pin(handle.send(TimelineActorMessage::LinkPreviewPolicyChanged {
+                        unencrypted_global_enabled,
+                        encrypted_global_enabled,
+                        room_enabled,
+                    }))
+                    .await;
                 }
             }
         }
@@ -2112,15 +2141,14 @@ impl TimelineManagerActor {
             return;
         }
         let subscription_generation = self.current_subscription_generation();
-        match self
-            .build_timeline_actor_handle(
-                request_id,
-                &key,
-                activation.generation,
-                subscription_generation,
-                initial_backfill,
-            )
-            .await
+        match Box::pin(self.build_timeline_actor_handle(
+            request_id,
+            &key,
+            activation.generation,
+            subscription_generation,
+            initial_backfill,
+        ))
+        .await
         {
             Ok(handle) => {
                 self.emit_timeline_subscribed_action(&key).await;
@@ -2295,16 +2323,15 @@ impl TimelineManagerActor {
             Ok(PreparedFocusedTimeline::Sdk(timeline)) => match self.session.clone() {
                 Some(session) => {
                     let subscription_generation = self.current_subscription_generation();
-                    Ok(self
-                        .spawn_timeline_actor(
-                            session,
-                            pending.request_id,
-                            &key,
-                            timeline,
-                            pending.activation.generation,
-                            subscription_generation,
-                        )
-                        .await)
+                    Ok(Box::pin(self.spawn_timeline_actor(
+                        session,
+                        pending.request_id,
+                        &key,
+                        timeline,
+                        pending.activation.generation,
+                        subscription_generation,
+                    ))
+                    .await)
                 }
                 None => Err(FocusedBuildFailure::Sdk),
             },
@@ -2490,9 +2517,10 @@ impl TimelineManagerActor {
 
         trace("build_begin");
         let build_started = Some(startup_trace::now());
-        let timeline_result = self
-            .await_driving_manager_workers(koushi_timeline_builder(&room, focus).build())
-            .await;
+        let timeline_result = Box::pin(
+            self.await_driving_manager_workers(koushi_timeline_builder(&room, focus).build()),
+        )
+        .await;
         startup_trace::trace_phase(StartupPhase::TimelineBuild, build_started);
         trace("build_done");
 
@@ -2533,16 +2561,15 @@ impl TimelineManagerActor {
             }
         }
 
-        Ok(self
-            .spawn_timeline_actor(
-                session,
-                request_id,
-                key,
-                timeline,
-                actor_generation,
-                subscription_generation,
-            )
-            .await)
+        Ok(Box::pin(self.spawn_timeline_actor(
+            session,
+            request_id,
+            key,
+            timeline,
+            actor_generation,
+            subscription_generation,
+        ))
+        .await)
     }
 
     async fn spawn_timeline_actor(
@@ -2579,7 +2606,7 @@ impl TimelineManagerActor {
             self.terminal_ingress.clone(),
             self.msg_tx.clone(),
         );
-        let handle = self.await_driving_manager_workers(spawn).await;
+        let handle = Box::pin(self.await_driving_manager_workers(spawn)).await;
         if let Some(tx) = &self.history_recovery {
             let _ = handle
                 .tx

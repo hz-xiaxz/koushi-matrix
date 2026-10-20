@@ -719,7 +719,9 @@ async fn run_live_room_list_observation_with_sources(
     #[cfg(test)]
     let injected_direct_events =
         futures_util::stream::unfold(direct_events_rx, |mut receiver| async move {
-            receiver.recv().await.map(|content| (content, receiver))
+            Box::pin(receiver.recv())
+                .await
+                .map(|content| (content, receiver))
         });
     #[cfg(test)]
     let mut direct_events = match direct_event_source {
@@ -738,13 +740,13 @@ async fn run_live_room_list_observation_with_sources(
     #[cfg(test)]
     let mut entries_start = Box::pin(async {
         if let Some(entries_start_rx) = entries_start_rx.as_mut() {
-            let _ = entries_start_rx.recv().await;
+            let _ = Box::pin(entries_start_rx.recv()).await;
         }
     });
     #[cfg(not(test))]
     let mut entries_start = Box::pin(futures_util::future::pending::<()>());
 
-    let all_rooms = match service.all_rooms().await {
+    let all_rooms = match Box::pin(service.all_rooms()).await {
         Ok(all_rooms) => all_rooms,
         Err(_) => {
             record(
@@ -1533,7 +1535,7 @@ async fn normalize_and_project_entries(
     // projects, so an action never describes a room normalization dropped.
     let mut joined_access = std::collections::BTreeMap::new();
     for room in &joined_rooms {
-        let facts = koushi_sdk::matrix_room_access_facts(room).await;
+        let facts = Box::pin(koushi_sdk::matrix_room_access_facts(room)).await;
         joined_access.insert(
             room.room_id().to_string(),
             koushi_state::RoomAccessObservation {
@@ -1559,9 +1561,11 @@ async fn normalize_and_project_entries(
             },
         );
     }
-    let mut snapshot = koushi_sdk::room_list_snapshot_from_sdk_rooms_with_direct_targets(
-        joined_rooms,
-        direct_targets_by_room,
+    let mut snapshot = Box::pin(
+        koushi_sdk::room_list_snapshot_from_sdk_rooms_with_direct_targets(
+            joined_rooms,
+            direct_targets_by_room,
+        ),
     )
     .await;
     // Spaces carry their own condition on the rail, so their facts are projected
@@ -1577,7 +1581,7 @@ async fn normalize_and_project_entries(
                 .map(|condition| (room_id.to_owned(), condition.clone()))
         })
         .collect::<std::collections::BTreeMap<_, _>>();
-    snapshot.invites = koushi_sdk::matrix_invite_previews_from_rooms(invited_rooms).await;
+    snapshot.invites = Box::pin(koushi_sdk::matrix_invite_previews_from_rooms(invited_rooms)).await;
     if let (Some(direct_state), Some(diagnostics)) = (direct_state, sliding_sync_diagnostics) {
         let projected_dms = snapshot.rooms.iter().filter(|room| room.is_dm).count();
         let explicit_dms = direct_state.authoritative_targets().map_or(0, |targets| {
@@ -1651,8 +1655,8 @@ async fn normalize_and_project_entries(
                 identity.display_name_collision_entry_count as u64,
             )),
     );
-    relay_missing_space_child_links(&snapshot, room_tx).await;
-    project_room_list_snapshot(
+    Box::pin(relay_missing_space_child_links(&snapshot, room_tx)).await;
+    Box::pin(project_room_list_snapshot(
         &snapshot,
         known_room_ids,
         known_dm_rooms,
@@ -1662,7 +1666,7 @@ async fn normalize_and_project_entries(
         source,
         authoritative.load(Ordering::Acquire),
         room_access,
-    )
+    ))
     .await
 }
 
@@ -1672,9 +1676,7 @@ async fn relay_missing_space_child_links(
 ) {
     let links = missing_space_child_links(snapshot);
     if !links.is_empty() {
-        let _ = room_tx
-            .send(RoomMessage::MissingSpaceChildLinks { links })
-            .await;
+        let _ = Box::pin(room_tx.send(RoomMessage::MissingSpaceChildLinks { links })).await;
     }
 }
 
@@ -1758,14 +1760,14 @@ impl RoomActor {
                 current_session.is_some_and(|session| Arc::ptr_eq(&binding.session, session))
             })
             .map(|binding| binding.handle.clone());
-        let forwarded_result = forward_visible_rooms_if_authoritative(
+        let forwarded_result = Box::pin(forward_visible_rooms_if_authoritative(
             timeline_residency.as_ref(),
             core_generation,
             reconciliation_is_complete,
             entries_count,
             distinct_identity_count,
             room_ids,
-        )
+        ))
         .await;
         let _ = forwarded.send(forwarded_result);
     }
@@ -1786,9 +1788,12 @@ impl RoomActor {
                 current_session.is_some_and(|session| Arc::ptr_eq(&binding.session, session))
             })
             .map(|binding| binding.handle.clone());
-        let forwarded_result =
-            forward_membership_batches(timeline_residency.as_ref(), core_generation, [transitions])
-                .await;
+        let forwarded_result = Box::pin(forward_membership_batches(
+            timeline_residency.as_ref(),
+            core_generation,
+            [transitions],
+        ))
+        .await;
         let _ = forwarded.send(forwarded_result);
     }
 
@@ -1835,19 +1840,19 @@ impl RoomActor {
     pub(super) async fn stop_observation(&mut self) {
         if let Some(task) = self.space_hydration_enqueue_task.take() {
             task.abort();
-            let _ = task.await;
+            let _ = Box::pin(task).await;
         }
         if let Some(mut observation) = self.observation.take() {
             let _ = observation.stop_tx.send(());
-            if executor::timeout(
+            if Box::pin(executor::timeout(
                 ROOM_OBSERVATION_SHUTDOWN_JOIN_TIMEOUT,
                 &mut observation.task,
-            )
+            ))
             .await
             .is_err()
             {
                 observation.task.abort();
-                let _ = observation.task.await;
+                let _ = Box::pin(observation.task).await;
             }
         }
     }

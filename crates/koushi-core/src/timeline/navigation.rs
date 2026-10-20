@@ -810,12 +810,12 @@ impl TimelineManagerActor {
         {
             handle.cancel_link_previews_after_commit();
         }
-        self.handle_committed_room_selection(
+        Box::pin(self.handle_committed_room_selection(
             intent.cause_request_id,
             intent.key,
             intent.replay_existing,
             false,
-        )
+        ))
         .await;
     }
     pub(super) async fn handle_committed_room_selection(
@@ -856,13 +856,13 @@ impl TimelineManagerActor {
             }
         }
 
-        self.handle_subscribe(
+        Box::pin(self.handle_subscribe(
             request_id,
             key.clone(),
             replay_existing,
             emit_failure_terminal,
             koushi_protocol::command::InitialBackfillPolicy::Disabled,
-        )
+        ))
         .await;
         if let Some(handle) = self.timelines.get(&key) {
             let deadline = executor::Instant::now() + LIVE_TAIL_CANCELLATION_DEADLINE;
@@ -1056,7 +1056,7 @@ impl TimelineActor {
         let actor_tx = self.msg_tx.clone();
         let account_work = self.account_work.clone();
         let task = executor::spawn(async move {
-            let completion = Self::paginate_once_for(
+            let completion = Box::pin(Self::paginate_once_for(
                 request_id,
                 key,
                 timeline,
@@ -1066,7 +1066,7 @@ impl TimelineActor {
                 account_work,
                 direction,
                 event_count,
-            )
+            ))
             .await;
             let _ = actor_tx
                 .send(TimelineActorMessage::PaginationFinished {
@@ -1138,12 +1138,12 @@ impl TimelineActor {
             let trace_started = Some(std::time::Instant::now());
             // #1239: bound the SDK await so a stalled relationship request can
             // never leave the pane in `Paginating` for the life of the timeline.
-            let outcome = bounded_paginate_with(TIMELINE_PAGINATION_TIMEOUT, async {
+            let outcome = Box::pin(bounded_paginate_with(TIMELINE_PAGINATION_TIMEOUT, async {
                 match direction {
                     PaginationDirection::Backward => timeline.paginate_backwards(event_count).await,
                     PaginationDirection::Forward => timeline.paginate_forwards(event_count).await,
                 }
-            })
+            }))
             .await;
             trace_timeline_paginate(
                 "sdk_finish",

@@ -1100,7 +1100,7 @@ impl AccountActor {
                 let (result, timed_out) = if first_response_seen.load(Ordering::Acquire) {
                     (sync.await, false)
                 } else {
-                    match executor::timeout(Duration::from_secs(15), sync).await {
+                    match Box::pin(executor::timeout(Duration::from_secs(15), sync)).await {
                         Ok(result) => (result, false),
                         Err(_) => (Err(koushi_sdk::ProvisionalEncryptionSyncError::Sdk), true),
                     }

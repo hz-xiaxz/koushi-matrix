@@ -891,7 +891,7 @@ impl RoomActor {
                 force_all,
             } => {
                 if let Some(history) = &self.history_keys {
-                    if !history.request(room_id, force_all, request_id).await {
+                    if !Box::pin(history.request(room_id, force_all, request_id)).await {
                         self.emit_failure(request_id, CoreFailure::StoreUnavailable);
                     }
                 } else {
@@ -902,29 +902,33 @@ impl RoomActor {
                 request_id,
                 options,
             } => {
-                self.handle_create_room(request_id, options).await;
+                Box::pin(self.handle_create_room(request_id, options)).await;
             }
             RoomCommand::CreatePublicDirectoryRoom {
                 request_id,
                 name,
                 alias_localpart,
             } => {
-                self.handle_create_public_directory_room(request_id, name, alias_localpart)
-                    .await;
+                Box::pin(self.handle_create_public_directory_room(
+                    request_id,
+                    name,
+                    alias_localpart,
+                ))
+                .await;
             }
             RoomCommand::CreateSpace { request_id, name } => {
-                self.handle_create_space(request_id, name).await;
+                Box::pin(self.handle_create_space(request_id, name)).await;
             }
             RoomCommand::CheckRoomAddressAvailability {
                 request_id,
                 alias_localpart,
             } => {
-                self.handle_check_room_address_availability(request_id, alias_localpart)
+                Box::pin(self.handle_check_room_address_availability(request_id, alias_localpart))
                     .await;
             }
             RoomCommand::ClearRoomAddressAvailability { request_id: _ } => {
-                self.stop_room_address_check().await;
-                self.reduce_reliable(vec![AppAction::RoomAddressAvailabilityCleared])
+                Box::pin(self.stop_room_address_check()).await;
+                Box::pin(self.reduce_reliable(vec![AppAction::RoomAddressAvailabilityCleared]))
                     .await;
             }
             RoomCommand::SetSpaceChild {
@@ -932,8 +936,7 @@ impl RoomActor {
                 space_id,
                 child_room_id,
             } => {
-                self.handle_set_space_child(request_id, space_id, child_room_id)
-                    .await;
+                Box::pin(self.handle_set_space_child(request_id, space_id, child_room_id)).await;
             }
             RoomCommand::SetSpaceChildSuggested {
                 request_id,
@@ -941,12 +944,12 @@ impl RoomActor {
                 child_room_id,
                 suggested,
             } => {
-                self.handle_set_space_child_suggested(
+                Box::pin(self.handle_set_space_child_suggested(
                     request_id,
                     space_id,
                     child_room_id,
                     suggested,
-                )
+                ))
                 .await;
             }
             RoomCommand::JoinSuggestedSpaceRooms {
@@ -954,38 +957,40 @@ impl RoomActor {
                 space_id,
                 room_ids,
             } => {
-                self.handle_join_suggested_space_rooms(request_id, space_id, room_ids)
+                Box::pin(self.handle_join_suggested_space_rooms(request_id, space_id, room_ids))
                     .await;
             }
             RoomCommand::DismissSuggestedSpaceRooms {
                 request_id: _,
                 space_id,
             } => {
-                self.reduce_reliable(vec![AppAction::SuggestedRoomsOfferDismissed { space_id }])
-                    .await;
+                Box::pin(
+                    self.reduce_reliable(vec![AppAction::SuggestedRoomsOfferDismissed {
+                        space_id,
+                    }]),
+                )
+                .await;
             }
             RoomCommand::InviteUser {
                 request_id,
                 room_id,
                 user_id,
             } => {
-                self.handle_invite_user(request_id, room_id, user_id).await;
+                Box::pin(self.handle_invite_user(request_id, room_id, user_id)).await;
             }
             RoomCommand::LoadSpaceMembers {
                 request_id,
                 space_id,
                 generation,
             } => {
-                self.handle_load_space_members(request_id, space_id, generation)
-                    .await;
+                Box::pin(self.handle_load_space_members(request_id, space_id, generation)).await;
             }
             RoomCommand::LoadSpaceChildren {
                 request_id,
                 space_id,
                 generation,
             } => {
-                self.handle_load_space_children(request_id, space_id, generation)
-                    .await;
+                Box::pin(self.handle_load_space_children(request_id, space_id, generation)).await;
             }
             RoomCommand::InviteUserToSpace {
                 request_id,
@@ -993,8 +998,10 @@ impl RoomActor {
                 user_id,
                 generation,
             } => {
-                self.handle_invite_user_to_space(request_id, space_id, user_id, generation)
-                    .await;
+                Box::pin(
+                    self.handle_invite_user_to_space(request_id, space_id, user_id, generation),
+                )
+                .await;
             }
             RoomCommand::CancelSpaceInvite {
                 request_id,
@@ -1002,8 +1009,10 @@ impl RoomActor {
                 user_id,
                 generation,
             } => {
-                self.handle_cancel_space_invite(request_id, space_id, user_id, generation)
-                    .await;
+                Box::pin(
+                    self.handle_cancel_space_invite(request_id, space_id, user_id, generation),
+                )
+                .await;
             }
             RoomCommand::InviteTargets {
                 request_id,
@@ -1011,54 +1020,51 @@ impl RoomActor {
                 user_ids,
                 scope,
             } => {
-                self.handle_invite_targets(request_id, room_id, user_ids, scope)
-                    .await;
+                Box::pin(self.handle_invite_targets(request_id, room_id, user_ids, scope)).await;
             }
             RoomCommand::AcceptInvite {
                 request_id,
                 room_id,
             } => {
-                self.handle_accept_invite(request_id, room_id).await;
+                Box::pin(self.handle_accept_invite(request_id, room_id)).await;
             }
             RoomCommand::DeclineInvite {
                 request_id,
                 room_id,
             } => {
-                self.handle_decline_invite(request_id, room_id).await;
+                Box::pin(self.handle_decline_invite(request_id, room_id)).await;
             }
             RoomCommand::StartDirectMessage {
                 request_id,
                 user_id,
                 missing,
             } => {
-                self.handle_start_direct_message(request_id, user_id, missing)
-                    .await;
+                Box::pin(self.handle_start_direct_message(request_id, user_id, missing)).await;
             }
             RoomCommand::JoinRoom {
                 request_id,
                 room_id,
             } => {
-                self.handle_join_room(request_id, room_id).await;
+                Box::pin(self.handle_join_room(request_id, room_id)).await;
             }
             RoomCommand::LeaveRoom {
                 request_id,
                 room_id,
             } => {
-                self.handle_leave_room(request_id, room_id).await;
+                Box::pin(self.handle_leave_room(request_id, room_id)).await;
             }
             RoomCommand::LeaveSpace {
                 request_id,
                 space_id,
                 child_room_ids,
             } => {
-                self.handle_leave_space(request_id, space_id, child_room_ids)
-                    .await;
+                Box::pin(self.handle_leave_space(request_id, space_id, child_room_ids)).await;
             }
             RoomCommand::ForgetRoom {
                 request_id,
                 room_id,
             } => {
-                self.handle_forget_room(request_id, room_id).await;
+                Box::pin(self.handle_forget_room(request_id, room_id)).await;
             }
             RoomCommand::SetTag {
                 request_id,
@@ -1066,63 +1072,70 @@ impl RoomActor {
                 tag,
                 order,
             } => {
-                self.handle_set_tag(request_id, room_id, tag, order).await;
+                Box::pin(self.handle_set_tag(request_id, room_id, tag, order)).await;
             }
             RoomCommand::RemoveTag {
                 request_id,
                 room_id,
                 tag,
             } => {
-                self.handle_remove_tag(request_id, room_id, tag).await;
+                Box::pin(self.handle_remove_tag(request_id, room_id, tag)).await;
             }
             RoomCommand::PinEvent {
                 request_id,
                 room_id,
                 event_id,
             } => {
-                self.handle_pin_event(request_id, room_id, event_id).await;
+                Box::pin(self.handle_pin_event(request_id, room_id, event_id)).await;
             }
             RoomCommand::UnpinEvent {
                 request_id,
                 room_id,
                 event_id,
             } => {
-                self.handle_unpin_event(request_id, room_id, event_id).await;
+                Box::pin(self.handle_unpin_event(request_id, room_id, event_id)).await;
             }
             RoomCommand::QueryDirectory { request_id, query } => {
-                self.handle_query_directory(request_id, query).await;
+                Box::pin(self.handle_query_directory(request_id, query)).await;
             }
             RoomCommand::PreviewJoinTarget {
                 request_id,
                 room_id_or_alias,
                 via_servers,
             } => {
-                self.handle_preview_join_target(request_id, room_id_or_alias, via_servers)
-                    .await;
+                Box::pin(self.handle_preview_join_target(
+                    request_id,
+                    room_id_or_alias,
+                    via_servers,
+                ))
+                .await;
             }
             RoomCommand::DismissDirectoryPreview { request_id: _ } => {
-                self.reduce_reliable(vec![AppAction::DirectoryPreviewDismissed])
-                    .await;
+                Box::pin(self.reduce_reliable(vec![AppAction::DirectoryPreviewDismissed])).await;
             }
             RoomCommand::JoinDirectoryRoom {
                 request_id,
                 room_id_or_alias,
                 via_servers,
             } => {
-                self.handle_join_directory_room(request_id, room_id_or_alias, via_servers)
-                    .await;
+                Box::pin(self.handle_join_directory_room(
+                    request_id,
+                    room_id_or_alias,
+                    via_servers,
+                ))
+                .await;
             }
             RoomCommand::LoadRoomSettings {
                 request_id,
                 room_id,
             } => {
-                self.handle_load_room_settings(request_id, room_id).await;
+                Box::pin(self.handle_load_room_settings(request_id, room_id)).await;
             }
             RoomCommand::SetRoomAccessDraft {
                 request_id: _,
                 command,
             } => {
-                self.handle_set_room_access_draft(command).await;
+                Box::pin(self.handle_set_room_access_draft(command)).await;
             }
             RoomCommand::QueryMentionCandidates {
                 request_id,
@@ -1131,13 +1144,13 @@ impl RoomActor {
                 surface,
                 query,
             } => {
-                self.handle_query_mention_candidates(
+                Box::pin(self.handle_query_mention_candidates(
                     request_id,
                     account_key,
                     room_id,
                     surface,
                     query,
-                )
+                ))
                 .await;
             }
             RoomCommand::UpdateRoomSetting {
@@ -1145,8 +1158,7 @@ impl RoomActor {
                 room_id,
                 change,
             } => {
-                self.handle_update_room_setting(request_id, room_id, change)
-                    .await;
+                Box::pin(self.handle_update_room_setting(request_id, room_id, change)).await;
             }
             RoomCommand::ModerateRoomMember {
                 request_id,
@@ -1155,13 +1167,13 @@ impl RoomActor {
                 action,
                 reason,
             } => {
-                self.handle_moderate_room_member(
+                Box::pin(self.handle_moderate_room_member(
                     request_id,
                     room_id,
                     target_user_id,
                     action,
                     reason,
-                )
+                ))
                 .await;
             }
             RoomCommand::UpdateRoomMemberRole {
@@ -1170,12 +1182,12 @@ impl RoomActor {
                 target_user_id,
                 power_level,
             } => {
-                self.handle_update_room_member_role(
+                Box::pin(self.handle_update_room_member_role(
                     request_id,
                     room_id,
                     target_user_id,
                     power_level,
-                )
+                ))
                 .await;
             }
             RoomCommand::UpdateSpaceMemberRole {
@@ -1188,7 +1200,7 @@ impl RoomActor {
                 power_level,
                 confirmed,
             } => {
-                self.handle_update_space_member_role(
+                Box::pin(self.handle_update_space_member_role(
                     request_id,
                     space_id,
                     user_id,
@@ -1197,7 +1209,7 @@ impl RoomActor {
                     expected_power_level,
                     power_level,
                     confirmed,
-                )
+                ))
                 .await;
             }
             RoomCommand::SelectSpace { .. } | RoomCommand::SelectRoom { .. } => {
@@ -1213,39 +1225,34 @@ impl RoomActor {
             } => {
                 // Pure navigation preference: project to reducer; no domain event.
                 // One-shot navigation MUST be delivered reliably (see reduce_reliable).
-                self.reduce_reliable(vec![AppAction::ReorderSpaces { space_ids }])
-                    .await;
+                Box::pin(self.reduce_reliable(vec![AppAction::ReorderSpaces { space_ids }])).await;
             }
             RoomCommand::MarkRoomAsRead {
                 request_id,
                 room_id,
                 event_id,
             } => {
-                self.handle_mark_room_as_read(request_id, room_id, event_id)
-                    .await;
+                Box::pin(self.handle_mark_room_as_read(request_id, room_id, event_id)).await;
             }
             RoomCommand::MarkRoomAsUnread {
                 request_id,
                 room_id,
                 unread,
             } => {
-                self.handle_mark_room_as_unread(request_id, room_id, unread)
-                    .await;
+                Box::pin(self.handle_mark_room_as_unread(request_id, room_id, unread)).await;
             }
             RoomCommand::ForceRotateOutboundSession {
                 request_id,
                 room_id,
             } => {
-                self.handle_force_rotate_outbound_session(request_id, room_id)
-                    .await;
+                Box::pin(self.handle_force_rotate_outbound_session(request_id, room_id)).await;
             }
             RoomCommand::SetRoomNotificationMode {
                 request_id,
                 room_id,
                 mode,
             } => {
-                self.handle_set_room_notification_mode(request_id, room_id, mode)
-                    .await;
+                Box::pin(self.handle_set_room_notification_mode(request_id, room_id, mode)).await;
             }
             RoomCommand::ReportContent {
                 request_id,
@@ -1253,15 +1260,14 @@ impl RoomActor {
                 event_id,
                 reason,
             } => {
-                self.handle_report_content(request_id, room_id, event_id, reason)
-                    .await;
+                Box::pin(self.handle_report_content(request_id, room_id, event_id, reason)).await;
             }
             RoomCommand::ReportRoom {
                 request_id,
                 room_id,
                 reason,
             } => {
-                self.handle_report_room(request_id, room_id, reason).await;
+                Box::pin(self.handle_report_room(request_id, room_id, reason)).await;
             }
         }
     }

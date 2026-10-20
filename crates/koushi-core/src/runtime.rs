@@ -949,7 +949,7 @@ impl CoreRuntime {
         let (shutdown_completion_tx, shutdown_completion) = watch::channel(None);
         let actor = executor::spawn(async move {
             let _view_lifetime = view_lifetime;
-            let result = actor.run().await;
+            let result = Box::pin(actor.run()).await;
             drop(_view_lifetime);
             actor_completion_tx.send_replace(Some(result));
         });
@@ -1764,7 +1764,7 @@ impl AppActor {
                 }
                 event_navigation_prepared = self.event_navigation_prepared_rx.recv() => {
                     if let Some(event_navigation_prepared) = event_navigation_prepared {
-                        self.handle_event_navigation_prepared(event_navigation_prepared).await;
+                        Box::pin(self.handle_event_navigation_prepared(event_navigation_prepared)).await;
                     } else {
                         break;
                     }
@@ -1773,7 +1773,7 @@ impl AppActor {
                     &mut self.focused_projection_rx
                 ) => {
                     if let Some(focused_projection) = focused_projection {
-                        self.handle_focused_projection_commit(focused_projection).await;
+                        Box::pin(self.handle_focused_projection_commit(focused_projection)).await;
                     }
                 }
                 action_batch = receive_action_batch(
@@ -1785,7 +1785,7 @@ impl AppActor {
                     #[cfg(any(test, feature = "test-hooks"))]
                     let composer_draft_test_completions =
                         self.apply_pending_composer_draft_test_mutations().await;
-                    self.commit_action_batch(actions, batch_origin).await;
+                    Box::pin(self.commit_action_batch(actions, batch_origin)).await;
                     #[cfg(any(test, feature = "test-hooks"))]
                     for completion in composer_draft_test_completions {
                         let _ = completion.send(self.state.clone());
@@ -3064,6 +3064,10 @@ impl AppActor {
                 projected_state_changed
             }
             CoreCommand::App(app_command) => {
+                // #1554: each arm runs in its own heap future. Without that the
+                // dispatcher's poll frame sums all command arms (measured at
+                // 1.2 MiB on Linux release) and overflows the 2 MiB Windows
+                // worker stack on an attachment send.
                 Box::pin(async move {
                     match app_command {
                         AppCommand::NavigateToEvent {
@@ -3073,38 +3077,51 @@ impl AppActor {
                             source,
                             missing_target_policy,
                         } => {
-                            self.handle_event_navigation_command(
-                                request_id,
-                                room_id,
-                                event_id,
-                                source,
-                                missing_target_policy,
-                            )
+                            Box::pin(async move {
+                                Box::pin(self.handle_event_navigation_command(
+                                    request_id,
+                                    room_id,
+                                    event_id,
+                                    source,
+                                    missing_target_policy,
+                                ))
+                                .await
+                            })
                             .await
                         }
                         AppCommand::Shutdown { .. } => {
-                            unreachable!("shutdown is handled by the AppActor command disposition")
+                            Box::pin(async move {
+                                unreachable!(
+                                    "shutdown is handled by the AppActor command disposition"
+                                )
+                            })
+                            .await
                         }
                         AppCommand::SetComposerReplyTarget {
                             request_id,
                             room_id,
                             event_id,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::ComposerReplyTargetSelected {
-                                    room_id,
-                                    event_id,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ComposerReplyTargetSelected { room_id, event_id },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::CancelComposerReply { request_id } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::ComposerReplyCancelled)
+                            Box::pin(async move {
+                                let effects = Box::pin(
+                                    self.reduce_app_action(AppAction::ComposerReplyCancelled),
+                                )
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SetComposerDraft {
                             request_id,
@@ -3113,18 +3130,22 @@ impl AppActor {
                             document,
                             revision,
                         } => {
-                            if !composer_draft_account_matches(&self.state, &expected_account) {
-                                return false;
-                            }
-                            let effects = self
-                                .reduce_app_action(AppAction::ComposerDraftChangedAtRevision {
-                                    room_id,
-                                    document,
-                                    revision,
-                                })
+                            Box::pin(async move {
+                                if !composer_draft_account_matches(&self.state, &expected_account) {
+                                    return false;
+                                }
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ComposerDraftChangedAtRevision {
+                                        room_id,
+                                        document,
+                                        revision,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SeedComposerDraft {
                             request_id,
@@ -3132,17 +3153,18 @@ impl AppActor {
                             room_id,
                             document,
                         } => {
-                            if !composer_draft_account_matches(&self.state, &expected_account) {
-                                return false;
-                            }
-                            let effects = self
-                                .reduce_app_action(AppAction::ComposerDraftSeeded {
-                                    room_id,
-                                    document,
-                                })
+                            Box::pin(async move {
+                                if !composer_draft_account_matches(&self.state, &expected_account) {
+                                    return false;
+                                }
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ComposerDraftSeeded { room_id, document },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SetThreadComposerDraft {
                             request_id,
@@ -3152,21 +3174,23 @@ impl AppActor {
                             document,
                             revision,
                         } => {
-                            if !composer_draft_account_matches(&self.state, &expected_account) {
-                                return false;
-                            }
-                            let effects = self
-                                .reduce_app_action(
+                            Box::pin(async move {
+                                if !composer_draft_account_matches(&self.state, &expected_account) {
+                                    return false;
+                                }
+                                let effects = Box::pin(self.reduce_app_action(
                                     AppAction::ThreadComposerDraftChangedAtRevision {
                                         room_id,
                                         root_event_id,
                                         document,
                                         revision,
                                     },
-                                )
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::AcceptComposerDraft {
                             request_id,
@@ -3175,45 +3199,50 @@ impl AppActor {
                             submitted_revision,
                             consumes_draft,
                         } => {
-                            if !composer_draft_account_matches(&self.state, &expected_account) {
-                                return false;
-                            }
-                            if composer_draft_acceptance_would_exhaust(
-                                &self.state,
-                                &target,
-                                submitted_revision,
-                            ) {
-                                self.emit(CoreEvent::OperationFailed {
-                                    request_id,
-                                    failure: CoreFailure::TimelineOperationFailed {
-                                        kind: TimelineFailureKind::ComposerRevisionExhausted,
-                                    },
-                                });
-                                return false;
-                            }
-                            let effects = self
-                                .reduce_app_action(AppAction::ComposerDraftAccepted {
-                                    target,
+                            Box::pin(async move {
+                                if !composer_draft_account_matches(&self.state, &expected_account) {
+                                    return false;
+                                }
+                                if composer_draft_acceptance_would_exhaust(
+                                    &self.state,
+                                    &target,
                                     submitted_revision,
-                                    consumes_draft,
-                                })
+                                ) {
+                                    self.emit(CoreEvent::OperationFailed {
+                                        request_id,
+                                        failure: CoreFailure::TimelineOperationFailed {
+                                            kind: TimelineFailureKind::ComposerRevisionExhausted,
+                                        },
+                                    });
+                                    return false;
+                                }
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ComposerDraftAccepted {
+                                        target,
+                                        submitted_revision,
+                                        consumes_draft,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SetUploadStaging {
                             request_id,
                             target,
                             items,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::UploadStagingChanged {
-                                    target,
-                                    items,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::UploadStagingChanged { target, items },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::UpdateStagedUploadCaption {
                             request_id,
@@ -3221,15 +3250,19 @@ impl AppActor {
                             staged_id,
                             caption,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::UploadStagingCaptionChanged {
-                                    target,
-                                    staged_id,
-                                    caption,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::UploadStagingCaptionChanged {
+                                        target,
+                                        staged_id,
+                                        caption,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::UpdateStagedUploadCompression {
                             request_id,
@@ -3237,15 +3270,19 @@ impl AppActor {
                             staged_id,
                             compression_choice,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::UploadStagingCompressionChanged {
-                                    target,
-                                    staged_id,
-                                    compression_choice,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::UploadStagingCompressionChanged {
+                                        target,
+                                        staged_id,
+                                        compression_choice,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SelectStagedUploadOutput {
                             request_id,
@@ -3253,22 +3290,31 @@ impl AppActor {
                             staged_id,
                             selection,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::UploadStagingOutputSelected {
-                                    target,
-                                    staged_id,
-                                    selection,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::UploadStagingOutputSelected {
+                                        target,
+                                        staged_id,
+                                        selection,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::ClearUploadStaging { request_id, target } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::UploadStagingCleared { target })
-                                .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                            Box::pin(async move {
+                                let effects =
+                                    Box::pin(self.reduce_app_action(
+                                        AppAction::UploadStagingCleared { target },
+                                    ))
+                                    .await;
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::ScheduleSend {
                             request_id,
@@ -3279,44 +3325,45 @@ impl AppActor {
                             send_at_ms,
                             draft_revision,
                         } => {
-                            if !composer_draft_account_matches(&self.state, &expected_account) {
-                                self.emit(CoreEvent::OperationFailed {
-                                    request_id,
-                                    failure: CoreFailure::SessionRequired,
-                                });
-                                return false;
-                            }
-                            let target = match &thread_root_event_id {
-                                Some(root_event_id) => ComposerTarget::Thread {
-                                    room_id: room_id.clone(),
-                                    root_event_id: root_event_id.clone(),
-                                },
-                                None => ComposerTarget::Main {
-                                    room_id: room_id.clone(),
-                                },
-                            };
-                            if composer_draft_acceptance_would_exhaust(
-                                &self.state,
-                                &target,
-                                draft_revision,
-                            ) {
-                                self.emit(CoreEvent::OperationFailed {
-                                    request_id,
-                                    failure: CoreFailure::TimelineOperationFailed {
-                                        kind: TimelineFailureKind::ComposerRevisionExhausted,
+                            Box::pin(async move {
+                                if !composer_draft_account_matches(&self.state, &expected_account) {
+                                    self.emit(CoreEvent::OperationFailed {
+                                        request_id,
+                                        failure: CoreFailure::SessionRequired,
+                                    });
+                                    return false;
+                                }
+                                let target = match &thread_root_event_id {
+                                    Some(root_event_id) => ComposerTarget::Thread {
+                                        room_id: room_id.clone(),
+                                        root_event_id: root_event_id.clone(),
                                     },
-                                });
-                                return false;
-                            }
-                            // Issue #450: validate slash semantics BEFORE either
-                            // scheduled-send acceptance path clears the draft — a
-                            // recognized-but-unavailable command (/join, /invite) is
-                            // rejected terminally here instead of being scheduled and
-                            // entering a permanent dispatch/retry loop. The rejection
-                            // is keyed to the composer target so the UI routes the
-                            // notice to the right pane (no frontend correlation
-                            // needed).
-                            if let Err(kind) =
+                                    None => ComposerTarget::Main {
+                                        room_id: room_id.clone(),
+                                    },
+                                };
+                                if composer_draft_acceptance_would_exhaust(
+                                    &self.state,
+                                    &target,
+                                    draft_revision,
+                                ) {
+                                    self.emit(CoreEvent::OperationFailed {
+                                        request_id,
+                                        failure: CoreFailure::TimelineOperationFailed {
+                                            kind: TimelineFailureKind::ComposerRevisionExhausted,
+                                        },
+                                    });
+                                    return false;
+                                }
+                                // Issue #450: validate slash semantics BEFORE either
+                                // scheduled-send acceptance path clears the draft — a
+                                // recognized-but-unavailable command (/join, /invite) is
+                                // rejected terminally here instead of being scheduled and
+                                // entering a permanent dispatch/retry loop. The rejection
+                                // is keyed to the composer target so the UI routes the
+                                // notice to the right pane (no frontend correlation
+                                // needed).
+                                if let Err(kind) =
                                 crate::timeline::composer::validate_composer_body_for_timeline_send(
                                     &body,
                                 )
@@ -3339,111 +3386,119 @@ impl AppActor {
                                 }
                                 return false;
                             }
-                            if self.state.scheduled_sends.capability
-                                != ScheduledSendCapability::LocalFallback
-                            {
-                                let scheduled_id = scheduled_send_id();
-                                let forwarded_permit = self.forward_composer_draft_permit(
+                                if self.state.scheduled_sends.capability
+                                    != ScheduledSendCapability::LocalFallback
+                                {
+                                    let scheduled_id = scheduled_send_id();
+                                    let forwarded_permit = self.forward_composer_draft_permit(
                                     request_id,
                                     ComposerAcceptanceIdentity::ScheduledSend(scheduled_id.clone()),
                                     composer_permit.take().expect(
                                         "server schedule command must carry its admitted permit",
                                     ),
                                 );
-                                if !self
-                                    .account_actor
-                                    .send(AccountMessage::ScheduleServerDelayedSend {
-                                        request_id,
-                                        expected_account,
-                                        scheduled_id,
-                                        room_id,
-                                        thread_root_event_id,
-                                        body,
-                                        send_at_ms,
-                                        draft_revision,
-                                        composer_permit: forwarded_permit,
-                                        // #1348: the delayed content is built by the
-                                        // account actor, so the live composer
-                                        // formatting travels with the command.
-                                        formatting_options: self
-                                            .state
-                                            .settings
-                                            .values
-                                            .composer
-                                            .formatting_options(),
-                                    })
+                                    if !Box::pin(
+                                        self.account_actor.send(
+                                            AccountMessage::ScheduleServerDelayedSend {
+                                                request_id,
+                                                expected_account,
+                                                scheduled_id,
+                                                room_id,
+                                                thread_root_event_id,
+                                                body,
+                                                send_at_ms,
+                                                draft_revision,
+                                                composer_permit: forwarded_permit,
+                                                // #1348: the delayed content is built by the
+                                                // account actor, so the live composer
+                                                // formatting travels with the command.
+                                                formatting_options: self
+                                                    .state
+                                                    .settings
+                                                    .values
+                                                    .composer
+                                                    .formatting_options(),
+                                            },
+                                        ),
+                                    )
                                     .await
-                                {
-                                    self.emit(CoreEvent::OperationFailed {
-                                        request_id,
-                                        failure: CoreFailure::TimelineOperationFailed {
-                                            kind: TimelineFailureKind::QueueOverflow,
-                                        },
-                                    });
+                                    {
+                                        self.emit(CoreEvent::OperationFailed {
+                                            request_id,
+                                            failure: CoreFailure::TimelineOperationFailed {
+                                                kind: TimelineFailureKind::QueueOverflow,
+                                            },
+                                        });
+                                    }
+                                    return false;
                                 }
-                                return false;
-                            }
-                            let capability_effects = self
-                                .reduce_app_action(AppAction::ScheduledSendCapabilityChanged {
-                                    capability: ScheduledSendCapability::LocalFallback,
-                                })
+                                let capability_effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ScheduledSendCapabilityChanged {
+                                        capability: ScheduledSendCapability::LocalFallback,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, capability_effects)
+                                Box::pin(self.handle_app_effects(request_id, capability_effects))
+                                    .await;
+                                let item = ScheduledSendItem {
+                                    scheduled_id: scheduled_send_id(),
+                                    room_id,
+                                    thread_root_event_id,
+                                    body,
+                                    send_at_ms,
+                                    handle: ScheduledSendHandle::Local,
+                                    is_dispatching: false,
+                                };
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ScheduledSendCreatedAtRevision {
+                                        item,
+                                        draft_revision,
+                                    },
+                                ))
                                 .await;
-                            let item = ScheduledSendItem {
-                                scheduled_id: scheduled_send_id(),
-                                room_id,
-                                thread_root_event_id,
-                                body,
-                                send_at_ms,
-                                handle: ScheduledSendHandle::Local,
-                                is_dispatching: false,
-                            };
-                            let effects = self
-                                .reduce_app_action(AppAction::ScheduledSendCreatedAtRevision {
-                                    item,
-                                    draft_revision,
-                                })
-                                .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::CancelScheduledSend {
                             request_id,
                             scheduled_id,
                         } => {
-                            if let Some(ScheduledSendHandle::Server { delay_id }) = self
-                                .state
-                                .scheduled_sends
-                                .items
-                                .get(&scheduled_id)
-                                .map(|item| item.handle.clone())
-                            {
-                                if !self
-                                    .account_actor
-                                    .send(AccountMessage::CancelServerDelayedSend {
-                                        request_id,
-                                        scheduled_id,
-                                        delay_id,
-                                    })
-                                    .await
+                            Box::pin(async move {
+                                if let Some(ScheduledSendHandle::Server { delay_id }) = self
+                                    .state
+                                    .scheduled_sends
+                                    .items
+                                    .get(&scheduled_id)
+                                    .map(|item| item.handle.clone())
                                 {
-                                    self.emit(CoreEvent::OperationFailed {
-                                        request_id,
-                                        failure: CoreFailure::TimelineOperationFailed {
-                                            kind: TimelineFailureKind::QueueOverflow,
+                                    if !Box::pin(self.account_actor.send(
+                                        AccountMessage::CancelServerDelayedSend {
+                                            request_id,
+                                            scheduled_id,
+                                            delay_id,
                                         },
-                                    });
+                                    ))
+                                    .await
+                                    {
+                                        self.emit(CoreEvent::OperationFailed {
+                                            request_id,
+                                            failure: CoreFailure::TimelineOperationFailed {
+                                                kind: TimelineFailureKind::QueueOverflow,
+                                            },
+                                        });
+                                    }
+                                    return false;
                                 }
-                                return false;
-                            }
-                            let effects = self
-                                .reduce_app_action(AppAction::ScheduledSendCancelled {
-                                    scheduled_id,
-                                })
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ScheduledSendCancelled { scheduled_id },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::RescheduleScheduledSend {
                             request_id,
@@ -3451,16 +3506,17 @@ impl AppActor {
                             body,
                             send_at_ms,
                         } => {
-                            // Issue #450: rescheduling must apply the same slash
-                            // validation as the initial schedule — otherwise a
-                            // recognized-but-unavailable command (/join, /invite)
-                            // could be stored and enter the permanent dispatch/retry
-                            // loop. Reject terminally and leave the existing item
-                            // untouched. Scheduled items are edited from the main-pane
-                            // scheduled list (thread items included), so the notice is
-                            // keyed to the item's room — visible without the thread
-                            // being open.
-                            if let Err(kind) =
+                            Box::pin(async move {
+                                // Issue #450: rescheduling must apply the same slash
+                                // validation as the initial schedule — otherwise a
+                                // recognized-but-unavailable command (/join, /invite)
+                                // could be stored and enter the permanent dispatch/retry
+                                // loop. Reject terminally and leave the existing item
+                                // untouched. Scheduled items are edited from the main-pane
+                                // scheduled list (thread items included), so the notice is
+                                // keyed to the item's room — visible without the thread
+                                // being open.
+                                if let Err(kind) =
                                 crate::timeline::composer::validate_composer_body_for_timeline_send(
                                     &body,
                                 )
@@ -3497,50 +3553,55 @@ impl AppActor {
                                 }
                                 return false;
                             }
-                            if let Some(item) =
-                                self.state.scheduled_sends.items.get(&scheduled_id).cloned()
-                                && let ScheduledSendHandle::Server { delay_id } = item.handle
-                            {
-                                if !self
-                                    .account_actor
-                                    .send(AccountMessage::RescheduleServerDelayedSend {
-                                        request_id,
-                                        scheduled_id,
-                                        room_id: item.room_id,
-                                        thread_root_event_id: item.thread_root_event_id,
-                                        body,
-                                        delay_id,
-                                        send_at_ms,
-                                        // #1348: the replacement content also
-                                        // follows the live composer formatting.
-                                        formatting_options: self
-                                            .state
-                                            .settings
-                                            .values
-                                            .composer
-                                            .formatting_options(),
-                                    })
-                                    .await
+                                if let Some(item) =
+                                    self.state.scheduled_sends.items.get(&scheduled_id).cloned()
+                                    && let ScheduledSendHandle::Server { delay_id } = item.handle
                                 {
-                                    self.emit(CoreEvent::OperationFailed {
-                                        request_id,
-                                        failure: CoreFailure::TimelineOperationFailed {
-                                            kind: TimelineFailureKind::QueueOverflow,
-                                        },
-                                    });
+                                    if !Box::pin(
+                                        self.account_actor.send(
+                                            AccountMessage::RescheduleServerDelayedSend {
+                                                request_id,
+                                                scheduled_id,
+                                                room_id: item.room_id,
+                                                thread_root_event_id: item.thread_root_event_id,
+                                                body,
+                                                delay_id,
+                                                send_at_ms,
+                                                // #1348: the replacement content also
+                                                // follows the live composer formatting.
+                                                formatting_options: self
+                                                    .state
+                                                    .settings
+                                                    .values
+                                                    .composer
+                                                    .formatting_options(),
+                                            },
+                                        ),
+                                    )
+                                    .await
+                                    {
+                                        self.emit(CoreEvent::OperationFailed {
+                                            request_id,
+                                            failure: CoreFailure::TimelineOperationFailed {
+                                                kind: TimelineFailureKind::QueueOverflow,
+                                            },
+                                        });
+                                    }
+                                    return false;
                                 }
-                                return false;
-                            }
-                            let effects = self
-                                .reduce_app_action(AppAction::ScheduledSendRescheduled {
-                                    scheduled_id,
-                                    body,
-                                    send_at_ms,
-                                    handle: ScheduledSendHandle::Local,
-                                })
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ScheduledSendRescheduled {
+                                        scheduled_id,
+                                        body,
+                                        send_at_ms,
+                                        handle: ScheduledSendHandle::Local,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::OpenThread {
                             request_id,
@@ -3548,79 +3609,90 @@ impl AppActor {
                             root_event_id,
                             intent,
                         } => {
-                            let replaced_thread_key =
-                                self.unsubscribe_replaced_thread_timeline(&room_id, &root_event_id);
-                            let effects = self
-                                .reduce_app_action(AppAction::OpenThread {
-                                    room_id,
-                                    root_event_id,
-                                    intent,
-                                })
-                                .await;
-                            if effects_open_thread_timeline(&effects)
-                                && let Some(key) = replaced_thread_key
-                            {
-                                self.send_timeline_command_or_fail(
-                                    request_id,
-                                    TimelineCommand::Unsubscribe { request_id, key },
-                                )
-                                .await;
-                            }
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                            Box::pin(async move {
+                                let replaced_thread_key = self
+                                    .unsubscribe_replaced_thread_timeline(&room_id, &root_event_id);
+                                let effects =
+                                    Box::pin(self.reduce_app_action(AppAction::OpenThread {
+                                        room_id,
+                                        root_event_id,
+                                        intent,
+                                    }))
+                                    .await;
+                                if effects_open_thread_timeline(&effects)
+                                    && let Some(key) = replaced_thread_key
+                                {
+                                    Box::pin(self.send_timeline_command_or_fail(
+                                        request_id,
+                                        TimelineCommand::Unsubscribe { request_id, key },
+                                    ))
+                                    .await;
+                                }
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::CloseThread { request_id } => {
-                            let thread_key = self.current_thread_timeline_key();
-                            let effects = self.reduce_app_action(AppAction::CloseThread).await;
-                            if let Some(key) = thread_key {
-                                self.send_timeline_command_or_fail(
-                                    request_id,
-                                    TimelineCommand::Unsubscribe { request_id, key },
-                                )
-                                .await;
-                            }
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                            Box::pin(async move {
+                                let thread_key = self.current_thread_timeline_key();
+                                let effects =
+                                    Box::pin(self.reduce_app_action(AppAction::CloseThread)).await;
+                                if let Some(key) = thread_key {
+                                    Box::pin(self.send_timeline_command_or_fail(
+                                        request_id,
+                                        TimelineCommand::Unsubscribe { request_id, key },
+                                    ))
+                                    .await;
+                                }
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::OpenFocusedContext {
                             request_id,
                             room_id,
                             event_id,
                         } => {
-                            self.pending_focused_navigation = None;
-                            if !self
-                                .ensure_room_event_cached(request_id, &room_id, &event_id)
-                                .await
-                            {
-                                self.emit(CoreEvent::OperationFailed {
-                                    request_id,
-                                    failure: CoreFailure::TimelineOperationFailed {
-                                        kind: TimelineFailureKind::Timeout,
-                                    },
-                                });
-                                return true;
-                            }
-                            let replaced_focused_key = self
-                                .unsubscribe_replaced_focused_context_timeline(&room_id, &event_id);
-                            let effects = self
-                                .reduce_app_action(AppAction::OpenFocusedContext {
-                                    room_id,
-                                    event_id,
-                                })
-                                .await;
-                            if effects_open_focused_timeline(&effects) {
-                                if let Some(key) = replaced_focused_key {
-                                    self.send_timeline_command_or_fail(
-                                        request_id,
-                                        TimelineCommand::Unsubscribe { request_id, key },
-                                    )
-                                    .await;
-                                }
-                            } else {
+                            Box::pin(async move {
                                 self.pending_focused_navigation = None;
-                            }
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                if !Box::pin(
+                                    self.ensure_room_event_cached(request_id, &room_id, &event_id),
+                                )
+                                .await
+                                {
+                                    self.emit(CoreEvent::OperationFailed {
+                                        request_id,
+                                        failure: CoreFailure::TimelineOperationFailed {
+                                            kind: TimelineFailureKind::Timeout,
+                                        },
+                                    });
+                                    return true;
+                                }
+                                let replaced_focused_key = self
+                                    .unsubscribe_replaced_focused_context_timeline(
+                                        &room_id, &event_id,
+                                    );
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::OpenFocusedContext { room_id, event_id },
+                                ))
+                                .await;
+                                if effects_open_focused_timeline(&effects) {
+                                    if let Some(key) = replaced_focused_key {
+                                        Box::pin(self.send_timeline_command_or_fail(
+                                            request_id,
+                                            TimelineCommand::Unsubscribe { request_id, key },
+                                        ))
+                                        .await;
+                                    }
+                                } else {
+                                    self.pending_focused_navigation = None;
+                                }
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::OpenAnchoredTimeline {
                             request_id,
@@ -3628,122 +3700,24 @@ impl AppActor {
                             event_id,
                             allow_live_fallback,
                         } => {
-                            if !self
-                                .ensure_room_event_cached(request_id, &room_id, &event_id)
-                                .await
-                            {
-                                self.emit(CoreEvent::OperationFailed {
-                                    request_id,
-                                    failure: CoreFailure::TimelineOperationFailed {
-                                        kind: TimelineFailureKind::Timeout,
-                                    },
-                                });
-                                return true;
-                            }
-                            let replaced_focused_key = self
-                                .unsubscribe_replaced_focused_context_timeline(&room_id, &event_id);
-                            let Some(account_key) = self.current_account_key() else {
-                                self.emit(CoreEvent::OperationFailed {
-                                    request_id,
-                                    failure: CoreFailure::SessionRequired,
-                                });
-                                return true;
-                            };
-                            let key = TimelineKey {
-                                account_key,
-                                kind: TimelineKind::Focused {
-                                    room_id: room_id.clone(),
-                                    event_id: event_id.clone(),
-                                },
-                            };
-                            self.pending_focused_navigation = Some(PendingFocusedNavigation {
-                                projection_request_id: request_id,
-                                key,
-                                room_id: room_id.clone(),
-                                event_id: event_id.clone(),
-                                allow_live_fallback,
-                                generation: None,
-                            });
-                            let effects = self
-                                .reduce_app_action(AppAction::OpenFocusedContext {
-                                    room_id,
-                                    event_id,
-                                })
-                                .await;
-                            if effects_open_focused_timeline(&effects) {
-                                if let Some(key) = replaced_focused_key {
-                                    self.send_timeline_command_or_fail(
-                                        request_id,
-                                        TimelineCommand::Unsubscribe { request_id, key },
-                                    )
-                                    .await;
-                                }
-                            } else {
-                                self.pending_focused_navigation = None;
-                            }
-                            self.handle_app_effects(request_id, effects).await;
-                            true
-                        }
-                        AppCommand::EnterAnchoredTimeline {
-                            request_id,
-                            room_id,
-                            event_id,
-                        } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::EnterAnchoredTimeline {
-                                    room_id,
-                                    event_id,
-                                })
-                                .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
-                        }
-                        AppCommand::RepairRoomTimeline {
-                            request_id,
-                            room_id,
-                        } => {
-                            let Some(account_key) = self.current_account_key() else {
-                                self.emit(CoreEvent::OperationFailed {
-                                    request_id,
-                                    failure: CoreFailure::SessionRequired,
-                                });
-                                return true;
-                            };
-                            let _ = self
-                                .account_actor
-                                .send(AccountMessage::RepairRoomTimeline {
-                                    request_id,
-                                    account_key,
-                                    room_id,
-                                })
-                                .await;
-                            true
-                        }
-                        AppCommand::OpenTimelineAtTimestamp {
-                            request_id,
-                            room_id,
-                            timestamp_ms,
-                        } => {
-                            // A newer jump owns the next account-actor reply.
-                            self.cancelled_date_navigation_request_id = None;
-                            let focused_key = self.current_focused_context_timeline_key();
-                            let effects =
-                                self.reduce_app_action(AppAction::CloseFocusedContext).await;
-                            if let Some(key) = focused_key {
-                                self.send_timeline_command_or_fail(
-                                    request_id,
-                                    TimelineCommand::Unsubscribe { request_id, key },
+                            Box::pin(async move {
+                                if !Box::pin(
+                                    self.ensure_room_event_cached(request_id, &room_id, &event_id),
                                 )
-                                .await;
-                            }
-                            self.handle_app_effects(request_id, effects).await;
-                            if let Some(event_id) = self
-                                .activity_projection
-                                .event_at_or_after(&room_id, timestamp_ms)
-                            {
-                                // #161: jump-to-date reuses the focused-context timeline
-                                // subscription lifecycle but renders it in the MAIN pane
-                                // (marked by `main_timeline_anchor`), not the right panel.
+                                .await
+                                {
+                                    self.emit(CoreEvent::OperationFailed {
+                                        request_id,
+                                        failure: CoreFailure::TimelineOperationFailed {
+                                            kind: TimelineFailureKind::Timeout,
+                                        },
+                                    });
+                                    return true;
+                                }
+                                let replaced_focused_key = self
+                                    .unsubscribe_replaced_focused_context_timeline(
+                                        &room_id, &event_id,
+                                    );
                                 let Some(account_key) = self.current_account_key() else {
                                     self.emit(CoreEvent::OperationFailed {
                                         request_id,
@@ -3751,190 +3725,352 @@ impl AppActor {
                                     });
                                     return true;
                                 };
+                                let key = TimelineKey {
+                                    account_key,
+                                    kind: TimelineKind::Focused {
+                                        room_id: room_id.clone(),
+                                        event_id: event_id.clone(),
+                                    },
+                                };
                                 self.pending_focused_navigation = Some(PendingFocusedNavigation {
                                     projection_request_id: request_id,
-                                    key: TimelineKey {
+                                    key,
+                                    room_id: room_id.clone(),
+                                    event_id: event_id.clone(),
+                                    allow_live_fallback,
+                                    generation: None,
+                                });
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::OpenFocusedContext { room_id, event_id },
+                                ))
+                                .await;
+                                if effects_open_focused_timeline(&effects) {
+                                    if let Some(key) = replaced_focused_key {
+                                        Box::pin(self.send_timeline_command_or_fail(
+                                            request_id,
+                                            TimelineCommand::Unsubscribe { request_id, key },
+                                        ))
+                                        .await;
+                                    }
+                                } else {
+                                    self.pending_focused_navigation = None;
+                                }
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
+                        }
+                        AppCommand::EnterAnchoredTimeline {
+                            request_id,
+                            room_id,
+                            event_id,
+                        } => {
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::EnterAnchoredTimeline { room_id, event_id },
+                                ))
+                                .await;
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
+                        }
+                        AppCommand::RepairRoomTimeline {
+                            request_id,
+                            room_id,
+                        } => {
+                            Box::pin(async move {
+                                let Some(account_key) = self.current_account_key() else {
+                                    self.emit(CoreEvent::OperationFailed {
+                                        request_id,
+                                        failure: CoreFailure::SessionRequired,
+                                    });
+                                    return true;
+                                };
+                                let _ = Box::pin(self.account_actor.send(
+                                    AccountMessage::RepairRoomTimeline {
+                                        request_id,
                                         account_key,
-                                        kind: TimelineKind::Focused {
+                                        room_id,
+                                    },
+                                ))
+                                .await;
+                                true
+                            })
+                            .await
+                        }
+                        AppCommand::OpenTimelineAtTimestamp {
+                            request_id,
+                            room_id,
+                            timestamp_ms,
+                        } => {
+                            Box::pin(async move {
+                                // A newer jump owns the next account-actor reply.
+                                self.cancelled_date_navigation_request_id = None;
+                                let focused_key = self.current_focused_context_timeline_key();
+                                let effects = Box::pin(
+                                    self.reduce_app_action(AppAction::CloseFocusedContext),
+                                )
+                                .await;
+                                if let Some(key) = focused_key {
+                                    Box::pin(self.send_timeline_command_or_fail(
+                                        request_id,
+                                        TimelineCommand::Unsubscribe { request_id, key },
+                                    ))
+                                    .await;
+                                }
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                if let Some(event_id) = self
+                                    .activity_projection
+                                    .event_at_or_after(&room_id, timestamp_ms)
+                                {
+                                    // #161: jump-to-date reuses the focused-context timeline
+                                    // subscription lifecycle but renders it in the MAIN pane
+                                    // (marked by `main_timeline_anchor`), not the right panel.
+                                    let Some(account_key) = self.current_account_key() else {
+                                        self.emit(CoreEvent::OperationFailed {
+                                            request_id,
+                                            failure: CoreFailure::SessionRequired,
+                                        });
+                                        return true;
+                                    };
+                                    self.pending_focused_navigation =
+                                        Some(PendingFocusedNavigation {
+                                            projection_request_id: request_id,
+                                            key: TimelineKey {
+                                                account_key,
+                                                kind: TimelineKind::Focused {
+                                                    room_id: room_id.clone(),
+                                                    event_id: event_id.clone(),
+                                                },
+                                            },
+                                            room_id: room_id.clone(),
+                                            event_id: event_id.clone(),
+                                            allow_live_fallback: true,
+                                            generation: None,
+                                        });
+                                    let effects = Box::pin(self.reduce_app_action(
+                                        AppAction::OpenFocusedContext {
                                             room_id: room_id.clone(),
                                             event_id: event_id.clone(),
                                         },
-                                    },
-                                    room_id: room_id.clone(),
-                                    event_id: event_id.clone(),
-                                    allow_live_fallback: true,
-                                    generation: None,
-                                });
-                                let effects = self
-                                    .reduce_app_action(AppAction::OpenFocusedContext {
-                                        room_id: room_id.clone(),
-                                        event_id: event_id.clone(),
-                                    })
+                                    ))
                                     .await;
-                                self.handle_app_effects(request_id, effects).await;
-                                return true;
-                            }
-                            self.pending_date_navigation_request_id = Some(request_id);
-                            let _ = self
-                                .account_actor
-                                .send(AccountMessage::OpenTimelineAtTimestamp {
-                                    request_id,
-                                    room_id,
-                                    timestamp_ms,
-                                })
+                                    Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                    return true;
+                                }
+                                self.pending_date_navigation_request_id = Some(request_id);
+                                let _ = Box::pin(self.account_actor.send(
+                                    AccountMessage::OpenTimelineAtTimestamp {
+                                        request_id,
+                                        room_id,
+                                        timestamp_ms,
+                                    },
+                                ))
                                 .await;
-                            true
+                                true
+                            })
+                            .await
                         }
                         AppCommand::TimelineScrollAnchorUpdated {
                             request_id,
                             room_id,
                             anchor,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::TimelineScrollAnchorUpdated {
-                                    room_id,
-                                    anchor,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::TimelineScrollAnchorUpdated { room_id, anchor },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::CloseFocusedContext { request_id } => {
-                            self.pending_focused_navigation = None;
-                            let focused_key = self.current_focused_context_timeline_key();
-                            let effects =
-                                self.reduce_app_action(AppAction::CloseFocusedContext).await;
-                            if let Some(key) = focused_key {
-                                self.send_timeline_command_or_fail(
-                                    request_id,
-                                    TimelineCommand::Unsubscribe { request_id, key },
+                            Box::pin(async move {
+                                self.pending_focused_navigation = None;
+                                let focused_key = self.current_focused_context_timeline_key();
+                                let effects = Box::pin(
+                                    self.reduce_app_action(AppAction::CloseFocusedContext),
                                 )
                                 .await;
-                            }
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                if let Some(key) = focused_key {
+                                    Box::pin(self.send_timeline_command_or_fail(
+                                        request_id,
+                                        TimelineCommand::Unsubscribe { request_id, key },
+                                    ))
+                                    .await;
+                                }
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::CloseSearch { request_id } => {
-                            let effects = self.reduce_app_action(AppAction::SearchClosed).await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                            Box::pin(async move {
+                                let effects =
+                                    Box::pin(self.reduce_app_action(AppAction::SearchClosed)).await;
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::DismissEventNavigationFailure { request_id } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::EventNavigationFailureDismissed)
-                                .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                            Box::pin(async move {
+                                let effects =
+                                    Box::pin(self.reduce_app_action(
+                                        AppAction::EventNavigationFailureDismissed,
+                                    ))
+                                    .await;
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::DismissUnverifiedOwnSessionsAlert { request_id } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::UnverifiedOwnSessionsAlertDismissed)
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::UnverifiedOwnSessionsAlertDismissed,
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::OpenInviteWorkflow {
                             request_id,
                             room_id,
                         } => {
-                            self.settle_invite_workflow_action(
-                                request_id,
-                                AppAction::InviteWorkflowOpened { room_id },
-                            )
-                            .await;
-                            true
+                            Box::pin(async move {
+                                Box::pin(self.settle_invite_workflow_action(
+                                    request_id,
+                                    AppAction::InviteWorkflowOpened { room_id },
+                                ))
+                                .await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::CloseInviteWorkflow { request_id } => {
-                            self.settle_invite_workflow_action(
-                                request_id,
-                                AppAction::InviteWorkflowClosed,
-                            )
-                            .await;
-                            true
+                            Box::pin(async move {
+                                Box::pin(self.settle_invite_workflow_action(
+                                    request_id,
+                                    AppAction::InviteWorkflowClosed,
+                                ))
+                                .await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SearchInviteTargets {
                             request_id,
                             room_id,
                             query,
                         } => {
-                            self.settle_invite_workflow_action(
-                                request_id,
-                                AppAction::InviteTargetQueryChanged { room_id, query },
-                            )
-                            .await;
-                            true
+                            Box::pin(async move {
+                                Box::pin(self.settle_invite_workflow_action(
+                                    request_id,
+                                    AppAction::InviteTargetQueryChanged { room_id, query },
+                                ))
+                                .await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SetInviteScope {
                             request_id,
                             room_id,
                             scope,
                         } => {
-                            self.settle_invite_workflow_action(
-                                request_id,
-                                AppAction::InviteScopeSelected { room_id, scope },
-                            )
-                            .await;
-                            true
+                            Box::pin(async move {
+                                Box::pin(self.settle_invite_workflow_action(
+                                    request_id,
+                                    AppAction::InviteScopeSelected { room_id, scope },
+                                ))
+                                .await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SelectInviteTarget {
                             request_id,
                             room_id,
                             user_id,
                         } => {
-                            self.settle_invite_workflow_action(
-                                request_id,
-                                AppAction::InviteTargetSelected { room_id, user_id },
-                            )
-                            .await;
-                            true
+                            Box::pin(async move {
+                                Box::pin(self.settle_invite_workflow_action(
+                                    request_id,
+                                    AppAction::InviteTargetSelected { room_id, user_id },
+                                ))
+                                .await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::RemoveInviteTarget {
                             request_id,
                             user_id,
                         } => {
-                            self.settle_invite_workflow_action(
-                                request_id,
-                                AppAction::InviteTargetRemoved { user_id },
-                            )
-                            .await;
-                            true
+                            Box::pin(async move {
+                                Box::pin(self.settle_invite_workflow_action(
+                                    request_id,
+                                    AppAction::InviteTargetRemoved { user_id },
+                                ))
+                                .await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::UpdateSettings { request_id, patch } => {
-                            if patch.affects_account_settings()
-                                && !account_settings_session_key(&self.state).is_some_and(|key| {
-                                    self.account_settings_loaded_for.as_ref() == Some(&key)
-                                })
-                            {
-                                self.emit(CoreEvent::OperationFailed {
-                                    request_id,
-                                    failure: CoreFailure::StoreUnavailable,
-                                });
-                                return false;
-                            }
-                            let effects = self
-                                .reduce_app_action(AppAction::SettingsUpdateRequested {
-                                    request_id: request_id.sequence,
-                                    patch,
-                                })
+                            Box::pin(async move {
+                                if patch.affects_account_settings()
+                                    && !account_settings_session_key(&self.state).is_some_and(
+                                        |key| {
+                                            self.account_settings_loaded_for.as_ref() == Some(&key)
+                                        },
+                                    )
+                                {
+                                    self.emit(CoreEvent::OperationFailed {
+                                        request_id,
+                                        failure: CoreFailure::StoreUnavailable,
+                                    });
+                                    return false;
+                                }
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::SettingsUpdateRequested {
+                                        request_id: request_id.sequence,
+                                        patch,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SetNotificationDeliverySecret {
                             request_id,
                             sink_id,
                             secret,
                         } => {
-                            // The secret is moved straight into the store call and is not
-                            // reduced, published, or logged. The command settles on the
-                            // projection the write publishes, so a store that refuses the value
-                            // is the only failure.
-                            let result = self
-                                .set_notification_delivery_secret(request_id, &sink_id, secret)
+                            Box::pin(async move {
+                                // The secret is moved straight into the store call and is not
+                                // reduced, published, or logged. The command settles on the
+                                // projection the write publishes, so a store that refuses the value
+                                // is the only failure.
+                                let result = Box::pin(self.set_notification_delivery_secret(
+                                    request_id, &sink_id, secret,
+                                ))
                                 .await;
-                            self.settle_notification_delivery_command(request_id, result)
+                                Box::pin(
+                                    self.settle_notification_delivery_command(request_id, result),
+                                )
                                 .await;
-                            false
+                                false
+                            })
+                            .await
                         }
                         AppCommand::SaveNotificationSink {
                             request_id,
@@ -3942,376 +4078,457 @@ impl AppActor {
                             secret,
                             accept_content_consent,
                         } => {
-                            // #1468: one Save on the settings screen. The secret, when one
-                            // travels, is moved into the store call exactly as above.
-                            let result = self
-                                .save_notification_sink(
+                            Box::pin(async move {
+                                // #1468: one Save on the settings screen. The secret, when one
+                                // travels, is moved into the store call exactly as above.
+                                let result = Box::pin(self.save_notification_sink(
                                     request_id,
                                     sink,
                                     secret,
                                     accept_content_consent,
+                                ))
+                                .await;
+                                Box::pin(
+                                    self.settle_notification_delivery_command(request_id, result),
                                 )
                                 .await;
-                            self.settle_notification_delivery_command(request_id, result)
-                                .await;
-                            false
+                                false
+                            })
+                            .await
                         }
                         AppCommand::ClearNotificationDeliverySecret {
                             request_id,
                             sink_id,
                         } => {
-                            let result = self
-                                .clear_notification_delivery_secret(request_id, &sink_id)
+                            Box::pin(async move {
+                                let result = Box::pin(
+                                    self.clear_notification_delivery_secret(request_id, &sink_id),
+                                )
                                 .await;
-                            self.settle_notification_delivery_command(request_id, result)
+                                Box::pin(
+                                    self.settle_notification_delivery_command(request_id, result),
+                                )
                                 .await;
-                            false
+                                false
+                            })
+                            .await
                         }
                         AppCommand::TestNotificationDelivery {
                             request_id,
                             sink_id,
                         } => {
-                            let window_id = self.next_notification_delivery_test_window(&sink_id);
-                            let result = self
-                                .dispatch_notification_delivery_test(&sink_id, window_id)
+                            Box::pin(async move {
+                                let window_id =
+                                    self.next_notification_delivery_test_window(&sink_id);
+                                let result = Box::pin(
+                                    self.dispatch_notification_delivery_test(&sink_id, window_id),
+                                )
                                 .await;
-                            self.settle_notification_delivery_command(request_id, result)
+                                Box::pin(
+                                    self.settle_notification_delivery_command(request_id, result),
+                                )
                                 .await;
-                            false
+                                false
+                            })
+                            .await
                         }
                         AppCommand::ImportLegacySettings {
                             request_id,
                             mut patch,
                         } => {
-                            if self.settings_load_status == SettingsLoadStatus::Failed {
-                                self.emit(CoreEvent::OperationFailed {
-                                    request_id,
-                                    failure: CoreFailure::StoreUnavailable,
-                                });
-                                true
-                            } else if self
-                                .state
-                                .settings
-                                .values
-                                .legacy_frontend_preferences_imported
-                            {
-                                true
-                            } else {
-                                patch.legacy_frontend_preferences_imported = Some(true);
-                                let persist_account_settings = patch.affects_account_settings();
-                                let mut values = self.state.settings.values.clone();
-                                values.apply_patch(patch.clone());
-                                let projected_values = values.clone();
-                                let account_values = values.account_settings();
-                                let key_id = account_settings_session_key(&self.state);
-                                let account_settings_ready = key_id.as_ref().is_some_and(|key| {
-                                    self.account_settings_loaded_for.as_ref() == Some(key)
-                                });
-                                let account_store = self.composer_draft_store_actor.clone();
-                                let store = self.settings_store.clone();
-                                let saved = executor::spawn_blocking(move || {
-                                    if persist_account_settings {
-                                        if !account_settings_ready {
-                                            return Err(());
-                                        }
-                                        let Some(key_id) = key_id else {
-                                            return Err(());
-                                        };
-                                        account_store
-                                            .save_account_settings(&key_id, &account_values)
-                                            .map_err(|_| ())?;
-                                    }
-                                    store.save_patch(&patch).map_err(|_| ())?;
-                                    Ok::<_, ()>(())
-                                })
-                                .await;
-                                match saved {
-                                    Ok(Ok(())) => {
-                                        let effects = self
-                                            .reduce_app_action(AppAction::SettingsLoaded {
-                                                values: projected_values,
-                                            })
-                                            .await;
-                                        self.handle_app_effects(request_id, effects).await;
-                                    }
-                                    Ok(Err(_)) | Err(_) => {
-                                        self.emit(CoreEvent::OperationFailed {
-                                            request_id,
-                                            failure: CoreFailure::StoreUnavailable,
+                            Box::pin(async move {
+                                if self.settings_load_status == SettingsLoadStatus::Failed {
+                                    self.emit(CoreEvent::OperationFailed {
+                                        request_id,
+                                        failure: CoreFailure::StoreUnavailable,
+                                    });
+                                    true
+                                } else if self
+                                    .state
+                                    .settings
+                                    .values
+                                    .legacy_frontend_preferences_imported
+                                {
+                                    true
+                                } else {
+                                    patch.legacy_frontend_preferences_imported = Some(true);
+                                    let persist_account_settings = patch.affects_account_settings();
+                                    let mut values = self.state.settings.values.clone();
+                                    values.apply_patch(patch.clone());
+                                    let projected_values = values.clone();
+                                    let account_values = values.account_settings();
+                                    let key_id = account_settings_session_key(&self.state);
+                                    let account_settings_ready =
+                                        key_id.as_ref().is_some_and(|key| {
+                                            self.account_settings_loaded_for.as_ref() == Some(key)
                                         });
+                                    let account_store = self.composer_draft_store_actor.clone();
+                                    let store = self.settings_store.clone();
+                                    let saved = Box::pin(executor::spawn_blocking(move || {
+                                        if persist_account_settings {
+                                            if !account_settings_ready {
+                                                return Err(());
+                                            }
+                                            let Some(key_id) = key_id else {
+                                                return Err(());
+                                            };
+                                            account_store
+                                                .save_account_settings(&key_id, &account_values)
+                                                .map_err(|_| ())?;
+                                        }
+                                        store.save_patch(&patch).map_err(|_| ())?;
+                                        Ok::<_, ()>(())
+                                    }))
+                                    .await;
+                                    match saved {
+                                        Ok(Ok(())) => {
+                                            let effects = Box::pin(self.reduce_app_action(
+                                                AppAction::SettingsLoaded {
+                                                    values: projected_values,
+                                                },
+                                            ))
+                                            .await;
+                                            Box::pin(self.handle_app_effects(request_id, effects))
+                                                .await;
+                                        }
+                                        Ok(Err(_)) | Err(_) => {
+                                            self.emit(CoreEvent::OperationFailed {
+                                                request_id,
+                                                failure: CoreFailure::StoreUnavailable,
+                                            });
+                                        }
                                     }
+                                    true
                                 }
-                                true
-                            }
+                            })
+                            .await
                         }
                         AppCommand::UpdateNavigationPreference { request_id, update } => {
-                            self.handle_navigation_preference_command(request_id, update)
+                            Box::pin(async move {
+                                Box::pin(
+                                    self.handle_navigation_preference_command(request_id, update),
+                                )
                                 .await;
-                            true
+                                true
+                            })
+                            .await
                         }
                         AppCommand::RebuildSearchIndex { request_id } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::SearchIndexRebuildRequested {
-                                    request_id: request_id.sequence,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::SearchIndexRebuildRequested {
+                                        request_id: request_id.sequence,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SetRoomUrlPreviewOverride {
                             request_id,
                             room_id,
                             enabled,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::RoomUrlPreviewOverrideSet {
-                                    request_id: request_id.sequence,
-                                    room_id,
-                                    enabled,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::RoomUrlPreviewOverrideSet {
+                                        request_id: request_id.sequence,
+                                        room_id,
+                                        enabled,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::OpenActivity { request_id } => {
-                            let previous_tab = match self.state.activity {
-                                ActivityState::Closed { last_selected_tab } => last_selected_tab,
-                                ActivityState::Opening { tab, .. } => {
-                                    record_activity_transition(
-                                        "open_applied",
-                                        request_id,
-                                        "already_opening",
+                            Box::pin(async move {
+                                let previous_tab = match self.state.activity {
+                                    ActivityState::Closed { last_selected_tab } => {
+                                        last_selected_tab
+                                    }
+                                    ActivityState::Opening { tab, .. } => {
+                                        record_activity_transition(
+                                            "open_applied",
+                                            request_id,
+                                            "already_opening",
+                                            tab,
+                                            tab,
+                                        );
+                                        return true;
+                                    }
+                                    ActivityState::Open { active_tab, .. } => {
+                                        record_activity_transition(
+                                            "open_applied",
+                                            request_id,
+                                            "already_open",
+                                            active_tab,
+                                            active_tab,
+                                        );
+                                        return true;
+                                    }
+                                };
+                                let effects =
+                                    Box::pin(self.reduce_app_action(AppAction::ActivityOpened {
+                                        request_id: request_id.sequence,
+                                    }))
+                                    .await;
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                let opening_tab = match self.state.activity {
+                                    ActivityState::Opening {
+                                        request_id: active_request_id,
                                         tab,
-                                        tab,
-                                    );
-                                    return true;
-                                }
-                                ActivityState::Open { active_tab, .. } => {
-                                    record_activity_transition(
-                                        "open_applied",
-                                        request_id,
-                                        "already_open",
-                                        active_tab,
-                                        active_tab,
-                                    );
-                                    return true;
-                                }
-                            };
-                            let effects = self
-                                .reduce_app_action(AppAction::ActivityOpened {
-                                    request_id: request_id.sequence,
-                                })
+                                    } if active_request_id == request_id.sequence => tab,
+                                    _ => {
+                                        record_activity_transition(
+                                            "open_applied",
+                                            request_id,
+                                            "stale",
+                                            previous_tab,
+                                            previous_tab,
+                                        );
+                                        return true;
+                                    }
+                                };
+                                let (recent, unread, excluded_room_ids) =
+                                    self.activity_projection.snapshot(&self.state);
+                                let snapshot_effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ActivitySnapshotLoaded {
+                                        request_id: request_id.sequence,
+                                        active_tab: opening_tab,
+                                        recent: recent.clone(),
+                                        unread: unread.clone(),
+                                        excluded_room_ids,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            let opening_tab = match self.state.activity {
-                                ActivityState::Opening {
-                                    request_id: active_request_id,
-                                    tab,
-                                } if active_request_id == request_id.sequence => tab,
-                                _ => {
-                                    record_activity_transition(
-                                        "open_applied",
-                                        request_id,
-                                        "stale",
-                                        previous_tab,
-                                        previous_tab,
-                                    );
-                                    return true;
-                                }
-                            };
-                            let (recent, unread, excluded_room_ids) =
-                                self.activity_projection.snapshot(&self.state);
-                            let snapshot_effects = self
-                                .reduce_app_action(AppAction::ActivitySnapshotLoaded {
-                                    request_id: request_id.sequence,
-                                    active_tab: opening_tab,
-                                    recent: recent.clone(),
-                                    unread: unread.clone(),
-                                    excluded_room_ids,
-                                })
-                                .await;
-                            self.handle_app_effects(request_id, snapshot_effects).await;
-                            self.start_activity_resolution().await;
-                            self.emit(CoreEvent::Activity(ActivityEvent::Opened { request_id }));
-                            let (recent, unread, selected_tab) = match &self.state.activity {
-                                ActivityState::Open {
-                                    active_tab,
+                                Box::pin(self.handle_app_effects(request_id, snapshot_effects))
+                                    .await;
+                                Box::pin(self.start_activity_resolution()).await;
+                                self.emit(CoreEvent::Activity(ActivityEvent::Opened {
+                                    request_id,
+                                }));
+                                let (recent, unread, selected_tab) = match &self.state.activity {
+                                    ActivityState::Open {
+                                        active_tab,
+                                        recent,
+                                        unread,
+                                        ..
+                                    } => (recent.clone(), unread.clone(), *active_tab),
+                                    _ => (recent, unread, opening_tab),
+                                };
+                                record_activity_transition(
+                                    "open_applied",
+                                    request_id,
+                                    "opened",
+                                    previous_tab,
+                                    selected_tab,
+                                );
+                                self.emit(CoreEvent::Activity(ActivityEvent::SnapshotLoaded {
+                                    request_id,
+                                    active_tab: selected_tab,
                                     recent,
                                     unread,
-                                    ..
-                                } => (recent.clone(), unread.clone(), *active_tab),
-                                _ => (recent, unread, opening_tab),
-                            };
-                            record_activity_transition(
-                                "open_applied",
-                                request_id,
-                                "opened",
-                                previous_tab,
-                                selected_tab,
-                            );
-                            self.emit(CoreEvent::Activity(ActivityEvent::SnapshotLoaded {
-                                request_id,
-                                active_tab: selected_tab,
-                                recent,
-                                unread,
-                            }));
-                            true
+                                }));
+                                true
+                            })
+                            .await
                         }
                         AppCommand::CloseActivity { request_id } => {
-                            self.dispatch_cancel_activity_resolution();
-                            let effects = self.reduce_app_action(AppAction::ActivityClosed).await;
-                            self.handle_app_effects(request_id, effects).await;
-                            self.emit(CoreEvent::Activity(ActivityEvent::Closed { request_id }));
-                            true
+                            Box::pin(async move {
+                                self.dispatch_cancel_activity_resolution();
+                                let effects =
+                                    Box::pin(self.reduce_app_action(AppAction::ActivityClosed))
+                                        .await;
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                self.emit(CoreEvent::Activity(ActivityEvent::Closed {
+                                    request_id,
+                                }));
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SetActivityTab { request_id, tab } => {
-                            let previous_tab = match self.state.activity {
-                                ActivityState::Open { active_tab, .. } => Some(active_tab),
-                                _ => None,
-                            };
-                            let effects = self
-                                .reduce_app_action(AppAction::ActivityTabSelected { tab })
+                            Box::pin(async move {
+                                let previous_tab = match self.state.activity {
+                                    ActivityState::Open { active_tab, .. } => Some(active_tab),
+                                    _ => None,
+                                };
+                                let effects = Box::pin(
+                                    self.reduce_app_action(AppAction::ActivityTabSelected { tab }),
+                                )
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            if let Some(previous_tab) = previous_tab
-                                && previous_tab != tab
-                            {
-                                record(
-                                    DiagnosticEvent::new(
-                                        DiagnosticLevel::Info,
-                                        "core.activity",
-                                        "tab_selected",
-                                    )
-                                    .field(DiagnosticField::request_id(
-                                        "request_id",
-                                        request_id.connection_id.0,
-                                        request_id.sequence,
-                                    ))
-                                    .field(DiagnosticField::token(
-                                        "previous_tab",
-                                        activity_tab_token(previous_tab),
-                                    ))
-                                    .field(
-                                        DiagnosticField::token(
-                                            "selected_tab",
-                                            activity_tab_token(tab),
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                if let Some(previous_tab) = previous_tab
+                                    && previous_tab != tab
+                                {
+                                    record(
+                                        DiagnosticEvent::new(
+                                            DiagnosticLevel::Info,
+                                            "core.activity",
+                                            "tab_selected",
+                                        )
+                                        .field(DiagnosticField::request_id(
+                                            "request_id",
+                                            request_id.connection_id.0,
+                                            request_id.sequence,
+                                        ))
+                                        .field(DiagnosticField::token(
+                                            "previous_tab",
+                                            activity_tab_token(previous_tab),
+                                        ))
+                                        .field(
+                                            DiagnosticField::token(
+                                                "selected_tab",
+                                                activity_tab_token(tab),
+                                            ),
                                         ),
-                                    ),
-                                );
-                            }
-                            self.emit(CoreEvent::Activity(ActivityEvent::TabSelected {
-                                request_id,
-                                tab,
-                            }));
-                            true
+                                    );
+                                }
+                                self.emit(CoreEvent::Activity(ActivityEvent::TabSelected {
+                                    request_id,
+                                    tab,
+                                }));
+                                true
+                            })
+                            .await
                         }
                         AppCommand::PaginateActivity {
                             request_id, tab, ..
                         } => {
-                            let (recent, unread, excluded_room_ids) = self
-                                .activity_projection
-                                .snapshot_preserving_resolution(&self.state);
-                            let effects = self
-                                .reduce_app_action(AppAction::ActivityRowsUpdated {
-                                    recent: recent.clone(),
-                                    unread: unread.clone(),
-                                    excluded_room_ids,
-                                })
+                            Box::pin(async move {
+                                let (recent, unread, excluded_room_ids) = self
+                                    .activity_projection
+                                    .snapshot_preserving_resolution(&self.state);
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ActivityRowsUpdated {
+                                        recent: recent.clone(),
+                                        unread: unread.clone(),
+                                        excluded_room_ids,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            self.emit(CoreEvent::Activity(ActivityEvent::SnapshotLoaded {
-                                request_id,
-                                active_tab: tab,
-                                recent,
-                                unread,
-                            }));
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                self.emit(CoreEvent::Activity(ActivityEvent::SnapshotLoaded {
+                                    request_id,
+                                    active_tab: tab,
+                                    recent,
+                                    unread,
+                                }));
+                                true
+                            })
+                            .await
                         }
                         AppCommand::RetryActivityResolution { request_id } => {
-                            self.start_activity_resolution().await;
-                            self.emit(CoreEvent::Activity(ActivityEvent::ResolutionRetried {
-                                request_id,
-                                generation: self.activity_resolution_generation,
-                            }));
-                            true
+                            Box::pin(async move {
+                                Box::pin(self.start_activity_resolution()).await;
+                                self.emit(CoreEvent::Activity(ActivityEvent::ResolutionRetried {
+                                    request_id,
+                                    generation: self.activity_resolution_generation,
+                                }));
+                                true
+                            })
+                            .await
                         }
                         AppCommand::MarkActivityRead { request_id, target } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::ActivityMarkReadRequested {
-                                    request_id: request_id.sequence,
-                                    target: target.clone(),
-                                })
-                                .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            let fully_read_updates = self
-                                .activity_projection
-                                .fully_read_marker_updates(&self.state, &target);
-                            let mark_read_result =
-                                self.activity_projection.mark_read(&self.state, &target);
-                            let cleared_room_ids =
-                                self.activity_projection.room_ids_without_remaining_unread(
-                                    &self.state,
-                                    &mark_read_result.cleared_event_ids,
-                                );
-                            let success_effects = self
-                                .reduce_app_action(AppAction::ActivityMarkReadSucceeded {
-                                    request_id: request_id.sequence,
-                                    cleared_event_ids: mark_read_result.cleared_event_ids.clone(),
-                                })
-                                .await;
-                            self.handle_app_effects(request_id, success_effects).await;
-                            for room_id in mark_read_result.cleared_placeholder_room_ids {
-                                let room_effects = self
-                                    .reduce_app_action(AppAction::RoomMarkedAsReadSucceeded {
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ActivityMarkReadRequested {
                                         request_id: request_id.sequence,
-                                        room_id,
-                                    })
-                                    .await;
-                                self.handle_app_effects(request_id, room_effects).await;
-                            }
-                            for room_id in cleared_room_ids {
-                                let room_effects = self
-                                    .reduce_app_action(AppAction::RoomMarkedAsReadSucceeded {
+                                        target: target.clone(),
+                                    },
+                                ))
+                                .await;
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                let fully_read_updates = self
+                                    .activity_projection
+                                    .fully_read_marker_updates(&self.state, &target);
+                                let mark_read_result =
+                                    self.activity_projection.mark_read(&self.state, &target);
+                                let cleared_room_ids =
+                                    self.activity_projection.room_ids_without_remaining_unread(
+                                        &self.state,
+                                        &mark_read_result.cleared_event_ids,
+                                    );
+                                let success_effects = Box::pin(self.reduce_app_action(
+                                    AppAction::ActivityMarkReadSucceeded {
                                         request_id: request_id.sequence,
-                                        room_id,
-                                    })
+                                        cleared_event_ids:
+                                            mark_read_result.cleared_event_ids.clone(),
+                                    },
+                                ))
+                                .await;
+                                Box::pin(self.handle_app_effects(request_id, success_effects))
                                     .await;
-                                self.handle_app_effects(request_id, room_effects).await;
-                            }
-                            for (room_id, event_id) in fully_read_updates {
-                                let room_read_request_id = self.next_internal_request_id();
-                                let _ = self
-                                    .account_actor
-                                    .send(AccountMessage::RoomCommand(
-                                        koushi_protocol::command::RoomCommand::MarkRoomAsRead {
-                                            request_id: room_read_request_id,
-                                            room_id: room_id.clone(),
-                                            event_id: event_id.clone(),
+                                for room_id in mark_read_result.cleared_placeholder_room_ids {
+                                    let room_effects = Box::pin(self.reduce_app_action(
+                                        AppAction::RoomMarkedAsReadSucceeded {
+                                            request_id: request_id.sequence,
+                                            room_id,
                                         },
                                     ))
                                     .await;
-                                let marker_effects = self
-                                    .reduce_app_action(AppAction::FullyReadMarkerUpdated {
-                                        room_id,
-                                        event_id: Some(event_id),
-                                    })
+                                    Box::pin(self.handle_app_effects(request_id, room_effects))
+                                        .await;
+                                }
+                                for room_id in cleared_room_ids {
+                                    let room_effects = Box::pin(self.reduce_app_action(
+                                        AppAction::RoomMarkedAsReadSucceeded {
+                                            request_id: request_id.sequence,
+                                            room_id,
+                                        },
+                                    ))
                                     .await;
-                                self.handle_app_effects(request_id, marker_effects).await;
-                            }
-                            if let Some(activity_update) = self
-                                .activity_projection
-                                .update_action_for_open_state(&self.state)
-                            {
-                                let activity_update_effects =
-                                    self.reduce_app_action(activity_update).await;
-                                self.handle_app_effects(request_id, activity_update_effects)
+                                    Box::pin(self.handle_app_effects(request_id, room_effects))
+                                        .await;
+                                }
+                                for (room_id, event_id) in fully_read_updates {
+                                    let room_read_request_id = self.next_internal_request_id();
+                                    let _ = Box::pin(self.account_actor.send(
+                                        AccountMessage::RoomCommand(
+                                            koushi_protocol::command::RoomCommand::MarkRoomAsRead {
+                                                request_id: room_read_request_id,
+                                                room_id: room_id.clone(),
+                                                event_id: event_id.clone(),
+                                            },
+                                        ),
+                                    ))
                                     .await;
-                            }
-                            self.emit(CoreEvent::Activity(ActivityEvent::MarkedRead {
-                                request_id,
-                                cleared_event_ids: mark_read_result.cleared_event_ids,
-                            }));
-                            true
+                                    let marker_effects = Box::pin(self.reduce_app_action(
+                                        AppAction::FullyReadMarkerUpdated {
+                                            room_id,
+                                            event_id: Some(event_id),
+                                        },
+                                    ))
+                                    .await;
+                                    Box::pin(self.handle_app_effects(request_id, marker_effects))
+                                        .await;
+                                }
+                                if let Some(activity_update) = self
+                                    .activity_projection
+                                    .update_action_for_open_state(&self.state)
+                                {
+                                    let activity_update_effects =
+                                        Box::pin(self.reduce_app_action(activity_update)).await;
+                                    Box::pin(
+                                        self.handle_app_effects(
+                                            request_id,
+                                            activity_update_effects,
+                                        ),
+                                    )
+                                    .await;
+                                }
+                                self.emit(CoreEvent::Activity(ActivityEvent::MarkedRead {
+                                    request_id,
+                                    cleared_event_ids: mark_read_result.cleared_event_ids,
+                                }));
+                                true
+                            })
+                            .await
                         }
                         AppCommand::OpenFilesView {
                             request_id,
@@ -4319,151 +4536,204 @@ impl AppActor {
                             filter,
                             sort,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::FilesViewOpened {
-                                    request_id: request_id.sequence,
-                                    scope,
-                                    filter,
-                                    sort,
-                                })
-                                .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                            Box::pin(async move {
+                                let effects =
+                                    Box::pin(self.reduce_app_action(AppAction::FilesViewOpened {
+                                        request_id: request_id.sequence,
+                                        scope,
+                                        filter,
+                                        sort,
+                                    }))
+                                    .await;
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::CloseFilesView { request_id } => {
-                            let effects = self.reduce_app_action(AppAction::FilesViewClosed).await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                            Box::pin(async move {
+                                let effects =
+                                    Box::pin(self.reduce_app_action(AppAction::FilesViewClosed))
+                                        .await;
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::OpenThreadsList { request_id, scope } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::OpenThreadsList {
-                                    request_id: request_id.sequence,
-                                    room_id: scope.scope_key(),
-                                })
-                                .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                            Box::pin(async move {
+                                let effects =
+                                    Box::pin(self.reduce_app_action(AppAction::OpenThreadsList {
+                                        request_id: request_id.sequence,
+                                        room_id: scope.scope_key(),
+                                    }))
+                                    .await;
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::CloseThreadsList { request_id } => {
-                            let effects = self.reduce_app_action(AppAction::CloseThreadsList).await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                            Box::pin(async move {
+                                let effects =
+                                    Box::pin(self.reduce_app_action(AppAction::CloseThreadsList))
+                                        .await;
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::OpenScheduledSendsList { request_id, scope } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::OpenScheduledSendsList { scope })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::OpenScheduledSendsList { scope },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::CloseScheduledSendsList { request_id } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::CloseScheduledSendsList)
+                            Box::pin(async move {
+                                let effects = Box::pin(
+                                    self.reduce_app_action(AppAction::CloseScheduledSendsList),
+                                )
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::PaginateThreadsList { request_id, scope } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::PaginateThreadsList {
-                                    request_id: request_id.sequence,
-                                    room_id: scope.scope_key(),
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::PaginateThreadsList {
+                                        request_id: request_id.sequence,
+                                        room_id: scope.scope_key(),
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::RecordLocalEncryptionHealth { request_id, health } => {
-                            let probe_effects = self
-                                .reduce_app_action(AppAction::LocalEncryptionProbeRequested {
-                                    request_id: request_id.sequence,
-                                })
+                            Box::pin(async move {
+                                let probe_effects = Box::pin(self.reduce_app_action(
+                                    AppAction::LocalEncryptionProbeRequested {
+                                        request_id: request_id.sequence,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, probe_effects).await;
-                            let health_effects = self
-                                .reduce_app_action(AppAction::LocalEncryptionHealthChanged {
-                                    request_id: request_id.sequence,
-                                    health,
-                                })
+                                Box::pin(self.handle_app_effects(request_id, probe_effects)).await;
+                                let health_effects = Box::pin(self.reduce_app_action(
+                                    AppAction::LocalEncryptionHealthChanged {
+                                        request_id: request_id.sequence,
+                                        health,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, health_effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, health_effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::UpdateNativeAttentionState {
                             request_id,
                             attention,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::NativeAttentionUpdated { attention })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::NativeAttentionUpdated { attention },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::ObserveNativeWindowFocus {
                             request_id,
                             focused,
                             observation_generation,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::NativeWindowFocusChanged {
-                                    focused,
-                                    observation_generation,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::NativeWindowFocusChanged {
+                                        focused,
+                                        observation_generation,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::StartNativeAttentionDispatch {
                             request_id,
                             dispatch_id,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::NativeAttentionDispatchStarted {
-                                    dispatch_id,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::NativeAttentionDispatchStarted { dispatch_id },
+                                ))
                                 .await;
-                            self.emit(CoreEvent::NativeAttention(
-                                NativeAttentionEvent::DispatchAdmission {
-                                    dispatch_id,
-                                    accepted: !effects.is_empty(),
-                                },
-                            ));
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                self.emit(CoreEvent::NativeAttention(
+                                    NativeAttentionEvent::DispatchAdmission {
+                                        dispatch_id,
+                                        accepted: !effects.is_empty(),
+                                    },
+                                ));
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SettleNativeAttentionDispatch {
                             request_id,
                             dispatch_id,
                             outcome,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::NativeAttentionDispatchSettled {
-                                    dispatch_id,
-                                    outcome,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::NativeAttentionDispatchSettled {
+                                        dispatch_id,
+                                        outcome,
+                                    },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::UpdateJapaneseCatalogProfile {
                             request_id,
                             profile,
                         } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::JapaneseCatalogProfileChanged {
-                                    profile,
-                                })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::JapaneseCatalogProfileChanged { profile },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                         AppCommand::SelectRoomListFilter { request_id, filter } => {
-                            let effects = self
-                                .reduce_app_action(AppAction::RoomListFilterSelected { filter })
+                            Box::pin(async move {
+                                let effects = Box::pin(self.reduce_app_action(
+                                    AppAction::RoomListFilterSelected { filter },
+                                ))
                                 .await;
-                            self.handle_app_effects(request_id, effects).await;
-                            true
+                                Box::pin(self.handle_app_effects(request_id, effects)).await;
+                                true
+                            })
+                            .await
                         }
                     }
                 })
@@ -4960,50 +5230,48 @@ impl AppActor {
                     source,
                     ..
                 } => {
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::ContinueSlidingSyncAdmission {
+                    let _ = Box::pin(self.account_actor.send(
+                        AccountMessage::ContinueSlidingSyncAdmission {
                             account_epoch,
                             request_id,
                             source,
-                        })
-                        .await;
+                        },
+                    ))
+                    .await;
                 }
                 AppEffect::RetrySlidingSyncCapabilityDiscovery {
                     account_epoch,
                     blocked_request_id,
                     request_id,
                 } => {
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::RetrySlidingSyncCapabilityDiscovery {
+                    let _ = Box::pin(self.account_actor.send(
+                        AccountMessage::RetrySlidingSyncCapabilityDiscovery {
                             account_epoch,
                             blocked_request_id,
                             request_id,
-                        })
-                        .await;
+                        },
+                    ))
+                    .await;
                 }
                 AppEffect::ScheduleSlidingSyncCapabilityRevalidation { account_epoch } => {
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::ScheduleSlidingSyncCapabilityRevalidation {
-                            account_epoch,
-                        })
-                        .await;
+                    let _ = Box::pin(self.account_actor.send(
+                        AccountMessage::ScheduleSlidingSyncCapabilityRevalidation { account_epoch },
+                    ))
+                    .await;
                 }
                 AppEffect::SettleSlidingSyncCapabilityRevalidation {
                     account_epoch,
                     request_id,
                     result,
                 } => {
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::SettleSlidingSyncCapabilityRevalidation {
+                    let _ = Box::pin(self.account_actor.send(
+                        AccountMessage::SettleSlidingSyncCapabilityRevalidation {
                             account_epoch,
                             request_id,
                             result,
-                        })
-                        .await;
+                        },
+                    ))
+                    .await;
                 }
                 AppEffect::StartSync => {
                     trace_runtime_sync!(
@@ -5020,12 +5288,10 @@ impl AppActor {
                         "source=command_effect request_id={} action=send_sync_start",
                         runtime_request_id_trace_label(request_id)
                     );
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::SyncCommand(SyncCommand::Start {
-                            request_id,
-                        }))
-                        .await;
+                    let _ = Box::pin(self.account_actor.send(AccountMessage::SyncCommand(
+                        SyncCommand::Start { request_id },
+                    )))
+                    .await;
                 }
                 AppEffect::StopSync => {
                     trace_runtime_sync!(
@@ -5042,12 +5308,10 @@ impl AppActor {
                         "source=command_effect request_id={} action=send_sync_stop",
                         runtime_request_id_trace_label(request_id)
                     );
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::SyncCommand(SyncCommand::Stop {
-                            request_id,
-                        }))
-                        .await;
+                    let _ = Box::pin(self.account_actor.send(AccountMessage::SyncCommand(
+                        SyncCommand::Stop { request_id },
+                    )))
+                    .await;
                 }
                 AppEffect::SubscribeTimeline { room_id } => {
                     let Some(account_key) = self.current_account_key() else {
@@ -5057,7 +5321,7 @@ impl AppActor {
                         });
                         continue;
                     };
-                    self.send_timeline_command_or_fail(
+                    Box::pin(self.send_timeline_command_or_fail(
                         request_id,
                         TimelineCommand::EnsureSubscribed {
                             request_id,
@@ -5067,7 +5331,7 @@ impl AppActor {
                             },
                             replay_existing: false,
                         },
-                    )
+                    ))
                     .await;
                 }
                 AppEffect::OpenThreadTimeline {
@@ -5082,7 +5346,7 @@ impl AppActor {
                         });
                         continue;
                     };
-                    self.send_timeline_command_or_fail(
+                    Box::pin(self.send_timeline_command_or_fail(
                         request_id,
                         TimelineCommand::Subscribe {
                             request_id,
@@ -5103,7 +5367,7 @@ impl AppActor {
                                 }
                             },
                         },
-                    )
+                    ))
                     .await;
                 }
                 AppEffect::CancelPendingMainTimelineNavigation { room_id } => {
@@ -5121,7 +5385,7 @@ impl AppActor {
                     // Subscribe enters the mailbox, so the retained demand can
                     // never retire it.
                     self.admit_focused_foreground();
-                    self.send_timeline_command_or_fail(
+                    Box::pin(self.send_timeline_command_or_fail(
                         request_id,
                         TimelineCommand::Subscribe {
                             request_id,
@@ -5132,7 +5396,7 @@ impl AppActor {
                             initial_backfill:
                                 koushi_protocol::command::InitialBackfillPolicy::Disabled,
                         },
-                    )
+                    ))
                     .await;
                 }
                 AppEffect::SearchMessages {
@@ -5162,9 +5426,8 @@ impl AppActor {
                             published_generation: self.state_generation,
                         });
                     }
-                    let _ = self
-                        .account_actor
-                        .send(crate::account::AccountMessage::SearchWithPolicy {
+                    let _ = Box::pin(self.account_actor.send(
+                        crate::account::AccountMessage::SearchWithPolicy {
                             command: SearchCommand::Query {
                                 request_id,
                                 query,
@@ -5172,8 +5435,9 @@ impl AppActor {
                                 room_filter,
                             },
                             content_policy,
-                        })
-                        .await;
+                        },
+                    ))
+                    .await;
                 }
                 AppEffect::SearchAttachments {
                     request_id: effect_request_id,
@@ -5184,9 +5448,8 @@ impl AppActor {
                     if effect_request_id != request_id.sequence {
                         continue;
                     }
-                    let _ = self
-                        .account_actor
-                        .send(crate::account::AccountMessage::SearchWithPolicy {
+                    let _ = Box::pin(self.account_actor.send(
+                        crate::account::AccountMessage::SearchWithPolicy {
                             command: SearchCommand::Attachments {
                                 request_id,
                                 scope,
@@ -5194,8 +5457,9 @@ impl AppActor {
                                 sort,
                             },
                             content_policy: self.state.settings.values.search_crawler.clone(),
-                        })
-                        .await;
+                        },
+                    ))
+                    .await;
                 }
                 AppEffect::SubscribeThreadsList {
                     request_id: effect_request_id,
@@ -5204,9 +5468,8 @@ impl AppActor {
                     if effect_request_id != request_id.sequence {
                         continue;
                     }
-                    let _ = self
-                        .account_actor
-                        .send(crate::account::AccountMessage::ThreadsListCommand(
+                    let _ = Box::pin(self.account_actor.send(
+                        crate::account::AccountMessage::ThreadsListCommand(
                             koushi_protocol::command::ThreadsListCommand::Open {
                                 request_id,
                                 scope: koushi_state::ThreadsListScope::Room {
@@ -5214,8 +5477,9 @@ impl AppActor {
                                 },
                                 room_ids: vec![room_id],
                             },
-                        ))
-                        .await;
+                        ),
+                    ))
+                    .await;
                 }
                 AppEffect::SubscribeThreadsListScoped {
                     request_id: effect_request_id,
@@ -5225,16 +5489,16 @@ impl AppActor {
                     if effect_request_id != request_id.sequence {
                         continue;
                     }
-                    let _ = self
-                        .account_actor
-                        .send(crate::account::AccountMessage::ThreadsListCommand(
+                    let _ = Box::pin(self.account_actor.send(
+                        crate::account::AccountMessage::ThreadsListCommand(
                             koushi_protocol::command::ThreadsListCommand::Open {
                                 request_id,
                                 scope,
                                 room_ids,
                             },
-                        ))
-                        .await;
+                        ),
+                    ))
+                    .await;
                 }
                 AppEffect::PaginateThreadsList {
                     request_id: effect_request_id,
@@ -5243,23 +5507,23 @@ impl AppActor {
                     if effect_request_id != request_id.sequence {
                         continue;
                     }
-                    let _ = self
-                        .account_actor
-                        .send(crate::account::AccountMessage::ThreadsListCommand(
+                    let _ = Box::pin(self.account_actor.send(
+                        crate::account::AccountMessage::ThreadsListCommand(
                             koushi_protocol::command::ThreadsListCommand::Paginate {
                                 request_id,
                                 scope: koushi_state::ThreadsListScope::from_scope_key(&room_id),
                             },
-                        ))
-                        .await;
+                        ),
+                    ))
+                    .await;
                 }
                 AppEffect::UnsubscribeThreadsList => {
-                    let _ = self
-                        .account_actor
-                        .send(crate::account::AccountMessage::ThreadsListCommand(
+                    let _ = Box::pin(self.account_actor.send(
+                        crate::account::AccountMessage::ThreadsListCommand(
                             koushi_protocol::command::ThreadsListCommand::Close { request_id },
-                        ))
-                        .await;
+                        ),
+                    ))
+                    .await;
                 }
                 // #1060: one ordered crawler lane for every path, so a held
                 // notification is never delivered after a newer settings
@@ -5305,7 +5569,7 @@ impl AppActor {
                         .is_some_and(|key| self.account_settings_loaded_for.as_ref() == Some(key));
                     let account_store = self.composer_draft_store_actor.clone();
                     let settings_store = self.settings_store.clone();
-                    let action = match executor::spawn_blocking(move || {
+                    let action = match Box::pin(executor::spawn_blocking(move || {
                         if persist_account_settings {
                             if !account_settings_ready {
                                 return Err(());
@@ -5319,7 +5583,7 @@ impl AppActor {
                         }
                         settings_store.save_patch(&patch).map_err(|_| ())?;
                         Ok::<_, ()>(())
-                    })
+                    }))
                     .await
                     {
                         Ok(Ok(())) => AppAction::SettingsPersisted {
@@ -5330,7 +5594,7 @@ impl AppActor {
                             message: "settings could not be saved".to_owned(),
                         },
                     };
-                    let _ = self.reduce_app_action(action).await;
+                    let _ = Box::pin(self.reduce_app_action(action)).await;
                 }
                 AppEffect::PersistRoomPreferences {
                     request_id: effect_request_id,
@@ -5339,53 +5603,55 @@ impl AppActor {
                     if effect_request_id != request_id.sequence {
                         continue;
                     }
-                    self.persist_room_preferences(&preferences).await;
+                    Box::pin(self.persist_room_preferences(&preferences)).await;
                 }
                 AppEffect::EmitUiEvent(ui_event) => {
-                    self.handle_ui_event_effect(&ui_event).await;
+                    Box::pin(self.handle_ui_event_effect(&ui_event)).await;
                 }
                 AppEffect::RejectProvisionalSession => {
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::RejectProvisionalSession { request_id })
-                        .await;
+                    let _ = Box::pin(
+                        self.account_actor
+                            .send(AccountMessage::RejectProvisionalSession { request_id }),
+                    )
+                    .await;
                 }
                 AppEffect::CheckCurrentDeviceTrust => {
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::CheckCurrentDeviceTrust)
-                        .await;
+                    let _ = Box::pin(
+                        self.account_actor
+                            .send(AccountMessage::CheckCurrentDeviceTrust),
+                    )
+                    .await;
                 }
                 AppEffect::InspectSecureBackup => {
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::InspectSecureBackup)
+                    let _ = Box::pin(self.account_actor.send(AccountMessage::InspectSecureBackup))
                         .await;
                 }
                 AppEffect::SyncConnectivityChanged { proven } => {
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::SyncConnectivityChanged { proven })
-                        .await;
+                    let _ = Box::pin(
+                        self.account_actor
+                            .send(AccountMessage::SyncConnectivityChanged { proven }),
+                    )
+                    .await;
                 }
                 AppEffect::ArmCurrentSessionStatusCheck { token, due_at_ms } => {
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::ArmCurrentSessionStatusCheck { token, due_at_ms })
+                    let _ =
+                        Box::pin(self.account_actor.send(
+                            AccountMessage::ArmCurrentSessionStatusCheck { token, due_at_ms },
+                        ))
                         .await;
                 }
                 AppEffect::RefreshCurrentSessionStatus {
                     request_id,
                     trigger,
                 } => {
-                    let _ = self
-                        .account_actor
-                        .send(AccountMessage::RefreshCurrentSessionStatus {
+                    let _ = Box::pin(self.account_actor.send(
+                        AccountMessage::RefreshCurrentSessionStatus {
                             request_id,
                             trigger,
                             sync_state: current_session_sync_state(&self.state.sync),
-                        })
-                        .await;
+                        },
+                    ))
+                    .await;
                 }
                 AppEffect::RestoreSession
                 | AppEffect::DiscoverLogin { .. }

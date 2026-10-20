@@ -643,8 +643,7 @@ impl TimelineManagerActor {
 
         self.subscribe_existing_timeline_rooms(&room_list_service)
             .await;
-        self.rebuild_existing_room_timelines_after_sync_started()
-            .await;
+        Box::pin(self.rebuild_existing_room_timelines_after_sync_started()).await;
         self.apply_live_tail_scheduler_actions(replacement_starts)
             .await;
     }
@@ -959,8 +958,7 @@ impl TimelineManagerActor {
             .cloned()
             .collect::<Vec<_>>();
         for key in keys {
-            self.replace_existing_room_timeline_after_sync_started(key)
-                .await;
+            Box::pin(self.replace_existing_room_timeline_after_sync_started(key)).await;
         }
     }
     async fn replace_existing_room_timeline_after_sync_started(&mut self, key: TimelineKey) {
@@ -975,15 +973,14 @@ impl TimelineManagerActor {
             .room_list_service
             .as_ref()
             .map(|service| service.subscription_generation().get());
-        match self
-            .build_timeline_actor_handle(
-                request_id,
-                &key,
-                activation.generation,
-                subscription_generation,
-                koushi_protocol::command::InitialBackfillPolicy::Disabled,
-            )
-            .await
+        match Box::pin(self.build_timeline_actor_handle(
+            request_id,
+            &key,
+            activation.generation,
+            subscription_generation,
+            koushi_protocol::command::InitialBackfillPolicy::Disabled,
+        ))
+        .await
         {
             Ok(handle) => {
                 self.emit_timeline_subscribed_action(&key).await;

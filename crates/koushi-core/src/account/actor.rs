@@ -1688,12 +1688,14 @@ impl AccountActor {
             };
             // A removal can arrive concurrently with dequeuing a completion.
             if self.avatar_demand_rx.has_changed().unwrap_or(false) {
-                self.accept_avatar_demand().await;
+                Box::pin(self.accept_avatar_demand()).await;
             }
+            // #1554: box each message's work so this loop's frame holds one
+            // pointer per arm instead of every arm's temporary futures.
             match msg {
                 #[cfg(test)]
                 AccountMessage::StopRoomActorForTesting { acknowledged } => {
-                    let _ = self.stop_room_actor().await;
+                    let _ = Box::pin(self.stop_room_actor()).await;
                     let _ = acknowledged.send(());
                 }
                 #[cfg(test)]
@@ -1702,18 +1704,18 @@ impl AccountActor {
                 }
                 #[cfg(test)]
                 AccountMessage::Shutdown => {
-                    self.abort_direct_searches().await;
-                    self.abort_direct_attachments().await;
+                    Box::pin(self.abort_direct_searches()).await;
+                    Box::pin(self.abort_direct_attachments()).await;
                     break;
                 }
                 AccountMessage::ShutdownWithAck { acknowledged } => {
-                    self.abort_direct_searches().await;
-                    self.abort_direct_attachments().await;
+                    Box::pin(self.abort_direct_searches()).await;
+                    Box::pin(self.abort_direct_attachments()).await;
                     shutdown_ack = Some(acknowledged);
                     break;
                 }
                 AccountMessage::Command(command) => {
-                    self.handle_command(command).await;
+                    Box::pin(self.handle_command(command)).await;
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::QaSetLocalDeviceBlacklisted {
@@ -1721,7 +1723,8 @@ impl AccountActor {
                     room_id,
                     acknowledged,
                 } => {
-                    let result = self.qa_set_local_device_blacklisted(target, room_id).await;
+                    let result =
+                        Box::pin(self.qa_set_local_device_blacklisted(target, room_id)).await;
                     let _ = acknowledged.send(result);
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
@@ -1731,7 +1734,7 @@ impl AccountActor {
                 } => {
                     let result = match self.session.as_ref() {
                         Some(session) => {
-                            refresh_device_keys_and_assert_known(session, target).await
+                            Box::pin(refresh_device_keys_and_assert_known(session, target)).await
                         }
                         None => Err(()),
                     };
@@ -1743,8 +1746,8 @@ impl AccountActor {
                     acknowledged,
                 } => {
                     let result = match self.session.as_ref() {
-                        Some(session) => match koushi_sdk::inbound_group_session_index0_summary(
-                            session, &room_id,
+                        Some(session) => match Box::pin(
+                            koushi_sdk::inbound_group_session_index0_summary(session, &room_id),
                         )
                         .await
                         {
@@ -1757,33 +1760,37 @@ impl AccountActor {
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::QaSyncOnce { request_id } => {
-                    self.route_sync_once_for_qa(request_id).await;
+                    Box::pin(self.route_sync_once_for_qa(request_id)).await;
                 }
                 AccountMessage::ContinueSlidingSyncAdmission {
                     account_epoch,
                     request_id,
                     source,
                 } => {
-                    self.continue_sliding_sync_admission(account_epoch, request_id, source)
-                        .await;
+                    Box::pin(self.continue_sliding_sync_admission(
+                        account_epoch,
+                        request_id,
+                        source,
+                    ))
+                    .await;
                 }
                 AccountMessage::RetrySlidingSyncCapabilityDiscovery {
                     account_epoch,
                     blocked_request_id,
                     request_id,
                 } => {
-                    self.start_sliding_sync_capability_retry(
+                    Box::pin(self.start_sliding_sync_capability_retry(
                         account_epoch,
                         blocked_request_id,
                         request_id,
-                    )
+                    ))
                     .await;
                 }
                 AccountMessage::ScheduleSlidingSyncCapabilityRevalidation { account_epoch } => {
                     if account_epoch == self.sliding_sync_account_epoch {
                         self.sliding_sync_revalidation_pending = Some(account_epoch);
                         if self.session_promoted {
-                            self.start_sliding_sync_revalidation(account_epoch).await;
+                            Box::pin(self.start_sliding_sync_revalidation(account_epoch)).await;
                         }
                     }
                 }
@@ -1792,11 +1799,11 @@ impl AccountActor {
                     request_id,
                     result,
                 } => {
-                    self.finish_sliding_sync_capability_discovery(
+                    Box::pin(self.finish_sliding_sync_capability_discovery(
                         account_epoch,
                         request_id,
                         result,
-                    )
+                    ))
                     .await;
                 }
                 AccountMessage::SlidingSyncCapabilityRevalidationDiscovered {
@@ -1804,22 +1811,30 @@ impl AccountActor {
                     request_id,
                     result,
                 } => {
-                    self.finish_sliding_sync_revalidation(account_epoch, request_id, result)
-                        .await;
+                    Box::pin(self.finish_sliding_sync_revalidation(
+                        account_epoch,
+                        request_id,
+                        result,
+                    ))
+                    .await;
                 }
                 AccountMessage::SettleSlidingSyncCapabilityRevalidation {
                     account_epoch,
                     request_id,
                     result,
                 } => {
-                    self.settle_sliding_sync_revalidation(account_epoch, request_id, result)
-                        .await;
+                    Box::pin(self.settle_sliding_sync_revalidation(
+                        account_epoch,
+                        request_id,
+                        result,
+                    ))
+                    .await;
                 }
                 AccountMessage::SyncCommand(sync_command) => {
-                    self.route_sync_command(sync_command).await;
+                    Box::pin(self.route_sync_command(sync_command)).await;
                 }
                 AccountMessage::RoomCommand(room_command) => {
-                    self.route_room_command(room_command).await;
+                    Box::pin(self.route_room_command(room_command)).await;
                 }
                 AccountMessage::ReadReceiptWindow {
                     source,
@@ -1827,15 +1842,15 @@ impl AccountActor {
                     limit,
                     response,
                 } => {
-                    let _ = self
-                        .timeline_manager
-                        .send(crate::timeline::TimelineMessage::ReadReceiptWindow {
+                    let _ = Box::pin(self.timeline_manager.send(
+                        crate::timeline::TimelineMessage::ReadReceiptWindow {
                             source,
                             start,
                             limit,
                             response,
-                        })
-                        .await;
+                        },
+                    ))
+                    .await;
                 }
                 AccountMessage::DirectAttachment {
                     room_id,
@@ -1843,7 +1858,7 @@ impl AccountActor {
                     thumbnail,
                     response,
                 } => {
-                    self.handle_direct_attachment(room_id, event_id, thumbnail, response)
+                    Box::pin(self.handle_direct_attachment(room_id, event_id, thumbnail, response))
                         .await;
                 }
                 AccountMessage::DirectSearch {
@@ -1852,7 +1867,7 @@ impl AccountActor {
                     content_policy,
                     response,
                 } => {
-                    self.handle_direct_search(query, room_ids, content_policy, response)
+                    Box::pin(self.handle_direct_search(query, room_ids, content_policy, response))
                         .await;
                 }
                 AccountMessage::DirectRoomMessages {
@@ -1861,39 +1876,38 @@ impl AccountActor {
                     from,
                     response,
                 } => {
-                    self.handle_direct_room_messages(room_id, limit, from, response)
+                    Box::pin(self.handle_direct_room_messages(room_id, limit, from, response))
                         .await;
                 }
                 AccountMessage::TimelineCommand(timeline_command) => {
-                    self.route_timeline_command(timeline_command).await;
+                    Box::pin(self.route_timeline_command(timeline_command)).await;
                 }
                 AccountMessage::ReadStatePolicyChanged { send_read_receipts } => {
                     self.send_read_receipts = send_read_receipts;
-                    let _ = self
-                        .timeline_manager
-                        .set_read_state_policy(
-                            self.read_persistence_session_generation,
-                            send_read_receipts,
-                        )
-                        .await;
+                    let _ = Box::pin(self.timeline_manager.set_read_state_policy(
+                        self.read_persistence_session_generation,
+                        send_read_receipts,
+                    ))
+                    .await;
                 }
                 AccountMessage::DisplayPolicyChanged {
                     thread_root_order,
                     hide_redacted,
                 } => {
-                    let _ = self
-                        .timeline_manager
-                        .set_display_policy(thread_root_order, hide_redacted)
-                        .await;
+                    let _ = Box::pin(
+                        self.timeline_manager
+                            .set_display_policy(thread_root_order, hide_redacted),
+                    )
+                    .await;
                 }
                 AccountMessage::TimelineCommandWithComposerFormatting {
                     command,
                     formatting_options,
                 } => {
-                    self.route_timeline_command_with_formatting_options(
+                    Box::pin(self.route_timeline_command_with_formatting_options(
                         command,
                         formatting_options,
-                    )
+                    ))
                     .await;
                 }
                 AccountMessage::LeasedTimelineCommandWithComposerFormatting {
@@ -1901,11 +1915,11 @@ impl AccountActor {
                     composer_permit,
                     formatting_options,
                 } => {
-                    self.route_leased_timeline_command_with_formatting_options(
+                    Box::pin(self.route_leased_timeline_command_with_formatting_options(
                         command,
                         composer_permit,
                         formatting_options,
-                    )
+                    ))
                     .await;
                 }
                 AccountMessage::ResolveActivity {
@@ -1916,28 +1930,27 @@ impl AccountActor {
                         task.abort();
                     }
                     let Some(session) = self.session.clone() else {
-                        let _ = self
-                            .action_tx
-                            .send(vec![AppAction::ActivityResolutionFailed {
+                        let _ = Box::pin(self.action_tx.send(vec![
+                            AppAction::ActivityResolutionFailed {
                                 generation,
-                                unresolved_room_count: requests
-                                    .len()
-                                    .try_into()
-                                    .unwrap_or(u32::MAX),
+                                unresolved_room_count:
+                                    requests.len().try_into().unwrap_or(u32::MAX),
                                 kind: OperationFailureKind::Sdk,
-                            }])
-                            .await;
+                            },
+                        ]))
+                        .await;
                         continue;
                     };
                     let action_tx = self.action_tx.clone();
                     let backpressure = self.account_work.clone();
                     self.activity_resolution_task = Some(crate::executor::spawn(async move {
-                        let outcome = crate::activity_resolution::resolve_activity_requests(
-                            &session,
-                            &requests,
-                            &backpressure,
-                        )
-                        .await;
+                        let outcome =
+                            Box::pin(crate::activity_resolution::resolve_activity_requests(
+                                &session,
+                                &requests,
+                                &backpressure,
+                            ))
+                            .await;
                         let settlement = match outcome.failure_kind {
                             Some(kind) => AppAction::ActivityResolutionFailed {
                                 generation,
@@ -1946,15 +1959,14 @@ impl AccountActor {
                             },
                             None => AppAction::ActivityResolutionSucceeded { generation },
                         };
-                        let _ = action_tx
-                            .send(vec![
-                                AppAction::ActivityResolutionRowsObserved {
-                                    generation,
-                                    rows: outcome.rows,
-                                },
-                                settlement,
-                            ])
-                            .await;
+                        let _ = Box::pin(action_tx.send(vec![
+                            AppAction::ActivityResolutionRowsObserved {
+                                generation,
+                                rows: outcome.rows,
+                            },
+                            settlement,
+                        ]))
+                        .await;
                     }));
                 }
                 AccountMessage::ExportHistory {
@@ -1962,8 +1974,7 @@ impl AccountActor {
                     request,
                     locale,
                 } => {
-                    self.handle_export_history(request_id, request, locale)
-                        .await;
+                    Box::pin(self.handle_export_history(request_id, request, locale)).await;
                 }
                 AccountMessage::CancelActivityResolution => {
                     if let Some(task) = self.activity_resolution_task.take() {
@@ -1982,7 +1993,7 @@ impl AccountActor {
                     composer_permit,
                     formatting_options,
                 } => {
-                    self.handle_schedule_server_delayed_send(
+                    Box::pin(self.handle_schedule_server_delayed_send(
                         request_id,
                         expected_account,
                         scheduled_id,
@@ -1993,7 +2004,7 @@ impl AccountActor {
                         draft_revision,
                         composer_permit,
                         formatting_options,
-                    )
+                    ))
                     .await;
                 }
                 AccountMessage::DispatchLocalScheduledSend {
@@ -2005,7 +2016,7 @@ impl AccountActor {
                     body,
                     formatting_options,
                 } => {
-                    self.handle_dispatch_local_scheduled_send(
+                    Box::pin(self.handle_dispatch_local_scheduled_send(
                         request_id,
                         origin_session_key,
                         scheduled_id,
@@ -2013,7 +2024,7 @@ impl AccountActor {
                         thread_root_event_id,
                         body,
                         formatting_options,
-                    )
+                    ))
                     .await;
                 }
                 AccountMessage::CancelServerDelayedSend {
@@ -2021,8 +2032,12 @@ impl AccountActor {
                     scheduled_id,
                     delay_id,
                 } => {
-                    self.handle_cancel_server_delayed_send(request_id, scheduled_id, delay_id)
-                        .await;
+                    Box::pin(self.handle_cancel_server_delayed_send(
+                        request_id,
+                        scheduled_id,
+                        delay_id,
+                    ))
+                    .await;
                 }
                 AccountMessage::RescheduleServerDelayedSend {
                     request_id,
@@ -2034,7 +2049,7 @@ impl AccountActor {
                     send_at_ms,
                     formatting_options,
                 } => {
-                    self.handle_reschedule_server_delayed_send(
+                    Box::pin(self.handle_reschedule_server_delayed_send(
                         request_id,
                         scheduled_id,
                         room_id,
@@ -2043,7 +2058,7 @@ impl AccountActor {
                         delay_id,
                         send_at_ms,
                         formatting_options,
-                    )
+                    ))
                     .await;
                 }
                 AccountMessage::OpenTimelineAtTimestamp {
@@ -2051,8 +2066,12 @@ impl AccountActor {
                     room_id,
                     timestamp_ms,
                 } => {
-                    self.handle_open_timeline_at_timestamp(request_id, room_id, timestamp_ms)
-                        .await;
+                    Box::pin(self.handle_open_timeline_at_timestamp(
+                        request_id,
+                        room_id,
+                        timestamp_ms,
+                    ))
+                    .await;
                 }
                 #[cfg(test)]
                 AccountMessage::ConfigureEventCacheFetchForTesting { fetch } => {
@@ -2082,9 +2101,10 @@ impl AccountActor {
                     event_id,
                     response_tx,
                 } => {
-                    let result = self
-                        .handle_ensure_room_event_cached(request_id, room_id, event_id)
-                        .await;
+                    let result = Box::pin(
+                        self.handle_ensure_room_event_cached(request_id, room_id, event_id),
+                    )
+                    .await;
                     let _ = response_tx.send(result);
                 }
                 AccountMessage::RepairRoomTimeline {
@@ -2092,13 +2112,13 @@ impl AccountActor {
                     account_key,
                     room_id,
                 } => {
-                    self.route_timeline_command(TimelineCommand::RepairGaps {
+                    Box::pin(self.route_timeline_command(TimelineCommand::RepairGaps {
                         request_id,
                         key: TimelineKey {
                             account_key,
                             kind: TimelineKind::Room { room_id },
                         },
-                    })
+                    }))
                     .await;
                 }
                 AccountMessage::SearchWithPolicy {
@@ -2110,11 +2130,11 @@ impl AccountActor {
                     if let Some(notification) = self.pending_crawler_notification.as_mut() {
                         notification.settings = content_policy.clone();
                     }
-                    self.route_search_command_with_policy(command, Some(content_policy))
+                    Box::pin(self.route_search_command_with_policy(command, Some(content_policy)))
                         .await;
                 }
                 AccountMessage::SearchCommand(search_command) => {
-                    self.route_search_command(search_command).await;
+                    Box::pin(self.route_search_command(search_command)).await;
                 }
                 AccountMessage::SearchRetentionDiagnostics { response } => {
                     match &self.search_actor {
@@ -2122,7 +2142,8 @@ impl AccountActor {
                             // Forwarded; on a failed send the sender is consumed
                             // and the caller's bounded wait settles as
                             // unavailable.
-                            let _ = search_actor.retention_diagnostics_forward(response).await;
+                            let _ = Box::pin(search_actor.retention_diagnostics_forward(response))
+                                .await;
                         }
                         None => {
                             // No search session for this account: settle as
@@ -2155,17 +2176,16 @@ impl AccountActor {
                     self.flush_pending_crawler_notification();
                 }
                 AccountMessage::CurrentDeviceTrustChanged { generation, trust } => {
-                    self.handle_observed_current_device_trust(generation, trust)
-                        .await;
+                    Box::pin(self.handle_observed_current_device_trust(generation, trust)).await;
                 }
                 AccountMessage::ActiveSessionAccountManagementUrlResolved {
                     generation,
                     info,
                     url,
                 } => {
-                    self.handle_active_session_account_management_url_resolved(
+                    Box::pin(self.handle_active_session_account_management_url_resolved(
                         generation, info, url,
-                    )
+                    ))
                     .await;
                 }
                 #[cfg(test)]
@@ -2189,14 +2209,13 @@ impl AccountActor {
                     self.arm_current_session_status_timer(token, due_at_ms);
                 }
                 AccountMessage::CurrentSessionStatusTimerFired { token } => {
-                    self.handle_current_session_status_timer_fired(token).await;
+                    Box::pin(self.handle_current_session_status_timer_fired(token)).await;
                 }
                 AccountMessage::OwnSessionCheckDue { generation } => {
                     self.handle_own_session_check_due(generation);
                 }
                 AccountMessage::OwnSessionCheckFinished { generation, result } => {
-                    self.handle_own_session_check_finished(generation, result)
-                        .await;
+                    Box::pin(self.handle_own_session_check_finished(generation, result)).await;
                 }
                 AccountMessage::TrustRecheckRetryDue { serial } => {
                     self.handle_trust_recheck_retry_due(serial);
@@ -2224,9 +2243,9 @@ impl AccountActor {
                     started_at,
                     result,
                 } => {
-                    self.finish_current_session_status_refresh(
+                    Box::pin(self.finish_current_session_status_refresh(
                         request_id, generation, sync_state, started_at, result,
-                    )
+                    ))
                     .await;
                 }
                 AccountMessage::CurrentDeviceTrustRecheckFinished { generation, result } => {
@@ -2276,13 +2295,13 @@ impl AccountActor {
                         Err(_) => Some(koushi_state::CurrentDeviceTrustState::Unknown),
                     };
                     if let Some(trust) = trust {
-                        self.handle_current_device_trust(generation, trust).await;
+                        Box::pin(self.handle_current_device_trust(generation, trust)).await;
                     }
                     // A trust recheck follows own cross-signing changes
                     // (import, bootstrap, own verification), which decide
                     // whether Verify user can sign an open contact (#1024).
                     if recheck_succeeded {
-                        self.refresh_any_open_contact_security().await;
+                        Box::pin(self.refresh_any_open_contact_security()).await;
                     }
                     // #1009: a failure on a promoted session keeps the demand
                     // pending behind the shared failure backoff.
@@ -2309,7 +2328,7 @@ impl AccountActor {
                         self.session.is_some(),
                         self.session_promoted,
                     ) {
-                        self.cancel_verification_method_discovery_admission_timeout()
+                        Box::pin(self.cancel_verification_method_discovery_admission_timeout())
                             .await;
                         self.provisional_encryption_sync_ready = succeeded;
                         let trust = self
@@ -2318,19 +2337,21 @@ impl AccountActor {
                             .map(|session| session.current_device_trust())
                             .unwrap_or(koushi_state::CurrentDeviceTrustState::Unknown);
                         if succeeded && should_discover_verification_methods(trust) {
-                            self.discover_verification_methods(generation).await;
+                            Box::pin(self.discover_verification_methods(generation)).await;
                         } else if succeeded
                             && trust == koushi_state::CurrentDeviceTrustState::Verified
                         {
-                            self.handle_current_device_trust(generation, trust).await;
+                            Box::pin(self.handle_current_device_trust(generation, trust)).await;
                         } else if trust == koushi_state::CurrentDeviceTrustState::Unknown {
                             self.request_authoritative_trust_recheck();
                         } else {
                             self.verification_method_discovery_failed = true;
-                            self.send_actions(vec![AppAction::VerificationMethodDiscoveryFailed {
-                                generation,
-                                kind: koushi_state::VerificationGateFailureKind::Sdk,
-                            }])
+                            Box::pin(self.send_actions(vec![
+                                AppAction::VerificationMethodDiscoveryFailed {
+                                    generation,
+                                    kind: koushi_state::VerificationGateFailureKind::Sdk,
+                                },
+                            ]))
                             .await;
                         }
                     }
@@ -2357,10 +2378,12 @@ impl AccountActor {
                                 serial,
                             ),
                         );
-                        self.send_actions(vec![AppAction::VerificationMethodDiscoveryFailed {
-                            generation,
-                            kind: koushi_state::VerificationGateFailureKind::Timeout,
-                        }])
+                        Box::pin(self.send_actions(vec![
+                            AppAction::VerificationMethodDiscoveryFailed {
+                                generation,
+                                kind: koushi_state::VerificationGateFailureKind::Timeout,
+                            },
+                        ]))
                         .await;
                     }
                 }
@@ -2390,7 +2413,7 @@ impl AccountActor {
                         self.sas_verification.is_some(),
                     );
                     if eligible {
-                        self.recheck_own_user_sas_after_sync().await;
+                        Box::pin(self.recheck_own_user_sas_after_sync()).await;
                     }
                 }
                 AccountMessage::ProvisionalEncryptionSyncFailed { generation } => {
@@ -2465,9 +2488,9 @@ impl AccountActor {
                                         ),
                                     ),
                                 );
-                                self.send_actions(vec![AppAction::VerificationMethodsDiscovered(
-                                    gate,
-                                )])
+                                Box::pin(self.send_actions(vec![
+                                    AppAction::VerificationMethodsDiscovered(gate),
+                                ]))
                                 .await;
                                 record_verification_method_discovery_event(
                                     verification_method_discovery_event(
@@ -2493,12 +2516,12 @@ impl AccountActor {
                                     ),
                                 );
                                 record_device_cleanup_offer("recovery_failed");
-                                self.send_actions(vec![
+                                Box::pin(self.send_actions(vec![
                                     AppAction::VerificationMethodDiscoveryFailed {
                                         generation,
                                         kind,
                                     },
-                                ])
+                                ]))
                                 .await;
                             }
                         }
@@ -2517,10 +2540,12 @@ impl AccountActor {
                                 serial,
                             ),
                         );
-                        self.send_actions(vec![AppAction::VerificationMethodDiscoveryFailed {
-                            generation,
-                            kind: koushi_state::VerificationGateFailureKind::Sdk,
-                        }])
+                        Box::pin(self.send_actions(vec![
+                            AppAction::VerificationMethodDiscoveryFailed {
+                                generation,
+                                kind: koushi_state::VerificationGateFailureKind::Sdk,
+                            },
+                        ]))
                         .await;
                     } else {
                         record_verification_method_discovery_event(
@@ -2538,8 +2563,10 @@ impl AccountActor {
                     request_id,
                     result,
                 } => {
-                    self.handle_recovery_finished(generation, flow_id, request_id, result)
-                        .await;
+                    Box::pin(
+                        self.handle_recovery_finished(generation, flow_id, request_id, result),
+                    )
+                    .await;
                 }
                 AccountMessage::RecoveryTrustSettlementTimedOut {
                     generation,
@@ -2547,9 +2574,9 @@ impl AccountActor {
                     request_id,
                     trust,
                 } => {
-                    self.handle_recovery_trust_settlement_timed_out(
+                    Box::pin(self.handle_recovery_trust_settlement_timed_out(
                         generation, flow_id, request_id, trust,
-                    )
+                    ))
                     .await;
                 }
                 AccountMessage::TrustProjectionApplied {
@@ -2558,28 +2585,38 @@ impl AccountActor {
                     ready,
                     locked,
                 } => {
-                    self.handle_trust_projection_applied(generation, transition_id, ready, locked)
-                        .await;
+                    Box::pin(self.handle_trust_projection_applied(
+                        generation,
+                        transition_id,
+                        ready,
+                        locked,
+                    ))
+                    .await;
                 }
                 AccountMessage::InspectSecureBackup => {
                     self.start_secure_backup_inspection();
                 }
                 AccountMessage::SyncConnectivityChanged { proven } => {
-                    self.handle_sync_connectivity_changed(proven).await;
+                    Box::pin(self.handle_sync_connectivity_changed(proven)).await;
                 }
                 AccountMessage::SecureBackupDeferredDeadlineExpired {
                     generation,
                     deadline_serial,
                 } => {
-                    self.handle_secure_backup_defer_deadline_expired(generation, deadline_serial)
-                        .await;
+                    Box::pin(
+                        self.handle_secure_backup_defer_deadline_expired(
+                            generation,
+                            deadline_serial,
+                        ),
+                    )
+                    .await;
                 }
                 AccountMessage::SecureBackupInspectionFinished {
                     generation,
                     started_at,
                     result,
                 } => {
-                    self.finish_secure_backup_inspection(generation, started_at, result)
+                    Box::pin(self.finish_secure_backup_inspection(generation, started_at, result))
                         .await;
                 }
                 AccountMessage::RetrySecureBackupInspection {
@@ -2599,14 +2636,13 @@ impl AccountActor {
                     self.start_secure_backup_inspection();
                 }
                 AccountMessage::SecureBackupStateChanged { generation, state } => {
-                    self.handle_secure_backup_state_changed(generation, state)
-                        .await;
+                    Box::pin(self.handle_secure_backup_state_changed(generation, state)).await;
                 }
                 AccountMessage::RejectProvisionalSession { request_id } => {
-                    self.perform_logout(request_id, true, false).await;
+                    Box::pin(self.perform_logout(request_id, true, false)).await;
                 }
                 AccountMessage::RetrySessionTeardown { generation } => {
-                    self.retry_session_teardown(generation).await;
+                    Box::pin(self.retry_session_teardown(generation)).await;
                 }
                 #[cfg(test)]
                 AccountMessage::AttachLifecycleProbe { probe_tx } => {
@@ -2661,8 +2697,7 @@ impl AccountActor {
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::SetCurrentDeviceTrustForTesting { trust } => {
-                    self.handle_current_device_trust(self.trust_generation, trust)
-                        .await;
+                    Box::pin(self.handle_current_device_trust(self.trust_generation, trust)).await;
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestConfigureInstallGap {
@@ -2689,34 +2724,31 @@ impl AccountActor {
                     resume,
                     installed,
                 } => {
-                    let _ = self
-                        .room_actor
-                        .send(crate::room::RoomMessage::PauseHistoryKeyImport {
+                    let _ = Box::pin(self.room_actor.send(
+                        crate::room::RoomMessage::PauseHistoryKeyImport {
                             disclosure,
                             reached,
                             resume,
                             installed,
-                        })
-                        .await;
+                        },
+                    ))
+                    .await;
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::HistoryRecoveryBarrier { room_id, completed } => {
-                    let _ = self
-                        .room_actor
-                        .send(crate::room::RoomMessage::HistoryRecoveryBarrier {
-                            room_id,
-                            completed,
-                        })
-                        .await;
+                    let _ = Box::pin(self.room_actor.send(
+                        crate::room::RoomMessage::HistoryRecoveryBarrier { room_id, completed },
+                    ))
+                    .await;
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestInstallSession { session, completed } => {
-                    self.install_residency_test_session(session).await;
+                    Box::pin(self.install_residency_test_session(session)).await;
                     let _ = completed.send(());
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestRoomCommand { command, accepted } => {
-                    self.route_room_command(command).await;
+                    Box::pin(self.route_room_command(command)).await;
                     let _ = accepted.send(());
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
@@ -2729,10 +2761,11 @@ impl AccountActor {
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestTimelineSnapshot { response } => {
-                    let _ = self
-                        .timeline_manager
-                        .residency_snapshot_for_testing(response)
-                        .await;
+                    let _ = Box::pin(
+                        self.timeline_manager
+                            .residency_snapshot_for_testing(response),
+                    )
+                    .await;
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 AccountMessage::ResidencyTestTimelineGateSnapshot { response } => {
@@ -2746,7 +2779,7 @@ impl AccountActor {
                 }
                 #[cfg(test)]
                 AccountMessage::ConfigureSyntheticRecoveryTask { flow_id, pending } => {
-                    self.stop_recovery_task().await;
+                    Box::pin(self.stop_recovery_task()).await;
                     let request_id = incoming_verification_request_id(flow_id);
                     self.recovery_task = Some(PendingRecoveryTask {
                         generation: self.trust_generation,
@@ -2790,14 +2823,14 @@ impl AccountActor {
                     self.verification_request_observer = Some(VerificationObservation {
                         stop_tx: request_stop,
                         task: executor::spawn(async move {
-                            let _ = request_stopped.await;
+                            let _ = Box::pin(request_stopped).await;
                         }),
                     });
                     let (sas_stop, sas_stopped) = oneshot::channel();
                     self.sas_verification_observer = Some(VerificationObservation {
                         stop_tx: sas_stop,
                         task: executor::spawn(async move {
-                            let _ = sas_stopped.await;
+                            let _ = Box::pin(sas_stopped).await;
                         }),
                     });
                     self.sas_timeout_task = Some(executor::spawn(std::future::pending()));
@@ -2813,7 +2846,7 @@ impl AccountActor {
                             VerificationTerminal::Failed(kind)
                         }
                     };
-                    self.settle_verification(flow_id, terminal).await;
+                    Box::pin(self.settle_verification(flow_id, terminal)).await;
                 }
                 #[cfg(test)]
                 AccountMessage::InspectVerificationRuntime { response } => {
@@ -2859,7 +2892,7 @@ impl AccountActor {
                 }
                 AccountMessage::InvalidateSearchCrawlerCache => {
                     if let Some(handle) = &self.search_actor {
-                        handle.invalidate_crawler_cache().await;
+                        Box::pin(handle.invalidate_crawler_cache()).await;
                     }
                     // If the actor is not yet running there is no completed-room
                     // cache to clear; the pending_crawler_notification is
@@ -2867,18 +2900,18 @@ impl AccountActor {
                 }
                 AccountMessage::RebuildSearchIndex => {
                     if let Some(handle) = &self.search_actor {
-                        handle.rebuild_search_index().await;
+                        Box::pin(handle.rebuild_search_index()).await;
                     }
                 }
                 AccountMessage::ThreadsListCommand(threads_list_command) => {
-                    self.route_threads_list_command(threads_list_command).await;
+                    Box::pin(self.route_threads_list_command(threads_list_command)).await;
                 }
                 AccountMessage::VerificationRequestProgress {
                     request_id,
                     target,
                     state,
                 } => {
-                    self.handle_verification_request_progress(request_id, target, state)
+                    Box::pin(self.handle_verification_request_progress(request_id, target, state))
                         .await;
                 }
                 AccountMessage::SasVerificationProgress {
@@ -2886,14 +2919,14 @@ impl AccountActor {
                     target,
                     state,
                 } => {
-                    self.handle_sas_verification_progress(request_id, target, state)
+                    Box::pin(self.handle_sas_verification_progress(request_id, target, state))
                         .await;
                 }
                 AccountMessage::SasVerificationTimedOut { flow_id } => {
-                    self.handle_sas_verification_timeout(flow_id).await;
+                    Box::pin(self.handle_sas_verification_timeout(flow_id)).await;
                 }
                 AccountMessage::ContactSecurityStoreChanged { generation } => {
-                    self.handle_contact_security_store_changed(generation).await;
+                    Box::pin(self.handle_contact_security_store_changed(generation)).await;
                 }
                 AccountMessage::ContactSecurityLoadFinished {
                     request_id,
@@ -2902,9 +2935,9 @@ impl AccountActor {
                     result,
                     changes,
                 } => {
-                    self.handle_contact_security_load_finished(
+                    Box::pin(self.handle_contact_security_load_finished(
                         request_id, generation, user_id, result, changes,
-                    )
+                    ))
                     .await;
                 }
                 AccountMessage::ContactUserVerificationRequestFinished {
@@ -2913,9 +2946,9 @@ impl AccountActor {
                     target,
                     result,
                 } => {
-                    self.handle_contact_user_verification_request_finished(
+                    Box::pin(self.handle_contact_user_verification_request_finished(
                         request_id, generation, target, result,
-                    )
+                    ))
                     .await;
                 }
                 AccountMessage::VerificationRequestObserverEnded { flow_id } => {
@@ -2924,10 +2957,10 @@ impl AccountActor {
                             sas_verification_event("observer_ended", flow_id)
                                 .field(DiagnosticField::token("observer", "request")),
                         );
-                        self.settle_verification(
+                        Box::pin(self.settle_verification(
                             flow_id,
                             VerificationTerminal::Failed(TrustOperationFailureKind::Sdk),
-                        )
+                        ))
                         .await;
                     }
                 }
@@ -2937,10 +2970,10 @@ impl AccountActor {
                             sas_verification_event("observer_ended", flow_id)
                                 .field(DiagnosticField::token("observer", "sas")),
                         );
-                        self.settle_verification(
+                        Box::pin(self.settle_verification(
                             flow_id,
                             VerificationTerminal::Failed(TrustOperationFailureKind::Sdk),
-                        )
+                        ))
                         .await;
                     }
                 }
@@ -2951,8 +2984,10 @@ impl AccountActor {
                 } => {
                     if incoming_verification_request_is_current(self.session.as_ref(), &session) {
                         let request_id = self.next_incoming_verification_request_id();
-                        self.handle_incoming_verification_request(request_id, target, handle)
-                            .await;
+                        Box::pin(
+                            self.handle_incoming_verification_request(request_id, target, handle),
+                        )
+                        .await;
                     } else {
                         record(incoming_verification_request_dropped_event(
                             self.session.is_some(),
@@ -2960,13 +2995,13 @@ impl AccountActor {
                     }
                 }
                 AccountMessage::SessionInvalidated { reason } => {
-                    self.handle_session_invalidated(reason).await;
+                    Box::pin(self.handle_session_invalidated(reason)).await;
                 }
                 AccountMessage::SessionTokensRefreshed => {
-                    self.handle_session_tokens_refreshed().await;
+                    Box::pin(self.handle_session_tokens_refreshed()).await;
                 }
                 AccountMessage::IdentityResetAuthTimedOut { flow_id } => {
-                    self.handle_identity_reset_auth_timeout(flow_id).await;
+                    Box::pin(self.handle_identity_reset_auth_timeout(flow_id)).await;
                 }
                 #[cfg(test)]
                 AccountMessage::AvatarFetchIdForTesting {
@@ -2985,7 +3020,7 @@ impl AccountActor {
                     fetch_id,
                     thumbnail,
                 } => {
-                    self.handle_avatar_fetched(mxc_uri, generation, fetch_id, thumbnail)
+                    Box::pin(self.handle_avatar_fetched(mxc_uri, generation, fetch_id, thumbnail))
                         .await;
                 }
                 AccountMessage::AccountHydrationLoaded {
@@ -2993,8 +3028,12 @@ impl AccountActor {
                     actions,
                     ignored_user_ids,
                 } => {
-                    self.handle_account_hydration_loaded(generation, actions, ignored_user_ids)
-                        .await;
+                    Box::pin(self.handle_account_hydration_loaded(
+                        generation,
+                        actions,
+                        ignored_user_ids,
+                    ))
+                    .await;
                 }
             }
             self.flush_pending_crawler_notification();
@@ -3002,11 +3041,11 @@ impl AccountActor {
         #[cfg(test)]
         if let Some((entered, release)) = shutdown_gate {
             let _ = entered.send(());
-            let _ = release.await;
+            let _ = Box::pin(release).await;
         }
-        let runtime_ok = self.shutdown_owned_runtime().await;
+        let runtime_ok = Box::pin(self.shutdown_owned_runtime()).await;
         // Always attempt RoomActor cleanup, even when session teardown failed.
-        let room_ok = self.stop_room_actor().await;
+        let room_ok = Box::pin(self.stop_room_actor()).await;
         if let Some(acknowledged) = shutdown_ack {
             let _ = acknowledged.send(runtime_ok && room_ok);
         }
@@ -3089,7 +3128,7 @@ impl AccountActor {
     async fn abort_direct_attachments(&mut self) {
         for task in self.direct_attachment_tasks.drain(..) {
             task.abort();
-            let _ = task.await;
+            let _ = Box::pin(task).await;
         }
     }
 
@@ -3139,11 +3178,11 @@ impl AccountActor {
     async fn abort_direct_searches(&mut self) {
         for task in self.direct_search_tasks.drain(..) {
             task.abort();
-            let _ = task.await;
+            let _ = Box::pin(task).await;
         }
         for task in self.direct_room_messages_tasks.drain(..) {
             task.abort();
-            let _ = task.await;
+            let _ = Box::pin(task).await;
         }
     }
 
@@ -3190,15 +3229,14 @@ impl AccountActor {
                 request_id,
                 homeserver,
             } => {
-                self.handle_discover_login(request_id, homeserver).await;
+                Box::pin(self.handle_discover_login(request_id, homeserver)).await;
             }
             AccountCommand::StartOidcLogin {
                 request_id,
                 homeserver,
                 method,
             } => {
-                self.handle_start_oidc_login(request_id, homeserver, method)
-                    .await;
+                Box::pin(self.handle_start_oidc_login(request_id, homeserver, method)).await;
             }
             AccountCommand::CancelOidcLogin { .. } => {
                 self.handle_cancel_oidc_login();
@@ -3208,95 +3246,91 @@ impl AccountActor {
                 callback_url,
                 platform,
             } => {
-                self.handle_complete_oidc_login(request_id, callback_url, platform)
-                    .await;
+                Box::pin(self.handle_complete_oidc_login(request_id, callback_url, platform)).await;
             }
             AccountCommand::LoginPassword {
                 request_id,
                 request,
                 platform,
             } => {
-                self.handle_login_password(request_id, request, platform)
-                    .await;
+                Box::pin(self.handle_login_password(request_id, request, platform)).await;
             }
             AccountCommand::RestoreSession {
                 request_id,
                 account_key,
             } => {
-                self.handle_restore_session(request_id, account_key).await;
+                Box::pin(self.handle_restore_session(request_id, account_key)).await;
             }
             AccountCommand::RestoreLastSession { request_id } => {
-                self.handle_restore_last_session(request_id).await;
+                Box::pin(self.handle_restore_last_session(request_id)).await;
             }
             AccountCommand::RetrySlidingSyncCapability { request_id } => {
-                self.handle_retry_sliding_sync_capability(request_id).await;
+                Box::pin(self.handle_retry_sliding_sync_capability(request_id)).await;
             }
             AccountCommand::QuerySavedSessions { request_id } => {
-                self.handle_query_saved_sessions(request_id).await;
+                Box::pin(self.handle_query_saved_sessions(request_id)).await;
             }
             AccountCommand::RefreshCurrentSessionStatus { .. } => {
                 // The AppActor routes the reducer-owned refresh effect with
                 // the authoritative sync projection.
             }
             AccountCommand::LoadAccountManagementCapabilities { request_id } => {
-                self.handle_load_account_management_capabilities(request_id)
-                    .await;
+                Box::pin(self.handle_load_account_management_capabilities(request_id)).await;
             }
             AccountCommand::ChangePassword {
                 request_id,
                 new_password,
             } => {
-                self.handle_change_password(request_id, new_password).await;
+                Box::pin(self.handle_change_password(request_id, new_password)).await;
             }
             AccountCommand::DeactivateAccount {
                 request_id,
                 erase_data,
                 password,
             } => {
-                self.handle_deactivate_account(request_id, erase_data, password)
-                    .await;
+                Box::pin(self.handle_deactivate_account(request_id, erase_data, password)).await;
             }
             AccountCommand::SubmitAccountManagementUia {
                 request_id,
                 flow_id,
                 auth,
             } => {
-                self.handle_submit_account_management_uia(request_id, flow_id, auth)
+                Box::pin(self.handle_submit_account_management_uia(request_id, flow_id, auth))
                     .await;
             }
             AccountCommand::AccountNotifications {
                 request_id,
                 request,
             } => {
-                self.handle_account_notifications(request_id, request).await;
+                Box::pin(self.handle_account_notifications(request_id, request)).await;
             }
             AccountCommand::ContactSecurity {
                 request_id,
                 request,
             } => {
-                self.handle_contact_security(request_id, request).await;
+                Box::pin(self.handle_contact_security(request_id, request)).await;
             }
             AccountCommand::SoftLogoutReauth {
                 request_id,
                 password,
             } => {
-                self.handle_soft_logout_reauth(request_id, password).await;
+                Box::pin(self.handle_soft_logout_reauth(request_id, password)).await;
             }
             AccountCommand::ExportRoomKeys {
                 request_id,
                 request,
             } => {
-                self.handle_export_room_keys(request_id, request).await;
+                Box::pin(self.handle_export_room_keys(request_id, request)).await;
             }
             AccountCommand::ExportHistory { request_id, .. } => {
                 // AppActor routes this command as `AccountMessage::ExportHistory`
                 // with its resolved locale; a bare command cannot be exported.
                 self.native_artifacts
                     .unregister(request_id, NativeArtifactKind::HistoryExportDirectory);
-                self.send_actions(vec![AppAction::HistoryExportFailed {
+                Box::pin(self.send_actions(vec![AppAction::HistoryExportFailed {
                     request_id: request_id.sequence,
                     kind: koushi_state::HistoryExportFailureKind::Sdk,
-                }])
+                }]))
                 .await;
                 self.emit_failure(
                     request_id,
@@ -3309,34 +3343,31 @@ impl AccountActor {
                 request_id,
                 target_request_id,
             } => {
-                self.handle_stop_history_export(request_id, target_request_id)
-                    .await;
+                Box::pin(self.handle_stop_history_export(request_id, target_request_id)).await;
             }
             AccountCommand::RetryHistoryExport {
                 request_id,
                 target_request_id,
             } => {
-                self.handle_retry_history_export(request_id, target_request_id)
-                    .await;
+                Box::pin(self.handle_retry_history_export(request_id, target_request_id)).await;
             }
             AccountCommand::ImportRoomKeys {
                 request_id,
                 request,
             } => {
-                self.handle_import_room_keys(request_id, request).await;
+                Box::pin(self.handle_import_room_keys(request_id, request)).await;
             }
             AccountCommand::BootstrapSecureBackup {
                 request_id,
                 request,
             } => {
-                self.handle_bootstrap_secure_backup(request_id, request)
-                    .await;
+                Box::pin(self.handle_bootstrap_secure_backup(request_id, request)).await;
             }
             AccountCommand::RecoverSecureBackup {
                 request_id,
                 request,
             } => {
-                self.handle_recover_secure_backup(request_id, request).await;
+                Box::pin(self.handle_recover_secure_backup(request_id, request)).await;
             }
             AccountCommand::RetrySecureBackupInspection { request_id } => {
                 if self.session_promoted && !self.sync_connectivity_proven {
@@ -3344,8 +3375,7 @@ impl AccountActor {
                     // ask the sync owner to re-project its current status so a
                     // healthy Running sync can still admit the inspection.
                     // Start re-projects without restarting a Running sync.
-                    self.route_sync_command(SyncCommand::Start { request_id })
-                        .await;
+                    Box::pin(self.route_sync_command(SyncCommand::Start { request_id })).await;
                 }
                 self.start_secure_backup_inspection();
             }
@@ -3353,61 +3383,64 @@ impl AccountActor {
                 request_id,
                 request,
             } => {
-                self.handle_change_secure_backup_passphrase(request_id, request)
-                    .await;
+                Box::pin(self.handle_change_secure_backup_passphrase(request_id, request)).await;
             }
             AccountCommand::SaveSecureBackupRecoveryKey {
                 request_id,
                 reveal_request_id,
             } => {
-                self.handle_save_secure_backup_recovery_key(request_id, reveal_request_id)
-                    .await;
+                Box::pin(
+                    self.handle_save_secure_backup_recovery_key(request_id, reveal_request_id),
+                )
+                .await;
             }
             AccountCommand::ConfirmSecureBackupRecoveryKeySaved {
                 request_id,
                 reveal_request_id,
             } => {
-                self.handle_confirm_secure_backup_recovery_key_saved(request_id, reveal_request_id)
-                    .await;
+                Box::pin(self.handle_confirm_secure_backup_recovery_key_saved(
+                    request_id,
+                    reveal_request_id,
+                ))
+                .await;
             }
             AccountCommand::ProbeLocalEncryptionHealth { request_id } => {
-                self.handle_probe_local_encryption_health(request_id).await;
+                Box::pin(self.handle_probe_local_encryption_health(request_id)).await;
             }
             AccountCommand::ResetLocalData { request_id } => {
-                self.handle_reset_local_data(request_id).await;
+                Box::pin(self.handle_reset_local_data(request_id)).await;
             }
             AccountCommand::StartDeviceCleanup { request_id } => {
-                self.handle_start_device_cleanup(request_id).await;
+                Box::pin(self.handle_start_device_cleanup(request_id)).await;
             }
             AccountCommand::SubmitDeviceCleanupUia {
                 request_id,
                 flow_id,
                 password,
             } => {
-                self.handle_submit_device_cleanup_uia(request_id, flow_id, password)
+                Box::pin(self.handle_submit_device_cleanup_uia(request_id, flow_id, password))
                     .await;
             }
             AccountCommand::EraseDeviceCleanupLocalDataAnyway { request_id } => {
-                self.handle_erase_device_cleanup_local_data_anyway(request_id)
-                    .await;
+                Box::pin(self.handle_erase_device_cleanup_local_data_anyway(request_id)).await;
             }
             AccountCommand::Logout { request_id } => {
-                self.handle_logout(request_id).await;
+                Box::pin(self.handle_logout(request_id)).await;
             }
             AccountCommand::ChangeHomeserver { request_id } => {
-                self.handle_change_homeserver(request_id).await;
+                Box::pin(self.handle_change_homeserver(request_id)).await;
             }
             AccountCommand::SwitchAccount {
                 request_id,
                 account_key,
             } => {
-                self.handle_switch_account(request_id, account_key).await;
+                Box::pin(self.handle_switch_account(request_id, account_key)).await;
             }
             AccountCommand::SubmitRecovery {
                 request_id,
                 request,
             } => {
-                self.handle_submit_recovery(request_id, request).await;
+                Box::pin(self.handle_submit_recovery(request_id, request)).await;
             }
             AccountCommand::StartSessionBootstrap {
                 request_id,
@@ -3415,82 +3448,80 @@ impl AccountActor {
                 auth,
                 passphrase,
             } => {
-                self.handle_start_session_bootstrap(request_id, flow_id, auth, passphrase)
-                    .await;
+                Box::pin(
+                    self.handle_start_session_bootstrap(request_id, flow_id, auth, passphrase),
+                )
+                .await;
             }
             AccountCommand::ConfirmSessionBootstrapSaved {
                 request_id,
                 flow_id,
             } => {
-                self.handle_confirm_session_bootstrap_saved(request_id, flow_id)
-                    .await;
+                Box::pin(self.handle_confirm_session_bootstrap_saved(request_id, flow_id)).await;
             }
             AccountCommand::BootstrapCrossSigning { request_id, auth } => {
-                self.handle_bootstrap_cross_signing(request_id, auth).await;
+                Box::pin(self.handle_bootstrap_cross_signing(request_id, auth)).await;
             }
             AccountCommand::EnableKeyBackup {
                 request_id,
                 passphrase,
             } => {
-                self.handle_enable_key_backup(request_id, passphrase).await;
+                Box::pin(self.handle_enable_key_backup(request_id, passphrase)).await;
             }
             AccountCommand::RestoreKeyBackup {
                 request_id,
                 version,
                 request,
             } => {
-                self.handle_restore_key_backup(request_id, version, request)
-                    .await;
+                Box::pin(self.handle_restore_key_backup(request_id, version, request)).await;
             }
             AccountCommand::ResetIdentity { request_id } => {
-                self.handle_reset_identity(request_id).await;
+                Box::pin(self.handle_reset_identity(request_id)).await;
             }
             AccountCommand::CancelIdentityReset {
                 request_id,
                 flow_id,
             } => {
-                self.handle_cancel_identity_reset(request_id, flow_id).await;
+                Box::pin(self.handle_cancel_identity_reset(request_id, flow_id)).await;
             }
             AccountCommand::SubmitIdentityResetAuth {
                 request_id,
                 flow_id,
                 request,
             } => {
-                self.handle_submit_identity_reset_auth(request_id, flow_id, request)
+                Box::pin(self.handle_submit_identity_reset_auth(request_id, flow_id, request))
                     .await;
             }
             AccountCommand::SetPresence {
                 request_id,
                 presence,
             } => {
-                self.handle_set_presence(request_id, presence).await;
+                Box::pin(self.handle_set_presence(request_id, presence)).await;
             }
             AccountCommand::SetDisplayName {
                 request_id,
                 display_name,
             } => {
-                self.handle_set_display_name(request_id, display_name).await;
+                Box::pin(self.handle_set_display_name(request_id, display_name)).await;
             }
             AccountCommand::SetLocalUserAlias {
                 request_id,
                 user_id,
                 alias,
             } => {
-                self.handle_set_local_user_alias(request_id, user_id, alias)
-                    .await;
+                Box::pin(self.handle_set_local_user_alias(request_id, user_id, alias)).await;
             }
             AccountCommand::SetAvatar {
                 request_id,
                 request,
             } => {
-                self.handle_set_avatar(request_id, request).await;
+                Box::pin(self.handle_set_avatar(request_id, request)).await;
             }
             AccountCommand::DownloadAvatarThumbnail {
                 request_id,
                 mxc_uri,
             } => {
-                self.handle_download_avatar_thumbnail(request_id, mxc_uri)
-                    .await;
+                Box::pin(self.handle_download_avatar_thumbnail(request_id, mxc_uri)).await;
             }
             AccountCommand::CancelAvatarThumbnail {
                 request_id,
@@ -3505,29 +3536,29 @@ impl AccountActor {
                 request_id,
                 user_id,
             } => {
-                self.handle_ignore_user(request_id, user_id, true).await;
+                Box::pin(self.handle_ignore_user(request_id, user_id, true)).await;
             }
             AccountCommand::UnignoreUser {
                 request_id,
                 user_id,
             } => {
-                self.handle_ignore_user(request_id, user_id, false).await;
+                Box::pin(self.handle_ignore_user(request_id, user_id, false)).await;
             }
             AccountCommand::ReportUser {
                 request_id,
                 user_id,
                 reason,
             } => {
-                self.handle_report_user(request_id, user_id, reason).await;
+                Box::pin(self.handle_report_user(request_id, user_id, reason)).await;
             }
             AccountCommand::RequestVerification { request_id, target } => {
-                self.handle_request_verification(request_id, target).await;
+                Box::pin(self.handle_request_verification(request_id, target)).await;
             }
             AccountCommand::StartOwnUserSas {
                 request_id,
                 flow_id,
             } => {
-                self.handle_start_own_user_sas(request_id, flow_id).await;
+                Box::pin(self.handle_start_own_user_sas(request_id, flow_id)).await;
             }
             AccountCommand::RetryCurrentDeviceTrustDiscovery { request_id: _ } => {
                 let current_trust = self
@@ -3535,12 +3566,13 @@ impl AccountActor {
                     .as_ref()
                     .map(|session| session.current_device_trust());
                 if retry_should_restart_method_discovery(self.session_promoted, current_trust) {
-                    self.send_actions(vec![AppAction::VerificationMethodDiscoveryRetryStarted {
-                        generation: self.trust_generation,
-                    }])
+                    Box::pin(self.send_actions(vec![
+                        AppAction::VerificationMethodDiscoveryRetryStarted {
+                            generation: self.trust_generation,
+                        },
+                    ]))
                     .await;
-                    self.discover_verification_methods(self.trust_generation)
-                        .await;
+                    Box::pin(self.discover_verification_methods(self.trust_generation)).await;
                 } else {
                     self.request_authoritative_trust_recheck();
                 }
@@ -3549,22 +3581,20 @@ impl AccountActor {
                 request_id,
                 flow_id,
             } => {
-                self.handle_accept_verification(request_id, flow_id).await;
+                Box::pin(self.handle_accept_verification(request_id, flow_id)).await;
             }
             AccountCommand::ConfirmSasVerification {
                 request_id,
                 flow_id,
             } => {
-                self.handle_confirm_sas_verification(request_id, flow_id)
-                    .await;
+                Box::pin(self.handle_confirm_sas_verification(request_id, flow_id)).await;
             }
             AccountCommand::CancelVerification {
                 request_id,
                 flow_id,
                 reason,
             } => {
-                self.handle_cancel_verification(request_id, flow_id, reason)
-                    .await;
+                Box::pin(self.handle_cancel_verification(request_id, flow_id, reason)).await;
             }
         }
     }

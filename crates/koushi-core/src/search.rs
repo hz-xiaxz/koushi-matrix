@@ -971,7 +971,7 @@ impl SearchActor {
     async fn run(mut self, mut index_rx: mpsc::Receiver<SearchIndexMessage>) {
         loop {
             if let Some(msg) = self.deferred_messages.pop_front() {
-                if !self.handle_actor_message(msg).await {
+                if !Box::pin(self.handle_actor_message(msg)).await {
                     break;
                 }
                 continue;
@@ -981,7 +981,7 @@ impl SearchActor {
                 biased;
                 msg = self.msg_rx.recv() => {
                     let Some(msg) = msg else { break };
-                    if !self.handle_actor_message(msg).await {
+                    if !Box::pin(self.handle_actor_message(msg)).await {
                         break;
                     }
                 }
@@ -1013,7 +1013,7 @@ impl SearchActor {
                 _ = std::future::ready(()), if !self.queued_crawl_index.is_empty()
                     && self.attachment_retries.len() < SEARCH_INDEX_MUTATION_QUEUE => {
                     let message = self.queued_crawl_index.pop_front().unwrap();
-                    self.handle_index(message).await;
+                    Box::pin(self.handle_index(message)).await;
                     self.start_next_history_crawl_page();
                 }
                 index_msg = index_rx.recv(), if self.attachment_retries.len() < SEARCH_INDEX_MUTATION_QUEUE => {
@@ -1021,7 +1021,7 @@ impl SearchActor {
                         // Timeline sender dropped — that's fine (e.g. on shutdown).
                         continue;
                     };
-                    self.handle_index(index_msg).await;
+                    Box::pin(self.handle_index(index_msg)).await;
                     // Index work can leave body-free retries or an unapplied page
                     // queue behind; re-run the pump so the crawler resumes as soon
                     // as the index lane goes quiet (#1276).
@@ -1109,8 +1109,7 @@ impl SearchActor {
                 if let Some(settings) = content_policy {
                     self.set_crawler_settings(settings);
                 }
-                self.handle_attachments(request_id, scope, filter, sort)
-                    .await;
+                Box::pin(self.handle_attachments(request_id, scope, filter, sort)).await;
                 true
             }
             SearchActorMessage::StartHistoryCrawl {
@@ -1397,7 +1396,7 @@ impl SearchActor {
         filter: AttachmentFilter,
         sort: AttachmentSort,
     ) {
-        if !self.reconcile_attachment_redactions().await {
+        if !Box::pin(self.reconcile_attachment_redactions()).await {
             let _ = self
                 .action_tx
                 .send(vec![AppAction::FilesViewQueryFailed {
@@ -1412,7 +1411,7 @@ impl SearchActor {
             return;
         }
         self.start_next_history_crawl_page();
-        self.rebuild_files_rows(&scope).await;
+        Box::pin(self.rebuild_files_rows(&scope)).await;
         let results = self.document_store.attachments(&scope, &filter, sort);
 
         let _ = self
@@ -1472,7 +1471,7 @@ impl SearchActor {
                     Err(_) => break,
                 };
                 pages_left -= 1;
-                self.apply_rebuilt_rows(&room_id, &page.events).await;
+                Box::pin(self.apply_rebuilt_rows(&room_id, &page.events)).await;
                 match page.next {
                     Some(next) => {
                         self.files_rebuild_pending
@@ -1508,7 +1507,7 @@ impl SearchActor {
             ) else {
                 continue;
             };
-            self.handle_index(message).await;
+            Box::pin(self.handle_index(message)).await;
         }
     }
 
