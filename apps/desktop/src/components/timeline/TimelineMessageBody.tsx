@@ -474,8 +474,8 @@ export function renderFormattedBody(
   mentions: TimelineMentionFacts = NO_MENTIONS
 ): ReactNode {
   const parsed =
-    linkRanges.length > 0 && !formatted.html.includes("<a")
-      ? linkifyFormattedNodes(parseFormattedHtml(formatted.html), linkRanges)
+    linkRanges.length > 0
+      ? linkifyFormattedNodes(parseFormattedHtml(formatted.html), linkRanges, formatted.plain_text)
       : parseFormattedHtml(formatted.html);
   const nodes = markMentionAnchors(parsed, mentions);
   const codeBlockIndexRef = { current: 0 };
@@ -604,9 +604,26 @@ function parseFormattedHtml(html: string): FormattedNode[] {
   return root.children;
 }
 
+/**
+ * Elements whose text must never gain a projected anchor: an authored or
+ * mention `<a>` is already a link (nesting anchors is invalid), and code is
+ * shown verbatim, as Element does. Their text still advances the projection.
+ */
+const UNLINKIFIED_FORMATTED_TAGS = new Set(["a", "code", "pre"]);
+
+/**
+ * Issue #1542: wrap Rust-projected URL ranges in anchors in the text nodes
+ * outside existing links and code. Rust computes `link_ranges` on
+ * `formatted.plain_text`, so each text node is located in that text by
+ * forward search (as `formattedTextOffsetsProject` does) instead of assuming
+ * the node lengths sum to its offsets, and a range is applied only when the
+ * text it covers is exactly its URL; any misalignment drops the link rather
+ * than drawing it in the wrong place.
+ */
 function linkifyFormattedNodes(
   nodes: FormattedNode[],
-  linkRanges: TimelineLinkRange[]
+  linkRanges: TimelineLinkRange[],
+  plainText: string
 ): FormattedNode[] {
   const sortedRanges = [...linkRanges].sort((left, right) => {
     if (left.start_utf16 !== right.start_utf16) {
@@ -615,32 +632,55 @@ function linkifyFormattedNodes(
     return left.end_utf16 - right.end_utf16;
   });
   const cursor = { utf16: 0 };
-  return linkifyFormattedNodeList(nodes, sortedRanges, cursor);
+  return linkifyFormattedNodeList(nodes, sortedRanges, plainText, cursor, true);
 }
 
 function linkifyFormattedNodeList(
   nodes: FormattedNode[],
   linkRanges: TimelineLinkRange[],
-  cursor: { utf16: number }
+  plainText: string,
+  cursor: { utf16: number },
+  linkable: boolean
 ): FormattedNode[] {
-  return nodes.flatMap((node) => linkifyFormattedNode(node, linkRanges, cursor));
+  return nodes.flatMap((node) =>
+    linkifyFormattedNode(node, linkRanges, plainText, cursor, linkable)
+  );
 }
 
 function linkifyFormattedNode(
   node: FormattedNode,
   linkRanges: TimelineLinkRange[],
-  cursor: { utf16: number }
+  plainText: string,
+  cursor: { utf16: number },
+  linkable: boolean
 ): FormattedNode[] {
   if (node.kind === "text") {
-    const textStart = cursor.utf16;
-    cursor.utf16 += node.value.length;
-    return linkifyFormattedTextNode(node.value, textStart, linkRanges);
+    // Whitespace-only nodes (list indentation, inter-block newlines) hold no
+    // URL and may be absent from the plain text, so they do not move the
+    // projection.
+    if (node.value.trim().length === 0) {
+      return [node];
+    }
+    const textStart = plainText.indexOf(node.value, cursor.utf16);
+    if (textStart < 0) {
+      return [node];
+    }
+    cursor.utf16 = textStart + node.value.length;
+    return linkable
+      ? linkifyFormattedTextNode(node.value, textStart, linkRanges, plainText)
+      : [node];
   }
 
   return [
     {
       ...node,
-      children: linkifyFormattedNodeList(node.children, linkRanges, cursor)
+      children: linkifyFormattedNodeList(
+        node.children,
+        linkRanges,
+        plainText,
+        cursor,
+        linkable && !UNLINKIFIED_FORMATTED_TAGS.has(node.tagName)
+      )
     }
   ];
 }
@@ -648,14 +688,16 @@ function linkifyFormattedNode(
 function linkifyFormattedTextNode(
   value: string,
   textStartUtf16: number,
-  linkRanges: TimelineLinkRange[]
+  linkRanges: TimelineLinkRange[],
+  plainText: string
 ): FormattedNode[] {
   const textEndUtf16 = textStartUtf16 + value.length;
   const rangesInText = linkRanges.filter(
     (range) =>
       range.start_utf16 >= textStartUtf16 &&
       range.end_utf16 <= textEndUtf16 &&
-      range.start_utf16 < range.end_utf16
+      range.start_utf16 < range.end_utf16 &&
+      plainText.slice(range.start_utf16, range.end_utf16) === range.url
   );
   if (rangesInText.length === 0) {
     return [{ kind: "text", value }];

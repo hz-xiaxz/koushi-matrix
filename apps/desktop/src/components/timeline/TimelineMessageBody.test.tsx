@@ -314,3 +314,98 @@ describe("renderFormattedBody mention pills (#874, #1123)", () => {
     );
   });
 });
+
+describe("renderFormattedBody linkify beside existing anchors (#1542)", () => {
+  type Range = { url: string; start_utf16: number; end_utf16: number };
+  const rangeOf = (plainText: string, url: string): Range => {
+    const start = plainText.indexOf(url);
+    if (start < 0) throw new Error(`fixture: ${url} not in plain text`);
+    return { url, start_utf16: start, end_utf16: start + url.length };
+  };
+  const renderLinked = (
+    html: string,
+    plainText: string,
+    ranges: Range[],
+    userIds: ReadonlySet<string> = new Set<string>()
+  ) =>
+    renderToStaticMarkup(
+      renderFormattedBody(
+        { html, plain_text: plainText, code_blocks: [] } satisfies TimelineFormattedBody,
+        ranges,
+        false,
+        () => undefined,
+        [],
+        NO_SPOILERS,
+        undefined,
+        { userIds, room: false }
+      )
+    );
+  const anchorCount = (markup: string) => (markup.match(/<a\b/g) ?? []).length;
+  const NESTED_ANCHOR = /<a\b(?:(?!<\/a>)[\s\S])*<a\b/;
+
+  test("links a bare URL that follows a mention anchor and keeps the pill", () => {
+    const url = "https://arxiv.org/abs/2610.22307";
+    const html = `<a href="https://matrix.to/#/%40a%3Aexample.test">a</a>: text ${url}`;
+    const plainText = `a: text ${url}`;
+    const markup = renderLinked(
+      html,
+      plainText,
+      [rangeOf(plainText, url)],
+      new Set(["@a:example.test"])
+    );
+
+    expect(markup).toContain(`href="${url}"`);
+    expect(markup).toContain('data-mention-user-id="@a:example.test"');
+  });
+
+  test("does not nest an anchor inside an authored link to the same URL", () => {
+    const url = "https://example.com";
+    const markup = renderLinked(`<a href="${url}">${url}</a>`, url, [rangeOf(url, url)]);
+
+    expect(anchorCount(markup)).toBe(1);
+    expect(markup).not.toMatch(NESTED_ANCHOR);
+  });
+
+  test("links only the bare URL when an authored link and a bare URL coexist", () => {
+    const linked = "https://example.com/a";
+    const bare = "https://example.com/b";
+    const html = `see <a href="${linked}">${linked}</a> and ${bare}`;
+    const plainText = `see ${linked} and ${bare}`;
+    const markup = renderLinked(html, plainText, [
+      rangeOf(plainText, linked),
+      rangeOf(plainText, bare)
+    ]);
+
+    expect(anchorCount(markup)).toBe(2);
+    expect(markup).toContain(`href="${bare}"`);
+    expect(markup).not.toMatch(NESTED_ANCHOR);
+  });
+
+  test("leaves URLs inside inline code unlinked", () => {
+    const url = "https://x.example/y";
+    const html = `run <code>${url}</code>`;
+    const plainText = `run ${url}`;
+    const markup = renderLinked(html, plainText, [rangeOf(plainText, url)]);
+
+    expect(anchorCount(markup)).toBe(0);
+  });
+
+  test("drops a range whose text does not match its URL instead of mislinking", () => {
+    const url = "https://example.com/real";
+    const html = `<a href="https://matrix.to/#/%40a%3Aexample.test">a</a> ${url}`;
+    const plainText = `a ${url}`;
+    const shifted = { url, start_utf16: 1, end_utf16: 1 + url.length };
+    const markup = renderLinked(html, plainText, [shifted]);
+
+    expect(markup).not.toContain(`href="${url}"`);
+  });
+
+  test("still links when the plain text carries separators the HTML lacks", () => {
+    const url = "https://example.invalid/pull/7";
+    const html = `<a href="https://matrix.to/#/%40alice%3Aexample.invalid">@Alice</a><br>${url}<br><br>Feedback`;
+    const plainText = `@Alice\n${url}\n\nFeedback`;
+    const markup = renderLinked(html, plainText, [rangeOf(plainText, url)]);
+
+    expect(markup).toContain(`href="${url}"`);
+  });
+});
