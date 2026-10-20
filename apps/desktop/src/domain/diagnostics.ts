@@ -1,3 +1,7 @@
+// The desktop package version is the release version: the release version
+// check keeps it equal to tauri.conf.json and Cargo.toml (the About menu's
+// source), so the renderer can name its build without a new IPC call (#1487).
+import { version as koushiVersion } from "../../package.json";
 import type { AppStoreDeltaStats } from "./appStore";
 import type { CapturedJsError } from "./jsErrorLog";
 import type { TimelineTransportStats } from "./timelineTransportStats";
@@ -288,6 +292,7 @@ export function diagnosticReport({
   const securityDiagnosticLog = formatSecurityDiagnostics(securityDiagnostics);
   const lines = [
     "Koushi diagnostics",
+    `Koushi version: ${koushiVersion}`,
     `Generated at: ${new Date().toISOString()}`,
     `Session: ${snapshot.state.domain.session.kind}`,
     `Sync: ${syncStateLabel(snapshot.state.domain.sync)}`,
