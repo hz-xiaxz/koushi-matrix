@@ -39,6 +39,11 @@ pub enum ErrorCode {
     Busy,
     /// The tool or argument shape is not supported by this build.
     Unsupported,
+    /// A continuation cursor cannot be used (malformed, from a previous run,
+    /// for another account, ahead of the feed, or older than its retained
+    /// window). The message leads with the reason token; the caller starts a
+    /// fresh baseline instead of assuming nothing happened.
+    ResyncRequired,
     /// An unexpected internal failure; no detail crosses the boundary.
     Internal,
 }
@@ -56,6 +61,7 @@ impl ErrorCode {
             Self::AttachmentTooLarge => "attachment_too_large",
             Self::Busy => "busy",
             Self::Unsupported => "unsupported",
+            Self::ResyncRequired => "resync_required",
             Self::Internal => "internal",
         }
     }
@@ -67,6 +73,10 @@ impl ErrorCode {
 pub struct WireError {
     pub code: ErrorCode,
     pub message: String,
+    /// A stable, machine-readable refinement of `code`, such as why a cursor
+    /// needs a resync. Absent for most failures.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub reason: Option<String>,
 }
 
 impl WireError {
@@ -74,6 +84,16 @@ impl WireError {
         Self {
             code,
             message: message.into(),
+            reason: None,
+        }
+    }
+
+    /// A failure with a stable reason token the client can branch on.
+    pub fn with_reason(code: ErrorCode, reason: &str, message: impl Into<String>) -> Self {
+        Self {
+            code,
+            message: message.into(),
+            reason: Some(reason.to_owned()),
         }
     }
 

@@ -123,6 +123,7 @@ fn dock_badge_count(state: &AppState) -> u64 {
         previous_candidate: None,
         message_previews: false,
         capabilities: available_capabilities(),
+        locale: koushi_state::CatalogLocale::En,
     })
     .summary
     .badge_count

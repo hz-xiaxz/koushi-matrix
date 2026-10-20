@@ -298,6 +298,7 @@ fn project(rooms: &[RoomSummary]) -> koushi_state::NativeAttentionProjection {
         previous_candidate: None,
         message_previews: false,
         capabilities: NativeAttentionCapabilities::default(),
+        locale: koushi_state::CatalogLocale::En,
     })
 }
 
@@ -355,6 +356,7 @@ fn an_ignored_user_dm_keeps_its_raw_badge_contribution() {
         previous_candidate: None,
         message_previews: false,
         capabilities: NativeAttentionCapabilities::default(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     assert_eq!(projection.state.summary.badge_count, 6);

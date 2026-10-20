@@ -98,6 +98,7 @@ fn projected_native_attention_from_rooms(
             previous_candidate,
             message_previews: state.settings.values.notifications.message_previews,
             capabilities: state.native_attention.summary.capabilities,
+            locale: crate::resolve_catalog_locale(&state.settings.values.locale),
         },
         live_room_id,
         preview_room_id,

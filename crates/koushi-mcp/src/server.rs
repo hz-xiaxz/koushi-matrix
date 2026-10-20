@@ -188,7 +188,7 @@ fn tool_list() -> Vec<Value> {
     tools::definitions()
         .into_iter()
         .map(|tool| {
-            json!({
+            let mut listed = json!({
                 "name": tool.name,
                 "description": tool.description,
                 "inputSchema": tool.input_schema,
@@ -197,7 +197,11 @@ fn tool_list() -> Vec<Value> {
                     "destructiveHint": !tool.read_only,
                     "openWorldHint": false
                 }
-            })
+            });
+            if let Some(output_schema) = tool.output_schema {
+                listed["outputSchema"] = output_schema;
+            }
+            listed
         })
         .collect()
 }
@@ -321,6 +325,17 @@ mod tests {
             .find(|tool| tool["name"] == "search_messages")
             .expect("search_messages");
         assert_eq!(search["annotations"]["readOnlyHint"], true);
+        let wait = tools
+            .iter()
+            .find(|tool| tool["name"] == "wait_for_events")
+            .expect("wait_for_events");
+        assert_eq!(wait["outputSchema"]["type"], "object");
+        assert!(
+            wait["outputSchema"]["required"]
+                .as_array()
+                .is_some_and(|required| required.iter().any(|key| key == "coverage"))
+        );
+        assert!(read.get("outputSchema").is_none());
     }
 
     #[tokio::test]

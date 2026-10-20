@@ -388,6 +388,7 @@ fn local_alias_update_refreshes_open_dm_room_labels_and_notification_candidate()
         previous_candidate: None,
         message_previews: false,
         capabilities: Default::default(),
+        locale: koushi_state::CatalogLocale::En,
     });
 
     let effects = reduce(
@@ -458,6 +459,7 @@ fn local_alias_update_keeps_candidate_on_eligible_room_when_muted_room_ties() {
         previous_candidate: None,
         message_previews: false,
         capabilities: Default::default(),
+        locale: koushi_state::CatalogLocale::En,
     });
     assert_eq!(
         state

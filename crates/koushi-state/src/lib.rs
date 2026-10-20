@@ -8,6 +8,7 @@ mod composer_revision;
 mod composer_shortcuts;
 mod effect;
 mod locale_profile;
+mod notification_text;
 mod reducer;
 mod room_access;
 mod room_address;
@@ -38,6 +39,10 @@ pub use locale_profile::{
     CatalogLocale, DisplayPlatform, LocaleDirection, LocaleDisplayProfile, ModifierLabelProfile,
     PseudoLocaleMode, cjk_display_sort_key, normalize_cjk_search_text, resolve_catalog_locale,
     resolve_locale_display_profile,
+};
+pub use notification_text::{
+    NotificationPlural, NotificationText, notification_counts, notification_label_separator,
+    notification_list_separator, notification_plural, notification_text,
 };
 pub use reducer::reduce;
 pub use room_access::{

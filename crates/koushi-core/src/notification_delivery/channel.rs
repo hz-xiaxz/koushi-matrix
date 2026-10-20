@@ -377,6 +377,7 @@ impl NotificationDeliveryChannel {
         &mut self,
         settings: &NotificationDeliverySettings,
         now: Instant,
+        locale: koushi_state::CatalogLocale,
     ) -> Vec<NotificationDeliveryJob> {
         let mut jobs = Vec::new();
         for sink in &settings.sinks {
@@ -402,7 +403,7 @@ impl NotificationDeliveryChannel {
             }
             let rooms = lane.current_rooms(&room_ids);
             let window_id = lane.next_window_id(&self.nonce);
-            let Some(intent) = render_intent(sink, &rooms, &window_id) else {
+            let Some(intent) = render_intent(sink, &rooms, &window_id, locale) else {
                 lane.attempts = 0;
                 continue;
             };
@@ -431,6 +432,7 @@ impl NotificationDeliveryChannel {
         &mut self,
         settings: &NotificationDeliverySettings,
         now: Instant,
+        locale: koushi_state::CatalogLocale,
     ) -> Vec<NotificationDeliveryJob> {
         let mut jobs = Vec::new();
         for sink in &settings.sinks {
@@ -454,7 +456,7 @@ impl NotificationDeliveryChannel {
             }
             let rooms = lane.current_rooms(&retry.attempt.room_ids);
             let previous = retry.attempt.intent;
-            let Some(mut intent) = render_intent(sink, &rooms, "retry") else {
+            let Some(mut intent) = render_intent(sink, &rooms, "retry", locale) else {
                 lane.attempts = 0;
                 continue;
             };
@@ -465,7 +467,7 @@ impl NotificationDeliveryChannel {
                 intent.idempotency_key = previous.idempotency_key;
             } else {
                 let window_id = lane.next_window_id(&self.nonce);
-                intent = render_intent(sink, &rooms, &window_id).unwrap_or(intent);
+                intent = render_intent(sink, &rooms, &window_id, locale).unwrap_or(intent);
             }
             lane.last_attempt_at = Some(now);
             lane.inflight = Some(LaneAttempt {
@@ -752,3 +754,7 @@ mod tests;
 #[cfg(test)]
 #[path = "channel/held_recompute_tests.rs"]
 mod held_recompute_tests;
+
+#[cfg(test)]
+#[path = "channel/locale_tests.rs"]
+mod locale_tests;

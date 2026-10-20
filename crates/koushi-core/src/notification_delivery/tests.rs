@@ -99,6 +99,7 @@ fn text_body(text: &str, content: NotificationDeliveryContent) -> String {
         &sink,
         &[with_text(unread(ROOM_ID, "Room A", 1), text)],
         "w-1",
+        koushi_state::CatalogLocale::En,
     )
     .expect("an intent")
     .body
@@ -284,8 +285,13 @@ fn a_names_only_body_names_rooms_and_spaces_without_ids_or_text() {
         mention,
         room("!dm:example.invalid", "Alice", RoomAttentionKind::Dm, 3, 0),
     ];
-    let intent =
-        render_intent(&sink("home", "me@example.invalid"), &rooms, "w-1").expect("an intent");
+    let intent = render_intent(
+        &sink("home", "me@example.invalid"),
+        &rooms,
+        "w-1",
+        koushi_state::CatalogLocale::En,
+    )
+    .expect("an intent");
 
     assert_eq!(
         intent.subject,
@@ -313,6 +319,7 @@ fn a_single_room_subject_has_no_more_rooms_tail() {
         &sink("home", "me@example.invalid"),
         &[unread(ROOM_ID, "Room A", 1)],
         "w-1",
+        koushi_state::CatalogLocale::En,
     )
     .expect("an intent");
     assert_eq!(intent.subject, "Message in Room A");
@@ -326,6 +333,7 @@ fn an_unconsented_text_mode_renders_names_only() {
         &unconsented,
         &[with_text(unread(ROOM_ID, "Room A", 1), "private text")],
         "w-1",
+        koushi_state::CatalogLocale::En,
     )
     .expect("an intent");
     assert!(!intent.body.contains("private text"));
@@ -384,9 +392,14 @@ fn text_cut_at_the_source_or_by_the_provider_budget_is_never_called_entire() {
         sink("home", "me@example.invalid"),
         NotificationDeliveryContent::Full,
     );
-    let body = render_intent(&sink, &[cut_at_source], "w-1")
-        .expect("an intent")
-        .body;
+    let body = render_intent(
+        &sink,
+        &[cut_at_source],
+        "w-1",
+        koushi_state::CatalogLocale::En,
+    )
+    .expect("an intent")
+    .body;
     assert_eq!(
         quoted(&body),
         vec!["the start of it", NOTIFICATION_TEXT_TRUNCATED_MARKER]
@@ -400,6 +413,7 @@ fn text_cut_at_the_source_or_by_the_provider_budget_is_never_called_entire() {
         &wechat,
         &[with_text(unread(ROOM_ID, "Room A", 1), &long)],
         "w-1",
+        koushi_state::CatalogLocale::En,
     )
     .expect("an intent")
     .body;
@@ -430,6 +444,7 @@ fn a_room_label_with_a_line_break_stays_one_line() {
         &sink("home", "me@example.invalid"),
         &[unread(ROOM_ID, "Room\nMention in Bank", 1)],
         "w-1",
+        koushi_state::CatalogLocale::En,
     )
     .expect("an intent");
     assert!(!intent.subject.contains('\n'));
@@ -444,7 +459,8 @@ fn a_serverchan_title_is_bounded_and_its_body_cannot_inject_markdown() {
         unread(ROOM_ID, long_label, 1),
         "[click](https://phish.example.invalid) ![x](https://track.example.invalid/p.png) <b>",
     )];
-    let intent = render_intent(&wechat, &rooms, "w-1").expect("an intent");
+    let intent =
+        render_intent(&wechat, &rooms, "w-1", koushi_state::CatalogLocale::En).expect("an intent");
 
     assert!(intent.subject.chars().count() <= MAX_SERVERCHAN_TITLE_GRAPHEMES);
     assert!(intent.subject.ends_with('…'));
@@ -470,15 +486,18 @@ fn the_order_and_the_idempotency_key_are_deterministic() {
     reversed.reverse();
     let home = sink("home", "me@example.invalid");
 
-    let first = render_intent(&home, &rooms, "nonce-7").expect("an intent");
-    let second = render_intent(&home, &reversed, "nonce-7").expect("an intent");
+    let first = render_intent(&home, &rooms, "nonce-7", koushi_state::CatalogLocale::En)
+        .expect("an intent");
+    let second = render_intent(&home, &reversed, "nonce-7", koushi_state::CatalogLocale::En)
+        .expect("an intent");
     assert_eq!(first, second);
     assert_eq!(first.idempotency_key, "koushi-notification/home/nonce-7");
     assert!(first.body.starts_with("Mention in Mu"));
     assert!(first.body.find("Alpha") < first.body.find("Beta"));
 
     // A later window never reuses the key.
-    let later = render_intent(&home, &rooms, "nonce-8").expect("an intent");
+    let later = render_intent(&home, &rooms, "nonce-8", koushi_state::CatalogLocale::En)
+        .expect("an intent");
     assert_ne!(first.idempotency_key, later.idempotency_key);
     assert_eq!(first.body, later.body);
 }
@@ -486,8 +505,13 @@ fn the_order_and_the_idempotency_key_are_deterministic() {
 #[test]
 fn a_room_observed_twice_is_rendered_once() {
     let rooms = [unread(ROOM_ID, "Room A", 1), unread(ROOM_ID, "Room A", 3)];
-    let intent =
-        render_intent(&sink("home", "me@example.invalid"), &rooms, "w-1").expect("an intent");
+    let intent = render_intent(
+        &sink("home", "me@example.invalid"),
+        &rooms,
+        "w-1",
+        koushi_state::CatalogLocale::En,
+    )
+    .expect("an intent");
     assert_eq!(intent.body, "Message in Room A: 3 unread");
     assert_eq!(intent.subject, "Message in Room A");
 }
@@ -495,23 +519,48 @@ fn a_room_observed_twice_is_rendered_once() {
 #[test]
 fn no_intent_is_built_for_no_rooms_or_an_incomplete_destination() {
     let rooms = [unread(ROOM_ID, "Room A", 1)];
-    assert!(render_intent(&sink("home", "me@example.invalid"), &[], "w-1").is_none());
-    assert!(render_intent(&sink("home", " "), &rooms, "w-1").is_none());
-    assert!(render_intent(&sink(" ", "me@example.invalid"), &rooms, "w-1").is_none());
+    assert!(
+        render_intent(
+            &sink("home", "me@example.invalid"),
+            &[],
+            "w-1",
+            koushi_state::CatalogLocale::En
+        )
+        .is_none()
+    );
+    assert!(
+        render_intent(
+            &sink("home", " "),
+            &rooms,
+            "w-1",
+            koushi_state::CatalogLocale::En
+        )
+        .is_none()
+    );
+    assert!(
+        render_intent(
+            &sink(" ", "me@example.invalid"),
+            &rooms,
+            "w-1",
+            koushi_state::CatalogLocale::En
+        )
+        .is_none()
+    );
     let mut no_sender = sink("home", "me@example.invalid");
     no_sender.from_address.clear();
-    assert!(render_intent(&no_sender, &rooms, "w-1").is_none());
+    assert!(render_intent(&no_sender, &rooms, "w-1", koushi_state::CatalogLocale::En).is_none());
     let mut no_endpoint = sink("home", "me@example.invalid");
     no_endpoint.config = NotificationSinkConfig::Resend {
         endpoint: String::new(),
     };
-    assert!(render_intent(&no_endpoint, &rooms, "w-1").is_none());
+    assert!(render_intent(&no_endpoint, &rooms, "w-1", koushi_state::CatalogLocale::En).is_none());
     // ServerChan needs no mailbox: the SendKey names the recipient.
     assert!(
         render_intent(
             &serverchan(NotificationDeliveryContent::NamesOnly),
             &rooms,
-            "w-1"
+            "w-1",
+            koushi_state::CatalogLocale::En
         )
         .is_some()
     );
@@ -528,8 +577,13 @@ fn many_rooms_render_a_bounded_body_with_a_counted_tail() {
             )
         })
         .collect();
-    let intent =
-        render_intent(&sink("home", "me@example.invalid"), &rooms, "w-1").expect("an intent");
+    let intent = render_intent(
+        &sink("home", "me@example.invalid"),
+        &rooms,
+        "w-1",
+        koushi_state::CatalogLocale::En,
+    )
+    .expect("an intent");
     let named = intent
         .body
         .lines()
@@ -579,7 +633,8 @@ fn delivery_debug_output_redacts_identifiers_and_message_text() {
         sink("home", "me@example.invalid"),
         NotificationDeliveryContent::Full,
     );
-    let intent = render_intent(&home, &[room], "window-1").expect("an intent");
+    let intent = render_intent(&home, &[room], "window-1", koushi_state::CatalogLocale::En)
+        .expect("an intent");
     assert!(
         intent.body.contains("1234"),
         "the consented body carries the text"
@@ -610,7 +665,7 @@ fn direct(kind: RoomAttentionKind, alias: Option<&str>) -> QualifyingRoom {
 }
 
 fn subject_for(sink: &NotificationSinkSettings, room: QualifyingRoom) -> String {
-    render_intent(sink, &[room], "w-1")
+    render_intent(sink, &[room], "w-1", koushi_state::CatalogLocale::En)
         .expect("an intent")
         .subject
 }
@@ -626,6 +681,7 @@ fn a_direct_message_is_named_from_its_partners_alias_without_a_space() {
         &home,
         &[direct(RoomAttentionKind::Dm, Some("Hiroshi (lab)"))],
         "w-1",
+        koushi_state::CatalogLocale::En,
     )
     .expect("an intent");
     assert_eq!(intent.body, "Direct message from Hiroshi (lab): 1 unread");
@@ -681,25 +737,37 @@ fn preview_sample() -> NotificationDeliveryPreviewSample {
 
 #[test]
 fn the_preview_is_what_a_consented_send_renders_for_the_sample() {
-    for content in [
-        NotificationDeliveryContent::NamesOnly,
-        NotificationDeliveryContent::Prefix { graphemes: 4 },
-        NotificationDeliveryContent::Full,
-    ] {
+    // #1476: the preview and the send agree in every catalog locale.
+    for (locale, content) in [
+        koushi_state::CatalogLocale::En,
+        koushi_state::CatalogLocale::Ja,
+        koushi_state::CatalogLocale::ZhHans,
+        koushi_state::CatalogLocale::ZhHant,
+        koushi_state::CatalogLocale::Ko,
+    ]
+    .into_iter()
+    .flat_map(|locale| {
+        [
+            NotificationDeliveryContent::NamesOnly,
+            NotificationDeliveryContent::Prefix { graphemes: 4 },
+            NotificationDeliveryContent::Full,
+        ]
+        .map(|content| (locale, content))
+    }) {
         for draft in [sink("home", "me@example.invalid"), serverchan(content)] {
             let mut draft = consented(draft, content);
-            let preview = preview_digest(&draft, &preview_sample());
+            let preview = preview_digest(&draft, &preview_sample(), locale);
             let mut room = direct(RoomAttentionKind::Dm, Some("Hiroshi"));
             room.space_labels.clear();
             let room = with_text(room, "See you at 3");
-            let sent = render_intent(&draft, &[room], "w-1").expect("an intent");
+            let sent = render_intent(&draft, &[room], "w-1", locale).expect("an intent");
             assert_eq!(preview.subject, sent.subject);
             assert_eq!(preview.body, sent.body);
             assert_eq!(preview.sender_name, sent.sender_name);
 
             // The draft's own choice is previewed before its consent is accepted.
             draft.content_consent = None;
-            assert_eq!(preview_digest(&draft, &preview_sample()), preview);
+            assert_eq!(preview_digest(&draft, &preview_sample(), locale), preview);
         }
     }
 }
@@ -708,13 +776,13 @@ fn the_preview_is_what_a_consented_send_renders_for_the_sample() {
 fn the_preview_shows_the_default_sender_name_and_none_for_serverchan() {
     let mut draft = sink("home", "me@example.invalid");
     draft.sender_name.clear();
-    let preview = preview_digest(&draft, &preview_sample());
+    let preview = preview_digest(&draft, &preview_sample(), koushi_state::CatalogLocale::En);
     assert_eq!(preview.sender_name, "Koushi");
     assert_eq!(preview.subject, "Direct message from Hiroshi");
     assert_eq!(preview.body, "Direct message from Hiroshi: 1 unread");
 
     let wechat = serverchan(NotificationDeliveryContent::Full);
-    let preview = preview_digest(&wechat, &preview_sample());
+    let preview = preview_digest(&wechat, &preview_sample(), koushi_state::CatalogLocale::En);
     assert_eq!(preview.sender_name, "");
     assert!(preview.body.contains("See you at 3"));
 }
