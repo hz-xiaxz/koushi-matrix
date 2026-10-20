@@ -283,6 +283,10 @@ to upstream or revert.
   SDK-marked shared-history inbound sessions after fresh membership and trust
   checks. It uses the inbound historical export path and never changes the
   standard outbound pre-share or rotation path.
+  Manual verification of the other user is optional for historical recovery.
+  Peers must have owner-cross-signed devices, no local block or verification
+  violation, and unchanged device/master-key pins. Import preserves the SDK's
+  actual verified or unverified forwarding provenance.
 
 ## QA Gates And Cleanup
 
