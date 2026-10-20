@@ -1705,6 +1705,15 @@ describe("desktop integration source guards", () => {
     expect(paneSource).toContain("onOpenThreadsStable");
   });
 
+  test("no selected room renders the empty-state pane instead of a fake room timeline", () => {
+    // #1545: the empty-state string used to become the room name, avatar
+    // initial and composer placeholder of a TimelinePane whose Send was a
+    // silent no-op.
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    expect(source).not.toContain(': t("room.noRoomSelected")');
+    expect(source).toMatch(/!activeRoom \? \(\s*<NoRoomPane \/>/);
+  });
+
   test("room creation leaves space-child linking to the backend-created room id", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
     const createStart = source.indexOf("async function submitCreateDialog");
