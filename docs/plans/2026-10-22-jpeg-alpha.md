@@ -70,7 +70,8 @@ Independent review is not required for this risk scope.
   corrected without a lint suppression.
 - Frontend: typecheck, lint and all 2,251 Vitest tests passed.
 - Full workspace, Rust lint/stack gates, local Tuwunel/Synapse QA, documentation
-  checks, and PR CI: running; final results will be recorded before merge.
+  checks, and PR CI results are tracked in the validation section of PR #1582
+  before merge; this worklog records the focused verify-first evidence.
 - Self-review traces production initial/lazy/native/thumbnail callers, keeps
   public contracts unchanged, and checks new test files and the guide alongside
   the complete diff. No account content is used in any review material.
