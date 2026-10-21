@@ -1641,7 +1641,9 @@ impl SendComposerProjection {
     pub(super) fn for_send_text(key: &TimelineKey) -> Self {
         match key.kind {
             TimelineKind::Room { .. } => Self::Room,
-            TimelineKind::Thread { .. } | TimelineKind::Focused { .. } => Self::None,
+            // Plain thread text still owns the thread composer's lifecycle.
+            TimelineKind::Thread { .. } => Self::ThreadReply,
+            TimelineKind::Focused { .. } => Self::None,
         }
     }
 
