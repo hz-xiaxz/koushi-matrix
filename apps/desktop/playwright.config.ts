@@ -65,6 +65,8 @@ export default defineConfig({
         /editor-history-shortcuts\.spec\.ts$/,
         /room-list-filter-native-clear\.spec\.ts$/,
         /upload-preview-heic\.spec\.ts$/,
+        // #1574: short-image overlay clipping was reported in macOS WebKit.
+        /media-attachments\.spec\.ts$/,
         /inline-math-baseline\.spec\.ts$/,
         /activity-shell-scroll\.spec\.ts$/,
         /timeline-scroll-anchor-drift\.spec\.ts$/,

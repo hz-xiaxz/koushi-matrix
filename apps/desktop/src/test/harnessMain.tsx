@@ -49,8 +49,6 @@ declare global {
 
 const ACCOUNT_KEY = "@harness-user:example.invalid";
 const ROOM_ID = "!harness-room:example.invalid";
-const autoLoadOlderMessages =
-  new URLSearchParams(window.location.search).get("autoLoadOlderMessages") === "true";
 const variableHeights =
   new URLSearchParams(window.location.search).get("variableHeights") === "true";
 
@@ -294,7 +292,6 @@ renderTimeline = () => {
       roomId={currentRoomId}
       timelineKey={roomTimelineKey(ACCOUNT_KEY, currentRoomId)}
       transport={transport}
-      autoLoadOlderMessages={autoLoadOlderMessages}
       continuity={{ kind: "healthy", generation: 1, authoritative_start: true }}
       mediaDownloads={mediaDownloads}
       onReply={(roomId, eventId) => {

@@ -2171,7 +2171,7 @@ stateDiagram-v2
 - Existing threads retain ordinary automatic backfill eligibility after their
   settled initial projection. Underfilled non-empty windows may use the
   centralized viewport backfill policy subject to its normal in-flight/transition
-  fences and the automatic-history setting. The pre-subscription empty-snapshot
+  fences. Automatic loading cannot be disabled (#1573). The pre-subscription empty-snapshot
   page and later viewport policy are generation-fenced and cannot overlap; no
   frontend empty-thread effect may issue another request.
 - The open thread pane owns its own Rust `ComposerState`. The thread composer

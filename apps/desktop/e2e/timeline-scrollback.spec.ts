@@ -556,7 +556,7 @@ test("tall variable-height initial load snaps to the real live edge after measur
 });
 
 test("auto-backfill keeps a slight live-edge scroll stable before near-top prefetch", async ({ page }) => {
-  await page.goto("/harness.html?autoLoadOlderMessages=true");
+  await page.goto("/harness.html");
   await page.waitForSelector("[data-testid=timeline-view]");
 
   await page.evaluate(
@@ -642,7 +642,7 @@ test("auto-backfill keeps a slight live-edge scroll stable before near-top prefe
 });
 
 test("short timeline does not auto-backfill on a small scroll up from the live edge", async ({ page }) => {
-  await page.goto("/harness.html?autoLoadOlderMessages=true");
+  await page.goto("/harness.html");
   await page.waitForSelector("[data-testid=timeline-view]");
 
   // 50 items × 48px = 2400px total height; the desired 100-item prefetch
@@ -791,7 +791,7 @@ test("virtualized navigation hides the first-unread control after variable-heigh
 test("scrollback prepend keeps the anchor item visually stable and gates auto-backfill", async ({
   page
 }) => {
-  await page.goto("/harness.html?autoLoadOlderMessages=true");
+  await page.goto("/harness.html");
   await page.waitForSelector("[data-testid=timeline-view]");
 
   // ---- (a) InitialItems filling the viewport (30 × 48px ≫ 400px) ----
@@ -1024,26 +1024,19 @@ test("scrollback prepend keeps the anchor item visually stable and gates auto-ba
   expect(countAfterEndReached).toBe(1);
 });
 
-test("timeline does not auto-backfill unless the setting enables it", async ({ page }) => {
+test("underfilled timeline automatically loads history without scrolling (#1573)", async ({ page }) => {
   await page.goto("/harness.html");
   await page.waitForSelector("[data-testid=timeline-view]");
-  await pushInitialTimelineItems(page, 30);
-
-  const container = page.locator("[data-testid=timeline-view]");
-  await container.evaluate((node) => {
-    node.scrollTop = 40;
-    node.dispatchEvent(new Event("scroll", { bubbles: true }));
-  });
-
+  await pushInitialTimelineItems(page, 1);
   await expect
     .poll(() =>
       page.evaluate(() => window.__harness.invocationsOf("paginate_timeline_backwards").length)
     )
-    .toBe(0);
+    .toBe(1);
 });
 
 test("timeline prefetches older messages within two viewport heights", async ({ page }) => {
-  await page.goto("/harness.html?autoLoadOlderMessages=true");
+  await page.goto("/harness.html");
   await page.waitForSelector("[data-testid=timeline-view]");
   await pushInitialTimelineItems(page, 180);
 
@@ -1691,7 +1684,7 @@ test("timeline keeps SDK diff order and ignores duplicate update batches", async
 test("timeline navigation keeps the unread marker and bottom control independent", async ({
   page
 }) => {
-  await page.goto("/harness.html?autoLoadOlderMessages=true");
+  await page.goto("/harness.html");
   await page.waitForSelector("[data-testid=timeline-view]");
   await pushInitialTimelineItems(page, 30);
 
@@ -1760,7 +1753,7 @@ test("timeline navigation keeps the unread marker and bottom control independent
 });
 
 test("scrolling to bottom reports the latest readable event to Rust", async ({ page }) => {
-  await page.goto("/harness.html?autoLoadOlderMessages=true");
+  await page.goto("/harness.html");
   await page.waitForSelector("[data-testid=timeline-view]");
   await pushInitialTimelineItems(page, 40);
 

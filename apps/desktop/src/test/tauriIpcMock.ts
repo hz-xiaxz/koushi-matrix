@@ -343,7 +343,6 @@ export function defaultSnapshotResponse() {
             }
           },
           timeline: {
-            auto_load_older_messages: true,
             // Deliberately NOT the product default (latestReply since #366):
             // settings-toggle tests drive the rootEvent -> latestReply
             // transition from this seeded user choice.

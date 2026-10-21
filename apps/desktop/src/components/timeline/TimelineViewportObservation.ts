@@ -118,10 +118,7 @@ const AUTO_BACKFILL_THRESHOLD_PX = 80;
 const AUTO_BACKFILL_VIEWPORTS = 2;
 export const SCROLL_EDGE_TOLERANCE_PX = 2;
 
-export function timelineBackfillThreshold(clientHeight: number, enabled: boolean): number {
-  if (!enabled) {
-    return 0;
-  }
+export function timelineBackfillThreshold(clientHeight: number): number {
   return Math.max(
     AUTO_BACKFILL_THRESHOLD_PX,
     Math.max(0, clientHeight) * AUTO_BACKFILL_VIEWPORTS

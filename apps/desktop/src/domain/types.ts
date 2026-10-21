@@ -655,7 +655,6 @@ export interface MediaSettings {
 }
 
 export interface TimelineSettings {
-  auto_load_older_messages: boolean;
   thread_root_order: TimelineThreadRootOrder;
 }
 

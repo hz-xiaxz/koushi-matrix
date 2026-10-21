@@ -872,8 +872,6 @@ export const zhHans: Catalog = {
   "settings.languageKorean": "한국어",
   "settings.accountSwitcher": "账号切换器",
   "settings.current": "当前",
-  "settings.autoLoadOlderMessages": "自动加载较早的消息",
-  "settings.autoLoadOlderMessagesDescription": "滚动到已加载时间线的开头附近时，预先加载房间历史记录",
   "settings.threadRootLatestReply": "将讨论串显示在其最新回复的位置",
   "settings.threadRootLatestReplyDescription": "将每条根消息及其回复摘要移到最新回复的时间位置",
   "settings.checkLocalEncryption": "检查本地加密",

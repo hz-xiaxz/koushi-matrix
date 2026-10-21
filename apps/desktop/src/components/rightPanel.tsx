@@ -1125,7 +1125,6 @@ export function ContextualRightPanel({
               pinnedEventIds={focusedPinnedEventIds}
               forwardDestinations={forwardDestinationsFromSnapshot(snapshot)}
               onSetLocalUserAlias={onSetLocalUserAlias}
-              autoLoadOlderMessages={snapshot.state.domain.settings.values.timeline.auto_load_older_messages}
               codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
               density={snapshot.state.domain.settings.values.appearance.density}
               recentEmojis={composerSettings.recent_emojis}
@@ -1272,7 +1271,6 @@ export function ContextualRightPanel({
                 ? threadState.intent.pinnedReply.event_id
                 : null
             }
-            autoLoadOlderMessages={snapshot.state.domain.settings.values.timeline.auto_load_older_messages}
             codeBlockWrap={snapshot.state.domain.settings.values.display.code_block_wrap}
             density={snapshot.state.domain.settings.values.appearance.density}
             recentEmojis={composerSettings.recent_emojis}

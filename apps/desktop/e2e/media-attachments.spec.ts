@@ -640,3 +640,57 @@ test("macOS media viewer leaves the native window buttons above its toolbar", as
   await page.keyboard.press("Escape");
   await expect(viewer).toHaveCount(0);
 });
+
+test("short encrypted image keeps both controls and encryption badge inside its frame (#1574)", async ({ page }) => {
+  await gotoReadyShell(page);
+  const eventId = "$media-ready-img:example.invalid";
+  const item = makeImageItem(eventId);
+  item.media = {
+    ...(item.media as Record<string, unknown>),
+    width: 4000,
+    height: 50,
+    source: { mxc_uri: "mxc://example.invalid/abc", encrypted: true, encryption_version: null }
+  };
+  await seedTimelineItems(page, [item]);
+
+  // Push ready state with a synthetic data-URL as source.
+  const syntheticUrl = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
+  await pushMediaDownloadState(page, eventId, {
+    kind: "ready",
+    source_url: syntheticUrl,
+    width: 4000,
+    height: 50,
+    mime_type: "image/jpeg"
+  });
+
+  const article = page.locator(`[data-event-id="${eventId}"]`);
+  // The ready+Image variant renders an <img>.
+  const img = article.locator("img.message-media-image");
+  await expect(img).toBeVisible();
+  // #163: image-first layout — filename/mimetype/size are not persistent row
+  // text, and hover/focus reveals image-scoped controls over the image.
+  await expect(article.getByText("photo.jpg")).toHaveCount(0);
+  await expect(article.getByText("image/jpeg")).toHaveCount(0);
+  const hoverActions = article.locator(".message-media-hover-actions");
+  await expect(hoverActions).toHaveCSS("opacity", "0");
+  const frame = await article.locator(".message-media-figure").boundingBox();
+  expect(frame).not.toBeNull();
+  for (const control of await article.locator(".message-media-hover-action, .message-media-image-badge").all()) {
+    const box = await control.boundingBox();
+    expect(box).not.toBeNull();
+    expect(box!.y).toBeGreaterThanOrEqual(frame!.y);
+    expect(box!.y + box!.height).toBeLessThanOrEqual(frame!.y + frame!.height + 1);
+    expect(box!.x).toBeGreaterThanOrEqual(frame!.x);
+    expect(box!.x + box!.width).toBeLessThanOrEqual(frame!.x + frame!.width + 1);
+  }
+  await img.hover();
+  await expect(hoverActions).toHaveCSS("opacity", "1");
+  await page.keyboard.press("Tab");
+  await expect(hoverActions).toHaveCSS("opacity", "1");
+  await expect(
+    article.getByRole("button", { name: "Show media details for photo.jpg" })
+  ).toBeVisible();
+  await expect(
+    article.getByRole("button", { name: t("timeline.downloadMedia", { filename: "photo.jpg" }) })
+  ).toBeVisible();
+});

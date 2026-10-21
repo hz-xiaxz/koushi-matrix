@@ -83,6 +83,7 @@
   --media-image-max-inline: 420px;
   --media-image-max-block: 260px;
   --media-action-size: 30px;
+  --media-action-inset: 6px;
   --r-lg: 12px;
   --r-pill: 999px;
 
@@ -5121,6 +5122,8 @@ button:disabled {
   aspect-ratio: var(--media-frame-aspect-ratio, 16 / 9);
   border-radius: var(--r-md);
   background: var(--surface);
+  /* #1574: extreme panorama ratios must not clip the image actions/badge. */
+  min-block-size: calc(var(--media-action-size) + 2 * var(--media-action-inset));
 }
 
 .message-media-open {
@@ -5179,8 +5182,8 @@ button:disabled {
 
 .message-media-hover-actions {
   position: absolute;
-  inset-block-start: 6px;
-  inset-inline-end: 6px;
+  inset-block-start: var(--media-action-inset);
+  inset-inline-end: var(--media-action-inset);
   display: inline-flex;
   gap: 4px;
   opacity: 0;
@@ -5211,8 +5214,8 @@ button:disabled {
 
 .message-media-image-badge {
   position: absolute;
-  inset-block-start: 6px;
-  inset-inline-start: 6px;
+  inset-block-start: var(--media-action-inset);
+  inset-inline-start: var(--media-action-inset);
   padding: 2px 6px;
   border-radius: var(--r-md);
   font-size: 11px;

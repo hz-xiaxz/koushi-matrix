@@ -63,7 +63,6 @@ fn app_state_carries_default_non_secret_settings() {
     assert_eq!(
         state.settings.values.timeline,
         TimelineSettings {
-            auto_load_older_messages: true,
             thread_root_order: TimelineThreadRootOrder::LatestReply,
         }
     );
@@ -109,7 +108,6 @@ fn settings_loaded_replaces_values_without_requiring_a_session() {
             ..MediaSettings::default()
         },
         timeline: TimelineSettings {
-            auto_load_older_messages: true,
             thread_root_order: TimelineThreadRootOrder::RootEvent,
         },
         thread_list_order: ThreadListOrder::LatestReply,
@@ -228,7 +226,7 @@ fn settings_values_deserialize_legacy_without_media_as_default_ask() {
 }
 
 #[test]
-fn settings_values_deserialize_legacy_without_timeline_as_default_true() {
+fn settings_values_deserialize_legacy_without_timeline_as_default() {
     let values = serde_json::from_str::<SettingsValues>(
         r#"{
   "locale": { "language_tag": null, "text_direction": "auto" },
@@ -246,7 +244,6 @@ fn settings_values_deserialize_legacy_without_timeline_as_default_true() {
     assert_eq!(
         values.timeline,
         TimelineSettings {
-            auto_load_older_messages: true,
             thread_root_order: TimelineThreadRootOrder::LatestReply,
         }
     );
@@ -279,12 +276,6 @@ fn settings_values_deserialize_legacy_without_composer_as_default_math_on() {
 }
 
 #[test]
-fn timeline_auto_load_older_messages_defaults_to_true() {
-    let values = koushi_state::SettingsValues::default();
-    assert!(values.timeline.auto_load_older_messages);
-}
-
-#[test]
 fn timeline_thread_root_order_defaults_to_latest_reply() {
     assert_eq!(
         TimelineSettings::default().thread_root_order,
@@ -303,7 +294,6 @@ fn timeline_thread_root_order_patch_accepts_root_event_and_legacy_settings_defau
             patch: SettingsPatch {
                 timeline: Some(TimelineSettings {
                     thread_root_order: TimelineThreadRootOrder::RootEvent,
-                    ..TimelineSettings::default()
                 }),
                 ..SettingsPatch::default()
             },
@@ -329,7 +319,7 @@ fn timeline_thread_root_order_patch_accepts_root_event_and_legacy_settings_defau
 }
 
 #[test]
-fn missing_timeline_settings_backfill_auto_load_to_true() {
+fn missing_timeline_settings_use_default_thread_order() {
     let json = r#"{
       "locale": {"language_tag": null, "text_direction": "auto"},
       "appearance": {"theme": "system"},
@@ -340,11 +330,11 @@ fn missing_timeline_settings_backfill_auto_load_to_true() {
       "media": {}
     }"#;
     let values: koushi_state::SettingsValues = serde_json::from_str(json).unwrap();
-    assert!(values.timeline.auto_load_older_messages);
+    assert_eq!(values.timeline, TimelineSettings::default());
 }
 
 #[test]
-fn explicit_false_auto_load_older_messages_is_preserved() {
+fn legacy_false_auto_load_setting_is_ignored() {
     let json = r#"{
       "locale": {"language_tag": null, "text_direction": "auto"},
       "appearance": {"theme": "system"},
@@ -356,7 +346,7 @@ fn explicit_false_auto_load_older_messages_is_preserved() {
       "timeline": {"auto_load_older_messages": false}
     }"#;
     let values: koushi_state::SettingsValues = serde_json::from_str(json).unwrap();
-    assert!(!values.timeline.auto_load_older_messages);
+    assert_eq!(values.timeline, TimelineSettings::default());
 }
 
 #[test]
@@ -570,7 +560,6 @@ fn image_upload_compression_patch_is_rust_owned_and_persisted() {
 fn timeline_thread_root_order_patch_is_rust_owned_and_persisted() {
     let mut state = AppState::default();
     let timeline_settings = TimelineSettings {
-        auto_load_older_messages: true,
         thread_root_order: TimelineThreadRootOrder::LatestReply,
     };
 
@@ -1125,5 +1114,23 @@ fn sign_out_preserves_app_level_settings_for_the_next_save() {
     assert_eq!(
         persisted.appearance.density,
         koushi_state::DisplayDensity::Compact
+    );
+}
+
+#[test]
+fn retired_auto_load_setting_is_discarded_on_round_trip() {
+    let timeline: TimelineSettings = serde_json::from_str(
+        r#"{"auto_load_older_messages":false,"thread_root_order":{"kind":"rootEvent"}}"#,
+    )
+    .unwrap();
+    assert_eq!(
+        timeline.thread_root_order,
+        TimelineThreadRootOrder::RootEvent
+    );
+    assert!(
+        serde_json::to_value(timeline)
+            .unwrap()
+            .get("auto_load_older_messages")
+            .is_none()
     );
 }

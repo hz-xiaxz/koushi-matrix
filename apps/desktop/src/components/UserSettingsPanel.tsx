@@ -843,13 +843,6 @@ export function UserSettingsPanel({
               {isSaving ? <span className="settings-save-state">{t("settings.saving")}</span> : null}
             </div>
             <div className="settings-toggle-list">
-              <TimelineToggle
-                label={t("settings.autoLoadOlderMessages")}
-                description={t("settings.autoLoadOlderMessagesDescription")}
-                settingKey="auto_load_older_messages"
-                current={selectedTimeline}
-                onSelect={onUpdateSettings}
-              />
               <TimelineThreadRootOrderToggle
                 label={t("settings.threadRootLatestReply")}
                 description={t("settings.threadRootLatestReplyDescription")}
@@ -1197,52 +1190,6 @@ function NotificationSettingToggle({
       <span className="settings-toggle-copy">
         <span className="settings-toggle-label">
           {icon}
-          <span>{label}</span>
-        </span>
-        {description ? (
-          <span className="settings-toggle-description">{description}</span>
-        ) : null}
-      </span>
-      <span className="settings-switch-track" aria-hidden="true">
-        <span className="settings-switch-thumb" />
-      </span>
-    </button>
-  );
-}
-
-function TimelineToggle({
-  label,
-  description,
-  settingKey,
-  current,
-  onSelect
-}: {
-  label: string;
-  description?: string;
-  settingKey: "auto_load_older_messages";
-  current: TimelineSettings;
-  onSelect: (patch: SettingsPatch) => void;
-}) {
-  const checked = current[settingKey];
-  return (
-    <button
-      className="settings-toggle-row"
-      type="button"
-      role="switch"
-      aria-checked={checked}
-      aria-label={label}
-      onClick={() => {
-        onSelect({
-          timeline: {
-            ...current,
-            [settingKey]: !checked
-          }
-        });
-      }}
-    >
-      <span className="settings-toggle-copy">
-        <span className="settings-toggle-label">
-          <History size={15} aria-hidden="true" />
           <span>{label}</span>
         </span>
         {description ? (
