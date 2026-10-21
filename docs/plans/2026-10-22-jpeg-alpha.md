@@ -68,10 +68,26 @@ Independent review is not required for this risk scope.
 
 - Focused media suite: 49 tests passed; Clippy's checked-division finding was
   corrected without a lint suppression.
-- Frontend: typecheck, lint and all 2,251 Vitest tests passed.
+- Frontend before integrating the latest main: typecheck, lint and all 2,251
+  Vitest tests passed; the integrated branch is rechecked in PR CI.
 - Full workspace, Rust lint/stack gates, local Tuwunel/Synapse QA, documentation
   checks, and PR CI results are tracked in the validation section of PR #1582
   before merge; this worklog records the focused verify-first evidence.
 - Self-review traces production initial/lazy/native/thumbnail callers, keeps
   public contracts unchanged, and checks new test files and the guide alongside
   the complete diff. No account content is used in any review material.
+
+## Merge-gate evidence
+
+- The final image sources passed 4,414 tests in the feature-unified workspace
+  run (`--exclude sidebar-composition --exclude key-management`). Workspace and
+  QA Clippy, release Clippy with the Rust stack lints, formatting, and all three
+  release `stack_budget` checks passed.
+- The extra Core aggregate lane stops at `native attention candidate was not
+  projected`, before any image work. An unchanged main checkout (`b11f0ee1`,
+  whose Rust sources match the original base) reproduced the same failure.
+  This is a pre-existing native-attention QA fixture issue, not a passing gate.
+  The required SDK-only both-server lane and focused Core media lane are
+  tracked separately in the PR validation record.
+- Latest main was merged into the isolated task branch. Its changes affect
+  thread timestamp UI/help only; the tested Rust source blobs remain identical.
