@@ -79,6 +79,7 @@ import { EntityAvatar } from "../Shell";
 import { ImeSafeForm } from "../ImeTextControl";
 import type { TimelineTransport } from "./TimelineTransport";
 import { MessageMeta } from "./MessageMeta";
+import { MessageTimestamp } from "./MessageTimestampLabel";
 import { formatMessageTimestamp } from "./messageTimestamp";
 import { ReceiptReaders } from "./ReceiptReaders";
 import {
@@ -764,6 +765,8 @@ export function TimelineItemRow({
     canViewSource ||
     canForward;
   const canShowThreadSummary = Boolean(showThreadSummary && eventId && item.thread_summary);
+  const separatePostingTime = presentationContext === "room" && canShowThreadSummary && activityId !== eventId;
+  const postingTimestampMs = contentTimestampMs ?? item.timestamp_ms ?? null;
   const canShowReactions = !isRedacted && !isEditing && item.reactions.length > 0;
   const senderAvatar = resolvedAvatar(item.sender_avatar, profile?.avatar, ownAvatar);
   const senderDisplayLabel = peopleFacingLabel(item.sender_label);
@@ -1077,7 +1080,7 @@ export function TimelineItemRow({
         <div className="message-heading">
           <MessageMeta
             senderDisplayLabel={senderDisplayLabel}
-            timestampMs={contentTimestampMs ?? item.timestamp_ms ?? null}
+            timestampMs={separatePostingTime ? null : postingTimestampMs}
             isEdited={item.is_edited}
             isRedacted={isRedacted}
             sendStateKind={sendStateKind}
@@ -1099,6 +1102,12 @@ export function TimelineItemRow({
             }
           />
         </div>
+        {separatePostingTime && postingTimestampMs !== null ? (
+          <div className="message-posted-at">
+            <span>{t("timeline.postedAt")}</span>
+            <MessageTimestamp timestampMs={postingTimestampMs} style="posted" />
+          </div>
+        ) : null}
         {replyQuoteContent}
         {mediaContent ? (
           <>
@@ -1238,25 +1247,32 @@ export function TimelineItemRow({
           </button>
         ) : null}
         {canShowThreadSummary ? (
-          <button
-            className="thread-summary-chip"
-            type="button"
-            aria-label={t("timeline.openThreadSummary", { summary: threadSummaryText })}
-            onClick={submitOpenThread}
-          >
-            <MessageCircle size={13} />
-            <span>
-              {threadSummary && threadSummary.template ? (
-                <ThreadSummaryTemplateText
-                  template={threadSummary.template}
-                  values={threadSummary.values}
-                />
-              ) : (
-                threadSummary?.count
-              )}
-              {threadSummary?.timestamp ? <> · {threadSummary.timestamp}</> : null}
-            </span>
-          </button>
+          <div className="thread-summary">
+            <button
+              className="thread-summary-chip"
+              type="button"
+              aria-label={t("timeline.openThreadSummary", { summary: threadSummaryText })}
+              onClick={submitOpenThread}
+            >
+              <MessageCircle size={13} />
+              <span>
+                {threadSummary && threadSummary.template ? (
+                  <ThreadSummaryTemplateText
+                    template={threadSummary.template}
+                    values={threadSummary.values}
+                  />
+                ) : (
+                  threadSummary?.count
+                )}
+              </span>
+            </button>
+            {item.thread_summary?.latest_timestamp_ms != null ? (
+              <div className="thread-latest-reply">
+                <span>{t("timeline.latestReplyAt")}</span>
+                <MessageTimestamp timestampMs={item.thread_summary.latest_timestamp_ms} style="activity" />
+              </div>
+            ) : null}
+          </div>
         ) : null}
         {canShowReactions || receiptTotalCount > 0 ? (
           <div className="message-status-row">

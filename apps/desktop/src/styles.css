@@ -3550,6 +3550,24 @@ button:disabled {
   line-height: 1;
 }
 
+.message-posted-at,
+.thread-latest-reply {
+  display: flex;
+  align-items: baseline;
+  flex-wrap: wrap;
+  gap: 4px 8px;
+  color: var(--text-muted);
+  font-size: 12px;
+}
+
+.message-posted-at {
+  margin-block: 2px 6px;
+}
+
+.thread-latest-reply {
+  margin-block-start: 4px;
+}
+
 .message-actions {
   display: inline-flex;
   gap: 2px;

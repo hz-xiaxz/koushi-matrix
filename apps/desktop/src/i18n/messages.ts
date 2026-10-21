@@ -1737,6 +1737,9 @@ export type MessageId =
   | "timeline.notice.liveLocation"
   | "timeline.notice.call"
   | "timeline.editedMessage"
+  | "timeline.postedAt"
+  | "timeline.latestReplyAt"
+  | "timeline.timestampToday"
   | "timeline.timestampYesterday"
   | "accessToken.title"
   | "accessToken.explanation"
@@ -4155,6 +4158,9 @@ const en: Catalog = {
   "timeline.notice.roomNameRemoved": "removed the room name",
   "timeline.notice.roomNameChangedGeneric": "changed the room name",
   "timeline.editedMessage": "Edited",
+  "timeline.postedAt": "Posted",
+  "timeline.latestReplyAt": "Latest reply",
+  "timeline.timestampToday": "Today",
   "timeline.timestampYesterday": "Yesterday",
   "accessToken.title": "Access token",
   "accessToken.explanation": "Use the current session token with Matrix tools. This does not create a device. Authentication may rotate or expire. The token does not include encryption keys or message history.",
@@ -6457,6 +6463,9 @@ const ja: Catalog = {
   "timeline.notice.roomNameRemoved": "ルーム名を削除しました",
   "timeline.notice.roomNameChangedGeneric": "ルーム名が変更されました",
   "timeline.editedMessage": "編集済み",
+  "timeline.postedAt": "投稿",
+  "timeline.latestReplyAt": "最終返信",
+  "timeline.timestampToday": "今日",
   "timeline.timestampYesterday": "昨日",
   "accessToken.title": "アクセストークン",
   "accessToken.explanation": "現在のセッションのトークンをMatrixツールで利用できます。新しいデバイスは作成されません。認証情報は更新・失効することがあります。暗号鍵やメッセージ履歴は含まれません。",

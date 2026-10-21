@@ -4,8 +4,7 @@ import type { ReactNode } from "react";
 import { t } from "../../i18n/messages";
 import type { PresenceKind } from "../../domain/types";
 import { useActiveLocaleKey } from "../../i18n/activeLocaleContext";
-import { formatMessageTimestamp, formatFullMessageTimestamp } from "./messageTimestamp";
-import { useCalendarPresentation } from "./useCalendarPresentation";
+import { MessageTimestamp } from "./MessageTimestampLabel";
 import { Tooltip } from "../Tooltip";
 
 function presenceLabel(presence: PresenceKind): string {
@@ -52,8 +51,6 @@ export function MessageMeta({
   onOpenSenderDeviceAdvisory?: () => void;
 }): ReactNode {
   useActiveLocaleKey();
-  useCalendarPresentation();
-  const messageTimestamp = formatMessageTimestamp(timestampMs);
   const sendStateLabel =
     sendStateKind === "sending"
       ? t("timeline.sending")
@@ -119,20 +116,7 @@ export function MessageMeta({
           )}
         </Tooltip>
       ) : null}
-      {messageTimestamp ? (
-        <Tooltip label={formatFullMessageTimestamp(timestampMs!)} placement="above" openOnFocus>
-          {(tooltipProps) => (
-            <time
-              className="message-timestamp"
-              dateTime={new Date(timestampMs!).toISOString()}
-              tabIndex={0}
-              {...tooltipProps}
-            >
-              {messageTimestamp}
-            </time>
-          )}
-        </Tooltip>
-      ) : null}
+      <MessageTimestamp timestampMs={timestampMs} />
       {isEdited && !isRedacted ? (
         <span className="message-edited">{t("timeline.editedMessage")}</span>
       ) : null}
@@ -149,4 +133,4 @@ export function MessageMeta({
   );
 }
 
-export { formatMessageTimestamp };
+export { formatMessageTimestamp } from "./messageTimestamp";
