@@ -11,7 +11,7 @@ use tokio::sync::{broadcast, mpsc};
 use crate::room::{RoomActor, RoomMessage};
 
 #[tokio::test]
-async fn demanded_mention_candidates_include_member_after_invitation_is_accepted() {
+async fn demanded_mention_candidates_follow_invite_join_and_revocation() {
     let server = MatrixMockServer::new().await;
     let client = server.client_builder().build().await;
     let session = Arc::new(koushi_sdk::MatrixClientSession::from_client_for_testing(
@@ -44,7 +44,7 @@ async fn demanded_mention_candidates_include_member_after_invitation_is_accepted
         .mount()
         .await;
     session
-        .refresh_joined_member_snapshot(room_id.as_str())
+        .refresh_active_member_snapshot(room_id.as_str())
         .await
         .unwrap();
 
@@ -77,32 +77,61 @@ async fn demanded_mention_candidates_include_member_after_invitation_is_accepted
             }))
             .await
     );
-    assert!(next_complete_candidates(&mut action_rx).await.is_empty());
-
-    server
-        .mock_sync()
-        .ok_and_run(&client, |builder| {
-            builder.add_joined_room(
-                JoinedRoomBuilder::new(room_id).add_state_event(
-                    EventFactory::new()
-                        .room(room_id)
-                        .member(member_id)
-                        .membership(MembershipState::Join)
-                        .into_raw_sync_state(),
-                ),
-            );
-        })
-        .await;
-    assert!(
-        handle
-            .send(RoomMessage::MentionMembershipChanged {
-                room_ids: Some(BTreeSet::from([room_id.to_string()])),
-            })
-            .await
+    let invited = next_complete_candidates(&mut action_rx).await;
+    assert_eq!(
+        invited.len(),
+        1,
+        "invited members must be mention candidates"
     );
-    let candidates = next_complete_candidates(&mut action_rx).await;
-    assert_eq!(candidates.len(), 1);
-    assert_eq!(candidates[0].user_id, member_id.as_str());
+    assert_eq!(invited[0].user_id, member_id.as_str());
+    assert_eq!(
+        invited[0].membership,
+        koushi_state::MentionCandidateMembership::Invited
+    );
+
+    for membership in [
+        MembershipState::Join,
+        MembershipState::Leave,
+        MembershipState::Invite,
+        MembershipState::Leave,
+        MembershipState::Ban,
+        MembershipState::Knock,
+    ] {
+        server
+            .mock_sync()
+            .ok_and_run(&client, |builder| {
+                builder.add_joined_room(
+                    JoinedRoomBuilder::new(room_id).add_state_event(
+                        EventFactory::new()
+                            .room(room_id)
+                            .member(member_id)
+                            .membership(membership.clone())
+                            .into_raw_sync_state(),
+                    ),
+                );
+            })
+            .await;
+        assert!(
+            handle
+                .send(RoomMessage::MentionMembershipChanged {
+                    room_ids: Some(BTreeSet::from([room_id.to_string()])),
+                })
+                .await
+        );
+        let candidates = next_complete_candidates(&mut action_rx).await;
+        let expected = match membership {
+            MembershipState::Join => Some(koushi_state::MentionCandidateMembership::Joined),
+            MembershipState::Invite => Some(koushi_state::MentionCandidateMembership::Invited),
+            _ => None,
+        };
+        if let Some(expected) = expected {
+            assert_eq!(candidates.len(), 1);
+            assert_eq!(candidates[0].user_id, member_id.as_str());
+            assert_eq!(candidates[0].membership, expected);
+        } else {
+            assert!(candidates.is_empty());
+        }
+    }
     assert!(handle.send(RoomMessage::Shutdown).await);
     handle.join().await;
 }

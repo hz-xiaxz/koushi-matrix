@@ -1236,6 +1236,11 @@ function MentionOption({
         <span className="mention-option-label" dir="auto">
           {displayLabel}
         </span>
+        {candidate.membership === "invited" && (
+          <span className="mention-option-meta mention-option-membership">
+            {t("people.membershipInvited")}
+          </span>
+        )}
         <span className="mention-option-meta" dir="auto" aria-hidden="true">
           {meta}
         </span>
@@ -1258,7 +1263,8 @@ function mentionOptionMeta(candidate: MentionCandidate): string {
 function mentionOptionAriaLabel(candidate: MentionCandidate): string {
   const meta = mentionOptionMeta(candidate);
   const label = peopleFacingLabel(candidate.label);
-  return meta ? `${label} ${meta}` : label;
+  const membership = candidate.membership === "invited" ? t("people.membershipInvited") : "";
+  return [label, membership, meta].filter(Boolean).join(" ");
 }
 
 const ThreadComposer = memo(function ThreadComposer({

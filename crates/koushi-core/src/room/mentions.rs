@@ -5,7 +5,7 @@ use crate::mention_candidates::{MentionMemberInput, project_candidates};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_protocol::failure::{CoreFailure, RoomFailureKind};
 use koushi_protocol::ids::RequestId;
-use koushi_sdk::{MatrixClientSession, MatrixJoinedMemberSnapshot, MatrixRoomOperationError};
+use koushi_sdk::{MatrixActiveMemberSnapshot, MatrixClientSession, MatrixRoomOperationError};
 use koushi_state::{
     AppAction, MentionCandidatesCompleteness, MentionCandidatesFailureKind, MentionSurface,
     RoomMentionPermission,
@@ -132,7 +132,7 @@ impl RoomActor {
             "accepted",
         );
 
-        match session.joined_member_snapshot_no_sync(&room_id).await {
+        match session.active_member_snapshot_no_sync(&room_id).await {
             Ok(snapshot) => {
                 self.mention_member_snapshots
                     .insert(room_id.clone(), snapshot.clone());
@@ -154,7 +154,7 @@ impl RoomActor {
         room_id: String,
         session_generation: u64,
         refresh_generation: u64,
-        result: Result<MatrixJoinedMemberSnapshot, MatrixRoomOperationError>,
+        result: Result<MatrixActiveMemberSnapshot, MatrixRoomOperationError>,
     ) {
         if session_generation != self.mention_session_generation
             || self.mention_refresh_generations.get(&room_id) != Some(&refresh_generation)
@@ -213,7 +213,7 @@ impl RoomActor {
             "started",
         );
         executor::spawn(async move {
-            let result = session.refresh_joined_member_snapshot(&room_id).await;
+            let result = session.refresh_active_member_snapshot(&room_id).await;
             let _ = self_tx
                 .send(RoomMessage::MentionMembersRefreshed {
                     room_id,
@@ -250,7 +250,7 @@ impl RoomActor {
             // An update supersedes an in-flight refresh for this room. Its
             // completion is fenced by the replacement refresh generation.
             self.mention_refresh_generations.remove(&room_id);
-            match session.joined_member_snapshot_no_sync(&room_id).await {
+            match session.active_member_snapshot_no_sync(&room_id).await {
                 Ok(snapshot) => {
                     self.mention_member_snapshots
                         .insert(room_id.clone(), snapshot.clone());
@@ -304,7 +304,7 @@ impl RoomActor {
         &self,
         room_id: &str,
         surface: MentionSurface,
-        snapshot: &MatrixJoinedMemberSnapshot,
+        snapshot: &MatrixActiveMemberSnapshot,
     ) {
         let Some(demand) = self
             .mention_demands
@@ -324,6 +324,7 @@ impl RoomActor {
                 .members
                 .iter()
                 .map(|member| MentionMemberInput {
+                    membership: member.membership,
                     user_id: member.user_id.clone(),
                     room_display_name: member.display_name.clone(),
                     profile_display_name: None,

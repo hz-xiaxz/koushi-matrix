@@ -1,5 +1,11 @@
 # Design: Room People Projection and People-Facing Labels (#380, #355, #374)
 
+> Membership amendment (#1511, 2026-10-21): the joined-only mention eligibility
+> below is superseded by `docs/architecture/state-machine.md`. Candidates now
+> include joined and invited room members, with actual membership retained and
+> joined members ranked first within each match tier. All other scope,
+> completeness, permission, and ownership constraints remain in force.
+
 Status: approved in chat on 2026-07-30
 Issues:
 

@@ -264,7 +264,7 @@ fn local_member_profile_debug_redacts_identifiers_names_and_mxc_uris() {
         role_options: Vec::new(),
         user_trust: Some(super::MatrixUserTrustState::Verified),
     };
-    let snapshot = super::MatrixJoinedMemberSnapshot {
+    let snapshot = super::MatrixActiveMemberSnapshot {
         members: vec![summary],
         complete: true,
         room_mention_allowed: Some(true),

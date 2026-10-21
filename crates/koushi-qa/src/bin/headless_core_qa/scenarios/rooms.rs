@@ -425,6 +425,38 @@ pub(super) async fn run_room_people_projection_stage(
         "room people reinvite",
     )
     .await?;
+    wait_for_mention_target(
+        conn_a,
+        room_id,
+        MentionSurface::Main,
+        None,
+        "room people invited candidates before rejoin",
+        |target| {
+            target.completeness == MentionCandidatesCompleteness::Complete
+                && target.candidates.iter().any(|candidate| {
+                    candidate.user_id == user_b_id
+                        && candidate.membership == koushi_state::MentionCandidateMembership::Invited
+                })
+        },
+    )
+    .await?;
+    let invited_thread = query_mention_candidates(
+        conn_a,
+        account_key_a,
+        room_id,
+        MentionSurface::Thread,
+        &config.user_b,
+        "room people invited thread candidates",
+    )
+    .await?;
+    if invited_thread.candidates.len() != 1
+        || invited_thread.candidates[0].user_id != user_b_id
+        || invited_thread.candidates[0].membership
+            != koushi_state::MentionCandidateMembership::Invited
+    {
+        return Err("room people: invited member was not projected for thread".to_owned());
+    }
+    println!("room_people_invited_scope=ok");
     let rejoin_id = conn_b.next_request_id();
     conn_b
         .command(CoreCommand::Room(RoomCommand::JoinRoom {
@@ -440,6 +472,21 @@ pub(super) async fn run_room_people_projection_stage(
         MentionSurface::Main,
         [&user_a_id, &user_b_id],
         "room people candidates after rejoin",
+    )
+    .await?;
+    wait_for_mention_target(
+        conn_a,
+        room_id,
+        MentionSurface::Main,
+        None,
+        "room people joined membership after rejoin",
+        |target| {
+            target.completeness == MentionCandidatesCompleteness::Complete
+                && target.candidates.iter().any(|candidate| {
+                    candidate.user_id == user_b_id
+                        && candidate.membership == koushi_state::MentionCandidateMembership::Joined
+                })
+        },
     )
     .await?;
     println!("room_people_membership_refresh=ok");

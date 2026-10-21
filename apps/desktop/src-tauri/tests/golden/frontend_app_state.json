@@ -709,7 +709,7 @@
                   }
                 },
                 "display_label": "Fixture User",
-                "membership": "joined",
+                "membership": "invited",
                 "original_display_label": "Fixture User",
                 "user_id": "@fixture:example.invalid"
               }

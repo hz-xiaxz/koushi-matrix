@@ -89,8 +89,8 @@ Crate responsibilities:
   React sees labels. Normal people-facing labels remain optional and do not
   promote an MXID when no friendly label exists. `ProfileState.users` is an
   account-scoped cache, not room-membership evidence.
-  `AppState.mention_candidates` is the room/surface-keyed, joined-member-only
-  autocomplete projection. Rust owns membership eligibility, query
+  `AppState.mention_candidates` is the room/surface-keyed autocomplete
+  projection of joined and invited members. Rust owns membership eligibility, query
   normalization, Unicode/CJK matching, deterministic ranking, completeness,
   `@room` permission, and stale-result fencing; React owns only popup
   visibility/focus and typed mention intent. Timeline relabeling after profile
@@ -180,8 +180,8 @@ Crate responsibilities:
   Room member summaries retain SDK membership separately from power-level roles:
   People and profile views label joined and invited members explicitly. Missing
   membership in older snapshots is unknown, never inferred as joined from a
-  `User` role. Mention eligibility remains joined-only. Element Web marks invite
-  tiles and Element X iOS separates invited/joined members; desktop uses explicit
+  `User` role. Mention eligibility includes joined and invited members (#1511).
+  Element Web marks invite tiles and Element X iOS separates invited/joined members; desktop uses explicit
   status labels in its existing list and profile layout.
   Room list/title labels are also Rust projections: `RoomSummary.display_label`
   is the normal display value for room headers, sidebar entries, forward/search
@@ -535,8 +535,8 @@ Each account remains an in-process actor system in `koushi-core`:
   operations, invite accept/decline, DM start, public directory query and
   join-by-alias, unread counts, DM classification, and Matrix room tags
   (`m.tag` favourite / low priority). It also owns the demanded room member
-  directory for mention autocomplete: cached `JOIN` members produce a
-  fail-closed partial projection, incomplete lazy-loaded membership triggers
+  directory for mention autocomplete: cached `ACTIVE` (join + invite) members
+  produce a fail-closed partial projection, incomplete lazy-loaded membership triggers
   one SDK refresh, and base-room membership updates invalidate and recompute
   every demanded main/thread target for that room.
   Pinned-event body fetches run as actor-owned background work; room and Space

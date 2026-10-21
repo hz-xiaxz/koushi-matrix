@@ -1,11 +1,12 @@
 use koushi_state::{
     AvatarImage, AvatarThumbnailState, MentionCandidate, MentionCandidateMembership,
-    RoomMentionPermission, cjk_display_sort_key, normalize_cjk_search_text,
+    RoomMemberMembership, RoomMentionPermission, cjk_display_sort_key, normalize_cjk_search_text,
 };
 
 #[derive(Clone, Debug, Eq, PartialEq)]
 pub(crate) struct MentionMemberInput {
     pub user_id: String,
+    pub membership: RoomMemberMembership,
     pub room_display_name: Option<String>,
     pub profile_display_name: Option<String>,
     pub local_alias: Option<String>,
@@ -27,6 +28,11 @@ pub(crate) fn project_candidates(
     let mut ranked = members
         .into_iter()
         .filter_map(|member| {
+            let (membership, membership_rank) = match member.membership {
+                RoomMemberMembership::Joined => (MentionCandidateMembership::Joined, 0),
+                RoomMemberMembership::Invited => (MentionCandidateMembership::Invited, 1),
+                _ => return None,
+            };
             let original_display_label = friendly_value(member.room_display_name.as_deref())
                 .or_else(|| friendly_value(member.profile_display_name.as_deref()))
                 .map(str::to_owned);
@@ -52,15 +58,17 @@ pub(crate) fn project_candidates(
                     mxc_uri,
                     thumbnail: AvatarThumbnailState::NotRequested,
                 }),
-                membership: MentionCandidateMembership::Joined,
+                membership,
             };
-            Some((rank, sort_key, member.user_id, candidate))
+            Some((rank, membership_rank, sort_key, member.user_id, candidate))
         })
         .collect::<Vec<_>>();
     ranked.sort_by(
-        |(left_rank, left_sort, left_id, _), (right_rank, right_sort, right_id, _)| {
+        |(left_rank, left_membership, left_sort, left_id, _),
+         (right_rank, right_membership, right_sort, right_id, _)| {
             left_rank
                 .cmp(right_rank)
+                .then_with(|| left_membership.cmp(right_membership))
                 .then_with(|| left_sort.cmp(right_sort))
                 .then_with(|| left_id.cmp(right_id))
         },
@@ -69,7 +77,7 @@ pub(crate) fn project_candidates(
     MentionCandidatesProjection {
         candidates: ranked
             .into_iter()
-            .map(|(_, _, _, candidate)| candidate)
+            .map(|(_, _, _, _, candidate)| candidate)
             .collect(),
         room_mention_included: room_mention_permission == RoomMentionPermission::Allowed
             && match_rank(&normalized_query, ["room"].into_iter()).is_some(),
