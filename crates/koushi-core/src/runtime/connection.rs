@@ -487,7 +487,10 @@ impl CoreCommandHandle {
             | CoreCommandEnvelope::ReaderPrepared(_)
             | CoreCommandEnvelope::DirectSearch { .. }
             | CoreCommandEnvelope::DirectAttachment { .. }
-            | CoreCommandEnvelope::DirectRoomMessages { .. } => {
+            | CoreCommandEnvelope::DirectRoomMessages { .. }
+            | CoreCommandEnvelope::DirectRecentActivity { .. }
+            | CoreCommandEnvelope::DirectSessionAccessToken { .. }
+            | CoreCommandEnvelope::ValidateSessionAccessToken { .. } => {
                 unreachable!("composer admission creates a public command")
             }
             #[cfg(test)]
@@ -580,7 +583,10 @@ impl CoreConnectionTestControl {
         self.command_rx.recv().await.map(|envelope| match envelope {
             CoreCommandEnvelope::DirectSearch { .. }
             | CoreCommandEnvelope::DirectAttachment { .. }
-            | CoreCommandEnvelope::DirectRoomMessages { .. } => {
+            | CoreCommandEnvelope::DirectRoomMessages { .. }
+            | CoreCommandEnvelope::DirectRecentActivity { .. }
+            | CoreCommandEnvelope::DirectSessionAccessToken { .. }
+            | CoreCommandEnvelope::ValidateSessionAccessToken { .. } => {
                 unreachable!("direct operations are not public commands")
             }
             CoreCommandEnvelope::Public {
@@ -692,6 +698,96 @@ impl CoreConnection {
         result
             .await
             .map_err(|_| AttachmentFetchFailure::AccountInactive)?
+    }
+
+    /// Explicit private reply; never joins snapshot/event replay.
+    pub async fn current_session_access_token(
+        &self,
+        expected: koushi_state::SessionInfo,
+    ) -> Result<
+        crate::session_access_token::SessionAccessToken,
+        crate::session_access_token::SessionAccessTokenError,
+    > {
+        use crate::session_access_token::SessionAccessTokenError as Failure;
+        let (response, result) = oneshot::channel();
+        self.command_tx
+            .send(CoreCommandEnvelope::DirectSessionAccessToken {
+                expected: expected.clone(),
+                response,
+            })
+            .await
+            .map_err(|_| Failure::AccountInactive)?;
+        let token = result.await.map_err(|_| Failure::AccountInactive)??;
+        self.validate_session_access_token(&token).await?;
+        Ok(token)
+    }
+
+    /// Recheck immediately before an adapter delivers an already acquired reply.
+    pub async fn validate_session_access_token(
+        &self,
+        token: &crate::session_access_token::SessionAccessToken,
+    ) -> Result<(), crate::session_access_token::SessionAccessTokenError> {
+        use crate::session_access_token::SessionAccessTokenError as Failure;
+        let (response, result) = oneshot::channel();
+        self.command_tx
+            .send(CoreCommandEnvelope::ValidateSessionAccessToken {
+                expected: token.session().clone(),
+                revision: token.session_revision(),
+                response,
+            })
+            .await
+            .map_err(|_| Failure::AccountInactive)?;
+        if !result.await.map_err(|_| Failure::AccountInactive)? {
+            return Err(Failure::StaleSession);
+        }
+        Ok(())
+    }
+
+    pub fn begin_navigation_operation_for_request(
+        &self,
+        cause: koushi_diagnostics::NavigationCause,
+        origin: koushi_diagnostics::NavigationOrigin,
+        request: RequestId,
+    ) -> crate::NavigationOperation {
+        crate::navigation_diagnostics::NavigationOperation::new(
+            self.snapshot_rx.clone(),
+            cause,
+            origin,
+            request,
+        )
+    }
+
+    pub fn begin_navigation_operation(
+        &self,
+        cause: koushi_diagnostics::NavigationCause,
+        origin: koushi_diagnostics::NavigationOrigin,
+    ) -> crate::NavigationOperation {
+        crate::navigation_diagnostics::NavigationOperation::new(
+            self.snapshot_rx.clone(),
+            cause,
+            origin,
+            self.next_request_id(),
+        )
+    }
+
+    pub async fn read_recent_activity(
+        &self,
+    ) -> Result<
+        crate::direct_activity::RecentActivitySnapshot,
+        crate::direct_activity::RecentActivityFailure,
+    > {
+        let (response, result) = oneshot::channel();
+        self.command_tx
+            .send(CoreCommandEnvelope::DirectRecentActivity { response })
+            .await
+            .map_err(|_| crate::direct_activity::RecentActivityFailure::AccountInactive)?;
+        result
+            .await
+            .map_err(|_| crate::direct_activity::RecentActivityFailure::AccountInactive)?
+    }
+
+    pub fn shares_runtime_with(&self, other: &Self) -> bool {
+        self.command_tx.same_channel(&other.command_tx)
     }
 
     /// Read one page of a room's recent messages for an out-of-band caller
@@ -1440,57 +1536,82 @@ impl CoreConnection {
         room_id: String,
         timeout: Duration,
     ) -> Result<u64, SelectRoomError> {
+        self.select_room_and_wait_with_origin(
+            room_id,
+            timeout,
+            koushi_diagnostics::NavigationOrigin::Unknown,
+        )
+        .await
+    }
+
+    pub async fn select_room_and_wait_with_origin(
+        &mut self,
+        room_id: String,
+        timeout: Duration,
+        origin: koushi_diagnostics::NavigationOrigin,
+    ) -> Result<u64, SelectRoomError> {
         let deadline = tokio::time::Instant::now() + timeout;
         let baseline_generation = self.state_generation();
         let request_id = self.next_request_id();
-        tokio::time::timeout_at(
-            deadline,
-            self.command(CoreCommand::Room(RoomCommand::SelectRoom {
-                request_id,
-                room_id: room_id.clone(),
-            })),
-        )
-        .await
-        .map_err(|_| SelectRoomError::Timeout)?
-        .map_err(SelectRoomError::CommandSubmit)?;
-
-        match self
-            .wait_for_request_outcome(
-                super::request_outcome::OutcomeCorrelation::Request(request_id),
-                super::request_outcome::RequestOutcomeExpectation::RoomSelected {
-                    request_id,
-                    room_id,
-                    account_key: None,
-                    allow_initial: true,
-                },
-                baseline_generation,
+        let operation = crate::navigation_diagnostics::NavigationOperation::room_selection(
+            self.snapshot_rx.clone(),
+            origin,
+            request_id,
+            room_id.clone(),
+        );
+        let result = async {
+            tokio::time::timeout_at(
                 deadline,
+                self.command(CoreCommand::Room(RoomCommand::SelectRoom {
+                    request_id,
+                    room_id: room_id.clone(),
+                })),
             )
             .await
-        {
-            Ok(super::request_outcome::RequestOutcome::RoomSelected { generation }) => {
-                Ok(generation)
-            }
-            Ok(_) => Err(SelectRoomError::Timeout),
-            Err(super::request_outcome::RequestOutcomeError::OperationFailed { failure }) => {
-                Err(SelectRoomError::OperationFailed(failure))
-            }
-            Err(super::request_outcome::RequestOutcomeError::FailedNoOp { reason }) => {
-                Err(match reason {
-                    IntentNoOpReason::SessionNotReady => SelectRoomError::SessionNotReady,
-                    IntentNoOpReason::RoomNotInState => SelectRoomError::RoomNotInState,
-                    reason => SelectRoomError::FailedNoOp(reason),
-                })
-            }
-            Err(super::request_outcome::RequestOutcomeError::Disconnected) => {
-                Err(SelectRoomError::EventStreamClosed)
-            }
-            Err(super::request_outcome::RequestOutcomeError::TimedOut)
-            | Err(super::request_outcome::RequestOutcomeError::Lagged)
-            | Err(super::request_outcome::RequestOutcomeError::InvalidOutcome) => {
-                Err(SelectRoomError::Timeout)
+            .map_err(|_| SelectRoomError::Timeout)?
+            .map_err(SelectRoomError::CommandSubmit)?;
+
+            match self
+                .wait_for_request_outcome(
+                    super::request_outcome::OutcomeCorrelation::Request(request_id),
+                    super::request_outcome::RequestOutcomeExpectation::RoomSelected {
+                        request_id,
+                        room_id,
+                        account_key: None,
+                        allow_initial: true,
+                    },
+                    baseline_generation,
+                    deadline,
+                )
+                .await
+            {
+                Ok(super::request_outcome::RequestOutcome::RoomSelected { generation }) => {
+                    Ok(generation)
+                }
+                Ok(_) => Err(SelectRoomError::Timeout),
+                Err(super::request_outcome::RequestOutcomeError::OperationFailed { failure }) => {
+                    Err(SelectRoomError::OperationFailed(failure))
+                }
+                Err(super::request_outcome::RequestOutcomeError::FailedNoOp { reason }) => {
+                    Err(match reason {
+                        IntentNoOpReason::SessionNotReady => SelectRoomError::SessionNotReady,
+                        IntentNoOpReason::RoomNotInState => SelectRoomError::RoomNotInState,
+                        reason => SelectRoomError::FailedNoOp(reason),
+                    })
+                }
+                Err(super::request_outcome::RequestOutcomeError::Disconnected) => {
+                    Err(SelectRoomError::EventStreamClosed)
+                }
+                Err(super::request_outcome::RequestOutcomeError::TimedOut)
+                | Err(super::request_outcome::RequestOutcomeError::Lagged)
+                | Err(super::request_outcome::RequestOutcomeError::InvalidOutcome) => {
+                    Err(SelectRoomError::Timeout)
+                }
             }
         }
+        .await;
+        operation.finish(result.is_ok());
+        result
     }
 }
 

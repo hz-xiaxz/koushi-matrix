@@ -84,8 +84,8 @@ unexpected.
 ## Notifications are missing
 
 Check **Room info** for **Mute** or **Mentions only**, then check **Account
-Settings → Notifications** for desktop notifications and **App Settings →
-Notifications** for sounds and badges. Also check the operating system's
+Settings → Notifications → OS notifications** for desktop notifications,
+sounds, and badges. Also check the operating system's
 notification permission for Koushi. An unread badge and a desktop notification
 are different signals. A red badge counts locally observed unread messages;
 server-only notification counts do not create a red number or a desktop alert.

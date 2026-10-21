@@ -109,6 +109,10 @@ test("Tuwunel fixture intrinsically advertises simplified Sliding Sync", () => {
       unstableFeature: "org.matrix.simplified_msc3575",
       enabled: true,
       configuration: "intrinsic"
+    },
+    multiReaderReceipts: {
+      supported: false,
+      limitation: "sss_receipt_packing_single_reader"
     }
   });
 });

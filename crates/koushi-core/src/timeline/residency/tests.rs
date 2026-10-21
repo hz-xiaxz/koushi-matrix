@@ -19,6 +19,53 @@ use super::{
 };
 
 #[tokio::test]
+async fn settings_room_demand_retains_unrelated_rooms_and_fences_stale_or_left_targets() {
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use matrix_sdk_ui::room_list_service::RoomListService;
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room_list = Arc::new(RoomListService::new(client).await.unwrap());
+    let mut manager = live_tail_test_manager(HashMap::new());
+    manager.room_list_service = Some(room_list.clone());
+    manager.current_core_generation = Some(7);
+    let space = matrix_sdk::ruma::room_id!("!settings-space:test").to_owned();
+    let other = matrix_sdk::ruma::room_id!("!unrelated:test").to_owned();
+    manager.session_subscribed_rooms.insert(other.clone());
+
+    manager
+        .handle_settings_room_observed(6, space.clone())
+        .await;
+    assert_eq!(
+        manager.session_subscribed_rooms,
+        BTreeSet::from([other.clone()])
+    );
+    manager
+        .handle_settings_room_observed(7, space.clone())
+        .await;
+    let generation = room_list.subscription_generation();
+    manager
+        .handle_settings_room_observed(7, space.clone())
+        .await;
+    assert_eq!(
+        manager.session_subscribed_rooms,
+        BTreeSet::from([other.clone(), space.clone()])
+    );
+    assert!(manager.subscribed_room_leases.is_empty());
+    assert_eq!(
+        room_list.active_room_subscriptions(),
+        BTreeSet::from([other.clone(), space.clone()])
+    );
+    assert_eq!(room_list.subscription_generation(), generation);
+
+    manager.session_subscribed_rooms.remove(&space);
+    manager
+        .room_leave_states
+        .insert(space.clone(), RoomLeaveState::LeftObserved);
+    manager.handle_settings_room_observed(7, space).await;
+    assert_eq!(manager.session_subscribed_rooms, BTreeSet::from([other]));
+}
+
+#[tokio::test]
 async fn observed_leave_quiesces_timeline_and_tombstones_room() {
     let room_id = matrix_sdk::ruma::room_id!("!left:test").to_owned();
     let key = TimelineKey::room(AccountKey("@a:test".to_owned()), room_id.as_str());
@@ -387,4 +434,84 @@ async fn renderer_recovery_for_absent_thread_key_does_not_build_an_actor() {
         }) => {}
         other => panic!("expected a NotSubscribed terminal, got {other:?}"),
     }
+}
+
+#[tokio::test]
+async fn settings_room_demand_forwards_backend_generation_not_local_list_generation() {
+    use crate::room::{RoomActor, RoomMessage};
+    use koushi_sdk::MatrixClientSession;
+    use koushi_state::SessionInfo;
+    use koushi_state::{RoomListSource, SessionAuthenticationMethod};
+    use matrix_sdk::test_utils::mocks::MatrixMockServer;
+    use matrix_sdk_test::JoinedRoomBuilder;
+    use matrix_sdk_ui::room_list_service::RoomListService;
+    let server = MatrixMockServer::new().await;
+    let client = server.client_builder().build().await;
+    let room_id = matrix_sdk::ruma::room_id!("!settings-space:test");
+    server
+        .sync_room(&client, JoinedRoomBuilder::new(room_id))
+        .await;
+    let session = Arc::new(MatrixClientSession::from_client_for_testing(
+        client.clone(),
+        SessionInfo {
+            homeserver: server.uri(),
+            user_id: client.user_id().unwrap().to_string(),
+            device_id: client.device_id().unwrap().to_string(),
+            authentication_method: SessionAuthenticationMethod::Unknown,
+        },
+    ));
+    let service = Arc::new(RoomListService::new(client).await.unwrap());
+    let mut manager = live_tail_test_manager(HashMap::new());
+    let (action_tx, _action_rx) = mpsc::channel(64);
+    let (event_tx, _event_rx) = tokio::sync::broadcast::channel(64);
+    let mut actor = RoomActor::spawn(
+        action_tx,
+        event_tx,
+        crate::SlidingSyncDiagnostics::default(),
+    );
+    actor.bind_timeline_residency(
+        session.clone(),
+        manager.room_subscription_residency_test_handle(),
+    );
+    actor
+        .send(RoomMessage::SessionEstablished {
+            session: session.clone(),
+            account_epoch: 1,
+        })
+        .await;
+    actor
+        .send(RoomMessage::SyncStarted {
+            session,
+            room_list_service: service,
+            source: RoomListSource::Live,
+            backend_generation: 42,
+        })
+        .await;
+    actor
+        .send(RoomMessage::TestSettingsRoomDemand {
+            room_id: room_id.to_string(),
+        })
+        .await;
+    loop {
+        let message =
+            tokio::time::timeout(std::time::Duration::from_secs(10), manager.msg_rx.recv())
+                .await
+                .unwrap()
+                .unwrap();
+        if let super::TimelineMessage::SettingsRoomObserved {
+            core_generation,
+            room_id: observed,
+            acknowledged,
+        } = message
+        {
+            let _ = acknowledged.send(());
+            assert_eq!(observed, room_id);
+            assert_eq!(
+                core_generation, 42,
+                "local RoomActor list generation is 1; manager owns backend generation 42"
+            );
+            break;
+        }
+    }
+    actor.shutdown().await;
 }

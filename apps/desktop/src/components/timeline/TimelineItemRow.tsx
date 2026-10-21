@@ -1,3 +1,4 @@
+import { useCalendarPresentation } from "./useCalendarPresentation";
 import {
   Copy,
   Edit3,
@@ -77,7 +78,8 @@ import { Composer } from "../composer";
 import { EntityAvatar } from "../Shell";
 import { ImeSafeForm } from "../ImeTextControl";
 import type { TimelineTransport } from "./TimelineTransport";
-import { formatMessageTimestamp, MessageMeta } from "./MessageMeta";
+import { MessageMeta } from "./MessageMeta";
+import { formatMessageTimestamp } from "./messageTimestamp";
 import { ReceiptReaders } from "./ReceiptReaders";
 import {
   TimelineMediaAttachment,
@@ -448,6 +450,8 @@ export function TimelineItemRow({
   onOpenContextMenu?: OpenContextMenu;
   mediaDownload?: TimelineMediaDownloadState;
 }) {
+
+  useCalendarPresentation();
   const itemDomId = timelineItemDomId(item.id);
   const domId = rowId ?? itemDomId;
   const syntheticId = "Synthetic" in item.id ? item.id.Synthetic.synthetic_id : null;

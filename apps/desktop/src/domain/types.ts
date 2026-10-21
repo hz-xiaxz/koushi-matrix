@@ -103,7 +103,7 @@ export type ComposerDraftAccountOwner = SavedSessionInfo;
  * (`AccountNotificationsSnapshot.keywords`), the account's own `content` rules
  * in server order with their server-owned enabled flag (#1427).
  */
-export const SNAPSHOT_SCHEMA_VERSION = 11;
+export const SNAPSHOT_SCHEMA_VERSION = 12;
 
 /**
  * Snapshot state. #87 Phase 4 sectioned this into domain (Matrix/product, Rust-owned,
@@ -119,6 +119,7 @@ export interface AppState {
 
 export interface AppDomainState {
   session: SessionState;
+  session_epoch?: number;
   session_lock_reason: SessionLockReason | null;
   secure_backup_gate: SecureBackupGateState;
   current_session_status: CurrentSessionStatusState;
@@ -2387,6 +2388,7 @@ export interface RoomPermissionFacts {
   can_edit_settings: boolean;
   /** May send `m.room.join_rules`, which is all changing who can join needs (#935). */
   can_change_join_rule: boolean;
+  can_change_topic: boolean;
   can_edit_roles: boolean;
   can_invite: boolean;
   can_kick: boolean;

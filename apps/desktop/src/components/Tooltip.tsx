@@ -1,6 +1,7 @@
 import {
   type CSSProperties,
   type KeyboardEvent,
+  type FocusEvent,
   type MouseEvent,
   type PointerEvent,
   type ReactNode,
@@ -18,6 +19,8 @@ export type TooltipPlacement = "right" | "above" | "below";
 
 export type TooltipTriggerProps = {
   "aria-describedby"?: string;
+  onFocus?: (event: FocusEvent<HTMLElement>) => void;
+  onBlur?: (event: FocusEvent<HTMLElement>) => void;
   onKeyDown: (event: KeyboardEvent<HTMLElement>) => void;
   onMouseEnter: (event: MouseEvent<HTMLElement>) => void;
   onMouseLeave: (event: MouseEvent<HTMLElement>) => void;
@@ -27,6 +30,8 @@ export type TooltipTriggerProps = {
 type TooltipProps = {
   children: (props: TooltipTriggerProps) => ReactNode;
   label: string;
+  /** Non-action metadata may disclose its full value to keyboard users. */
+  openOnFocus?: boolean;
   /**
    * `right` keeps the bubble beside the trigger. `above`/`below` anchor on the
    * trigger itself, which is what a toolbar or a header row wants: the control
@@ -60,7 +65,7 @@ const TOOLTIP_ANCHOR_GAP_PX = 8;
  * The shared explanation bubble for an icon-only control.
  *
  * #1388: the bubble is pointer-owned and opens on hover only. Keyboard and
- * programmatic focus must not open it — returning focus to a menu trigger after a
+ * programmatic focus must not open it by default — returning focus to a menu trigger after a
  * selection used to leave the explanation floating over the sidebar. The wrapped
  * control keeps its own `aria-label`, which is what assistive technology reads.
  */
@@ -71,7 +76,8 @@ export function Tooltip({
   align = "start",
   delayMs = 250,
   className,
-  resetKey
+  resetKey,
+  openOnFocus = false
 }: TooltipProps) {
   const tooltipId = useId();
   const [isOpen, setIsOpen] = useState(false);
@@ -286,6 +292,8 @@ export function Tooltip({
         close();
       }
     },
+    onFocus: openOnFocus ? openNow : undefined,
+    onBlur: openOnFocus ? release : undefined,
     onMouseEnter: openAfterDelay,
     onMouseLeave: release,
     onPointerDown: press

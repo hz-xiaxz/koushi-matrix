@@ -58,6 +58,7 @@ async fn demanded_mention_candidates_include_member_after_invitation_is_accepted
     assert!(
         handle
             .send(RoomMessage::SessionEstablished {
+                account_epoch: 0,
                 session: session.clone()
             })
             .await

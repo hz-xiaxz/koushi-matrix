@@ -63,6 +63,7 @@ pub type ScopedReceiptSummaryChanges =
 #[derive(Clone, Debug, Default, Eq, PartialEq, Serialize, Deserialize)]
 pub struct StateDeltaChangedSlices {
     pub session: Option<SessionState>,
+    pub session_disclosure_epoch: Option<u64>,
     pub session_lock_reason: Option<Option<koushi_state::SessionLockReason>>,
     pub secure_backup_gate: Option<SecureBackupGateState>,
     pub device_cleanup: Option<DeviceCleanupState>,

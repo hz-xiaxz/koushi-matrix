@@ -107,6 +107,7 @@ pub(crate) mod room;
 pub(crate) mod room_key_files;
 pub(crate) mod search;
 pub(crate) mod session;
+pub(crate) mod session_access_token;
 pub(crate) mod settings;
 pub(crate) mod timeline;
 pub(crate) mod views;

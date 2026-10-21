@@ -14,6 +14,12 @@ import {
   SecureImeTextField,
   type ImeInlineMentionEditorHandle
 } from "./ImeTextControl";
+import {
+  runFocusedEditorHistory,
+  focusedEditorHistoryAvailability,
+  observeEditorHistoryAvailability,
+  setNativeEditorHistoryAcceleratorsOwned
+} from "../domain/editorHistory";
 import type { ComposerDocument } from "../domain/types";
 
 const EDITOR_LABEL = "message";
@@ -1020,5 +1026,126 @@ describe("spelling replacement (#1010)", () => {
     beforeInput(control, "historyUndo");
 
     expect(control.textContent).toBe("Check regulaly today.");
+  });
+});
+
+
+describe("focused structured editor history (#1569)", () => {
+  it("native and keyboard routes each restore a mention atom exactly once", () => {
+    const onChange = vi.fn();
+    render(<ControlledMentionEditor onChange={onChange} />);
+    const control = screen.getByRole("textbox", { name: EDITOR_LABEL });
+    control.focus();
+    const after = control.lastChild!;
+    setSelection(after, 0);
+    beforeInput(control, "deleteContentBackward");
+    expect(focusedEditorHistoryAvailability()).toEqual({ undo: true, redo: false });
+    act(() => { expect(runFocusedEditorHistory("undo")).toBe(true); });
+    expect(control.querySelector("[data-composer-mention]")?.textContent).toBe("@Alice");
+    expect(onChange).toHaveBeenCalledTimes(2);
+    expect(onChange.mock.lastCall?.[0]).toEqual(mentionDocument);
+    fireEvent.keyDown(control, { key: "z", ctrlKey: true, shiftKey: true });
+    expect(control.querySelector("[data-composer-mention]")).toBeNull();
+    expect(onChange).toHaveBeenCalledTimes(3);
+    fireEvent.keyDown(control, { key: "z", metaKey: true });
+    expect(onChange.mock.lastCall?.[0]).toEqual(mentionDocument);
+    // A new mutation invalidates redo.
+    beforeInput(control, "insertText", "x");
+    expect(focusedEditorHistoryAvailability().redo).toBe(false);
+  });
+
+  it("leaves composition to the IME and disables native history while composing", () => {
+    const onChange = vi.fn();
+    render(<ControlledMentionEditor onChange={onChange} />);
+    const control = screen.getByRole("textbox", { name: EDITOR_LABEL });
+    control.focus();
+    beforeInput(control, "insertText", "x");
+    const updates = vi.fn();
+    const stop = observeEditorHistoryAvailability(updates);
+    fireEvent.compositionStart(control);
+    expect(updates).toHaveBeenLastCalledWith({ undo: false, redo: false });
+    const key = createEvent.keyDown(control, { key: "z", ctrlKey: true, isComposing: true });
+    fireEvent(control, key);
+    expect(key.defaultPrevented).toBe(false);
+    act(() => { expect(runFocusedEditorHistory("undo")).toBe(true); });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    stop();
+  });
+
+  it("lets packaged menu accelerators own Z while CtrlY remains a direct shortcut", () => {
+    const onChange = vi.fn();
+    render(<ControlledMentionEditor onChange={onChange} />);
+    const control = screen.getByRole("textbox", { name: EDITOR_LABEL });
+    control.focus();
+    beforeInput(control, "insertText", "x");
+    setNativeEditorHistoryAcceleratorsOwned(true);
+    try {
+      const key = createEvent.keyDown(control, { key: "z", metaKey: true });
+      fireEvent(control, key);
+      expect(key.defaultPrevented).toBe(false);
+      expect(onChange).toHaveBeenCalledTimes(1);
+      act(() => { runFocusedEditorHistory("undo"); });
+      expect(onChange).toHaveBeenCalledTimes(2);
+      fireEvent.keyDown(control, { key: "y", ctrlKey: true });
+      expect(onChange).toHaveBeenCalledTimes(3);
+    } finally {
+      setNativeEditorHistoryAcceleratorsOwned(false);
+    }
+  });
+
+  it("routes native Edit to the focused editor and clears availability on blur", () => {
+    const firstChange = vi.fn();
+    const secondChange = vi.fn();
+    render(<><ControlledMentionEditor onChange={firstChange} /><ControlledMentionEditor onChange={secondChange} /></>);
+    const [first, second] = screen.getAllByRole("textbox", { name: EDITOR_LABEL });
+    first.focus();
+    beforeInput(first, "insertText", "x");
+    const updates = vi.fn();
+    const stop = observeEditorHistoryAvailability(updates);
+    second.focus();
+    expect(updates).toHaveBeenLastCalledWith({ undo: false, redo: false });
+    act(() => { expect(runFocusedEditorHistory("undo")).toBe(true); });
+    expect(firstChange).toHaveBeenCalledTimes(1);
+    expect(secondChange).not.toHaveBeenCalled();
+    first.focus();
+    expect(updates).toHaveBeenLastCalledWith({ undo: true, redo: false });
+    act(() => { runFocusedEditorHistory("undo"); });
+    expect(firstChange).toHaveBeenCalledTimes(2);
+    first.blur();
+    expect(updates).toHaveBeenLastCalledWith({ undo: false, redo: false });
+    stop();
+  });
+
+  it("resets history at room and target boundaries without native fallback", () => {
+    const onChange = vi.fn();
+    const view = (syncKey: string, document: ComposerDocument) => <ImeInlineMentionEditor
+      aria-label={EDITOR_LABEL} syncKey={syncKey} document={document} onDocumentChange={onChange} />;
+    const { rerender } = render(view("room-a:main", mentionDocument));
+    const control = screen.getByRole("textbox", { name: EDITOR_LABEL });
+    control.focus();
+    beforeInput(control, "insertText", "x");
+    expect(focusedEditorHistoryAvailability().undo).toBe(true);
+    rerender(view("room-a:thread-b", mentionDocument));
+    expect(focusedEditorHistoryAvailability()).toEqual({ undo: false, redo: false });
+    act(() => { expect(runFocusedEditorHistory("undo")).toBe(true); });
+    expect(onChange).toHaveBeenCalledTimes(1);
+    rerender(view("room-b:main", { version: 2, inlines: [{ kind: "text", text: "other room" }] }));
+    act(() => { expect(runFocusedEditorHistory("redo")).toBe(true); });
+    expect(control.textContent).toBe("other room");
+    expect(onChange).toHaveBeenCalledTimes(1);
+  });
+
+  it("uses native history only for an ordinary focused input", () => {
+    const nativeUndo = vi.fn(() => true);
+    Object.defineProperty(document, "execCommand", { configurable: true, value: nativeUndo });
+    const ordinaryLabel = "ordinary";
+    render(<ImeTextField aria-label={ordinaryLabel} />);
+    const control = screen.getByRole("textbox", { name: "ordinary" });
+    control.focus();
+    expect(runFocusedEditorHistory("undo")).toBe(true);
+    expect(nativeUndo).toHaveBeenCalledExactlyOnceWith("undo");
+    control.blur();
+    expect(runFocusedEditorHistory("redo")).toBe(false);
+    expect(nativeUndo).toHaveBeenCalledTimes(1);
   });
 });

@@ -200,6 +200,7 @@ fn room_permission_facts_from_sdk(permissions: MatrixRoomPermissionFacts) -> Roo
     RoomPermissionFacts {
         can_edit_settings: permissions.can_edit_settings,
         can_change_join_rule: permissions.can_change_join_rule,
+        can_change_topic: permissions.can_change_topic,
         can_edit_roles: permissions.can_edit_roles,
         can_invite: permissions.can_invite,
         can_kick: permissions.can_kick,
@@ -283,7 +284,65 @@ impl RoomActor {
         .await;
     }
 
-    pub(super) async fn handle_load_room_settings(&self, request_id: RequestId, room_id: String) {
+    pub(super) async fn observe_loaded_topic(
+        &self,
+        updated: Option<&std::collections::BTreeSet<String>>,
+    ) {
+        let (Some(room_id), Some(session)) = (&self.settings_room_id, &self.session) else {
+            return;
+        };
+        if updated.is_some_and(|rooms| !rooms.contains(room_id)) {
+            return;
+        }
+        if let Ok((topic, can_change_topic)) =
+            koushi_sdk::get_room_topic_metadata(session, room_id).await
+        {
+            self.reduce_reliable(vec![AppAction::RoomTopicObserved {
+                room_id: room_id.clone(),
+                account_epoch: self.settings_account_epoch,
+                topic,
+                can_change_topic,
+            }])
+            .await;
+        }
+    }
+
+    /// Re-admit the retained management target after a backend handoff too.
+    pub(super) async fn admit_loaded_settings_room(&self) {
+        let (Some(target), Some(session), Some(backend_generation)) = (
+            &self.settings_room_id,
+            &self.session,
+            self.room_list_backend_generation
+                .filter(|generation| *generation != 0),
+        ) else {
+            return;
+        };
+        let Ok(room_id) = target.parse::<matrix_sdk::ruma::OwnedRoomId>() else {
+            return;
+        };
+        if !session
+            .client()
+            .get_room(&room_id)
+            .is_some_and(|room| room.state() == matrix_sdk::RoomState::Joined)
+        {
+            return;
+        }
+        // Existing admission owns the same-session binding and teardown gate;
+        // the manager owns generation/leave fences and exact reconciliation.
+        let Ok(admitted) = self.begin_residency_operation() else {
+            return;
+        };
+        let _ = admitted
+            .residency
+            .settings_room_observed(&admitted.permit, backend_generation, room_id)
+            .await;
+    }
+
+    pub(super) async fn handle_load_room_settings(
+        &mut self,
+        request_id: RequestId,
+        room_id: String,
+    ) {
         let Some(session) = &self.session else {
             self.emit_failure(request_id, CoreFailure::SessionRequired);
             return;
@@ -291,6 +350,8 @@ impl RoomActor {
 
         match koushi_sdk::get_room_settings_snapshot(session, &room_id).await {
             Ok(settings) => {
+                self.settings_room_id = Some(room_id.clone());
+                self.admit_loaded_settings_room().await;
                 let settings = room_settings_snapshot_from_sdk(settings);
                 // Request-outcome settlement may accept this exact baseline generation for an
                 // idempotent reload, so the authoritative reduction must complete before the
@@ -711,6 +772,7 @@ mod tests {
             permissions: MatrixRoomPermissionFacts {
                 can_edit_settings: true,
                 can_change_join_rule: true,
+                can_change_topic: true,
                 can_edit_roles: true,
                 can_invite: true,
                 can_kick: true,

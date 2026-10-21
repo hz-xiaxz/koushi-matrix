@@ -1745,6 +1745,8 @@ pub fn run() {
             commands::settings::clear_notification_delivery_secret,
             commands::settings::preview_notification_delivery,
             commands::settings::test_notification_delivery,
+            commands::session_access_token::current_session_access_token,
+            desktop_menu::set_native_editor_history_availability,
             desktop_menu::native_menu_label_keys,
             desktop_menu::set_native_menu_labels,
             commands::native_attention::play_native_attention_sound,

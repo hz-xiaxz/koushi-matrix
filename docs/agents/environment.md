@@ -64,6 +64,12 @@ Tuwunel with `--no-default-features` unless a Linux-oriented build profile is
 intentional: the default feature set includes deployment features such as
 `systemd`/`io_uring` that are not useful for local desktop QA.
 
+Synapse fixtures run as the invoking POSIX UID/GID, so retained data under
+`.local-secrets/headless-local-qa/` can be edited or removed without elevation.
+The generated image entrypoint is executable by that numeric identity. Existing
+fixtures created by older runners may still have foreign ownership; the runner
+does not recursively change the checkout or delete retained fixtures.
+
 ## Local gates
 
 Enable the repo pre-commit hook once per clone: `git config core.hooksPath

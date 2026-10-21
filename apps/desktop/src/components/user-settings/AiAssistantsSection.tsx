@@ -17,7 +17,6 @@ import type {
   SettingsPatch
 } from "../../domain/types";
 import { t } from "../../i18n/messages";
-import { accountTabLabel } from "../accountSignOut";
 import { mcpAccountId, mcpAccountLabel, useMcpAssistantsState } from "../useMcpAssistantsState";
 import { MCP_ALLOW_ARMING_DELAY_MS, mcpAllowLabel, mcpWantsText, useArmed } from "../McpApprovalDialog";
 
@@ -229,10 +228,10 @@ function AssistantCard({
           {NEEDS.map(need => <span role="columnheader" key={need}>{needLabel(need)}</span>)}
         </div>
         {rows.map(row => {
-          const account = mcpAccountLabel(row.account_id, accountTabs) ?? t("settings.assistantsUnknownAccount");
+          const account = row.account_id.replace(/^account:/, "");
           return (
             <div role="row" className="settings-assistant-row" key={row.account_id}>
-              <span role="rowheader">{account}</span>
+              <span role="rowheader" dir="ltr">{account}</span>
               {NEEDS.map(need => (
                 <span role="cell" key={need}>
                   <PermissionSwitch
@@ -249,7 +248,7 @@ function AssistantCard({
         })}
         {unrequested.map(tab => (
           <div role="row" className="settings-assistant-row" key={tab.id}>
-            <span role="rowheader">{accountTabLabel(tab)}</span>
+            <span role="rowheader" dir="ltr">{tab.accountKey}</span>
             <span role="cell" aria-colspan={3} className="settings-assistant-unrequested">
               {t("settings.assistantsNotRequested", { client })}
             </span>

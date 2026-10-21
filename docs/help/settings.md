@@ -556,3 +556,21 @@ select and copy the displayed URL manually.
 The [guide index](README.md) explains how to find instructions for your installed
 release. The desktop Help menu opens this short assistance dialog; the keyboard
 shortcut reference is under **App Settings → Keyboard**.
+
+
+### Current session access token
+
+Open **Account Settings → Sessions → Access token**. **Reveal** shows the current
+session's Matrix access token; **Copy** retrieves its current value again before
+copying it. The matching homeserver, Matrix ID and device ID are displayed with
+it. **Hide**, closing settings, leaving the Sessions page, locking, signing out
+or changing account/session removes the revealed value. An explicit copy stays
+in the operating system clipboard until overwritten.
+
+This is the existing session token, not a new integration device or a token with
+additional permissions. Password and OAuth/MAS sessions use the live SDK-owned
+token. OAuth tokens may rotate or expire; a copied value does not refresh itself,
+and no token is promised to be permanent. Copying it does not copy private keys,
+crypto storage, cross-signing secrets or historical room keys, and does not make
+an external client a verified E2EE device. A separately provisioned integration
+session is a different workflow. Tokens are never included in diagnostic exports.

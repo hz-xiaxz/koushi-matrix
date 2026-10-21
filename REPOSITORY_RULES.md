@@ -210,8 +210,9 @@ to upstream or revert.
   keys, and local unlock secrets.
 - Secrets MUST NOT be logged, sent to telemetry, written to crash reports,
   printed in test output, checked into fixtures, or copied into screenshots.
-  Credential/key material is not returned to the webview after entry; the single
-  exception is a freshly generated Secure Backup recovery key in the live
+  Credential/key material is not returned to the webview after entry; the narrowly scoped exceptions are current-session access-token Reveal/Copy
+  through the private on-demand Advanced Account Settings response defined in
+  the engineering rules, and a freshly generated Secure Backup recovery key in the live
   reveal state of
   [engineering rule 11](docs/policies/engineering-rules.md#secrets-and-private-data),
   never entered input echoed back. Decrypted bodies and attachment filenames

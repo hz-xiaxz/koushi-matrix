@@ -88,13 +88,13 @@ test("the switch turns the bridge off through an app-scope settings patch", asyn
 
 test("permission switches change exactly one permission for one account", async () => {
   await renderSection(state());
-  const send = screen.getByRole("switch", { name: "Send for Synthetic Workspace" });
+  const send = screen.getByRole("switch", { name: "Send for @member1:example.invalid" });
   expect(send.getAttribute("aria-checked")).toBe("false");
   expect(screen.getByText("Denied")).toBeTruthy();
   fireEvent.click(send);
   expect(fixture.setPermission).toHaveBeenCalledWith("claude-code", WORK, "send", true);
   // Switches stay disabled while a change is saving.
-  const read = screen.getByRole("switch", { name: "Read for Synthetic Workspace" }) as HTMLButtonElement;
+  const read = screen.getByRole("switch", { name: "Read for @member1:example.invalid" }) as HTMLButtonElement;
   expect(read.disabled).toBe(true);
   await waitFor(() => expect(read.disabled).toBe(false));
   fireEvent.click(read);
@@ -104,7 +104,7 @@ test("permission switches change exactly one permission for one account", async 
 test("accounts the assistant has not used yet are listed as not requested", async () => {
   await renderSection(state());
   const card = screen.getByRole("article", { name: "claude-code" });
-  expect(within(card).getByText("Member Home")).toBeTruthy();
+  expect(within(card).getByText("@member2:example.invalid")).toBeTruthy();
   expect(within(card).getByText(/Koushi will ask when claude-code first uses this account/)).toBeTruthy();
 });
 
@@ -177,7 +177,7 @@ test("permissions of an account signed in this run match its tab", async () => {
   const signInTabs = [{ ...tabs[0], id: "add:1" } as AccountTabSummary, tabs[1]];
   render(<AiAssistantsSection settings={{ enabled: true }} isSaving={false} accountTabs={signInTabs} onUpdateSettings={vi.fn()} />);
   const card = await screen.findByRole("article", { name: "claude-code" });
-  expect(within(card).getByRole("switch", { name: "Read for Synthetic Workspace" })).toBeTruthy();
+  expect(within(card).getByRole("switch", { name: "Read for @member1:example.invalid" })).toBeTruthy();
   expect(within(card).queryByText("Account not open in Koushi")).toBeNull();
   // Only the other account is listed as not requested.
   expect(within(card).getAllByText(/Koushi will ask when claude-code first uses this account/)).toHaveLength(1);
@@ -234,3 +234,20 @@ test("an outdated launcher is reported", async () => {
   expect(screen.getByText(/claude-desktop uses a launcher from an older Koushi/)).toBeTruthy();
 });
 
+
+
+test("full Matrix IDs distinguish equal display names without changing permission targets", async () => {
+  const ids = ["@member:example.invalid", "@member:other.example.invalid"];
+  const sameNameTabs = ids.map(id => tab(`account:${id}`, "Member"));
+  fixture.getState.mockResolvedValue(state({ assistants: [{
+    client_name: "claude-code", client_version: "2.1.0", last_used_ms: null,
+    accounts: ids.map(id => ({ account_id: `account:${id}`, read: true, send: false, attachments: false, denied: [] }))
+  }] }));
+  render(<AiAssistantsSection settings={{ enabled: true }} isSaving={false} accountTabs={sameNameTabs} onUpdateSettings={vi.fn()} />);
+  const card = await screen.findByRole("article", { name: "claude-code" });
+  for (const id of ids) {
+    expect(within(card).getByRole("rowheader", { name: id })).toBeTruthy();
+  }
+  fireEvent.click(within(card).getByRole("switch", { name: `Send for ${ids[1]}` }));
+  expect(fixture.setPermission).toHaveBeenCalledWith("claude-code", `account:${ids[1]}`, "send", true);
+});

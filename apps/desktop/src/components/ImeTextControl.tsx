@@ -42,6 +42,12 @@ import {
   type DocumentMutation,
   type DocumentSelection
 } from "../domain/composerDocument";
+import {
+  EDITOR_HISTORY_EVENT,
+  EDITOR_HISTORY_CHANGED,
+  nativeEditorHistoryAcceleratorsOwned,
+  type EditorHistoryRequest
+} from "../domain/editorHistory";
 import type { ComposerDocument, ComposerInline } from "../domain/types";
 import { useActiveLocaleKey } from "../i18n/activeLocaleContext";
 import { t } from "../i18n/messages";
@@ -396,6 +402,10 @@ export const ImeInlineMentionEditor = forwardRef<
       });
     }, [localeKey]);
 
+    const notifyHistory = useCallback(() => {
+      controlRef.current?.dispatchEvent(new Event(EDITOR_HISTORY_CHANGED, { bubbles: true }));
+    }, []);
+
     const publish = useCallback(
       (mutation: DocumentMutation) => {
         const changed = !documentsEqual(documentRef.current, mutation.document);
@@ -404,8 +414,9 @@ export const ImeInlineMentionEditor = forwardRef<
         pendingSelectionRef.current = mutation.selection;
         onSelectionChange?.(mutation.selection);
         if (changed) onDocumentChange(mutation.document);
+        notifyHistory();
       },
-      [onDocumentChange, onSelectionChange]
+      [onDocumentChange, onSelectionChange, notifyHistory]
     );
 
     const publishHistory = useCallback(
@@ -417,9 +428,31 @@ export const ImeInlineMentionEditor = forwardRef<
         pendingSelectionRef.current = { start: caret, end: caret };
         onSelectionChange?.({ start: caret, end: caret });
         onDocumentChange(history.present);
+        notifyHistory();
       },
-      [onDocumentChange, onSelectionChange]
+      [onDocumentChange, onSelectionChange, notifyHistory]
     );
+
+    useLayoutEffect(() => {
+      const control = controlRef.current;
+      if (!control) return;
+      const handleHistory = (event: Event) => {
+        if (control.ownerDocument.activeElement !== control) return;
+        event.preventDefault();
+        const detail = (event as CustomEvent<EditorHistoryRequest>).detail;
+        const available = editable && !composingRef.current;
+        detail.availability = {
+          undo: available && historyRef.current.past.length > 0,
+          redo: available && historyRef.current.future.length > 0
+        };
+        if (available && detail.action) {
+          publishHistory(detail.action === "undo" ? undoDocument(historyRef.current) : redoDocument(historyRef.current));
+        }
+      };
+      control.addEventListener(EDITOR_HISTORY_EVENT, handleHistory);
+      return () => control.removeEventListener(EDITOR_HISTORY_EVENT, handleHistory);
+    }, [editable, publishHistory]);
+    useLayoutEffect(notifyHistory, [document, syncKey, editable, notifyHistory]);
 
     const selection = useCallback(() => {
       const control = controlRef.current;
@@ -571,6 +604,7 @@ export const ImeInlineMentionEditor = forwardRef<
         suppressContentEditableWarning
         onCompositionStart={(event) => {
           composingRef.current = true;
+          notifyHistory();
           event.currentTarget.dataset.composing = "true";
           onCompositionStart?.(event);
         }}
@@ -596,6 +630,19 @@ export const ImeInlineMentionEditor = forwardRef<
             })
           ) {
             submitFence?.mark();
+            return;
+          }
+          const key = event.key.toLowerCase();
+          const historyAction = !event.altKey && (event.metaKey !== event.ctrlKey)
+            ? key === "z" ? (event.shiftKey ? "redo" : "undo")
+              : key === "y" && event.ctrlKey && !event.shiftKey ? "redo" : null
+            : null;
+          if (historyAction && !composingRef.current && !event.nativeEvent.isComposing && event.keyCode !== 229) {
+            // Packaged menus own their accelerator. Browser keydown cancels the
+            // default so it cannot also generate a native history beforeinput.
+            if (key === "z" && nativeEditorHistoryAcceleratorsOwned()) return;
+            event.preventDefault();
+            if (editable) publishHistory(historyAction === "undo" ? undoDocument(historyRef.current) : redoDocument(historyRef.current));
             return;
           }
           // Issue #956: step over a #875 caret anchor so a mention pill costs

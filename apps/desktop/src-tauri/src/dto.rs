@@ -256,6 +256,8 @@ pub struct FrontendDomainStateChangedSlices {
     #[serde(skip_serializing_if = "Option::is_none")]
     pub session: Option<FrontendSessionState>,
     #[serde(skip_serializing_if = "Option::is_none")]
+    pub session_epoch: Option<u64>,
+    #[serde(skip_serializing_if = "Option::is_none")]
     pub session_lock_reason: Option<Option<SessionLockReason>>,
     #[serde(skip_serializing_if = "Option::is_none")]
     pub secure_backup_gate: Option<SecureBackupGateState>,
@@ -388,6 +390,7 @@ pub struct FrontendDomainStateChangedSlices {
 impl FrontendDomainStateChangedSlices {
     fn is_empty(&self) -> bool {
         self.session.is_none()
+            && self.session_epoch.is_none()
             && self.session_lock_reason.is_none()
             && self.secure_backup_gate.is_none()
             && self.current_session_status.is_none()
@@ -506,6 +509,7 @@ impl From<StateDelta> for FrontendDesktopSnapshotDelta {
         let mut ui = FrontendUiStateChangedSlices::default();
 
         domain.session = changed.session.map(Into::into);
+        domain.session_epoch = changed.session_disclosure_epoch;
         domain.session_lock_reason = changed.session_lock_reason;
         domain.secure_backup_gate = changed.secure_backup_gate;
         domain.current_session_status = changed.current_session_status;
@@ -635,6 +639,7 @@ pub struct FrontendAppState {
 #[derive(Clone, Debug, Serialize)]
 pub struct FrontendDomainState {
     pub session: FrontendSessionState,
+    pub session_epoch: u64,
     pub session_lock_reason: Option<SessionLockReason>,
     pub secure_backup_gate: SecureBackupGateState,
     pub current_session_status: CurrentSessionStatusState,
@@ -719,6 +724,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
         schema_version: SNAPSHOT_SCHEMA_VERSION,
         domain: FrontendDomainState {
             session: state.session.into(),
+            session_epoch: state.session_disclosure_epoch,
             session_lock_reason: state.session_lock_reason,
             secure_backup_gate: state.secure_backup_gate,
             current_session_status: state.current_session_status,
@@ -783,7 +789,7 @@ fn frontend_app_state_for_platform(state: AppState, platform: DisplayPlatform) -
 /// each sink holds a credential and how its last send ended. Version 11 adds the
 /// keyword-rule projection (`AccountNotificationsSnapshot.keywords`), which
 /// carries the account's own `content` rules and their server-owned enabled flag.
-pub const SNAPSHOT_SCHEMA_VERSION: u32 = 11;
+pub const SNAPSHOT_SCHEMA_VERSION: u32 = 12;
 
 pub(crate) fn frontend_display_platform() -> DisplayPlatform {
     #[cfg(target_os = "macos")]

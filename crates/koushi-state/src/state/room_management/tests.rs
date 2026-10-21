@@ -155,6 +155,7 @@ fn access_policy_change_uses_the_join_rule_permission() {
     ));
     let mut permissions = RoomPermissionFacts {
         can_change_join_rule: true,
+        can_change_topic: true,
         ..RoomPermissionFacts::default()
     };
     assert!(permissions.allows_setting_change(&change));

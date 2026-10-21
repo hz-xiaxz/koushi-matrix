@@ -146,5 +146,12 @@ async fn late_decrypted_in_room_request_reaches_incoming_observer() {
     assert_eq!(request.target().user_id, alice_user_id.as_str());
     assert_eq!(request.target().device_id, "ALICEDEVICE");
 
+    assert!(
+        tokio::time::timeout(Duration::from_millis(100), observer.recv())
+            .await
+            .is_err(),
+        "late-decrypted verification must reach the product through exactly one typed delivery"
+    );
+
     observer.shutdown().await;
 }

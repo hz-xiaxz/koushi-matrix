@@ -82,7 +82,7 @@ test("Home drains the current room composer after same-view room navigation", as
     .toBe(1);
   await expect
     .poll(() => page.evaluate(() => window.__harness.invocationsOf("select_space")[0]?.args))
-    .toEqual({ spaceId: null });
+    .toEqual({ spaceId: null, input: "pointer" });
 });
 
 test("a selected space exposes the aggregate Threads nav entry", async ({ page }) => {

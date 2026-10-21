@@ -106,3 +106,13 @@ Unreadable events and messages that cannot yet be displayed have neutral
 notices. These are distinct from messages waiting for decryption. Polls, live
 location and calls have explanatory placeholders; these placeholders do not
 provide voting, location tracking or calling functionality.
+
+
+Message timestamps show the local time for today and add a localized date for
+older messages (yesterday, weekday within the past week, month/day this year,
+year for earlier years). Hover or focus a timestamp to read the full date and
+time. Date labels update at local midnight and when the window resumes.
+
+Undo/Redo uses the focused message editor's history in room, thread and message
+editing composers. Use Cmd+Z / Shift+Cmd+Z on macOS; Ctrl+Z / Ctrl+Y or
+Ctrl+Shift+Z on Windows/Linux. **Edit → Undo/Redo** uses the same history.

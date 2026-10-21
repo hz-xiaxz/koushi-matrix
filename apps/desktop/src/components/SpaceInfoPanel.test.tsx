@@ -213,6 +213,7 @@ describe("SpaceInfoPanel", () => {
             permissions: {
               can_edit_settings: false,
               can_change_join_rule: false,
+              can_change_topic: false,
               can_edit_roles: false,
               can_invite: false,
               can_kick: false,
@@ -309,9 +310,10 @@ describe("SpaceInfoPanel", () => {
     const access = screen.getByRole("region", { name: "Access" });
     const rooms = screen.getByRole("region", { name: "Rooms" });
     const download = screen.getByRole("region", { name: t("historyExport.spaceSection") });
-    // The access section follows the names directly: nothing splits the
-    // Space's own properties, and the download comes after its rooms.
-    expect(names.nextElementSibling).toBe(access);
+    // Shared description and access stay with the Space's own properties.
+    const description = screen.getByRole("group", { name: t("space.description") });
+    expect(names.nextElementSibling).toBe(description.parentElement);
+    expect(description.parentElement?.nextElementSibling).toBe(access);
     expect(rooms.compareDocumentPosition(download) & Node.DOCUMENT_POSITION_FOLLOWING).toBeTruthy();
   });
 

@@ -134,6 +134,7 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
     "room_history_export=ok"
   ]),
   room_management: Object.freeze([
+    "space_topic=ok",
     "knock_room_created=ok",
     "knock_join_request=ok"
   ])

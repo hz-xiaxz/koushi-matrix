@@ -191,6 +191,32 @@ pub fn definitions() -> Vec<ToolDefinition> {
             output_schema: None,
         },
         ToolDefinition {
+            name: "read_recent_activity",
+            description: "Read account-wide Activity Recent, including already-read items, without opening Activity or changing GUI navigation, unread counts or receipts. This is bounded observed history, not a complete archive: at most 200 existing Activity rows, muted/low-priority exclusions and notification filters apply. No background history resolver is started. Newest first using Core ordering. Unknown read state is explicit. Default limit 50, maximum 100. Opaque immutable snapshot cursors expire after 120 seconds, restart, account/session/caller/query/access changes or bounded-cache eviction; repeat all query fields when continuing. resync_required means start a fresh read without cursor and use read_room_messages for available surrounding history, deduplicating account/room/event IDs. Exhaustion or an empty result does not imply no messages occurred.",
+            input_schema: json!({
+                "type":"object", "properties":{
+                    "account_id": account_id_property(), "limit":limit_property(100),
+                    "room_ids":{"type":"array","items":{"type":"string"},"maxItems":64},
+                    "from_timestamp_ms":{"type":"integer","minimum":0,"description":"Inclusive timestamp boundary."},
+                    "to_timestamp_ms":{"type":"integer","minimum":0,"description":"Exclusive timestamp boundary."},
+                    "cursor":{"type":"string","description":"Opaque continuation; repeat the same filters and limit."}
+                },"required":["account_id"],"additionalProperties":false
+            }),
+            read_only: true,
+            output_schema: Some(json!({"type":"object", "properties":{
+                "account_id":{"type":"string"}, "items":{"type":"array", "items":{"type":"object", "properties":{
+                    "account_id":{"type":"string"},"room_id":{"type":"string"},
+                    "event_id":{"type":["string","null"]},"sender_id":{"type":["string","null"]},
+                    "thread_root_event_id":{"type":["string","null"]},"timestamp_ms":{"type":"integer"},
+                    "preview":{"type":["string","null"]},"content_available":{"type":"boolean"},
+                    "preview_truncated":{"type":"boolean"},"metadata_truncated":{"type":"boolean"},"read_state":{"const":"unknown"}
+                },"required":["account_id","room_id","event_id","sender_id","timestamp_ms","preview","read_state","content_available","preview_truncated"]}},
+                "cursor":{"type":["string","null"]},"snapshot_timestamp_ms":{"type":"integer"},
+                "coverage":{"const":"bounded_observed_recent"},"history_complete":{"const":false},
+                "retention_limit":{"const":200},"truncated":{"type":"boolean"},"expires_after_s":{"const":120}
+            },"required":["account_id","items","cursor","snapshot_timestamp_ms","coverage","history_complete","truncated","expires_after_s","retention_limit"]})),
+        },
+        ToolDefinition {
             name: "wait_for_events",
             description: "Wait up to timeout_s for sampled room changes in the account. This is a change feed, not a message log: Koushi samples each joined room's latest event about every 2 seconds and records one entry per room whose latest event changed since the previous sample, so several messages posted between samples coalesce into one entry. Invites are not reported. The first sample after Koushi or the bridge starts only sets a baseline. Entries are ordered by cursor, kept in memory only (at most 500 across all accounts), and are not removed when a room is read; unread counts are informational. Returns at once when entries are pending, otherwise at the timeout. An empty events list means no change was sampled, not that no message was posted. Omit cursor to start at the newest position (this does not recover earlier history); pass the returned cursor to continue. A cursor is opaque and valid only for this account and this Koushi run: a malformed, future, expired (older than the retained entries), other-account, or previous-run cursor fails with resync_required. To recover, call again without a cursor and use read_room_messages for the rooms you need, de-duplicating by account, room, and event id.",
             input_schema: json!({
@@ -272,7 +298,7 @@ mod tests {
     #[test]
     fn definitions_are_unique_and_valid() {
         let tools = definitions();
-        assert_eq!(tools.len(), 7);
+        assert_eq!(tools.len(), 8);
         let mut names: Vec<&str> = tools.iter().map(|tool| tool.name).collect();
         names.sort_unstable();
         names.dedup();
@@ -290,6 +316,7 @@ mod tests {
             "search_messages",
             "wait_for_events",
             "read_room_messages",
+            "read_recent_activity",
         ] {
             let tool = find(name).expect("tool");
             let required = tool.input_schema["required"].as_array().expect("required");
@@ -343,7 +370,7 @@ mod tests {
             .iter()
             .filter(|tool| tool.output_schema.is_some())
             .count();
-        assert_eq!(others_typed, 1);
+        assert_eq!(others_typed, 2);
     }
 
     #[test]
@@ -372,5 +399,14 @@ mod tests {
             .map(|tool| tool.name)
             .collect();
         assert_eq!(writes, vec!["send_message"]);
+    }
+    #[test]
+    fn recent_activity_discovery_is_read_only_and_describes_bounded_history() {
+        let tool = find("read_recent_activity").expect("Recent tool");
+        assert!(tool.read_only);
+        assert!(tool.description.contains("read"));
+        assert!(tool.output_schema.is_some());
+        assert_eq!(tool.input_schema["properties"]["limit"]["minimum"], 1);
+        assert_eq!(tool.input_schema["properties"]["limit"]["maximum"], 100);
     }
 }

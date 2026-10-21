@@ -1062,11 +1062,8 @@ impl fmt::Debug for MatrixIncomingVerificationRequest {
 }
 
 pub struct MatrixIncomingVerificationRequestObserver {
-    client: matrix_sdk::Client,
     receiver: Option<tokio::sync::mpsc::Receiver<MatrixIncomingVerificationRequest>>,
-    handlers: Vec<matrix_sdk::event_handler::EventHandlerHandle>,
     incoming_request_task: Option<tokio::task::JoinHandle<()>>,
-    late_decrypted_request_task: Option<tokio::task::JoinHandle<()>>,
 }
 
 impl MatrixIncomingVerificationRequestObserver {
@@ -1087,18 +1084,6 @@ impl MatrixIncomingVerificationRequestObserver {
             let _ = task.await;
         }
         self.incoming_request_task = None;
-        if let Some(task) = self.late_decrypted_request_task.as_mut() {
-            task.abort();
-            let _ = task.await;
-        }
-        self.late_decrypted_request_task = None;
-        self.remove_handlers();
-    }
-
-    fn remove_handlers(&mut self) {
-        for handler in self.handlers.drain(..) {
-            self.client.remove_event_handler(handler);
-        }
     }
 }
 
@@ -1116,10 +1101,6 @@ impl Drop for MatrixIncomingVerificationRequestObserver {
         if let Some(task) = self.incoming_request_task.take() {
             task.abort();
         }
-        if let Some(task) = self.late_decrypted_request_task.take() {
-            task.abort();
-        }
-        self.remove_handlers();
     }
 }
 
@@ -2561,8 +2542,8 @@ pub async fn observe_incoming_verification_requests(
     let client = session.client();
     let (sender, receiver) = tokio::sync::mpsc::channel(32);
 
-    // All normal and recovered to-device requests use the same typed lease stream. Generic raw
-    // SDK handlers remain compatibility fanout only and do not own Koushi product delivery.
+    // To-device, immediately decrypted room, and late-decrypted room requests
+    // share one SDK-owned typed lease stream and one product handoff.
     let incoming_request_task = client
         .encryption()
         .subscribe_to_incoming_verification_requests()
@@ -2575,111 +2556,10 @@ pub async fn observe_incoming_verification_requests(
             ))
         });
 
-    // An in-room request that was a UTD at sync time never reaches the room
-    // event handler below; the SDK hands it to the verification machine when
-    // the event cache resolves the UTD, and this task surfaces it then.
-    let late_decrypted_request_task =
-        Some(tokio::spawn(forward_late_decrypted_verification_requests(
-            client.clone(),
-            client.event_cache().subscribe_to_decryption_reports(),
-            sender.clone(),
-        )));
-
-    let room_client = client.clone();
-    let room_sender = sender;
-    let room_handler = client.add_event_handler(
-        move |event: matrix_sdk::ruma::events::room::message::OriginalSyncRoomMessageEvent| {
-            let client = room_client.clone();
-            let sender = room_sender.clone();
-            async move {
-                if !matches!(
-                    &event.content.msgtype,
-                    matrix_sdk::ruma::events::room::message::MessageType::VerificationRequest(_)
-                ) {
-                    return;
-                }
-                if let Some(request) = incoming_verification_request_for_flow(
-                    &client,
-                    &event.sender,
-                    event.event_id.as_str(),
-                )
-                .await
-                {
-                    let _ = sender.send(request).await;
-                }
-            }
-        },
-    );
-
     MatrixIncomingVerificationRequestObserver {
-        client,
         receiver: Some(receiver),
-        handlers: vec![room_handler],
         incoming_request_task,
-        late_decrypted_request_task,
     }
-}
-
-async fn forward_late_decrypted_verification_requests(
-    client: matrix_sdk::Client,
-    reports: impl Stream<
-        Item = std::result::Result<
-            matrix_sdk::event_cache::RedecryptorReport,
-            matrix_sdk::event_cache::BroadcastStreamRecvError,
-        >,
-    >,
-    sender: tokio::sync::mpsc::Sender<MatrixIncomingVerificationRequest>,
-) {
-    futures_util::pin_mut!(reports);
-    while let Some(report) = reports.next().await {
-        // A lagged report cannot be replayed; later reports are still handled.
-        let Ok(matrix_sdk::event_cache::RedecryptorReport::ResolvedUtds { room_id, events }) =
-            report
-        else {
-            continue;
-        };
-        let Ok((room_cache, _drop_handles)) = client.event_cache().room(&room_id).await else {
-            continue;
-        };
-        for event_id in events {
-            let Ok(Some(event)) = room_cache.find_event(&event_id).await else {
-                continue;
-            };
-            let Some(sender_id) = late_decrypted_verification_request_sender(&event) else {
-                continue;
-            };
-            if let Some(request) =
-                incoming_verification_request_for_flow(&client, &sender_id, event_id.as_str()).await
-                && sender.send(request).await.is_err()
-            {
-                return;
-            }
-        }
-    }
-}
-
-/// The sender of a decrypted original `m.room.message` verification request.
-fn late_decrypted_verification_request_sender(
-    event: &matrix_sdk::deserialized_responses::TimelineEvent,
-) -> Option<matrix_sdk::ruma::OwnedUserId> {
-    use matrix_sdk::ruma::events::{
-        AnySyncMessageLikeEvent, AnySyncTimelineEvent, SyncMessageLikeEvent,
-        room::message::MessageType,
-    };
-
-    if !matches!(
-        event.kind,
-        matrix_sdk::deserialized_responses::TimelineEventKind::Decrypted(_)
-    ) {
-        return None;
-    }
-    let AnySyncTimelineEvent::MessageLike(AnySyncMessageLikeEvent::RoomMessage(
-        SyncMessageLikeEvent::Original(message),
-    )) = event.raw().deserialize().ok()?
-    else {
-        return None;
-    };
-    matches!(message.content.msgtype, MessageType::VerificationRequest(_)).then_some(message.sender)
 }
 
 async fn forward_incoming_verification_requests(
@@ -2714,18 +2594,6 @@ async fn forward_incoming_verification_deliveries<D, P>(
         }
         commit(delivery);
     }
-}
-
-async fn incoming_verification_request_for_flow(
-    client: &matrix_sdk::Client,
-    sender: &matrix_sdk::ruma::UserId,
-    flow_id: &str,
-) -> Option<MatrixIncomingVerificationRequest> {
-    let request = client
-        .encryption()
-        .get_verification_request(sender, flow_id)
-        .await?;
-    incoming_verification_request_from_handle(request)
 }
 
 fn incoming_verification_request_from_handle(
@@ -4790,3 +4658,7 @@ mod current_device_trust_recheck_classifier_tests {
         );
     }
 }
+
+#[cfg(test)]
+#[path = "e2ee/e2ee_in_room_request_tests.rs"]
+mod e2ee_in_room_request_tests;

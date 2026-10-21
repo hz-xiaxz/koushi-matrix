@@ -296,6 +296,11 @@ pub(crate) enum TimelineMessage {
         core_generation: u64,
         room_ids: Vec<VisibleRoomObservation>,
     },
+    SettingsRoomObserved {
+        core_generation: u64,
+        room_id: OwnedRoomId,
+        acknowledged: oneshot::Sender<()>,
+    },
     RoomMembershipObserved {
         core_generation: u64,
         transitions: Vec<RoomMembershipTransition>,
@@ -1021,6 +1026,14 @@ impl TimelineManagerActor {
                     room_ids,
                 } => {
                     Box::pin(self.handle_visible_rooms_observed(core_generation, room_ids)).await;
+                }
+                TimelineMessage::SettingsRoomObserved {
+                    core_generation,
+                    room_id,
+                    acknowledged,
+                } => {
+                    Box::pin(self.handle_settings_room_observed(core_generation, room_id)).await;
+                    let _ = acknowledged.send(());
                 }
                 TimelineMessage::RoomMembershipObserved {
                     core_generation,

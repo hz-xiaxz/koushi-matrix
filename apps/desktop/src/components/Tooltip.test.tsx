@@ -226,3 +226,20 @@ describe("Tooltip", () => {
     vi.restoreAllMocks();
   });
 });
+
+
+test("non-action metadata may explicitly disclose its full value on focus", () => {
+  const timeLabel = "Time";
+  render(<Tooltip label="Full date" openOnFocus>{(props) => <time tabIndex={0} {...props}>{timeLabel}</time>}</Tooltip>);
+  const trigger = screen.getByText("Time");
+  fireEvent.focus(trigger);
+  const tooltip = screen.getByRole("tooltip");
+  expect(trigger.getAttribute("aria-describedby")).toBe(tooltip.id);
+  fireEvent.keyDown(trigger, { key: "Escape" });
+  expect(screen.queryByRole("tooltip")).toBeNull();
+  fireEvent.blur(trigger);
+  fireEvent.focus(trigger);
+  expect(screen.getByRole("tooltip")).toBeTruthy();
+  fireEvent.blur(trigger);
+  expect(screen.queryByRole("tooltip")).toBeNull();
+});

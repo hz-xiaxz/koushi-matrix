@@ -5,6 +5,27 @@ use super::timeline::{
 use super::*;
 use koushi_core::EventNavigationError;
 
+#[derive(Clone, Copy, Default, Deserialize)]
+#[serde(rename_all = "snake_case")]
+pub enum NavigationInput {
+    Pointer,
+    Keyboard,
+    #[default]
+    Programmatic,
+    Notification,
+}
+impl NavigationInput {
+    fn origin(self) -> koushi_diagnostics::NavigationOrigin {
+        use koushi_diagnostics::NavigationOrigin as Origin;
+        match self {
+            Self::Pointer => Origin::RendererPointer,
+            Self::Keyboard => Origin::RendererKeyboard,
+            Self::Programmatic => Origin::RendererProgrammatic,
+            Self::Notification => Origin::NativeNotification,
+        }
+    }
+}
+
 #[tauri::command]
 pub async fn update_navigation_preference(
     account_tab_id: Option<String>,
@@ -26,6 +47,7 @@ pub async fn update_navigation_preference(
 pub async fn select_space(
     account_tab_id: Option<String>,
     space_id: Option<String>,
+    input: Option<NavigationInput>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendCommandAdmission, String> {
@@ -43,6 +65,12 @@ pub async fn select_space(
                 "target_present",
                 requested_space_id.is_some(),
             )),
+    );
+    let connection = account_connection(state.inner(), account_tab_id.as_deref()).await?;
+    let operation = connection.begin_navigation_operation_for_request(
+        koushi_diagnostics::NavigationCause::SelectSpace,
+        input.unwrap_or_default().origin(),
+        request_id,
     );
     let admission = submit_core_command_with_admission(
         state.inner(),
@@ -66,6 +94,7 @@ pub async fn select_space(
             started.elapsed().as_millis(),
         )),
     );
+    operation.finish(true);
     Ok(admission)
 }
 
@@ -90,12 +119,17 @@ pub async fn reorder_spaces(
 pub async fn select_room(
     account_tab_id: Option<String>,
     room_id: String,
+    input: Option<NavigationInput>,
     app: AppHandle,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendCommandSettlement, String> {
     let mut event_conn = account_connection(state.inner(), account_tab_id.as_deref()).await?;
     let generation = event_conn
-        .select_room_and_wait(room_id, SELECT_ROOM_EVENT_TIMEOUT)
+        .select_room_and_wait_with_origin(
+            room_id,
+            SELECT_ROOM_EVENT_TIMEOUT,
+            input.unwrap_or_default().origin(),
+        )
         .await
         .map_err(invoke_error_from_select_room_error)?;
     // Pinned-event bodies may require network fetches. Core schedules their

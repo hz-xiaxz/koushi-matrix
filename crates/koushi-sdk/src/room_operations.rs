@@ -332,6 +332,7 @@ pub struct MatrixRoomPermissionFacts {
     /// Whether the account may send `m.room.join_rules` on its own, which is
     /// all that changing who can join requires.
     pub can_change_join_rule: bool,
+    pub can_change_topic: bool,
     pub can_edit_roles: bool,
     pub can_invite: bool,
     pub can_kick: bool,
@@ -377,6 +378,25 @@ pub async fn room_can_send_text_message(
     ))
 }
 
+/// Local-only selected settings metadata; never fetches room members or keys.
+pub async fn get_room_topic_metadata(
+    session: &MatrixClientSession,
+    room_id: &str,
+) -> Result<(Option<String>, bool), MatrixRoomOperationError> {
+    let room = matrix_room(session, room_id)?;
+    if room.state() != matrix_sdk::RoomState::Joined {
+        return Err(MatrixRoomOperationError::RoomUnavailable);
+    }
+    let powers = room.power_levels_or_default().await;
+    Ok((
+        super::room_projection::normalized_room_topic(&room),
+        powers.user_can_send_state(
+            room.own_user_id(),
+            matrix_sdk::ruma::events::StateEventType::RoomTopic,
+        ),
+    ))
+}
+
 pub async fn get_room_settings_snapshot(
     session: &MatrixClientSession,
     room_id: &str,
@@ -418,6 +438,9 @@ pub async fn update_room_setting(
     change: MatrixRoomSettingChange,
 ) -> Result<MatrixRoomSettingsSnapshot, MatrixRoomOperationError> {
     let room = matrix_room(session, room_id)?;
+    if let MatrixRoomSettingChange::Topic(topic) = &change {
+        return topic_commit::update_topic(&room, topic.as_deref().unwrap_or_default()).await;
+    }
     let snapshot = matrix_room_settings_snapshot(&room).await;
     match &change {
         MatrixRoomSettingChange::Name(name) => {
@@ -425,10 +448,8 @@ pub async fn update_room_setting(
                 .await
                 .map_err(MatrixRoomOperationError::from_sdk_error)?;
         }
-        MatrixRoomSettingChange::Topic(topic) => {
-            room.set_room_topic(topic.as_deref().unwrap_or_default())
-                .await
-                .map_err(MatrixRoomOperationError::from_sdk_error)?;
+        MatrixRoomSettingChange::Topic(_) => {
+            unreachable!("topic writes settle through local commit")
         }
         MatrixRoomSettingChange::AvatarUrl(Some(avatar_url)) => {
             let avatar_url = matrix_sdk::ruma::OwnedMxcUri::from(avatar_url.clone());
@@ -2199,3 +2220,8 @@ mod space_member_role_convergence_tests {
         assert_eq!(sent, event_id.to_string());
     }
 }
+
+#[cfg(test)]
+mod topic_commit_tests;
+
+mod topic_commit;

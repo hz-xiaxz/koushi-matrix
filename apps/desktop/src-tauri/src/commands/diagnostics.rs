@@ -26,6 +26,7 @@ pub struct FrontendDiagnosticLogEntry {
 pub struct FrontendDiagnosticLogSnapshot {
     entries: Vec<FrontendDiagnosticLogEntry>,
     dropped_entries: u64,
+    navigation: koushi_diagnostics::NavigationDiagnosticSnapshot,
     sliding_sync: koushi_core::SlidingSyncDiagnosticsSnapshot,
 }
 
@@ -44,6 +45,7 @@ fn map_snapshot(
             })
             .collect(),
         dropped_entries: snapshot.dropped_records,
+        navigation: snapshot.navigation,
         sliding_sync,
     }
 }

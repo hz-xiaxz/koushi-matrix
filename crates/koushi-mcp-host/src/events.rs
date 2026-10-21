@@ -222,6 +222,11 @@ impl EventLog {
         })
     }
 
+    /// Sample only joined room summaries. Invites are a separate workflow.
+    pub(crate) fn observe_snapshot(&self, account_id: &str, snapshot: &koushi_state::AppState) {
+        self.observe(account_id, &snapshot.rooms);
+    }
+
     /// Records room activity that changed since the previous observation.
     pub(crate) fn observe(&self, account_id: &str, rooms: &[koushi_state::RoomSummary]) {
         let mut seen = match self.seen.lock() {
@@ -317,7 +322,7 @@ pub(crate) fn spawn_poller(
                 }
                 _ = ticker.tick() => {
                     for account in accounts.accounts() {
-                        log.observe(&account.id, &account.connection.snapshot().rooms);
+                        log.observe_snapshot(&account.id, &account.connection.snapshot());
                     }
                 }
             }

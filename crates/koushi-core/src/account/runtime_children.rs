@@ -461,6 +461,7 @@ impl AccountActor {
         let _ = self
             .room_actor
             .send(RoomMessage::SessionEstablished {
+                account_epoch: self.sliding_sync_account_epoch,
                 session: session.clone(),
             })
             .await;

@@ -188,6 +188,7 @@ fn trust_admission_timeout_summary_is_allowlisted_and_private_safe() {
         event,
     };
     let snapshot = DiagnosticSnapshot {
+        navigation: Default::default(),
         records: vec![
             record(
                 DiagnosticEvent::new(
@@ -243,6 +244,7 @@ fn invite_timeout_diagnostic_summary_is_allowlisted_and_private_safe() {
         event,
     };
     let snapshot = DiagnosticSnapshot {
+        navigation: Default::default(),
         records: vec![
             record(DiagnosticEvent::new(
                 DiagnosticLevel::Debug,
@@ -338,6 +340,7 @@ fn send_lifecycle_summary_is_per_send_and_private_safe() {
         event,
     };
     let snapshot = DiagnosticSnapshot {
+        navigation: Default::default(),
         records: vec![
             record(
                 DiagnosticEvent::new(DiagnosticLevel::Info, "core.send", "accepted")

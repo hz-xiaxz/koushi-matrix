@@ -993,7 +993,7 @@ test("scoped Threads list row for another room selects that room before opening 
   expect(order).toEqual(["select_room", "open_thread"]);
   expect(
     await page.evaluate(() => window.__harness.invocationsOf("select_room")[0]?.args)
-  ).toEqual({ roomId: otherRoomId });
+  ).toEqual({ roomId: otherRoomId, input: "programmatic" });
   expect(
     await page.evaluate(() => window.__harness.invocationsOf("open_thread")[0]?.args)
   ).toEqual({ roomId: otherRoomId, rootEventId: otherRootEventId, intent: "existingThread" });
@@ -1162,7 +1162,7 @@ test("rail Home and sidebar Threads navigation buttons dispatch Rust-owned comma
   await expect.poll(() => invocationCount(page, "select_space")).toBeGreaterThanOrEqual(1);
   await expect
     .poll(async () => page.evaluate(() => window.__harness.invocationsOf("select_space")[0]?.args))
-    .toEqual({ spaceId: null });
+    .toEqual({ spaceId: null, input: "pointer" });
   await expect(page.getByRole("main", { name: t("workspace.activity") })).toBeVisible();
 
   await sidebar.getByRole("button", { name: t("workspace.threads") }).click();

@@ -1606,6 +1606,14 @@ export type MessageId =
   | "space.noUnread"
   | "space.roomMembership"
   | "space.spacePreferences"
+  | "space.description"
+  | "space.noDescription"
+  | "space.editDescription"
+  | "space.saveDescription"
+  | "space.clearDescription"
+  | "space.descriptionShared"
+  | "space.descriptionLoading"
+  | "space.descriptionNoPermission"
   | "space.access"
   | "space.accessScope"
   | "space.accessCurrent"
@@ -1731,6 +1739,18 @@ export type MessageId =
   | "timeline.notice.liveLocation"
   | "timeline.notice.call"
   | "timeline.editedMessage"
+  | "timeline.timestampYesterday"
+  | "accessToken.title"
+  | "accessToken.explanation"
+  | "accessToken.clipboardWarning"
+  | "accessToken.reveal"
+  | "accessToken.hide"
+  | "accessToken.copy"
+  | "accessToken.loading"
+  | "accessToken.copied"
+  | "accessToken.failed"
+  | "accessToken.copyFailed"
+  | "accessToken.unavailable"
   | "timeline.editMessage"
   | "timeline.editBody"
   | "timeline.loading"
@@ -4006,6 +4026,14 @@ const en: Catalog = {
   "space.noUnread": "No unread",
   "space.roomMembership": "Room membership",
   "space.spacePreferences": "Space preferences",
+  "space.description": "Description",
+  "space.noDescription": "No description",
+  "space.editDescription": "Edit description",
+  "space.saveDescription": "Save description",
+  "space.clearDescription": "Clear description",
+  "space.descriptionShared": "Shared with everyone in this Space.",
+  "space.descriptionLoading": "Loading description…",
+  "space.descriptionNoPermission": "Your role in this Space does not let you change the description.",
   "space.access": "Access",
   "space.accessScope": "Access decides who can join this Space. It does not change the rooms inside it, their history or encryption, or whether the Space is listed in the server's room directory.",
   "space.accessCurrent": "Current access",
@@ -4131,6 +4159,18 @@ const en: Catalog = {
   "timeline.notice.roomNameRemoved": "removed the room name",
   "timeline.notice.roomNameChangedGeneric": "changed the room name",
   "timeline.editedMessage": "Edited",
+  "timeline.timestampYesterday": "Yesterday",
+  "accessToken.title": "Access token",
+  "accessToken.explanation": "Use the current session token with Matrix tools. This does not create a device. Authentication may rotate or expire. The token does not include encryption keys or message history.",
+  "accessToken.clipboardWarning": "Copied tokens stay on the clipboard until overwritten.",
+  "accessToken.reveal": "Reveal",
+  "accessToken.hide": "Hide",
+  "accessToken.copy": "Copy",
+  "accessToken.loading": "Loading…",
+  "accessToken.copied": "Copied",
+  "accessToken.failed": "Could not retrieve the access token.",
+  "accessToken.copyFailed": "Could not copy the access token.",
+  "accessToken.unavailable": "Unlock the current session to access its token.",
   "timeline.editMessage": "Edit message",
   "timeline.editBody": "Edit message body",
   "timeline.loading": "Loading",
@@ -6290,6 +6330,14 @@ const ja: Catalog = {
   "space.noUnread": "未読なし",
   "space.roomMembership": "ルーム参加状態",
   "space.spacePreferences": "スペース環境設定",
+  "space.description": "説明",
+  "space.noDescription": "説明なし",
+  "space.editDescription": "説明を編集",
+  "space.saveDescription": "説明を保存",
+  "space.clearDescription": "説明をクリア",
+  "space.descriptionShared": "このスペースの全員に共有される説明です。",
+  "space.descriptionLoading": "説明を読み込んでいます…",
+  "space.descriptionNoPermission": "このスペースでのあなたのロールでは説明を変更できません。",
   "space.access": "アクセス",
   "space.accessScope": "アクセスは、このスペースに誰が参加できるかを決めます。スペース内のルーム、その履歴や暗号化、サーバーのルームディレクトリへの掲載には影響しません。",
   "space.accessCurrent": "現在のアクセス",
@@ -6415,6 +6463,18 @@ const ja: Catalog = {
   "timeline.notice.roomNameRemoved": "ルーム名を削除しました",
   "timeline.notice.roomNameChangedGeneric": "ルーム名が変更されました",
   "timeline.editedMessage": "編集済み",
+  "timeline.timestampYesterday": "昨日",
+  "accessToken.title": "アクセストークン",
+  "accessToken.explanation": "現在のセッションのトークンをMatrixツールで利用できます。新しいデバイスは作成されません。認証情報は更新・失効することがあります。暗号鍵やメッセージ履歴は含まれません。",
+  "accessToken.clipboardWarning": "コピーしたトークンは上書きされるまでクリップボードに残ります。",
+  "accessToken.reveal": "表示",
+  "accessToken.hide": "隠す",
+  "accessToken.copy": "コピー",
+  "accessToken.loading": "読み込み中…",
+  "accessToken.copied": "コピーしました",
+  "accessToken.failed": "アクセストークンを取得できませんでした。",
+  "accessToken.copyFailed": "アクセストークンをコピーできませんでした。",
+  "accessToken.unavailable": "トークンを表示するには現在のセッションのロックを解除してください。",
   "timeline.editMessage": "メッセージを編集",
   "timeline.editBody": "メッセージ本文を編集",
   "timeline.loading": "読み込み中",

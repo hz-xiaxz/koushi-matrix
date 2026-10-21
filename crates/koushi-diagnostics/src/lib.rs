@@ -1,3 +1,10 @@
+mod navigation;
+pub use navigation::{
+    DEFAULT_NAVIGATION_DIAGNOSTIC_CAPACITY, NavigationCause, NavigationDiagnostic,
+    NavigationDiagnosticLedger, NavigationDiagnosticRecord, NavigationDiagnosticSnapshot,
+    NavigationOrigin, NavigationStage, navigation_snapshot, record_navigation, reset_navigation,
+};
+
 use std::collections::{BTreeMap, VecDeque};
 use std::sync::{Arc, Mutex, MutexGuard, OnceLock, Weak};
 use std::time::{SystemTime, UNIX_EPOCH};
@@ -53,6 +60,7 @@ pub struct DiagnosticSnapshot {
     pub records: Vec<DiagnosticRecord>,
     #[serde(rename = "droppedRecords")]
     pub dropped_records: u64,
+    pub navigation: NavigationDiagnosticSnapshot,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
@@ -331,6 +339,7 @@ impl DiagnosticCounterContext {
                 timestamp_millis_at(SystemTime::now()),
             ),
             dropped_records: 0,
+            navigation: NavigationDiagnosticSnapshot::default(),
         }
     }
 
@@ -402,6 +411,7 @@ impl DiagnosticBuffer {
         DiagnosticSnapshot {
             records,
             dropped_records,
+            navigation: NavigationDiagnosticSnapshot::default(),
         }
     }
 
@@ -576,6 +586,7 @@ pub fn snapshot() -> DiagnosticSnapshot {
         .get_or_init(|| RotationDiagnosticLedger::new(DEFAULT_ROTATION_DIAGNOSTIC_CAPACITY))
         .snapshot();
     snapshot.records.extend(rotation_snapshot.records);
+    snapshot.navigation = navigation_snapshot();
     let timestamp_ms = timestamp_millis_at(SystemTime::now());
     snapshot
         .records
@@ -678,3 +689,6 @@ fn increment_dropped(counter: &Mutex<u64>) {
 
 #[cfg(test)]
 mod tests;
+
+#[cfg(test)]
+mod navigation_tests;

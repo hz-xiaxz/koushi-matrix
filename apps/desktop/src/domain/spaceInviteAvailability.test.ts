@@ -21,6 +21,7 @@ function settingsFor(roomId: string, canInvite: boolean): NonNullable<RoomManage
     permissions: {
       can_edit_settings: false,
       can_change_join_rule: false,
+      can_change_topic: false,
       can_edit_roles: false,
       can_invite: canInvite,
       can_kick: canInvite,

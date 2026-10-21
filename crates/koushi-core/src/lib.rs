@@ -116,3 +116,11 @@ pub fn project_timeline_event_for_qa(
 ) {
     event_projection::project_timeline_event_display_labels(event, state);
 }
+
+pub mod direct_activity;
+
+mod navigation_diagnostics;
+
+pub mod session_access_token;
+
+pub use navigation_diagnostics::NavigationOperation;

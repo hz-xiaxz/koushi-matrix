@@ -76,6 +76,7 @@ pub(crate) enum RoomMessage {
     /// Enables room operations; does NOT start the room-list observation —
     /// that starts on `SyncStarted` when its live `RoomListService` is known.
     SessionEstablished {
+        account_epoch: u64,
         session: Arc<MatrixClientSession>,
     },
     /// Sync started. Sent by `SyncActor` after the backend is launched.
@@ -176,6 +177,10 @@ pub(crate) enum RoomMessage {
         request_id: Option<RequestId>,
         room_id: String,
         result: Result<Vec<PinnedEvent>, RoomFailureKind>,
+    },
+    #[cfg(test)]
+    TestSettingsRoomDemand {
+        room_id: String,
     },
     #[cfg(any(test, feature = "test-hooks"))]
     TestVisibleRoomsObserved {
@@ -423,6 +428,8 @@ pub enum RoomListReconcileAck {
 pub struct RoomActor {
     history_keys: Option<super::history_keys::HistoryKeyRecoveryHandle>,
     pub(super) session: Option<Arc<MatrixClientSession>>,
+    pub(super) settings_room_id: Option<String>,
+    pub(super) settings_account_epoch: u64,
     pub(super) timeline_residency: watch::Receiver<Option<TimelineResidencyBinding>>,
     session_slot: watch::Sender<Option<Arc<MatrixClientSession>>>,
     #[cfg(any(test, feature = "test-hooks"))]
@@ -436,7 +443,7 @@ pub struct RoomActor {
     pub(super) navigation_enrichment_applied: NavigationEnrichmentApplied,
     room_list_generation: u64,
     room_list_source: Option<RoomListSource>,
-    room_list_backend_generation: Option<u64>,
+    pub(super) room_list_backend_generation: Option<u64>,
     pub(super) known_room_ids: Arc<RwLock<BTreeSet<String>>>,
     pub(super) known_dm_rooms: Arc<RwLock<Vec<koushi_state::RoomSummary>>>,
     pub(super) attempted_space_child_repairs: Arc<RwLock<BTreeSet<SpaceChildLinkKey>>>,
@@ -498,6 +505,8 @@ impl RoomActor {
         let actor = RoomActor {
             history_keys: None,
             session: None,
+            settings_room_id: None,
+            settings_account_epoch: 0,
             timeline_residency: timeline_residency_rx,
             session_slot: session_slot.clone(),
             #[cfg(any(test, feature = "test-hooks"))]
@@ -612,7 +621,12 @@ impl RoomActor {
                     self.handle_command(command).await;
                     let _ = processed.send(());
                 }
-                RoomMessage::SessionEstablished { session } => {
+                RoomMessage::SessionEstablished {
+                    session,
+                    account_epoch,
+                } => {
+                    self.settings_room_id = None;
+                    self.settings_account_epoch = account_epoch;
                     if let Some(history) = self.history_keys.take() {
                         history.stop().await;
                     }
@@ -678,6 +692,7 @@ impl RoomActor {
                         source,
                         timeline_residency,
                     );
+                    self.admit_loaded_settings_room().await;
                     // Pinned refreshes were stopped above and the observation
                     // is new: replay the retained navigation for both.
                     self.navigation_enrichment_applied.reset_session();
@@ -774,6 +789,7 @@ impl RoomActor {
                     }
                 }
                 RoomMessage::SessionCleared { ack } => {
+                    self.settings_room_id = None;
                     if let Some(history) = self.history_keys.take() {
                         history.stop().await;
                     }
@@ -811,6 +827,7 @@ impl RoomActor {
                     .await;
                 }
                 RoomMessage::MentionMembershipChanged { room_ids } => {
+                    self.observe_loaded_topic(room_ids.as_ref()).await;
                     self.handle_mention_membership_changed(room_ids).await;
                 }
                 RoomMessage::SpaceMembersProjectionRefreshed {
@@ -850,6 +867,11 @@ impl RoomActor {
                         self.handle_pinned_refresh_completed(request_id, room_id, result)
                             .await;
                     }
+                }
+                #[cfg(test)]
+                RoomMessage::TestSettingsRoomDemand { room_id } => {
+                    self.settings_room_id = Some(room_id);
+                    self.admit_loaded_settings_room().await;
                 }
                 #[cfg(any(test, feature = "test-hooks"))]
                 RoomMessage::TestVisibleRoomsObserved {

@@ -313,6 +313,7 @@ describe("ContextualRightPanel", () => {
       "backend/tauri/desktopAttentionPort.ts",
       "backend/tauri/desktopEventPort.ts",
       "backend/tauri/linkMediaPort.ts",
+      "backend/tauri/nativeEditorHistory.ts",
       "backend/tauri/nativeFileDropPort.ts",
       "backend/tauri/nativeMenuLabels.ts",
       "backend/tauri/windowDialogPort.ts",
@@ -1919,13 +1920,13 @@ describe("desktop integration source guards", () => {
 
   test("home rail button resets Home to Activity Recent instead of restoring the saved Home pane", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-    const selectSpaceStart = source.indexOf("async function selectSpace(spaceId: string | null)");
+    const selectSpaceStart = source.indexOf("async function selectSpace(spaceId: string | null,");
     const selectSpaceEnd = source.indexOf("async function reorderSpaces", selectSpaceStart);
     const selectSpaceSource = source.slice(selectSpaceStart, selectSpaceEnd);
 
     expect(selectSpaceStart).toBeGreaterThanOrEqual(0);
     expect(selectSpaceSource).toContain("if (spaceId === null)");
-    expect(selectSpaceSource).toContain('openHomeActivityView("home_rail")');
+    expect(selectSpaceSource).toContain('openHomeActivityView("home_rail", input)');
     expect(selectSpaceSource).not.toContain("api.selectSpace(null)");
   });
 
@@ -2177,14 +2178,14 @@ describe("desktop integration source guards", () => {
 
   test("room selection appends private-data-free transition diagnostics around the API call", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
-    const fnStart = source.indexOf("async function selectRoom(roomId: string)");
+    const fnStart = source.indexOf("async function selectRoom(roomId: string,");
     const fnEnd = source.indexOf("async function openHomeActivityView", fnStart);
     expect(fnStart).toBeGreaterThanOrEqual(0);
     expect(fnEnd).toBeGreaterThan(fnStart);
     const selectRoomSource = source.slice(fnStart, fnEnd);
 
     const startOffset = selectRoomSource.indexOf("stage=select_start");
-    const apiOffset = selectRoomSource.indexOf("api.selectRoom(roomId)");
+    const apiOffset = selectRoomSource.indexOf("api.selectRoom(roomId, input)");
     const doneOffset = selectRoomSource.indexOf("stage=select_done");
 
     expect(selectRoomSource).toContain('source: "room.transition"');
@@ -2239,13 +2240,13 @@ describe("desktop integration source guards", () => {
       new URL("../../../crates/koushi-core/src/runtime.rs", import.meta.url),
       "utf8"
     );
-    const fnStart = source.indexOf("async function selectSpace(spaceId: string | null)");
+    const fnStart = source.indexOf("async function selectSpace(spaceId: string | null,");
     const fnEnd = source.indexOf("async function reorderSpaces", fnStart);
     expect(fnStart).toBeGreaterThanOrEqual(0);
     expect(fnEnd).toBeGreaterThan(fnStart);
     const selectSpaceSource = source.slice(fnStart, fnEnd);
 
-    const apiOffset = selectSpaceSource.indexOf("api.selectSpace(spaceId)");
+    const apiOffset = selectSpaceSource.indexOf("api.selectSpace(spaceId, input)");
 
     expect(apiOffset).toBeGreaterThanOrEqual(0);
     expect(selectSpaceSource).not.toContain('source: "space.transition"');

@@ -1,0 +1,46 @@
+import { afterEach, expect, test, vi } from "vitest";
+import { startNativeEditorHistoryBridge } from "./nativeEditorHistory";
+const fixture = vi.hoisted(() => ({ invoke: vi.fn(), observe: vi.fn(), ownership: vi.fn() }));
+vi.mock("@tauri-apps/api/core", () => ({ invoke: fixture.invoke }));
+vi.mock("../../domain/editorHistory", () => ({ observeEditorHistoryAvailability: fixture.observe, setNativeEditorHistoryAcceleratorsOwned: fixture.ownership }));
+afterEach(() => vi.clearAllMocks());
+test("native availability writes serialize and coalesce to the latest focused editor", async () => {
+  let update!: (value: {undo:boolean;redo:boolean}) => void;
+  const stop = vi.fn();
+  fixture.observe.mockImplementation(callback => { update = callback; return stop; });
+  let complete!: () => void;
+  fixture.invoke.mockImplementationOnce(() => new Promise<void>(resolve => { complete = resolve; })).mockResolvedValue(undefined);
+  const dispose = startNativeEditorHistoryBridge();
+  update({undo:true,redo:false});
+  update({undo:false,redo:true});
+  update({undo:false,redo:false});
+  expect(fixture.invoke).toHaveBeenCalledTimes(1);
+  complete();
+  await vi.waitFor(() => expect(fixture.invoke).toHaveBeenCalledTimes(2));
+  expect(fixture.invoke).toHaveBeenLastCalledWith("set_native_editor_history_availability", {undo:false,redo:false});
+  dispose();
+  expect(stop).toHaveBeenCalledOnce();
+  expect(fixture.ownership).toHaveBeenLastCalledWith(false);
+});
+test("closing the bridge discards queued availability work", async () => {
+  let update!: (value: {undo:boolean;redo:boolean}) => void;
+  fixture.observe.mockImplementation(callback => { update = callback; return vi.fn(); });
+  let complete!: () => void;
+  fixture.invoke.mockImplementationOnce(() => new Promise<void>(resolve => { complete = resolve; }));
+  const dispose = startNativeEditorHistoryBridge();
+  update({undo:true,redo:false}); update({undo:false,redo:true});
+  dispose(); complete();
+  await Promise.resolve(); await Promise.resolve();
+  expect(fixture.invoke).toHaveBeenCalledTimes(1);
+});
+test("native accelerator ownership requires a confirmed native menu", async () => {
+  let update!: (value: {undo:boolean;redo:boolean}) => void;
+  fixture.observe.mockImplementation(callback => { update = callback; return vi.fn(); });
+  fixture.invoke.mockResolvedValueOnce({ protocolVersion: 1 }).mockResolvedValueOnce(true);
+  const dispose = startNativeEditorHistoryBridge();
+  update({undo:true,redo:false});
+  await vi.waitFor(() => expect(fixture.ownership).toHaveBeenLastCalledWith(false));
+  update({undo:false,redo:true});
+  await vi.waitFor(() => expect(fixture.ownership).toHaveBeenLastCalledWith(true));
+  dispose();
+});

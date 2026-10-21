@@ -181,6 +181,7 @@ async fn room_actor_publishes_cached_joined_members_before_refresh() {
     assert!(
         handle
             .send(RoomMessage::SessionEstablished {
+                account_epoch: 0,
                 session: session.clone(),
             })
             .await
@@ -277,6 +278,7 @@ async fn room_actor_settles_complete_cached_members_without_another_request() {
     assert!(
         handle
             .send(RoomMessage::SessionEstablished {
+                account_epoch: 0,
                 session: session.clone(),
             })
             .await
@@ -347,6 +349,7 @@ async fn room_actor_applies_local_aliases_to_candidate_matching_and_labels() {
     assert!(
         handle
             .send(RoomMessage::SessionEstablished {
+                account_epoch: 0,
                 session: session.clone(),
             })
             .await
@@ -425,6 +428,7 @@ async fn room_actor_shares_refresh_and_settles_main_and_thread_demands() {
     assert!(
         handle
             .send(RoomMessage::SessionEstablished {
+                account_epoch: 0,
                 session: session.clone(),
             })
             .await

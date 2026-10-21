@@ -17,6 +17,7 @@ import type {
 } from "../domain/types";
 import { HistoryExportSection, type HistoryExportControls } from "./HistoryExportDialog";
 import { SpaceAccessSection } from "./SpaceAccessSection";
+import { SpaceDescriptionSection } from "./SpaceDescriptionSection";
 import {
   InlineTextPropertyEditor,
   SettingsPropertyCard,
@@ -49,7 +50,8 @@ export function SpaceInfoPanel({
   onOpenMembers,
   onSetLocalPresentation,
   onSetChildSuggested,
-  onUpdateJoinRule
+  onUpdateJoinRule,
+  onUpdateTopic
 }: {
   fallbackName: string;
   historyExport?: HistoryExportState;
@@ -81,6 +83,7 @@ export function SpaceInfoPanel({
   onSetChildSuggested?: (childRoomId: string, suggested: boolean) => void;
   /** Issue #935: change who can join the selected Space. */
   onUpdateJoinRule?: (spaceId: string, joinRule: RoomJoinRule) => void | Promise<void>;
+  onUpdateTopic?: (spaceId: string, topic: string | null) => void | Promise<void>;
 }) {
   const accessHeadingRef = useRef<HTMLHeadingElement>(null);
   // Which local-presentation change is this panel's own, so its result shows
@@ -294,7 +297,9 @@ export function SpaceInfoPanel({
       ) : null}
 
       {space ? (
-        <SpaceAccessSection
+        <>
+        <SpaceDescriptionSection key={`description:${space.space_id}`} spaceId={space.space_id} roomManagement={roomManagement} onUpdateTopic={onUpdateTopic} />
+      <SpaceAccessSection
           // Keyed by Space so a confirmation or result never carries across.
           key={space.space_id}
           headingRef={accessHeadingRef}
@@ -302,6 +307,7 @@ export function SpaceInfoPanel({
           space={space}
           onUpdateJoinRule={onUpdateJoinRule}
         />
+        </>
       ) : null}
 
       <section className="settings-section" aria-label={t("workspace.rooms")}>

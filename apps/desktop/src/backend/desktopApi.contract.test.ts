@@ -107,6 +107,7 @@ describe("DesktopApi command contract", () => {
         "registerMcpClient",
         "createClaudeDesktopExtension",
         "saveDiagnosticsReport",
+        "currentSessionAccessToken",
         "cancelOidcLogin",
         "setSpaceChildSuggested",
         "joinSuggestedSpaceRooms",

@@ -29,6 +29,7 @@ export interface DiagnosticLogSnapshot {
   entries: DiagnosticLogEntry[];
   droppedEntries: number;
   slidingSync?: SlidingSyncDiagnostics;
+  navigation?: { records: readonly unknown[]; evicted_records: number; reset_count: number };
 }
 
 export interface SlidingSyncDiagnostics {
@@ -268,6 +269,7 @@ export interface DiagnosticReportInput {
   rendererContextDiagnostics?: RendererContextDiagnostics;
   droppedLogEntries?: number;
   slidingSyncDiagnostics?: SlidingSyncDiagnostics;
+  navigationDiagnostics?: DiagnosticLogSnapshot["navigation"];
 }
 
 export function diagnosticReport({
@@ -284,7 +286,8 @@ export function diagnosticReport({
   securityDiagnostics,
   rendererContextDiagnostics,
   droppedLogEntries,
-  slidingSyncDiagnostics
+  slidingSyncDiagnostics,
+  navigationDiagnostics
 }: DiagnosticReportInput): string {
   const crawler = summarizeCrawler(snapshot.state.domain.search_crawler.rooms);
   const roomClassification = summarizeRoomClassification(snapshot);
@@ -348,6 +351,7 @@ export function diagnosticReport({
     ...securityDiagnosticLog,
     ...formatRendererContextDiagnostics(rendererContextDiagnostics),
     ...formatSlidingSyncDiagnostics(slidingSyncDiagnostics),
+    ...(navigationDiagnostics ? [`Navigation ledger: ${JSON.stringify(navigationDiagnostics)}`] : []),
     `Diagnostic records dropped: ${normalizeDroppedLogEntries(droppedLogEntries)}`,
     ...diagnosticLog,
     `timeline_matches_active=${timelineMatchesActiveRoom(snapshot)}`,

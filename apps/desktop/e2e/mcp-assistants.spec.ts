@@ -94,7 +94,7 @@ test("App Settings lists assistants and changes one permission at a time", async
 
   const card = settings.getByRole("article", { name: "codex" });
   await expect(card).toBeVisible();
-  await card.getByRole("switch", { name: "Send for Harness", exact: true }).click();
+  await card.getByRole("switch", { name: "Send for @harness-user:example.invalid", exact: true }).click();
   await expect.poll(() => page.evaluate(() => window.__harness.invocationsOf("set_mcp_permission").at(-1)?.args))
     .toMatchObject({ clientName: "codex", accountId: ACCOUNT, need: "send", allowed: true });
 

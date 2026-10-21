@@ -14,6 +14,7 @@ mod endpoint;
 mod events;
 mod grants;
 mod handlers;
+mod recent_activity;
 pub mod registration;
 mod server;
 

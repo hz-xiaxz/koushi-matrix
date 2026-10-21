@@ -958,6 +958,7 @@ fn room_management_wrappers_use_settings_privacy_and_moderation_apis() {
         permissions: MatrixRoomPermissionFacts {
             can_edit_settings: true,
             can_change_join_rule: true,
+            can_change_topic: true,
             can_edit_roles: true,
             can_invite: true,
             can_kick: true,
@@ -1003,6 +1004,7 @@ fn room_setting_update_projects_the_sent_change_into_the_success_snapshot() {
         permissions: MatrixRoomPermissionFacts {
             can_edit_settings: true,
             can_change_join_rule: true,
+            can_change_topic: true,
             can_edit_roles: true,
             can_invite: true,
             can_kick: true,
@@ -1067,6 +1069,7 @@ fn room_member_power_level_projection_updates_role_in_success_snapshot() {
         permissions: MatrixRoomPermissionFacts {
             can_edit_settings: true,
             can_change_join_rule: true,
+            can_change_topic: true,
             can_edit_roles: true,
             can_invite: true,
             can_kick: true,

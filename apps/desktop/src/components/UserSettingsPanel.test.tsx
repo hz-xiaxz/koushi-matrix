@@ -1,7 +1,8 @@
 // @vitest-environment jsdom
 
+import { useLayoutEffect } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
-import { cleanup, fireEvent, render, screen, within } from "@testing-library/react";
+import { act, cleanup, fireEvent, render, screen, within } from "@testing-library/react";
 import { afterEach, describe, expect, test, vi } from "vitest";
 
 import { UserSettingsPanel } from "./UserSettingsPanel";
@@ -540,6 +541,35 @@ describe("UserSettingsPanel", () => {
     expect(degradedMarkup).toContain("Cross-signed");
     expect(degradedMarkup).toContain("Verified");
     expect(degradedMarkup).not.toContain("Needs attention");
+  });
+
+  test("clears a revealed token in the Account-to-App settings commit before passive category reset", async () => {
+    const session = { homeserver: "https://example.invalid", user_id: "@fixture:example.invalid", device_id: "FIXTURE" };
+    const retrieve = vi.fn().mockResolvedValue({ ...session, access_token: "synthetic-scope-switch-token" });
+    let revealedNode: HTMLElement | null = null;
+    let clearedBeforePassiveEffects = false;
+    function CommitProbe({ scope }: { scope: "account" | "app" }) {
+      useLayoutEffect(() => {
+        if (scope === "app") clearedBeforePassiveEffects = revealedNode?.textContent === "";
+      }, [scope]);
+      return null;
+    }
+    const view = (scope: "account" | "app") => <>
+      <UserSettingsPanel initialCategory="sessions" settingsScope={scope} currentSession={session}
+        currentSessionStatus={{ status: "idle" }} e2eeTrust={idleE2eeTrust}
+        localEncryption={{ kind: "healthy" }} platform="linux"
+        accountManagement={idleAccountManagement} accountManagementCapabilities={idleAccountManagementCapabilities}
+        profile={profile} settings={settings} {...handlers}
+        onRetrieveSessionAccessToken={retrieve} sessionAccessTokenAvailable sessionAccessTokenEpoch={42} />
+      <CommitProbe scope={scope} />
+    </>;
+    const { container, rerender } = render(view("account"));
+    await act(async () => { fireEvent.click(screen.getByRole("button", { name: "Reveal" })); });
+    revealedNode = container.querySelector<HTMLElement>("code");
+    expect(Boolean(revealedNode?.textContent)).toBe(true);
+    rerender(view("app"));
+    expect(clearedBeforePassiveEffects).toBe(true);
+    expect(retrieve).toHaveBeenCalledTimes(1);
   });
 
   test("keeps session health and recovery actions in Sessions", () => {

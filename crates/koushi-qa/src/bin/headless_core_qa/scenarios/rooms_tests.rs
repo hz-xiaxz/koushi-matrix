@@ -31,6 +31,7 @@ fn room_management_scenario_runs_after_room_space_and_reports_private_tokens() {
             "space_access_restricted_restore=ok",
             "space_access_two_parent=ok",
             "space_access=ok",
+            "space_topic=ok",
             "space_add_existing=ok",
             "space_leave_children=ok",
             "restore_cleanup=ok",

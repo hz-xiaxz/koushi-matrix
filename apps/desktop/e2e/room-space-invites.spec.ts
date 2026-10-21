@@ -122,7 +122,7 @@ test("workspace rail space and Home clicks apply returned navigation snapshots",
   await space.click({ force: true });
   await expect
     .poll(async () => page.evaluate(() => window.__harness.invocationsOf("select_space")[0]?.args))
-    .toEqual({ spaceId: "!harness-space:example.invalid" });
+    .toEqual({ spaceId: "!harness-space:example.invalid", input: "pointer" });
   await expect(space).toHaveClass(/is-active/);
   await expect(home).not.toHaveClass(/is-active/);
 
@@ -130,7 +130,7 @@ test("workspace rail space and Home clicks apply returned navigation snapshots",
   await home.click({ force: true });
   await expect
     .poll(async () => page.evaluate(() => window.__harness.invocationsOf("select_space")[0]?.args))
-    .toEqual({ spaceId: null });
+    .toEqual({ spaceId: null, input: "pointer" });
   await expect(home).toHaveClass(/is-active/);
   await expect(space).not.toHaveClass(/is-active/);
 });
@@ -217,7 +217,7 @@ test("workspace rail keeps a delta that arrives before its command receipt", asy
 
   await expect
     .poll(async () => page.evaluate(() => window.__harness.invocationsOf("select_space")[0]?.args))
-    .toEqual({ spaceId: "!harness-space:example.invalid" });
+    .toEqual({ spaceId: "!harness-space:example.invalid", input: "pointer" });
   await expect(space).toHaveClass(/is-active/);
   await expect(home).not.toHaveClass(/is-active/);
 });
@@ -822,7 +822,7 @@ test("invites view accepts a seeded invite and New DM renders the returned direc
     .poll(async () =>
       page.evaluate(() => window.__harness.invocationsOf("select_room").at(-1)?.args)
     )
-    .toEqual({ roomId: "!joined-from-invite:example.invalid" });
+    .toEqual({ roomId: "!joined-from-invite:example.invalid", input: "programmatic" });
   await expect
     .poll(async () =>
       page.evaluate(
@@ -1117,6 +1117,7 @@ test("room management panel updates settings, roles, and members from Rust state
               permissions: {
                 can_edit_settings: true,
                 can_change_join_rule: true,
+                can_change_topic: true,
                 can_edit_roles: true,
                 can_invite: true,
                 can_kick: true,
@@ -2441,7 +2442,7 @@ test("notification attention snapshot drives room, space, thread, and click rout
     .poll(async () =>
       page.evaluate(() => window.__harness.invocationsOf("select_room")[0]?.args)
     )
-    .toEqual({ roomId: "!attention-room:example.invalid" });
+    .toEqual({ roomId: "!attention-room:example.invalid", input: "pointer" });
   await expect(attentionRoom).toHaveClass(/is-active/);
 });
 
@@ -2615,7 +2616,7 @@ test("room selection keeps a delta that arrives before its command receipt", asy
 
   await expect
     .poll(async () => page.evaluate(() => window.__harness.invocationsOf("select_room")[0]?.args))
-    .toEqual({ roomId: "!delta-selected-room:example.invalid" });
+    .toEqual({ roomId: "!delta-selected-room:example.invalid", input: "pointer" });
   await expect(targetRoom).toHaveClass(/is-active/);
   await expect(page.locator(".channel-title").first()).toContainText("Delta Selected Room");
 });
@@ -2761,7 +2762,7 @@ test("room selection ignores unrelated avatar thumbnail bursts headlessly", asyn
 
   await expect
     .poll(async () => page.evaluate(() => window.__harness.invocationsOf("select_room")[0]?.args))
-    .toEqual({ roomId: "!avatar-burst-target:example.invalid" });
+    .toEqual({ roomId: "!avatar-burst-target:example.invalid", input: "pointer" });
   await expect(targetRoom).toHaveClass(/is-active/);
   await expect(page.locator(".channel-title").first()).toContainText("Avatar Burst Target");
 
@@ -3430,6 +3431,7 @@ test("the Room Info access editor dispatches typed draft commands over Rust-shap
               permissions: {
                 can_edit_settings: true,
                 can_change_join_rule: true,
+                can_change_topic: true,
                 can_edit_roles: true,
                 can_invite: true,
                 can_kick: true,

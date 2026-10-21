@@ -1276,6 +1276,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
         permissions: RoomPermissionFacts {
             can_edit_settings: true,
             can_change_join_rule: true,
+            can_change_topic: true,
             can_edit_roles: true,
             can_invite: true,
             can_kick: true,
@@ -1684,6 +1685,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
 
     let state_delta_previous = AppState::default();
     let mut state_delta_next = state_delta_previous.clone();
+    state_delta_next.session_disclosure_epoch = 42;
     state_delta_next.search_crawler.rooms.insert(
         "!crawler:example.test".to_owned(),
         SearchCrawlerRoomState::Queued,
