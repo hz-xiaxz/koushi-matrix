@@ -19,18 +19,25 @@ pub fn thumbnail_jpeg(bytes: &[u8], max_edge: u32) -> Option<Vec<u8>> {
     limits.max_alloc = Some(MAX_DECODE_ALLOC);
     reader.limits(limits);
     let mut decoder = reader.into_decoder().ok()?;
+    let icc_profile = crate::rgb_icc_profile(&mut decoder).ok()?;
     let orientation = decoder.orientation().ok();
     let mut image = DynamicImage::from_decoder(decoder).ok()?;
     if let Some(orientation) = orientation {
         image.apply_orientation(orientation);
     }
-    if image.width() > max_edge || image.height() > max_edge {
-        image = image.thumbnail(max_edge, max_edge);
-    }
-    let rgb = image.to_rgb8();
+    let image = crate::jpeg_background(&image, crate::PreparedImageFormat::Jpeg);
+    let rgb = if image.width() > max_edge || image.height() > max_edge {
+        image.thumbnail(max_edge, max_edge).to_rgb8()
+    } else {
+        image.to_rgb8()
+    };
     let mut out = Vec::new();
-    JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY)
-        .encode_image(&rgb)
-        .ok()?;
+    crate::with_color_profile(
+        JpegEncoder::new_with_quality(&mut out, JPEG_QUALITY),
+        icc_profile.as_deref(),
+    )
+    .ok()?
+    .encode_image(&rgb)
+    .ok()?;
     Some(out)
 }

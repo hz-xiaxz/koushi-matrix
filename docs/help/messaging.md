@@ -105,6 +105,13 @@ An attachment appearing in the composer is not yet an uploaded message. Server
 upload limits and network failures can prevent a send. Open an attachment from
 the timeline, or use **Room info → Files** to browse room files.
 
+When converting an image to JPEG, transparent areas become white and translucent
+shadows blend with white. Choose PNG or WebP to keep transparency, or keep the
+original format and size to send the original bytes.
+Converted images keep their display orientation and embedded RGB color profile.
+If an image's color profile cannot be converted, use the original format and
+size to send the file unchanged.
+
 For a failed send, see [sending troubleshooting](troubleshooting.md#message-will-not-send).
 
 ## Room changes and unavailable content
