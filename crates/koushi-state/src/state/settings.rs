@@ -1043,8 +1043,6 @@ impl Default for ImageUploadCompressionPolicy {
 
 #[derive(Clone, Debug, Eq, PartialEq, Serialize, Deserialize)]
 pub struct TimelineSettings {
-    #[serde(default = "default_true")]
-    pub auto_load_older_messages: bool,
     #[serde(default = "default_timeline_thread_root_order")]
     pub thread_root_order: TimelineThreadRootOrder,
 }
@@ -1052,7 +1050,6 @@ pub struct TimelineSettings {
 impl Default for TimelineSettings {
     fn default() -> Self {
         Self {
-            auto_load_older_messages: true,
             thread_root_order: default_timeline_thread_root_order(),
         }
     }

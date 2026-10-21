@@ -872,8 +872,6 @@ export const ko: Catalog = {
   "settings.languageKorean": "한국어",
   "settings.accountSwitcher": "계정 전환기",
   "settings.current": "현재",
-  "settings.autoLoadOlderMessages": "이전 메시지 자동으로 불러오기",
-  "settings.autoLoadOlderMessagesDescription": "불러온 타임라인의 시작 부분 근처로 스크롤하면 방 기록을 미리 불러옵니다",
   "settings.threadRootLatestReply": "스레드 대화를 최신 답장 위치에 표시",
   "settings.threadRootLatestReplyDescription": "각 루트 메시지와 답장 요약을 최신 답장 시간 위치로 이동합니다",
   "settings.checkLocalEncryption": "로컬 암호화 확인",

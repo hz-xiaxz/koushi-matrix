@@ -19,7 +19,6 @@ function snapshot(
     awaitingResync: false,
     suppressPaginationUi: false,
     automaticBackfillEligible: true,
-    autoLoadEnabled: true,
     paginationState: "Idle",
     requestInFlight: false,
     retryBlocked: false,
@@ -46,7 +45,6 @@ describe("evaluateTimelineBackfill", () => {
       "gap_projection_changed",
       "gap_repair_released",
       "resync_replayed",
-      "setting_changed",
       "timeline_reset",
       "live_edge_settled"
     ];
@@ -144,13 +142,13 @@ describe("evaluateTimelineBackfill", () => {
 
     expect(
       evaluateTimelineBackfill(
-        snapshot({ autoLoadEnabled: false, genuineUserScroll: true, scrollTop: 0 })
+        snapshot({ clientHeight: 0, genuineUserScroll: true, scrollTop: 0 })
       )
     ).toEqual({ kind: "request", demand: "explicit_top_scroll" });
 
     expect(
-      evaluateTimelineBackfill(snapshot({ autoLoadEnabled: false }))
-    ).toEqual({ kind: "idle", reason: "auto_load_disabled" });
+      evaluateTimelineBackfill(snapshot({ clientHeight: 0 }))
+    ).toEqual({ kind: "idle", reason: "viewport_unmeasured" });
 
     expect(evaluateTimelineBackfill(snapshot())).toEqual({
       kind: "idle",
@@ -270,7 +268,6 @@ describe("clearsExternalTransitionFence (#1473)", () => {
       "gap_projection_changed",
       "gap_repair_released",
       "resync_replayed",
-      "setting_changed",
       "timeline_reset",
       "retry_backoff_elapsed"
     ] as const) {

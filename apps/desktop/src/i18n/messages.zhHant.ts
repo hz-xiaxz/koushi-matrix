@@ -872,8 +872,6 @@ export const zhHant: Catalog = {
   "settings.languageKorean": "한국어",
   "settings.accountSwitcher": "帳號切換器",
   "settings.current": "目前",
-  "settings.autoLoadOlderMessages": "自動載入較舊的訊息",
-  "settings.autoLoadOlderMessagesDescription": "捲動到已載入時間軸的開頭附近時，預先擷取聊天室歷史紀錄",
   "settings.threadRootLatestReply": "將討論串對話顯示在最新回覆的位置",
   "settings.threadRootLatestReplyDescription": "將每則根訊息及其回覆摘要移至最新回覆的時間點",
   "settings.checkLocalEncryption": "檢查本機加密",

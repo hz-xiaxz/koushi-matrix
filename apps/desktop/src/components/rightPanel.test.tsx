@@ -267,7 +267,6 @@ function threadSnapshot(caption: string): DesktopSnapshot {
         mention_candidates: { targets: [] },
         settings: {
           values: {
-            timeline: { auto_load_older_messages: false },
             display: { code_block_wrap: false },
             // #1427: the settings surface renders this device's delivery on the
             // notifications page, so even a partial snapshot fixture has to carry it.

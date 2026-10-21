@@ -1891,6 +1891,9 @@ UI responsibilities:
   inside an editor in the timeline never count as timeline scroll input.
   Lifecycle diagnostics expose closed phase/cancellation/rebase reasons and
   renderer-local counters only, never timeline key hashes or Matrix identities.
+- Older history always loads automatically for eligible room and existing-thread
+  timelines; there is no opt-out setting (#1573). Legacy persisted opt-outs are
+  ignored and removed on the next settings write.
 - Decide backward pagination through one state evaluator. Automatic demand is
   either a settled underfilled viewport (both projected and DOM height models)
   or near-top prefetch; an explicit top request additionally requires genuine
@@ -1909,7 +1912,7 @@ UI responsibilities:
   without acceptance evidence, failure, or transport rejection releases the
   epoch but installs an owned retry fence. General failures wait for a new
   external transition: a genuine user scroll, a projection change
-  (initial/prepend/Reset/gap positions/resync), or a setting change. The
+  (initial/prepend/Reset/gap positions/resync), or a timeline replacement. The
   request's own terminal and layout, anchor, or live-edge settlement are not
   external transitions, so a permanently failing request cannot retry in a
   tight loop (#1473). Because an underfilled view offers no user scroll, a
@@ -1924,7 +1927,7 @@ UI responsibilities:
 - Re-evaluate after every transition that can add demand or remove a blocker:
   initial projection, layout/anchor settlement, genuine user scroll,
   pagination terminal state, prepend/Reset settlement, gap-position projection,
-  post-terminal `GapRepairReleased`, resync replay, setting change, reset,
+  post-terminal `GapRepairReleased`, resync replay, reset,
   retry-backoff elapse, and
   live-edge settlement. `GapPositionsUpdated` may precede a repair and is not a
   scheduler-release signal; Core emits `GapRepairReleased` only after terminal

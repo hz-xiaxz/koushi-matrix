@@ -1132,35 +1132,12 @@ test("account notification preferences dispatch Rust-owned update_settings patch
   await expect(previews).toHaveAttribute("aria-checked", "true");
 });
 
-test("timeline auto-load setting dispatches a Rust-owned update_settings patch", async ({
-  page
-}) => {
+test("older history loading has no opt-out switch", async ({ page }) => {
   await gotoReadyShell(page);
-  await page.evaluate(() => window.__harness.clearInvocations());
-
   await page.getByRole("button", { name: "App Settings", exact: true }).click();
   await page.getByRole("tab", { name: "Preferences", exact: true }).click();
   await expect(page.getByRole("heading", { name: t("settings.timeline") })).toBeVisible();
-
-  const autoLoad = page.getByRole("switch", { name: t("settings.autoLoadOlderMessages") });
-  await expect(autoLoad).toHaveAttribute("aria-checked", "true");
-  await autoLoad.click();
-
-  await expect.poll(() => invocationCount(page, "update_settings")).toBeGreaterThanOrEqual(1);
-  await expect
-    .poll(async () =>
-      page.evaluate(() => window.__harness.invocationsOf("update_settings")[0]?.args)
-    )
-    .toEqual({
-      patch: {
-        scope: "app",
-        timeline: {
-          auto_load_older_messages: false,
-          thread_root_order: { kind: "rootEvent" }
-        }
-      }
-    });
-  await expect(autoLoad).toHaveAttribute("aria-checked", "false");
+  await expect(page.getByRole("switch", { name: "Automatically load older messages" })).toHaveCount(0);
 });
 
 test("Compact density visually groups consecutive messages from the same sender", async ({ page }) => {

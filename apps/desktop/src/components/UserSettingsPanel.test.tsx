@@ -55,7 +55,6 @@ describe("UserSettingsPanel", () => {
         }
       },
       timeline: {
-        auto_load_older_messages: true,
         thread_root_order: { kind: "rootEvent" }
       },
       search_crawler: {
@@ -1261,7 +1260,7 @@ describe("UserSettingsPanel", () => {
     expect(markup).toContain("URL previews in non-encrypted rooms");
     expect(markup).toContain("URL previews in encrypted rooms");
     expect(markup).toContain("Hide deleted messages");
-    expect(markup).toContain("Automatically load older messages");
+    expect(markup).not.toContain("Automatically load older messages");
     expect(markup).toContain('role="switch"');
     expect(markup).toContain('aria-checked="false"');
   });

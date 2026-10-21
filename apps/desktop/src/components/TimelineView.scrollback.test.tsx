@@ -149,9 +149,8 @@ describe("TimelineView", () => {
   });
 
   it("bounds near-top prefetch to two viewport heights", () => {
-    expect(timelineBackfillThresholdForTests(900, true)).toBe(1800);
-    expect(timelineBackfillThresholdForTests(20, true)).toBe(80);
-    expect(timelineBackfillThresholdForTests(900, false)).toBe(0);
+    expect(timelineBackfillThresholdForTests(900)).toBe(1800);
+    expect(timelineBackfillThresholdForTests(20)).toBe(80);
   });
 
   it("emits private-data-free scroll diagnostics for the mounted timeline", async () => {
@@ -1041,7 +1040,7 @@ describe("TimelineView", () => {
     expect(onScrollDiagnosticsChange.mock.calls.length).toBeLessThanOrEqual(2);
   });
 
-  it("paginates older history when the user scrolls to the top even if prefetch is disabled", async () => {
+  it("paginates older history when the user scrolls to the top", async () => {
     const scheduler = createManualTimelineViewportScheduler();
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const paginateBackwards = vi.fn(async () => undefined);
@@ -1059,7 +1058,6 @@ describe("TimelineView", () => {
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages={false}
         onReply={vi.fn()}
         onDiagnosticLogEntry={onDiagnosticLogEntry}
         viewportScheduler={scheduler}
@@ -1110,14 +1108,14 @@ describe("TimelineView", () => {
         .filter((entry) => entry.source === "timeline.backfill")
         .map((entry) => entry.message);
       expect(backfillMessages[0]).toContain("stage=request trigger=scroll");
-      expect(backfillMessages[0]).toContain("threshold_px=0");
+      expect(backfillMessages[0]).toContain("threshold_px=80");
       expect(backfillMessages).toEqual(
         expect.arrayContaining([expect.stringContaining("stage=complete reason=pagination_idle")])
       );
     });
   });
 
-  it("does not treat a programmatic top scroll as explicit demand when prefetch is disabled", async () => {
+  it("classifies a programmatic top scroll as automatic prefetch", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const paginateBackwards = vi.fn(async () => undefined);
     const transport = baseTransport({
@@ -1133,7 +1131,6 @@ describe("TimelineView", () => {
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages={false}
         onReply={vi.fn()}
       />
     );
@@ -1164,7 +1161,7 @@ describe("TimelineView", () => {
     fireEvent.scroll(timeline);
     await act(async () => Promise.resolve());
 
-    expect(paginateBackwards).not.toHaveBeenCalled();
+    expect(paginateBackwards).toHaveBeenCalledTimes(1);
   });
 
   it.each([
@@ -1201,7 +1198,6 @@ describe("TimelineView", () => {
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages
         onReply={vi.fn()}
         onDiagnosticLogEntry={onDiagnosticLogEntry}
       />
@@ -1315,7 +1311,6 @@ describe("TimelineView", () => {
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages
         onReply={vi.fn()}
       />
     );
@@ -1399,12 +1394,12 @@ describe("TimelineView", () => {
       },
       paginateBackwards
     });
-    const renderView = (autoLoadOlderMessages: boolean) => (
+    const renderView = (backfillReady: boolean) => (
       <TimelineView
+        suppressPaginationUi={!backfillReady}
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages={autoLoadOlderMessages}
         onReply={vi.fn()}
       />
     );
@@ -1490,12 +1485,12 @@ describe("TimelineView", () => {
       },
       paginateBackwards
     });
-    const renderView = (autoLoadOlderMessages: boolean) => (
+    const renderView = (backfillReady: boolean) => (
       <TimelineView
+        suppressPaginationUi={!backfillReady}
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages={autoLoadOlderMessages}
         onReply={vi.fn()}
       />
     );
@@ -1590,7 +1585,6 @@ describe("TimelineView", () => {
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages
         onReply={vi.fn()}
       />
     );
@@ -1669,7 +1663,6 @@ describe("TimelineView", () => {
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages
         onReply={vi.fn()}
       />
     );
@@ -1756,16 +1749,16 @@ describe("TimelineView", () => {
       paginateBackwards
     });
 
-    const renderView = (autoLoadOlderMessages: boolean) => (
+    const renderView = (backfillReady: boolean) => (
       <TimelineView
+        suppressPaginationUi={!backfillReady}
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages={autoLoadOlderMessages}
         onReply={vi.fn()}
       />
     );
-    const { rerender } = render(renderView(true));
+    render(renderView(true));
 
     const timeline = screen.getByTestId("timeline-view");
     Object.defineProperty(timeline, "scrollHeight", { value: 320, configurable: true });
@@ -1793,8 +1786,8 @@ describe("TimelineView", () => {
     await act(async () => Promise.resolve());
     expect(paginateBackwards).toHaveBeenCalledTimes(1);
 
-    act(() => rerender(renderView(false)));
-    act(() => rerender(renderView(true)));
+    fireEvent.wheel(timeline, { deltaY: -120 });
+    fireEvent.scroll(timeline);
     await waitFor(() => expect(paginateBackwards).toHaveBeenCalledTimes(2));
   });
 
@@ -1819,7 +1812,6 @@ describe("TimelineView", () => {
           timelineKey={KEY}
           roomId="!room:example.invalid"
           transport={transport}
-          autoLoadOlderMessages
           onReply={vi.fn()}
         />
       );
@@ -1888,7 +1880,6 @@ describe("TimelineView", () => {
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages={true}
         onReply={vi.fn()}
         onDiagnosticLogEntry={onDiagnosticLogEntry}
       />
@@ -1933,7 +1924,7 @@ describe("TimelineView", () => {
     expect(paginateBackwards).toHaveBeenCalledTimes(1);
   });
 
-  it("re-evaluates an underfilled timeline when automatic loading is enabled", async () => {
+  it("loads older history in an underfilled timeline without a scroll event", async () => {
     let emit: (payload: CoreEventPayload) => void = () => undefined;
     const paginateBackwards = vi.fn(async () => undefined);
     const onDiagnosticLogEntry = vi.fn();
@@ -1944,17 +1935,16 @@ describe("TimelineView", () => {
       },
       paginateBackwards
     });
-    const renderView = (autoLoadOlderMessages: boolean) => (
+    const renderView = () => (
       <TimelineView
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages={autoLoadOlderMessages}
         onReply={vi.fn()}
         onDiagnosticLogEntry={onDiagnosticLogEntry}
       />
     );
-    const { rerender } = render(renderView(false));
+    render(renderView());
     const timeline = screen.getByTestId("timeline-view");
     Object.defineProperty(timeline, "scrollHeight", { value: 320, configurable: true });
     Object.defineProperty(timeline, "clientHeight", { value: 600, configurable: true });
@@ -1973,9 +1963,6 @@ describe("TimelineView", () => {
         }
       });
     });
-    expect(paginateBackwards).not.toHaveBeenCalled();
-
-    act(() => rerender(renderView(true)));
 
     await waitFor(() => expect(paginateBackwards).toHaveBeenCalledTimes(1));
     expect(
@@ -1983,7 +1970,7 @@ describe("TimelineView", () => {
         .map(([entry]) => entry)
         .filter((entry) => entry.source === "timeline.backfill_evaluation")
         .map((entry) => entry.message)
-    ).toEqual(expect.arrayContaining([expect.stringContaining("trigger=setting_changed")]));
+    ).toEqual(expect.arrayContaining([expect.stringContaining("demand=underfilled")]));
   });
 
   it("does not backfill a 3,234-item virtual timeline from transient DOM underfill", async () => {
@@ -2003,7 +1990,6 @@ describe("TimelineView", () => {
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages={true}
         onReply={vi.fn()}
         onDiagnosticLogEntry={onDiagnosticLogEntry}
       />
@@ -2067,6 +2053,7 @@ describe("TimelineView", () => {
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
+        suppressPaginationUi
         onReply={vi.fn()}
       />
     );
@@ -2125,7 +2112,6 @@ describe("TimelineView", () => {
         timelineKey={KEY}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages
         onReply={vi.fn()}
         onDiagnosticLogEntry={onDiagnosticLogEntry}
       />

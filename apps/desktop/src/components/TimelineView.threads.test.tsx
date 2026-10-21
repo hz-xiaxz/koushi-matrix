@@ -1123,7 +1123,6 @@ describe("TimelineView", () => {
         timelineKey={threadKey}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages
         onReply={vi.fn()}
       />
     );
@@ -1179,7 +1178,6 @@ describe("TimelineView", () => {
         timelineKey={threadKey}
         roomId="!room:example.invalid"
         transport={transport}
-        autoLoadOlderMessages
         automaticBackfillEligible={false}
         onReply={vi.fn()}
       />

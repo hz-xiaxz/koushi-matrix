@@ -383,7 +383,6 @@ export const TimelineView = memo(function TimelineView({
   isAnchored = false,
   onReturnToLive,
   liveLatestEventId = null,
-  autoLoadOlderMessages = false,
   codeBlockWrap = true,
   recentEmojis = [],
   onRecentEmojisChange,
@@ -444,7 +443,6 @@ export const TimelineView = memo(function TimelineView({
   isAnchored?: boolean;
   onReturnToLive?: ReturnToLiveHandler;
   liveLatestEventId?: string | null;
-  autoLoadOlderMessages?: boolean;
   codeBlockWrap?: boolean;
   recentEmojis?: string[];
   onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
@@ -653,7 +651,6 @@ export const TimelineView = memo(function TimelineView({
   });
   const nextBackfillRequestEpochRef = useRef(1);
   const pendingBackfillEvaluationRef = useRef<PendingTimelineBackfillEvaluation | null>(null);
-  const previousAutoLoadOlderMessagesRef = useRef(autoLoadOlderMessages);
   const evaluateAndMaybeRequestBackfillRef = useRef<
     (trigger: TimelineBackfillEvaluationTrigger, genuineUserScroll?: boolean) => void
   >(() => undefined);
@@ -3163,12 +3160,12 @@ export const TimelineView = memo(function TimelineView({
       if (demand === "underfilled") {
         emitDiagnosticLog(
           "timeline.backfill",
-          `stage=request trigger=underfilled_initial items=${items.length} scroll_height_px=${metrics.scrollHeight} client_height_px=${metrics.clientHeight} overflow_px=${Math.max(0, metrics.scrollHeight - metrics.clientHeight)} projected_height_px=${metrics.projectedContentHeight} auto_load=${autoLoadOlderMessages} state=${paginationStateDiagnosticLabel(backwardState)}`
+          `stage=request trigger=underfilled_initial items=${items.length} scroll_height_px=${metrics.scrollHeight} client_height_px=${metrics.clientHeight} overflow_px=${Math.max(0, metrics.scrollHeight - metrics.clientHeight)} projected_height_px=${metrics.projectedContentHeight} auto_load=true state=${paginationStateDiagnosticLabel(backwardState)}`
         );
       } else {
         emitDiagnosticLog(
           "timeline.backfill",
-          `stage=request trigger=${trigger === "user_scroll" ? "scroll" : trigger} scroll_top_px=${metrics.scrollTop} threshold_px=${metrics.threshold} max_scroll_top_px=${metrics.maxScrollTop} auto_load=${autoLoadOlderMessages}`
+          `stage=request trigger=${trigger === "user_scroll" ? "scroll" : trigger} scroll_top_px=${metrics.scrollTop} threshold_px=${metrics.threshold} max_scroll_top_px=${metrics.maxScrollTop} auto_load=true`
         );
       }
 
@@ -3187,7 +3184,6 @@ export const TimelineView = memo(function TimelineView({
     },
     [
       armExternalTransitionFence,
-      autoLoadOlderMessages,
       backwardState,
       emitDiagnosticLog,
       items.length,
@@ -3210,7 +3206,7 @@ export const TimelineView = memo(function TimelineView({
       const scrollTop = Math.round(container.scrollTop);
       const projectedContentHeight = Math.round(timelineHeightModel.totalHeight);
       const maxScrollTop = Math.max(0, scrollHeight - clientHeight);
-      const threshold = timelineBackfillThreshold(clientHeight, autoLoadOlderMessages);
+      const threshold = timelineBackfillThreshold(clientHeight);
       const projectionSettled = viewportTransactionRef.current.active() === null;
       const physicalVirtualLayoutSettled = !(
         virtualWindow.virtualized &&
@@ -3223,7 +3219,6 @@ export const TimelineView = memo(function TimelineView({
         awaitingResync: timelineKeyState?.awaitingResync ?? false,
         suppressPaginationUi,
         automaticBackfillEligible,
-        autoLoadEnabled: autoLoadOlderMessages && clientHeight > 0,
         paginationState: backwardState,
         requestInFlight: backfillRequestEpochRef.current !== null,
         retryBlocked: backfillRetryFenceRef.current !== null,
@@ -3277,7 +3272,6 @@ export const TimelineView = memo(function TimelineView({
       });
     },
     [
-      autoLoadOlderMessages,
       automaticBackfillEligible,
       backwardState,
       emitDiagnosticLog,
@@ -3292,21 +3286,6 @@ export const TimelineView = memo(function TimelineView({
     ]
   );
   evaluateAndMaybeRequestBackfillRef.current = evaluateAndMaybeRequestBackfill;
-
-  useLayoutEffect(() => {
-    if (previousAutoLoadOlderMessagesRef.current === autoLoadOlderMessages) {
-      return;
-    }
-    previousAutoLoadOlderMessagesRef.current = autoLoadOlderMessages;
-    if (backfillRetryFenceRef.current === "external_transition") {
-      backfillRetryFenceRef.current = null;
-      cancelBackfillFenceAutoRetry(backfillFenceAutoRetryRef.current, true);
-    }
-    pendingBackfillEvaluationRef.current = {
-      trigger: "setting_changed",
-      genuineUserScroll: false
-    };
-  }, [autoLoadOlderMessages]);
 
   useLayoutEffect(() => {
     const pending = pendingBackfillEvaluationRef.current;

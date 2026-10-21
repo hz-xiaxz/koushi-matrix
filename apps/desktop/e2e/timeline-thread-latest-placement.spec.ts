@@ -207,7 +207,6 @@ test("Rust display updates keep an old root whole without room backfill", async 
     patch: {
       scope: "app",
       timeline: {
-        auto_load_older_messages: true,
         thread_root_order: { kind: "latestReply" }
       }
     }

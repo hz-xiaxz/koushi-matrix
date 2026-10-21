@@ -10,7 +10,6 @@ export type TimelineBackfillEvaluationTrigger =
   | "gap_projection_changed"
   | "gap_repair_released"
   | "resync_replayed"
-  | "setting_changed"
   | "timeline_reset"
   | "live_edge_settled"
   | "retry_backoff_elapsed";
@@ -21,7 +20,7 @@ export type TimelineBackfillEvaluationTrigger =
  * settlements (the pagination's own terminal, layout, anchor, live edge) do not
  * count as an external transition, otherwise a permanently failing request
  * (for example a thread whose root the server withholds) retries in a tight
- * loop. Only a genuine user scroll, a real projection/setting change, or a
+ * loop. Only a genuine user scroll, a real projection change, or a
  * bounded backoff retry ({@link externalTransitionAutoRetryDelayMs}) clears it.
  */
 export function clearsExternalTransitionFence(
@@ -41,7 +40,6 @@ export function clearsExternalTransitionFence(
     case "gap_projection_changed":
     case "gap_repair_released":
     case "resync_replayed":
-    case "setting_changed":
     case "timeline_reset":
     case "retry_backoff_elapsed":
       return true;
@@ -85,7 +83,7 @@ export type TimelineBackfillEvaluation =
       demand: TimelineBackfillDemand;
       reason: TimelineBackfillBlocker;
     }
-  | { kind: "idle"; reason: "auto_load_disabled" | "no_demand" };
+  | { kind: "idle"; reason: "viewport_unmeasured" | "no_demand" };
 
 export interface TimelineBackfillSnapshot {
   trigger: TimelineBackfillEvaluationTrigger;
@@ -93,7 +91,6 @@ export interface TimelineBackfillSnapshot {
   awaitingResync: boolean;
   suppressPaginationUi: boolean;
   automaticBackfillEligible: boolean;
-  autoLoadEnabled: boolean;
   paginationState: PaginationState;
   requestInFlight: boolean;
   retryBlocked: boolean;
@@ -115,7 +112,7 @@ function demandForSnapshot(
   if (snapshot.genuineUserScroll && snapshot.scrollTop <= 0) {
     return "explicit_top_scroll";
   }
-  if (!snapshot.autoLoadEnabled) {
+  if (snapshot.clientHeight <= 0) {
     return null;
   }
 
@@ -156,7 +153,7 @@ export function evaluateTimelineBackfill(
   if (demand === null) {
     return {
       kind: "idle",
-      reason: snapshot.autoLoadEnabled ? "no_demand" : "auto_load_disabled"
+      reason: snapshot.clientHeight > 0 ? "no_demand" : "viewport_unmeasured"
     };
   }
 
