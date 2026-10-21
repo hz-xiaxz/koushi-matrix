@@ -186,3 +186,7 @@ justify closing the issue.
 CI-profile all-target Core clippy and release Core clippy passed with warnings
 denied; release also enabled both large-stack-frame and large-future lints.
 Neither Rust SDK nor its gitlink changed.
+
+The release `stack_budget` target passed all 3 tests, including the production
+attachment-send flow on a 512 KiB worker stack. No full-workspace or Windows gate
+result is claimed here; CI still runs its independent required matrix.
