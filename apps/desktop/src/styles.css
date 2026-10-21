@@ -5956,6 +5956,20 @@ mark {
   white-space: nowrap;
 }
 
+.mention-option-membership {
+  grid-column: 2;
+  grid-row: 1;
+}
+
+.mention-option-main:has(.mention-option-membership) {
+  grid-template-columns: minmax(0, 1fr) auto;
+  column-gap: 6px;
+}
+
+.mention-option-main:has(.mention-option-membership) > .mention-option-meta:not(.mention-option-membership) {
+  grid-column: 1 / -1;
+}
+
 .mention-option-label {
   color: var(--text);
   font-size: 13px;

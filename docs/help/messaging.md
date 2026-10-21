@@ -15,6 +15,18 @@ are **Enter sends** and the platform modifier plus Enter. The keyboard page
 lists the current platform's shortcuts. Confirming an IME candidate is separate
 from sending the composed message.
 
+## Mention someone
+
+Type `@` in a room, direct message, or thread composer and choose a person.
+Suggestions include joined and invited members of that room. Invited people
+show an **Invited** marker; within the same search match, joined people appear
+first. While the member list is loading, known candidates remain available.
+People who left, were banned, or are only requesting to join are excluded.
+
+Selecting a person inserts a mention pill. Invited people can see the mention
+once they join, subject to the room's history visibility. `@room` appears only
+when you have permission to notify the room.
+
 ## Resize the emoji picker
 
 Open **Emoji** in a composer or reaction menu and drag the marked outer corner

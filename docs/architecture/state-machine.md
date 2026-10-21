@@ -3367,16 +3367,16 @@ stateDiagram-v2
 Room mention candidates are an independent bounded domain slice keyed
 logically by `(room_id, surface)`, where `surface` is `main` or `thread`. Both
 surfaces for one room may be demanded concurrently. Only SDK members proven to
-have `join` membership are eligible; account profile-cache presence is never an
-eligibility signal.
+have `join` or `invite` membership are eligible; account profile-cache presence
+is never an eligibility signal.
 
 ```mermaid
 stateDiagram-v2
     [*] --> Absent
     Absent --> Loading: QueryMentionCandidates / generation++
-    Loading --> Complete: members_no_sync(JOIN) [members synced]
-    Loading --> Partial: members_no_sync(JOIN) [members incomplete]
-    Partial --> Refreshing: members(JOIN) refresh started
+    Loading --> Complete: members_no_sync(ACTIVE) [members synced]
+    Loading --> Partial: members_no_sync(ACTIVE) [members incomplete]
+    Partial --> Refreshing: members(ACTIVE) refresh started
     Refreshing --> Complete: refresh succeeded [matching account/room/surface/request/query/generation]
     Refreshing --> Failed: refresh failed [matching account/room/surface/request/query/generation]
     Loading --> Loading: newer query / generation++
@@ -3391,7 +3391,7 @@ stateDiagram-v2
 ```
 
 - The no-sync projection is fail-closed: `Loading`/`Partial` may contain only
-  cached users already proven joined. Invited, knocked, left, banned, and
+  cached users already proven joined or invited. Knocked, left, banned, and
   account-global-only profiles are absent.
 - One room membership refresh is shared by concurrently demanded main/thread
   targets. A base-room membership update invalidates the actor's directory and
@@ -3401,7 +3401,12 @@ stateDiagram-v2
   late room-A data cannot appear in room B.
 - Rust owns alias/display-name/MXID-localpart matching, Unicode/CJK
   normalization, exact-before-prefix-before-substring ranking, collation, and
-  stable user-id tie-breaking. React preserves the supplied order.
+  stable user-id tie-breaking. Within each match tier, joined members precede
+  invited members, then CJK collation and user-id tie-breaking apply. Candidates
+  retain their actual membership; React labels invited rows with the localized
+  People-panel invitation marker. Invite acceptance changes the candidate to
+  joined; revoked/declined invitations remove it on membership refresh. React
+  preserves the supplied order.
 - `@room` is a separate synthetic result. `Allowed` includes it, `Denied`
   excludes it, and `Unknown` fails closed rather than becoming allowed.
 

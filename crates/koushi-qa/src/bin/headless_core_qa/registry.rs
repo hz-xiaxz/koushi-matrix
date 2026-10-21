@@ -630,6 +630,7 @@ pub(super) fn tokens_for_stage(stage: QaStage) -> &'static [&'static str] {
         ],
         QaStage::RoomPeopleProjection => &[
             "room_people_joined_scope=ok",
+            "room_people_invited_scope=ok",
             "room_people_alias_search=ok",
             "room_people_surface_isolation=ok",
             "room_people_membership_refresh=ok",

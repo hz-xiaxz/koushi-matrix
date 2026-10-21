@@ -13,7 +13,7 @@ import type {
   ResolveComposerKeyAction
 } from "../domain/types";
 import { readClipboardImageFile } from "../backend/clipboardImageRuntime";
-import { t } from "../i18n/messages";
+import { setActiveLocaleProfile, t } from "../i18n/messages";
 import {
   claimNativeDroppedFiles,
   subscribeNativeFileDrops,
@@ -60,6 +60,7 @@ function changeEditorText(editor: Element, text: string) {
 
 afterEach(() => {
   cleanup();
+  setActiveLocaleProfile("en");
   vi.useRealTimers();
   vi.mocked(readClipboardImageFile).mockClear();
   vi.mocked(claimNativeDroppedFiles).mockClear();
@@ -1341,6 +1342,35 @@ describe("Composer", () => {
       screen.getAllByRole("option").map((option) => option.getAttribute("data-mention-key"))
     ).toEqual(orderedCandidates.map((candidate) => candidate.key));
     expect(container.querySelector(".composer-autocomplete-loading")).toBeNull();
+  });
+
+  it.each(["en", "ja"] as const)("marks invited suggestions in %s and inserts the same identity-bearing mention", (locale) => {
+    setActiveLocaleProfile(locale);
+    const onDocumentChange = vi.fn();
+    render(
+      <Composer
+        composerMode={{ kind: "plain" }}
+        isSending={false}
+        mentionCandidates={[
+          { ...mentionCandidates[0]!, membership: "invited" },
+          { ...mentionCandidates[1]!, membership: "joined" }
+        ]}
+        roomName="Synthetic room"
+        document={documentFromText("@")}
+        onCancelReply={() => undefined}
+        onSend={textSend(() => undefined)}
+        onDocumentChange={onDocumentChange}
+      />
+    );
+    const options = screen.getAllByRole("option");
+    expect(within(options[0]!).getByText(t("people.membershipInvited"))).toBeTruthy();
+    expect(within(options[1]!).queryByText(t("people.membershipInvited"))).toBeNull();
+    fireEvent.click(options[0]!);
+    expect(onDocumentChange.mock.calls.at(-1)?.[0].inlines).toContainEqual({
+      kind: "mention",
+      target: mentionCandidates[0]!.target,
+      display_label: "Alice"
+    });
   });
 
   it("keeps known partial mention candidates visible with a loading state", () => {

@@ -169,9 +169,9 @@ pub use space_children::{
 };
 
 pub use room_projection::{
-    MatrixAllowTarget, MatrixAllowTargetKind, MatrixCachedDirectAccountData,
-    MatrixConversationActivity, MatrixConversationActivitySource, MatrixDirectTargetsByRoom,
-    MatrixInvitePreview, MatrixJoinedMemberSnapshot, MatrixRestrictedCompleteness,
+    MatrixActiveMemberSnapshot, MatrixAllowTarget, MatrixAllowTargetKind,
+    MatrixCachedDirectAccountData, MatrixConversationActivity, MatrixConversationActivitySource,
+    MatrixDirectTargetsByRoom, MatrixInvitePreview, MatrixRestrictedCompleteness,
     MatrixRoomAccessFacts, MatrixRoomLatestEventSummary, MatrixRoomListError, MatrixRoomListRoom,
     MatrixRoomListSnapshot, MatrixRoomListSpace, MatrixRoomMemberRoleOption,
     MatrixRoomMemberSummary, MatrixRoomTagInfo, MatrixRoomTagKind, MatrixRoomTags,

@@ -49,7 +49,8 @@ export const HEADLESS_LOCAL_QA_SCENARIO_TOKENS = Object.freeze({
   avatar_demand: Object.freeze(["avatar_window_requests=ok"]),
   directory: Object.freeze(["directory_query=ok", "directory_join=ok", ...ADDRESS_TOKENS]),
   live_signals: Object.freeze(["live_signals=ok", IGNORE_RECOVERY_TOKEN]),
-  all: Object.freeze([...ADDRESS_TOKENS, IGNORE_RECOVERY_TOKEN]),
+  room_people_projection: Object.freeze(["room_people_invited_scope=ok", "room_people_projection=ok"]),
+  all: Object.freeze([...ADDRESS_TOKENS, IGNORE_RECOVERY_TOKEN, "room_people_invited_scope=ok"]),
   redact_edit_convergence: Object.freeze([
     "redact_edit_convergence=ok",
     "thread_summary_convergence=ok"

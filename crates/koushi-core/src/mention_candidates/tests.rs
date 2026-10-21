@@ -20,6 +20,7 @@ fn member(
     local_alias: Option<&str>,
 ) -> MentionMemberInput {
     MentionMemberInput {
+        membership: koushi_state::RoomMemberMembership::Joined,
         user_id: user_id.to_owned(),
         room_display_name: room_display_name.map(str::to_owned),
         profile_display_name: profile_display_name.map(str::to_owned),
@@ -264,7 +265,7 @@ async fn room_actor_settles_complete_cached_members_without_another_request() {
         .mount()
         .await;
     session
-        .refresh_joined_member_snapshot(room_id.as_str())
+        .refresh_active_member_snapshot(room_id.as_str())
         .await
         .expect("prime complete member cache");
 
@@ -486,4 +487,47 @@ async fn room_actor_shares_refresh_and_settles_main_and_thread_demands() {
 
     assert!(handle.send(RoomMessage::Shutdown).await);
     handle.join().await;
+}
+
+#[test]
+fn membership_priority_applies_within_match_tiers_and_preserves_collation() {
+    use koushi_state::{MentionCandidateMembership, RoomMemberMembership};
+    let mut invited = member("@invited:example.invalid", Some("Ali"), None, None);
+    invited.membership = RoomMemberMembership::Invited;
+    let mut invited_prefix = member("@invited-prefix:example.invalid", Some("Alice"), None, None);
+    invited_prefix.membership = RoomMemberMembership::Invited;
+    let mut excluded = member("@unknown:example.invalid", Some("Ali"), None, None);
+    excluded.membership = RoomMemberMembership::Unknown;
+    let projection = project_candidates(
+        "ali",
+        vec![
+            invited_prefix,
+            member("@joined-z:example.invalid", Some("Alina"), None, None),
+            invited,
+            member("@joined-a:example.invalid", Some("Alice"), None, None),
+            excluded,
+        ],
+        RoomMentionPermission::Denied,
+    );
+    assert_eq!(
+        projection
+            .candidates
+            .iter()
+            .map(|c| c.user_id.as_str())
+            .collect::<Vec<_>>(),
+        [
+            "@invited:example.invalid",
+            "@joined-a:example.invalid",
+            "@joined-z:example.invalid",
+            "@invited-prefix:example.invalid",
+        ]
+    );
+    assert_eq!(
+        projection.candidates[0].membership,
+        MentionCandidateMembership::Invited
+    );
+    assert_eq!(
+        projection.candidates[1].membership,
+        MentionCandidateMembership::Joined
+    );
 }

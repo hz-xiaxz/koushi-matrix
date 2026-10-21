@@ -35,6 +35,7 @@ pub enum RoomMentionPermission {
 #[serde(rename_all = "camelCase")]
 pub enum MentionCandidateMembership {
     Joined,
+    Invited,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

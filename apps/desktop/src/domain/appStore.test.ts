@@ -287,7 +287,7 @@ describe("appStore projection cache", () => {
             display_label: "Alice",
             original_display_label: "Alice",
             avatar,
-            membership: "joined"
+            membership: "invited"
           }
         ],
         room_mention_allowed: "allowed",
@@ -323,6 +323,7 @@ describe("appStore projection cache", () => {
     expect(candidates).toContainEqual(
       expect.objectContaining({
         key: "@alice:example.invalid",
+        membership: "invited",
         avatar,
         target: expect.objectContaining({ kind: "user", user_id: "@alice:example.invalid" })
       })

@@ -46,13 +46,15 @@ async fn room_member_status_and_mention_eligibility_follow_invite_then_join() {
     assert_eq!(invited.members.len(), 1);
     assert_eq!(invited.members[0].membership, RoomMemberMembership::Invited);
     let mentions = session
-        .joined_member_snapshot_no_sync(room_id.as_str())
+        .active_member_snapshot_no_sync(room_id.as_str())
         .await
         .unwrap();
     assert!(mentions.complete);
-    assert!(
-        mentions.members.is_empty(),
-        "an invitation must not establish mention eligibility"
+    assert_eq!(mentions.members.len(), 1);
+    assert_eq!(mentions.members[0].user_id, member_id.as_str());
+    assert_eq!(
+        mentions.members[0].membership,
+        RoomMemberMembership::Invited
     );
 
     server
@@ -76,7 +78,7 @@ async fn room_member_status_and_mention_eligibility_follow_invite_then_join() {
     assert_eq!(joined.members.len(), 1);
     assert_eq!(joined.members[0].membership, RoomMemberMembership::Joined);
     let mentions = session
-        .joined_member_snapshot_no_sync(room_id.as_str())
+        .active_member_snapshot_no_sync(room_id.as_str())
         .await
         .unwrap();
     assert_eq!(mentions.members.len(), 1);

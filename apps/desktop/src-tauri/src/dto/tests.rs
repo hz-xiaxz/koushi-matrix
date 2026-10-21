@@ -2046,7 +2046,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
                         mxc_uri: "mxc://example.invalid/mention-avatar".to_owned(),
                         thumbnail: koushi_state::AvatarThumbnailState::NotRequested,
                     }),
-                    membership: koushi_state::MentionCandidateMembership::Joined,
+                    membership: koushi_state::MentionCandidateMembership::Invited,
                 }],
                 room_mention_allowed: koushi_state::RoomMentionPermission::Allowed,
                 failure_kind: None,

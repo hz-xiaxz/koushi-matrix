@@ -1,5 +1,11 @@
 # Room People Projection Batch (#380, #355, #374) Implementation Plan
 
+> Membership amendment (#1511, 2026-10-21): the joined-only mention eligibility
+> below is superseded by `docs/architecture/state-machine.md`. Candidates now
+> include joined and invited room members, with actual membership retained and
+> joined members ranked first within each match tier. All other scope,
+> completeness, permission, and ownership constraints remain in force.
+
 > **For agentic workers:** REQUIRED SUB-SKILL: Use superpowers:subagent-driven-development (recommended) or superpowers:executing-plans to implement this plan.
 
 **Goal:** Make mention autocomplete room-scoped and joined-member-only, preserve Rust-owned friendly labels across people-facing surfaces, and remove only the Home rail visual tooltip.

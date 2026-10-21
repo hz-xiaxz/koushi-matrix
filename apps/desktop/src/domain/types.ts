@@ -715,7 +715,7 @@ export type MentionTarget =
 export type MentionSurface = "main" | "thread" | "edit";
 export type MentionCandidatesCompleteness = "loading" | "partial" | "complete" | "failed";
 export type RoomMentionPermission = "allowed" | "denied" | "unknown";
-export type MentionCandidateMembership = "joined";
+export type MentionCandidateMembership = "joined" | "invited";
 export type MentionCandidatesFailureKind = "network" | "forbidden" | "sdk";
 
 export interface MentionCandidate {

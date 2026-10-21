@@ -585,6 +585,7 @@ export function selectMentionCandidates(
       key: candidate.user_id,
       label: candidate.display_label?.trim() ?? "",
       avatar: candidate.avatar,
+      membership: candidate.membership,
       target: {
         kind: "user" as const,
         user_id: candidate.user_id,

@@ -22,7 +22,7 @@ use koushi_protocol::ids::RequestId;
 #[cfg(test)]
 use koushi_protocol::ids::RuntimeConnectionId;
 use koushi_sdk::{
-    MatrixClientSession, MatrixJoinedMemberSnapshot, MatrixRoomOperationError,
+    MatrixActiveMemberSnapshot, MatrixClientSession, MatrixRoomOperationError,
     MatrixSpaceMembersProjection,
 };
 use koushi_state::{AppAction, MentionSurface, PinnedEvent, RoomListFailureKind, RoomListSource};
@@ -147,7 +147,7 @@ pub(crate) enum RoomMessage {
         room_id: String,
         session_generation: u64,
         refresh_generation: u64,
-        result: Result<MatrixJoinedMemberSnapshot, MatrixRoomOperationError>,
+        result: Result<MatrixActiveMemberSnapshot, MatrixRoomOperationError>,
     },
     /// Base-client room updates can include membership state changes. Only
     /// demanded rooms are recomputed; `None` means the broadcast lagged and
@@ -448,7 +448,7 @@ pub struct RoomActor {
     pub(super) known_dm_rooms: Arc<RwLock<Vec<koushi_state::RoomSummary>>>,
     pub(super) attempted_space_child_repairs: Arc<RwLock<BTreeSet<SpaceChildLinkKey>>>,
     pub(super) mention_demands: HashMap<(String, MentionSurface), MentionDemand>,
-    pub(super) mention_member_snapshots: HashMap<String, MatrixJoinedMemberSnapshot>,
+    pub(super) mention_member_snapshots: HashMap<String, MatrixActiveMemberSnapshot>,
     pub(super) mention_refresh_generations: HashMap<String, u64>,
     pub(super) mention_refresh_sequence: u64,
     pub(super) mention_session_generation: u64,
