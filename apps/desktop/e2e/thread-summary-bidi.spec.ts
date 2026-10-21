@@ -1,7 +1,8 @@
 /**
  * Headless spec: the thread summary chip's bidi isolation (#1378).
  *
- * The chip composes `{count} · {sender}: {preview} · {time}`. With the sender and
+ * The chip composes `{count} · {sender}: {preview}` with a separately labelled
+ * latest-reply timestamp below it (#1556). With the sender and
  * the preview interpolated into one string, an LTR paragraph resolved their
  * trailing neutrals against the template instead of against the value:
  *
@@ -28,12 +29,14 @@ const LTR_PREVIEW = "Synthetic reply";
 interface Rect {
   left: number;
   right: number;
+  top: number;
+  bottom: number;
 }
 
 interface ChipGeometry {
   text: string;
   ariaLabel: string;
-  /** Edges of each requested needle's first occurrence, plus the trailing time. */
+  /** Edges of each requested needle's first occurrence, plus the separate latest-reply time. */
   rects: Record<string, Rect>;
   time: Rect;
 }
@@ -81,7 +84,7 @@ async function chipGeometry(
         range.setStart(from.node, from.offset);
         range.setEnd(to.node, to.offset + 1);
         const rect = range.getBoundingClientRect();
-        return { left: rect.left, right: rect.right };
+        return { left: rect.left, right: rect.right, top: rect.top, bottom: rect.bottom };
       };
       const rects: Record<string, Rect> = {};
       for (const needle of wanted) {
@@ -91,12 +94,13 @@ async function chipGeometry(
           rects[needle] = rect;
         }
       }
-      const timeStart = text.lastIndexOf(" · ") + 3;
+      const time = row?.querySelector<HTMLElement>(".thread-latest-reply time");
+      const timeRect = time?.getBoundingClientRect();
       return {
         text,
         ariaLabel: chip.getAttribute("aria-label") ?? "",
         rects,
-        time: measure(timeStart, text.length - timeStart)
+        time: timeRect ? { left: timeRect.left, right: timeRect.right, top: timeRect.top, bottom: timeRect.bottom } : null
       };
     },
     { rowId: eventId, wanted: [...needles] }
@@ -105,7 +109,7 @@ async function chipGeometry(
     throw new Error(`no thread summary chip in row ${eventId}`);
   }
   if (!measured.time) {
-    throw new Error(`chip text ${JSON.stringify(measured.text)} carries no trailing timestamp`);
+    throw new Error(`thread summary carries no latest-reply timestamp`);
   }
   for (const needle of needles) {
     if (!measured.rects[needle]) {
@@ -178,15 +182,8 @@ test("an RTL preview does not pull the timestamp into its own run", async ({ pag
   await seedTimelineItems(page, [threadRootRow(eventId, LTR_SENDER, RTL_PREVIEW)]);
 
   const chip = await chipGeometry(page, eventId, [RTL_PREVIEW]);
-  const separator = chip.text.lastIndexOf(" · ");
-  expect(separator, "the chip carries no timestamp separator").toBeGreaterThan(
-    chip.text.indexOf(RTL_PREVIEW)
-  );
-  expect(chip.time, "the chip carries no timestamp").not.toBeNull();
-
-  // The preview block ends before the timestamp begins. Before the fix the time
-  // was rendered in front of the preview, with the meridiem trailing it.
-  expect(edge(chip, RTL_PREVIEW, "right")).toBeLessThanOrEqual(chip.time.left + 1);
+  // The timestamp has its own line and cannot join the remote preview's bidi run.
+  expect(edge(chip, RTL_PREVIEW, "bottom")).toBeLessThanOrEqual(chip.time.top);
 });
 
 test("an RTL sender and an RTL preview stay in the template's order", async ({ page }) => {
@@ -209,5 +206,5 @@ test("an LTR sender and preview keep the plain order", async ({ page }) => {
 
   const chip = await chipGeometry(page, eventId, [LTR_SENDER, LTR_PREVIEW]);
   expect(edge(chip, LTR_SENDER, "left")).toBeLessThan(edge(chip, LTR_PREVIEW, "left"));
-  expect(edge(chip, LTR_PREVIEW, "right")).toBeLessThanOrEqual(chip.time.left + 1);
+  expect(edge(chip, LTR_PREVIEW, "bottom")).toBeLessThanOrEqual(chip.time.top);
 });

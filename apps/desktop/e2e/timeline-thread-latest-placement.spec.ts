@@ -173,6 +173,46 @@ async function waitForTimelineLayout(page: Page): Promise<void> {
   );
 }
 
+test("moved roots distinguish posting from reply dates with accessible full-date details", async ({ page }) => {
+  await gotoReadyApp(page);
+  const posted = new Date(2025, 9, 19, 8, 49).getTime();
+  const replied = new Date(2026, 9, 22, 10, 20).getTime();
+  const root = rootItem(LATEST_REPLY_EVENT_ID, replied);
+  root.timestamp_ms = posted;
+  root.thread_summary!.latest_timestamp_ms = replied;
+  await pushInitialItems(page, 100, [root]);
+  const row = page.locator(`article[data-content-event-id="${ROOT_EVENT_ID}"]`);
+  const posting = row.locator(".message-posted-at");
+  const latest = row.locator(".thread-latest-reply");
+  await expect(posting).toContainText("Posted");
+  await expect(posting).toContainText("2025");
+  await expect(latest).toContainText("Latest reply");
+  await expect(posting.locator("time")).toHaveAttribute("datetime", new Date(posted).toISOString());
+  await expect(latest.locator("time")).toHaveAttribute("datetime", new Date(replied).toISOString());
+  await expect(row.locator(".message-heading time")).toHaveCount(0);
+  for (const stamp of [posting.locator("time"), latest.locator("time")]) {
+    await stamp.hover();
+    await expect(page.getByRole("tooltip")).toContainText("October");
+    await page.mouse.move(0, 0);
+    await stamp.focus();
+    await expect(page.getByRole("tooltip")).toContainText("October");
+    await stamp.press("Escape");
+    await expect(page.getByRole("tooltip")).toHaveCount(0);
+    await stamp.blur();
+  }
+  await page.setViewportSize({ width: 390, height: 844 });
+  for (const line of [posting, latest]) {
+    await expect(line).toBeVisible();
+    const bounds = await line.evaluate(element => {
+      const rect = element.getBoundingClientRect();
+      return { left: rect.left, right: rect.right, scroll: element.scrollWidth, width: element.clientWidth };
+    });
+    expect(bounds.left).toBeGreaterThanOrEqual(0);
+    expect(bounds.right).toBeLessThanOrEqual(390);
+    expect(bounds.scroll).toBeLessThanOrEqual(bounds.width + 1);
+  }
+});
+
 test("Rust display updates keep an old root whole without room backfill", async ({ page }) => {
   await gotoReadyApp(page);
 

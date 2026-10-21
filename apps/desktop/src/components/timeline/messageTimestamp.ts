@@ -9,13 +9,21 @@ function calendarDay(date: Date): number {
   return civil.getTime() / 86_400_000;
 }
 
-export function formatMessageTimestamp(timestampMs: number | null, nowMs = Date.now()): string | null {
+export type MessageTimestampStyle = "relative" | "posted" | "activity";
+
+export function formatMessageTimestamp(timestampMs: number | null, nowMs = Date.now(), style: MessageTimestampStyle = "relative"): string | null {
   if (timestampMs === null) return null;
   const date = new Date(timestampMs);
   const now = new Date(nowMs);
   const daysAgo = calendarDay(now) - calendarDay(date);
   const time = uiDateTimeFormat({ timeStyle: "short" }).format(date);
-  if (daysAgo === 0) return time;
+  if (style === "posted") {
+    return `${uiDateTimeFormat({
+      weekday: "short", month: "short", day: "numeric",
+      ...(date.getFullYear() !== now.getFullYear() ? { year: "numeric" } : {})
+    }).format(date)} ${time}`;
+  }
+  if (daysAgo === 0) return style === "activity" ? `${t("timeline.timestampToday")} ${time}` : time;
   if (daysAgo === 1) return `${t("timeline.timestampYesterday")} ${time}`;
   const options: Intl.DateTimeFormatOptions = daysAgo > 1 && daysAgo < 7
     ? { weekday: "long" }
