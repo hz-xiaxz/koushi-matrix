@@ -213,6 +213,25 @@ impl TimelineSubscriptionResidencyHandle {
             .is_ok()
     }
 
+    /// Management metadata demand shares the session's subscription owner.
+    pub(crate) async fn settings_room_observed(
+        &self,
+        _permit: &TimelineSubscriptionResidencyPermit,
+        core_generation: u64,
+        room_id: OwnedRoomId,
+    ) -> bool {
+        let (acknowledged, ack) = oneshot::channel();
+        self.tx
+            .send(TimelineMessage::SettingsRoomObserved {
+                core_generation,
+                room_id,
+                acknowledged,
+            })
+            .await
+            .is_ok()
+            && ack.await.is_ok()
+    }
+
     pub(crate) async fn membership_observed(
         &self,
         core_generation: u64,
@@ -288,6 +307,7 @@ pub(super) enum SubscriptionReconcileTrigger {
     TimelineRebuild,
     SyncStarted,
     VisibleRange,
+    SettingsRoom,
     Restore,
     RoomLeft,
     RoomRejoined,
@@ -303,6 +323,7 @@ impl SubscriptionReconcileTrigger {
             | Self::TimelineRebuild => "opened",
             Self::SyncStarted => "session_restart",
             Self::VisibleRange => "visible_range",
+            Self::SettingsRoom => "settings_room",
             Self::Restore => "restore",
             Self::RoomLeft => "room_left",
             Self::RoomRejoined => "room_rejoined",
@@ -652,8 +673,38 @@ impl TimelineManagerActor {
         core_generation: u64,
         room_ids: Vec<VisibleRoomObservation>,
     ) {
+        self.handle_metadata_rooms_observed(
+            core_generation,
+            room_ids,
+            SubscriptionReconcileTrigger::VisibleRange,
+        )
+        .await;
+    }
+
+    pub(super) async fn handle_settings_room_observed(
+        &mut self,
+        core_generation: u64,
+        room_id: OwnedRoomId,
+    ) {
+        self.handle_metadata_rooms_observed(
+            core_generation,
+            vec![VisibleRoomObservation {
+                room_id: room_id.to_string(),
+                non_left: true,
+            }],
+            SubscriptionReconcileTrigger::SettingsRoom,
+        )
+        .await;
+    }
+
+    async fn handle_metadata_rooms_observed(
+        &mut self,
+        core_generation: u64,
+        room_ids: Vec<VisibleRoomObservation>,
+        trigger: SubscriptionReconcileTrigger,
+    ) {
         if self.current_core_generation != Some(core_generation) {
-            record_residency_intent("visible_range", "stale", 0, 0);
+            record_residency_intent(trigger.token(), "stale", 0, 0);
             return;
         }
         let mut accepted = BTreeSet::new();
@@ -672,7 +723,7 @@ impl TimelineManagerActor {
         let accepted_count = accepted.len();
         self.session_subscribed_rooms.extend(accepted);
         record_residency_intent(
-            "visible_range",
+            trigger.token(),
             if rejected == 0 {
                 "accepted"
             } else {
@@ -683,8 +734,7 @@ impl TimelineManagerActor {
         );
         // A valid current-generation observation is also the recovery wake
         // after UnknownPos/session expiry, even when it adds no new intent.
-        self.reconcile_subscriptions(SubscriptionReconcileTrigger::VisibleRange)
-            .await;
+        self.reconcile_subscriptions(trigger).await;
     }
     pub(super) async fn handle_room_membership_observed(
         &mut self,

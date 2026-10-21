@@ -238,6 +238,7 @@ function startSynapseHomeserver(
     [
       "run",
       "--rm",
+      ...synapseRuntimeIdentity(),
       "--name",
       containerName,
       "-p",
@@ -265,11 +266,25 @@ function startSynapseHomeserver(
   return child;
 }
 
+/** Docker's numeric identity preserves ownership of retained host fixtures. */
+export function synapseRuntimeIdentity({
+  uid = process.getuid?.() ?? null,
+  gid = process.getgid?.() ?? null
+} = {}) {
+  // Windows Docker Desktop maps host bind permissions and has no POSIX IDs.
+  if (uid === null || gid === null) return ["--user", "991:991"];
+  const identity = ["--user", `${uid}:${gid}`];
+  // Upstream defaults root to 991. Only root may request its explicit UID:
+  // setting UID for non-root would make /start.py attempt chown and gosu.
+  if (uid === 0) identity.push("-e", "UID=0", "-e", `GID=${gid}`);
+  return identity;
+}
+
 /** @returns {string} Dockerfile for the pinned local Synapse QA image. */
 export function synapseDockerfile() {
   return `FROM docker.io/matrixdotorg/synapse:v1.157.0
 COPY synapse-local-qa-start.sh /synapse-local-qa-start.sh
-RUN chmod 770 /synapse-local-qa-start.sh
+RUN chmod 755 /synapse-local-qa-start.sh
 ENTRYPOINT ["/synapse-local-qa-start.sh"]
 `;
 }

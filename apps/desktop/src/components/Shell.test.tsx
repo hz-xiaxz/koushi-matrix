@@ -839,7 +839,7 @@ describe("composerSendingAccount", () => {
       fireEvent.pointerDown(conversation);
       fireEvent.click(conversation);
 
-      expect(props.onSelectRoom).toHaveBeenCalledWith("!room-alpha:example.invalid");
+      expect(props.onSelectRoom).toHaveBeenCalledWith("!room-alpha:example.invalid", "programmatic");
       expect(screen.queryByRole("menu")).toBeNull();
     });
 

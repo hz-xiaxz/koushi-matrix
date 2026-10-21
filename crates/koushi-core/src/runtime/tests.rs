@@ -1326,6 +1326,7 @@ async fn committed_room_cleanup_bypasses_a_saturated_account_mailbox() {
         room_activity_loaded_for: None,
         account_settings_loaded_for: None,
         state_generation: 0,
+        session_revision: Some(0),
         active_search_request: None,
         pending_composer_draft_persist: None,
         pending_navigation_persist: None,
@@ -1760,6 +1761,7 @@ async fn same_batch_select_room_settles_only_final_selection() {
         room_activity_loaded_for: None,
         account_settings_loaded_for: None,
         state_generation: 0,
+        session_revision: Some(0),
         active_search_request: None,
         pending_composer_draft_persist: None,
         pending_navigation_persist: None,
@@ -3441,6 +3443,7 @@ fn app_actor_fixture_with_account_capacity(
         room_activity_loaded_for: None,
         account_settings_loaded_for: None,
         state_generation: 0,
+        session_revision: Some(0),
         active_search_request: None,
         pending_composer_draft_persist: None,
         pending_navigation_persist: None,
@@ -5642,3 +5645,12 @@ async fn two_direct_searches_keep_their_own_identity_and_filter() {
     assert!(results_b.is_empty());
     assert_eq!(actor.state.search, koushi_state::SearchState::Closed);
 }
+
+#[path = "tests/direct_activity.rs"]
+mod direct_activity;
+
+#[path = "tests/session_token_admission.rs"]
+mod session_token_admission;
+
+#[path = "tests/direct_history.rs"]
+mod direct_history;

@@ -558,7 +558,7 @@ export function WorkspaceRail({
   onOpenContextMenu: OpenContextMenu;
   onOpenUserSettings: () => void;
   onReorderSpaces: (spaceIds: string[]) => void;
-  onSelectSpace: (spaceId: string | null) => void;
+  onSelectSpace: (spaceId: string | null, input?: import("../backend/desktopApi").NavigationInput) => void;
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
 }) {
   const [draggedSpaceId, setDraggedSpaceId] = useState<string | null>(null);
@@ -610,7 +610,7 @@ export function WorkspaceRail({
             type="button"
             aria-label={accountHomeLabel(snapshot.sidebar.account_home)}
             aria-current={snapshot.sidebar.account_home.is_active ? "page" : undefined}
-            onClick={() => onSelectSpace(null)}
+            onClick={(event) => onSelectSpace(null, !event.isTrusted ? "programmatic" : event.detail === 0 ? "keyboard" : "pointer")}
           >
             <Home size={ICON_SIZE.rail} />
           </button>
@@ -671,7 +671,7 @@ export function WorkspaceRail({
                     type="button"
                     aria-label={fallbackName}
                     aria-current={space.is_active ? "page" : undefined}
-                    onClick={() => onSelectSpace(space.space_id)}
+                    onClick={(event) => onSelectSpace(space.space_id, !event.isTrusted ? "programmatic" : event.detail === 0 ? "keyboard" : "pointer")}
                     onDragStart={(event) => {
                       setDraggedSpaceId(space.space_id);
                       event.dataTransfer.effectAllowed = "move";
@@ -804,7 +804,7 @@ export function Sidebar({
   onOpenSpaceMembers?: () => void;
   spaceMemberCounts?: { joined: number; childOnly: number };
   onJoinRoom?: (roomId: string) => void;
-  onSelectRoom: (roomId: string) => void;
+  onSelectRoom: (roomId: string, input?: import("../backend/desktopApi").NavigationInput) => void;
   onUpdateSettings?: (patch: SettingsPatch) => void;
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
 }) {
@@ -1207,7 +1207,7 @@ function RoomSection({
   onJoinRoom?: (roomId: string) => void;
   onOpenInvites?: () => void;
   onSelectInvite?: () => void;
-  onSelectRoom: (roomId: string) => void;
+  onSelectRoom: (roomId: string, input?: import("../backend/desktopApi").NavigationInput) => void;
   onSelectSort?: (sort: RoomListSort) => void;
   onToggleCollapsed?: () => void;
   onToggleExpanded?: (expanded: boolean) => void;
@@ -1720,7 +1720,7 @@ function RoomButton({
   onOpenInvites?: () => void;
   onOpenContextMenu: OpenContextMenu;
   onSelectInvite?: () => void;
-  onSelectRoom: (roomId: string) => void;
+  onSelectRoom: (roomId: string, input?: import("../backend/desktopApi").NavigationInput) => void;
   onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
 }) {
   const sourceRoom = roomById.get(room.room_id);
@@ -1776,7 +1776,7 @@ function RoomButton({
       data-room-kind={kind}
       data-testid="room-item"
       type="button"
-      onClick={() => {
+      onClick={(event) => {
         if (kind === "invite") {
           onSelectInvite?.();
           return;
@@ -1796,7 +1796,7 @@ function RoomButton({
           }
           return;
         }
-        onSelectRoom(room.room_id);
+        onSelectRoom(room.room_id, !event.isTrusted ? "programmatic" : event.detail === 0 ? "keyboard" : "pointer");
       }}
       onContextMenu={(event) => {
         if (kind === "invite" || kind === "notJoined") {

@@ -1381,6 +1381,8 @@ pub struct RoomPermissionFacts {
     /// hold it (#935).
     #[serde(default)]
     pub can_change_join_rule: bool,
+    #[serde(default)]
+    pub can_change_topic: bool,
     pub can_edit_roles: bool,
     #[serde(default)]
     pub can_invite: bool,
@@ -1398,8 +1400,8 @@ impl RoomPermissionFacts {
             RoomSettingChange::JoinRule(_) | RoomSettingChange::AccessPolicy(_) => {
                 self.can_change_join_rule
             }
+            RoomSettingChange::Topic(_) => self.can_change_topic,
             RoomSettingChange::Name(_)
-            | RoomSettingChange::Topic(_)
             | RoomSettingChange::AvatarUrl(_)
             | RoomSettingChange::HistoryVisibility(_) => self.can_edit_settings,
         }

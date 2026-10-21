@@ -6,6 +6,8 @@ use tauri::{
 };
 
 pub(super) const MENU_EVENT_NAME: &str = "koushi-desktop://menu";
+const MENU_ID_EDITOR_UNDO: &str = "editor_undo";
+const MENU_ID_EDITOR_REDO: &str = "editor_redo";
 const MENU_ID_ABOUT: &str = "about_koushi";
 const MENU_ID_OPEN_ACCOUNT_SETTINGS: &str = "open_account_settings";
 const MENU_ID_OPEN_APP_SETTINGS: &str = "open_app_settings";
@@ -40,6 +42,20 @@ pub(crate) struct DesktopStandardMenuItem {
 
 pub(crate) fn desktop_menu_items() -> Vec<DesktopMenuItem> {
     vec![
+        DesktopMenuItem {
+            id: MENU_ID_EDITOR_UNDO,
+            label_key: "menu.undo",
+            label: "Undo",
+            menu: "edit",
+            accelerator: "CmdOrCtrl+Z",
+        },
+        DesktopMenuItem {
+            id: MENU_ID_EDITOR_REDO,
+            label_key: "menu.redo",
+            label: "Redo",
+            menu: "edit",
+            accelerator: "CmdOrCtrl+Shift+Z",
+        },
         DesktopMenuItem {
             id: MENU_ID_ABOUT,
             label_key: "menu.aboutKoushi",
@@ -143,6 +159,8 @@ pub(crate) fn desktop_standard_menu_items() -> Vec<DesktopStandardMenuItem> {
 
 pub(super) fn desktop_menu_action_id(menu_id: &str) -> Option<&'static str> {
     match menu_id {
+        MENU_ID_EDITOR_UNDO => Some("editorUndo"),
+        MENU_ID_EDITOR_REDO => Some("editorRedo"),
         MENU_ID_OPEN_ACCOUNT_SETTINGS => Some("openAccountSettings"),
         MENU_ID_OPEN_APP_SETTINGS => Some("openAppSettings"),
         MENU_ID_SIGN_OUT => Some("logout"),
@@ -220,8 +238,46 @@ pub(crate) fn set_native_menu_labels(
 ) -> Result<(), String> {
     // The menu is built before the webview knows the catalog locale, so the
     // resolved labels are pushed back and the menu is rebuilt and re-applied.
+    let previous = app.menu();
+    let history_enabled = [MENU_ID_EDITOR_UNDO, MENU_ID_EDITOR_REDO].map(|id| {
+        previous
+            .as_ref()
+            .and_then(|menu| menu.get(id))
+            .and_then(|item| item.as_menuitem().cloned())
+            .and_then(|item| item.is_enabled().ok())
+            .unwrap_or(false)
+    });
     let menu = build_desktop_menu(&app, &labels).map_err(|error| error.to_string())?;
+    set_history_availability(&menu, history_enabled[0], history_enabled[1])
+        .map_err(|error| error.to_string())?;
     app.set_menu(menu).map_err(|error| error.to_string())?;
+    Ok(())
+}
+
+/// Only availability crosses this platform boundary; draft history stays DOM-owned.
+#[tauri::command]
+pub(crate) fn set_native_editor_history_availability(
+    app: tauri::AppHandle,
+    undo: bool,
+    redo: bool,
+) -> Result<bool, String> {
+    let Some(menu) = app.menu() else {
+        return Ok(false);
+    };
+    set_history_availability(&menu, undo, redo).map_err(|error| error.to_string())?;
+    Ok(true)
+}
+
+fn set_history_availability<R: tauri::Runtime>(
+    menu: &tauri::menu::Menu<R>,
+    undo: bool,
+    redo: bool,
+) -> tauri::Result<()> {
+    for (id, enabled) in [(MENU_ID_EDITOR_UNDO, undo), (MENU_ID_EDITOR_REDO, redo)] {
+        if let Some(item) = menu.get(id).and_then(|item| item.as_menuitem().cloned()) {
+            item.set_enabled(enabled)?;
+        }
+    }
     Ok(())
 }
 
@@ -244,8 +300,8 @@ pub(super) fn build_desktop_menu<R: tauri::Runtime, M: Manager<R>>(
 
     // muda titles predefined items in English unless it is given text, so the
     // whole menu bar resolves through the catalog.
-    let undo = PredefinedMenuItem::undo(manager, Some(localized(labels, "menu.undo")))?;
-    let redo = PredefinedMenuItem::redo(manager, Some(localized(labels, "menu.redo")))?;
+    let undo = menu_item(manager, MENU_ID_EDITOR_UNDO, labels)?;
+    let redo = menu_item(manager, MENU_ID_EDITOR_REDO, labels)?;
     let cut = PredefinedMenuItem::cut(manager, Some(localized(labels, "menu.cut")))?;
     let copy = PredefinedMenuItem::copy(manager, Some(localized(labels, "menu.copy")))?;
     let paste = PredefinedMenuItem::paste(manager, Some(localized(labels, "menu.paste")))?;
@@ -346,7 +402,8 @@ fn menu_item<R: tauri::Runtime, M: Manager<R>>(
         .into_iter()
         .find(|item| item.id == id)
         .expect("desktop menu item id should be registered");
-    let builder = MenuItemBuilder::with_id(item.id, localized(labels, item.label_key));
+    let builder = MenuItemBuilder::with_id(item.id, localized(labels, item.label_key))
+        .enabled(!matches!(id, MENU_ID_EDITOR_UNDO | MENU_ID_EDITOR_REDO));
     if item.accelerator.is_empty() {
         builder.build(manager)
     } else {
@@ -480,3 +537,7 @@ mod tests {
         assert_eq!(localized(&Default::default(), "menu.view"), "View");
     }
 }
+
+#[cfg(test)]
+#[path = "desktop_menu_history_tests.rs"]
+mod history_tests;

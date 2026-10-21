@@ -1204,6 +1204,26 @@ fn reduce_action(state: &mut AppState, action: AppAction) -> Vec<AppEffect> {
             }
             Vec::new()
         }
+        AppAction::RoomTopicObserved {
+            room_id,
+            account_epoch,
+            topic,
+            can_change_topic,
+        } => {
+            if is_session_ready(state)
+                && state.sliding_sync_account_epoch == account_epoch
+                && state.room_management.selected_room_id.as_deref() == Some(room_id.as_str())
+                && let Some(settings) = state
+                    .room_management
+                    .settings
+                    .as_mut()
+                    .filter(|settings| settings.room_id == room_id)
+            {
+                settings.topic = topic;
+                settings.permissions.can_change_topic = can_change_topic;
+            }
+            Vec::new()
+        }
         AppAction::RoomSettingsSnapshotLoaded { room_id, settings } => {
             room_management::handle_room_settings_snapshot_loaded(state, room_id, settings)
         }

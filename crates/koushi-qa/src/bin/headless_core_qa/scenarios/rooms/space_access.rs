@@ -12,6 +12,9 @@ use super::super::scenario_identity::cleanup_qa_auditor_device;
 use super::*;
 use koushi_state::{RestrictedConditions, RoomAccessPolicy, RoomHistoryVisibility, RoomJoinRule};
 
+#[path = "space_topic.rs"]
+mod space_topic;
+
 pub(super) async fn verify(
     config: &QaConfig,
     conn_a: &mut CoreConnection,
@@ -89,6 +92,7 @@ async fn verify_with_auditor(
     if settings_b.permissions.can_change_join_rule {
         return Err("space_access: an ordinary member may change the join rule".to_owned());
     }
+    space_topic::verify(conn_a, conn_b, &space_id, &child_id, auditor).await?;
 
     let guard_id = conn_b.next_request_id();
     conn_b

@@ -16,6 +16,21 @@ its rooms. If a conversation is absent from a Space view, return to Home before
 assuming it has disappeared. The clock button opens the
 [scheduled messages panel](messaging.md#schedule-a-message).
 
+## Read or change a Space description
+
+Select a Space, then choose **Info** in its header. The **Description** card
+shows the shared description, including line breaks. **No description** means
+the Space has none; **Loading description…** means its settings are still loading.
+
+If your role allows description changes, choose **Edit**, enter the description,
+then **Save**. Choose **Clear** to remove it. These changes are shared with
+everyone in the Space and appear in other Matrix clients. The local name and
+icon in **Names** change only how this device displays the Space.
+
+The card shows saving progress and the result. If a save fails, choose **Edit**
+to retry the text you entered. Without permission to change the description,
+you can still read it and see updates from other members.
+
 ## Join a room
 
 If you received an invitation:

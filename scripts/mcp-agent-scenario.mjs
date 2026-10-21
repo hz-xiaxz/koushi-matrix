@@ -470,6 +470,7 @@ async function main() {
       "list_accounts",
       "list_rooms",
       "read_room_messages",
+      "read_recent_activity",
       "search_messages",
       "send_message",
       "wait_for_events",

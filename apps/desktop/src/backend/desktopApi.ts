@@ -1,3 +1,5 @@
+export type NavigationInput = "pointer" | "keyboard" | "programmatic" | "notification";
+export interface SessionAccessTokenReply { access_token: string; homeserver: string; user_id: string; device_id: string }
 import type {
   ReceiptSourceRef,
   ReaderWindowRequest,
@@ -256,6 +258,7 @@ export interface DesktopApi {
   ): Promise<NotificationDeliveryPreview>;
   changePassword(newPassword: string): Promise<CommandAdmission>;
   deactivateAccount(eraseData: boolean, password: string): Promise<CommandAdmission>;
+  currentSessionAccessToken(expectedSession: {homeserver: string; user_id: string; device_id: string}): Promise<SessionAccessTokenReply>;
   probeLocalEncryptionHealth(): Promise<CommandAdmission>;
   resetLocalData(): Promise<CommandAdmission>;
   bootstrapCrossSigning(): Promise<CommandAdmission>;
@@ -307,9 +310,9 @@ export interface DesktopApi {
     keyEvent: ComposerKeyEvent,
     options: ComposerResolverOptions
   ): Promise<ComposerResolvedAction>;
-  selectSpace(spaceId: string | null): Promise<CommandAdmission>;
+  selectSpace(spaceId: string | null, input?: NavigationInput): Promise<CommandAdmission>;
   reorderSpaces(spaceIds: string[]): Promise<CommandAdmission>;
-  selectRoom(roomId: string): Promise<CommandSettlement>;
+  selectRoom(roomId: string, input?: NavigationInput): Promise<CommandSettlement>;
   openActivityEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
   openPinnedEvent(roomId: string, eventId: string): Promise<CommandSettlement>;
   openNotificationEvent(roomId: string, eventId: string): Promise<CommandSettlement>;

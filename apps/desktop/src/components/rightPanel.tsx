@@ -165,6 +165,8 @@ export function ContextualRightPanel({
   runtimeAlerts = [],
   runtimeAlertRetrying = false,
   onRetryRuntimeAlert = () => undefined,
+  onRetrieveSessionAccessToken,
+  sessionAccessTokenAvailable,
   onProbeLocalEncryption,
   onResetLocalData,
   onLogout = () => undefined,
@@ -226,6 +228,7 @@ export function ContextualRightPanel({
   roomInfoReveal = null,
   onRoomInfoRevealHandled,
   onUpdateSpaceJoinRule,
+  onUpdateSpaceTopic,
   onSetSpaceChildSuggested,
   onIgnoreUser = () => undefined,
   onUnignoreUser = () => undefined,
@@ -332,6 +335,8 @@ export function ContextualRightPanel({
   accountSettingsCategory?: SettingsCategoryId;
   sendingAccount?: ComposerSendingAccount | null;
   onSettingsScopeChange?: (scope: "account" | "app") => void;
+  onRetrieveSessionAccessToken?: () => Promise<import("../backend/desktopApi").SessionAccessTokenReply>;
+  sessionAccessTokenAvailable?: boolean;
   onProbeLocalEncryption: () => void;
   onResetLocalData: () => void;
   onLogout?: () => void;
@@ -427,6 +432,7 @@ export function ContextualRightPanel({
   onRoomInfoRevealHandled?: () => void;
   /** Issue #935: settles, or rejects when Rust refuses the change. */
   onUpdateSpaceJoinRule?: (spaceId: string, joinRule: RoomJoinRule) => Promise<void>;
+  onUpdateSpaceTopic?: (spaceId: string, topic: string | null) => Promise<void>;
   /** Issue #1410: suggest (or stop suggesting) a Space child to its members. */
   onSetSpaceChildSuggested?: (spaceId: string, childRoomId: string, suggested: boolean) => void;
   onIgnoreUser?: (userId: string) => void;
@@ -668,6 +674,9 @@ export function ContextualRightPanel({
           onChangeSecureBackupPassphrase={onChangeSecureBackupPassphrase}
           onEnableKeyBackup={onEnableKeyBackup}
           onOpenRecovery={onOpenRecovery}
+          onRetrieveSessionAccessToken={onRetrieveSessionAccessToken}
+          sessionAccessTokenAvailable={sessionAccessTokenAvailable}
+          sessionAccessTokenEpoch={snapshot.state.domain.session_epoch ?? 0}
           onProbeLocalEncryption={onProbeLocalEncryption}
           onResetLocalData={onResetLocalData}
           onLogout={onLogout}
@@ -934,6 +943,7 @@ export function ContextualRightPanel({
               : undefined
           }
           onUpdateJoinRule={activeSpace ? onUpdateSpaceJoinRule : undefined}
+          onUpdateTopic={activeSpace ? onUpdateSpaceTopic : undefined}
         />
       </aside>
     );

@@ -922,6 +922,7 @@
           "permissions": {
             "can_ban": true,
             "can_change_join_rule": true,
+            "can_change_topic": true,
             "can_edit_roles": true,
             "can_edit_settings": true,
             "can_invite": true,
@@ -1112,6 +1113,7 @@
         "kind": "ready",
         "user_id": "@fixture:example.invalid"
       },
+      "session_epoch": 42,
       "session_lock_reason": null,
       "settings": {
         "persistence": {
@@ -1427,7 +1429,7 @@
         "platform": "linux"
       }
     },
-    "schema_version": 11,
+    "schema_version": 12,
     "ui": {
       "basic_operation": {
         "kind": "creatingRoom",

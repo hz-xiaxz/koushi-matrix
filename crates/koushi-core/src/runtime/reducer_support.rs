@@ -258,7 +258,34 @@ impl super::AppActor {
             _ => None,
         };
         let focused_timeline_before = self.current_focused_context_timeline_key();
+        let navigation_request = if let AppAction::SelectRoom { room_id } = &action {
+            self.pending_select
+                .get(room_id)
+                .and_then(|queue| queue.front())
+                .copied()
+        } else {
+            None
+        };
+        let navigation_observation = crate::navigation_diagnostics::NavigationObservation::begin(
+            &self.state,
+            &action,
+            koushi_diagnostics::NavigationOrigin::Unknown,
+            navigation_request,
+        );
+        let previous_session_state = self.state.session.clone();
+        let previous_disclosure_epoch = self.state.session_disclosure_epoch;
         let effects = reduce_with_unread_diagnostics(&mut self.state, action);
+        if self.state.session != previous_session_state {
+            self.state.session_disclosure_epoch =
+                crate::session_access_token::next_disclosure_epoch();
+            self.session_revision = self
+                .session_revision
+                .and_then(|revision| revision.checked_add(1));
+        }
+        if self.state.session == previous_session_state {
+            self.state.session_disclosure_epoch = previous_disclosure_epoch;
+        }
+        navigation_observation.finish(&self.state);
         // Account teardown (logout, switch) drops the whole timeline manager;
         // only release a focused timeline within the same account.
         let release_focused_timeline = focused_timeline_before.filter(|before| {

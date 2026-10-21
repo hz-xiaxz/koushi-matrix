@@ -39,6 +39,7 @@ async function seedRoomManagement(page: Page, locale: "en" | "ja") {
                 permissions: {
                   can_edit_settings: true,
                   can_change_join_rule: true,
+                  can_change_topic: true,
                   can_edit_roles: true,
                   can_invite: true,
                   can_kick: true,
@@ -216,6 +217,7 @@ async function seedAccessEditor(page: Page, locale: EditorLocale) {
                 permissions: {
                   can_edit_settings: true,
                   can_change_join_rule: true,
+                  can_change_topic: true,
                   can_edit_roles: true,
                   can_invite: true,
                   can_kick: true,

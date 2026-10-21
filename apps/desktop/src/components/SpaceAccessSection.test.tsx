@@ -48,6 +48,7 @@ function management(
       permissions: {
         can_edit_settings: false,
         can_change_join_rule: canChange,
+        can_change_topic: canChange,
         can_edit_roles: false,
         can_invite: false,
         can_kick: false,

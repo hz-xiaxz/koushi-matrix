@@ -40,6 +40,8 @@ const SNAPSHOT_READ_COMMANDS = new Set([
   "resync_snapshot"
 ]);
 const RESOURCE_COMMANDS = new Set([
+  "set_native_editor_history_availability",
+  "current_session_access_token",
   "read_receipt_reader_resource",
   "choose_room_key_export_destination",
   "choose_room_key_import_source",
@@ -161,7 +163,7 @@ export class TauriIpcMock {
         this.responseGeneration,
         snapshot.state_generation ?? 0
       );
-      if (!SNAPSHOT_READ_COMMANDS.has(command) && !VOID_COMMANDS.has(command)) {
+      if (!SNAPSHOT_READ_COMMANDS.has(command) && !VOID_COMMANDS.has(command) && !RESOURCE_COMMANDS.has(command)) {
         this.responseGeneration += 1;
         snapshot.state_generation = this.responseGeneration;
       }

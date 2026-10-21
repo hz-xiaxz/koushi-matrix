@@ -219,6 +219,21 @@ Rules:
    transaction IDs, or raw SDK errors. Action eligibility and source/forward
    ownership are in state ownership "Message interactions".
 
+### Explicit current-session access-token disclosure (#1519)
+
+Advanced Account Settings may reveal or copy the existing current-session access
+token only on explicit user action. Core admits the exact Ready account/session
+and reads the live SDK client's current token for each operation; it never reads
+stale credential-store session JSON or forces a token refresh just to display it.
+A zeroizing result with redacted Debug travels over a private one-shot response,
+never AppState, CoreEvent, snapshots, diagnostics, persisted settings or MCP.
+Refresh tokens, session JSON and crypto/store keys are excluded. Core fences
+lock/logout/account/session replacement; the DOM owner fences closure and late
+responses. The renderer keeps the value only in a transient DOM/ref, clears it
+on Hide, close, unmount or account/session change, and retrieves afresh for Copy.
+Clipboard retention after an explicit copy is explained. JS/IPC copies can be
+released, not reliably zeroized. No credential, device or trust mutation occurs.
+
 ## Logging and Diagnostics
 
 1. Diagnostics are structured and redacted
@@ -822,6 +837,10 @@ To reduce conflicts on these files:
   in a hover bubble also needs a keyboard-reachable statement: the wrapped
   control keeps its own accessible name, and the visible label or a permanent
   description carries anything the bubble adds.
+- Message timestamps may explicitly opt into focus disclosure of their full
+  date/time. These non-action metadata targets open the same tooltip on hover
+  or focus, close on blur, and expose the full value as their accessible
+  description. Action controls keep the pointer-only default above.
 - Headless regressions press outside the popup and then assert the popup is
   gone, that one instance of the kind remains, and that the dismissing press
   still reached its own action. A regression for a pointer-owned bubble hovers

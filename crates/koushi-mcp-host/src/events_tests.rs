@@ -237,3 +237,34 @@ async fn waiting_returns_immediately_when_records_exist() {
     assert_eq!(result["cursor"], log.cursor_for(A, 1).as_str());
     assert_eq!(result["events"][0]["cursor"], log.cursor_for(A, 1).as_str());
 }
+
+#[tokio::test]
+async fn invitations_do_not_enter_the_sampled_room_change_feed() {
+    let log = EventLog::new();
+    let mut snapshot = koushi_state::AppState {
+        rooms: vec![room("!joined:example.invalid", "$seed")],
+        ..Default::default()
+    };
+    log.observe_snapshot(A, &snapshot);
+    let cursor = log.cursor_for(A, 0);
+    snapshot.invites = vec![
+        serde_json::from_value(json!({
+            "room_id": "!invited:example.invalid", "display_name": "Synthetic invitation",
+            "topic": null, "inviter_display_name": null, "is_dm": false
+        }))
+        .expect("invite"),
+    ];
+    log.observe_snapshot(A, &snapshot);
+    snapshot.invites[0].is_dm = true;
+    snapshot.invites[0].display_name = "Updated invitation".into();
+    log.observe_snapshot(A, &snapshot);
+    assert_eq!(
+        poll(&log, A, Some(&cursor)).await.unwrap()["events"],
+        json!([])
+    );
+    snapshot.rooms = vec![room("!joined:example.invalid", "$next")];
+    log.observe_snapshot(A, &snapshot);
+    let result = poll(&log, A, Some(&cursor)).await.unwrap();
+    assert_eq!(result["events"].as_array().unwrap().len(), 1);
+    assert_eq!(result["events"][0]["room_id"], "!joined:example.invalid");
+}

@@ -1056,6 +1056,12 @@ pub enum AppAction {
         via_servers: Vec<String>,
         kind: OperationFailureKind,
     },
+    RoomTopicObserved {
+        room_id: String,
+        account_epoch: u64,
+        topic: Option<String>,
+        can_change_topic: bool,
+    },
     RoomSettingsSnapshotLoaded {
         room_id: String,
         settings: RoomSettingsSnapshot,
@@ -2012,6 +2018,9 @@ impl fmt::Debug for AppAction {
                 .field("room_id", &"RoomId(..)")
                 .field("enabled", enabled)
                 .finish(),
+            Self::RoomTopicObserved { .. } => formatter
+                .debug_struct("RoomTopicObserved")
+                .finish_non_exhaustive(),
             Self::RoomSettingsSnapshotLoaded { .. } => formatter
                 .debug_struct("RoomSettingsSnapshotLoaded")
                 .field("room_id", &"RoomId(..)")

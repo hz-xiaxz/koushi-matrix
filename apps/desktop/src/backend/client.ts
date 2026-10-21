@@ -538,6 +538,10 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandAdmission>("deactivate_account", { eraseData, password });
   }
 
+  async currentSessionAccessToken(expectedSession: { homeserver: string; user_id: string; device_id: string }): Promise<import("./desktopApi").SessionAccessTokenReply> {
+    return this.invokeCommand("current_session_access_token", { expectedSession });
+  }
+
   async probeLocalEncryptionHealth(): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("probe_local_encryption_health");
   }
@@ -690,16 +694,16 @@ export class TauriDesktopApi implements DesktopApi {
     });
   }
 
-  async selectSpace(spaceId: string | null): Promise<CommandAdmission> {
-    return this.invokeCommand<CommandAdmission>("select_space", { spaceId });
+  async selectSpace(spaceId: string | null, input?: import("./desktopApi").NavigationInput): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("select_space", { spaceId, ...(input ? { input } : {}) });
   }
 
   async reorderSpaces(spaceIds: string[]): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("reorder_spaces", { spaceIds });
   }
 
-  async selectRoom(roomId: string): Promise<CommandSettlement> {
-    return this.invokeCommand<CommandSettlement>("select_room", { roomId });
+  async selectRoom(roomId: string, input?: import("./desktopApi").NavigationInput): Promise<CommandSettlement> {
+    return this.invokeCommand<CommandSettlement>("select_room", { roomId, ...(input ? { input } : {}) });
   }
 
   async beginComposerDraftRendererGeneration(): Promise<string> {

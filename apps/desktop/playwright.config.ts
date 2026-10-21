@@ -62,6 +62,7 @@ export default defineConfig({
         trace: process.env.KOUSHI_PLAYWRIGHT_TRACE ? "retain-on-failure" : "off"
       },
       testMatch: [
+        /editor-history-shortcuts\.spec\.ts$/,
         /room-list-filter-native-clear\.spec\.ts$/,
         /upload-preview-heic\.spec\.ts$/,
         /inline-math-baseline\.spec\.ts$/,

@@ -129,6 +129,7 @@ pub fn start(
         Shared {
             accounts,
             log,
+            activity_pages: Arc::new(crate::recent_activity::ActivityPages::default()),
             broker: Arc::clone(&broker),
         },
         token,
@@ -149,6 +150,7 @@ pub fn start(
 pub(crate) struct Shared {
     pub(crate) accounts: Arc<dyn BridgeAccounts>,
     pub(crate) log: Arc<events::EventLog>,
+    pub(crate) activity_pages: Arc<crate::recent_activity::ActivityPages>,
     pub(crate) broker: Arc<ConsentBroker>,
 }
 

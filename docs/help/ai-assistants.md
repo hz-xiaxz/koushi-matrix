@@ -380,3 +380,27 @@ If the launcher exits with "client name must be 1-64 characters", choose a
 If the launcher reports it cannot locate the endpoint file, pass
 `--endpoint` explicitly. If Koushi refuses to read its own endpoint file,
 check that the file is readable only by you (`chmod 600`).
+
+
+## Recent topics across rooms
+
+Ask the assistant to call `read_recent_activity` with an explicit `account_id`.
+It reads the same bounded observed **Activity → Recent** feed while Activity is
+closed, including already-read messages. It does not open a room, mark messages
+read, clear unread counts or send receipts. Muted/low-priority exclusions and
+Activity notification filters apply. This is up to 200 observed rows, not a
+complete Matrix archive; no history resolver starts for the assistant. Unknown
+read state and unavailable previews are explicit.
+
+Optional `room_ids`, inclusive `from_timestamp_ms`, exclusive `to_timestamp_ms`,
+and `limit` (1–100, default 50) restrict the result. Continue with the returned
+opaque cursor and identical filters/limit. Pages are immutable, at most 256 KiB,
+so a large preview can yield fewer than the requested rows. Preview and label
+truncation are reported. Snapshots expire after 120 seconds, restart, access or
+session changes, or bounded-cache eviction. `resync_required` means start a new
+read without a cursor; it cannot restore evicted history. Use
+`read_room_messages` for available context and deduplicate account/room/event IDs.
+An empty or exhausted feed does not establish that no messages occurred.
+
+Connected assistants' permission tables label accounts by their complete Matrix
+IDs, including homeservers, so matching display names remain distinguishable.

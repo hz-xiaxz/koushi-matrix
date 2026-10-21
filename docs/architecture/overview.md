@@ -2532,3 +2532,94 @@ update results remain Rust-owned. Keyboard reference and send-key preferences
 belong to App Settings. Help offers the public repository URL, a copy action,
 and a short instruction to ask an AI assistant. It must be usable before
 sign-in and must not collect or copy account details or messages.
+
+
+## Direct Recent Activity reads (#1550)
+
+Core exposes a private read operation over its existing ActivityProjection Recent
+stream even when the GUI Activity pane is closed. It neither opens Activity nor
+starts its resolver. The existing projection owns eligibility, ordering and the
+200-row bound. Recent is observed, finite history independent of read state;
+unknown read state is explicit, never inferred from unread=false on Recent rows.
+The operation never reduces navigation, emits GUI events or sends receipts.
+
+The MCP host paginates immutable snapshots with random opaque server-side handles,
+bound to caller, explicit account, exact runtime/session and normalized room/time
+query and page limit (1..100, default 50). Snapshots expire after 120 seconds; retain
+at most 16 snapshots, 200 rows each, 8 MiB total, and at most 4096 Unicode scalars of
+preview per row with explicit truncation. Every page rechecks read permission,
+current session and joined-room eligibility; changed scope invalidates continuation.
+Malformed/expired/mismatched cursors return typed resync_required errors. Results
+expose snapshot time, bounded observed coverage, truncation, content availability
+and continuation. Exhaustion makes no claim of complete Matrix history. Restart
+invalidates cursors; fresh reads cannot recover evicted history.
+
+## Causal navigation diagnostics (#1543)
+
+Rust observes authoritative before/after account, Space and room state at every
+reduction, including automatic fallback, clearing and reset. A closed cause/origin
+enum and request correlation accompany admission and settlement; unrelated async
+work is never attributed to the most recent command. Unknown origin is explicit.
+Only session-local ordinal aliases, enums, booleans, counts and relative timing
+enter the separately bounded navigation ledger. Raw or hashed Matrix identifiers,
+content, queries, paths and secrets are excluded. Bounded alias lookup never reuses
+aliases ambiguously within retained records. The diagnostic export includes ledger
+retention and eviction counters separately from the general diagnostic rings.
+
+
+## Shared Room and Space topic observation (#1571)
+
+Topic edits use the exact m.room.topic permission (`can_change_topic`), separate
+from aggregate settings permission. Rust continuously observes the latest
+successfully loaded Room/Space settings target using the existing account room
+update subscription and a local-only SDK topic/power-level read. No member fetch
+or network poll is added. Session epochs and selected target fence observations;
+observations preserve editor drafts and operation outcomes and never select a
+settings target. Target replacement/session teardown retires the old demand.
+
+Topic-write success additionally requires the exact acknowledged event to reach
+the same SDK session's committed state. A temporary room-scoped committed-update
+receiver bridges acknowledgement and local sync, using canonical end-of-timeline
+state batches and local SDK state reads rather than typed timeline callbacks.
+The operation then returns current SDK settings. This
+keeps immediate close/reopen reads consistent without hiding later remote edits.
+
+When an MSC4186 response includes a topic or power-level timeline event but omits
+that requested canonical state entry, the existing SDK response owner can fetch
+the full current event from the same homeserver before normal state processing.
+It never copies timeline contents or replaces provided canonical state. Repair
+is bounded to eight entries, concurrency two and two seconds per response;
+failed or skipped repairs preserve regular sync without asserting confirmation.
+The existing position guard orders this work with response commit, and HTTP work
+does not hold the global store lock. This also covers remote description and
+topic-permission updates without a second state owner.
+
+
+## Incoming in-room verification request recovery (#1534)
+
+The SDK's existing bounded incoming verification owner retains both to-device
+and in-room requests when sender-device keys are not yet available. Retained
+identity includes sender and full room/transport-bound FlowId; a textual flow ID
+collision across scopes is explicitly rejected, never resolved to another flow.
+The existing key-query response attribution, expiry, ordered claim/rollback and
+committed delivery fences remain authoritative. In-room receipt enables the
+same key-query scheduler and recovery path; normal, late-decrypted and recovered
+in-room requests use the SDK typed incoming delivery stream. The first-party
+raw-room and resolved-UTD product delivery paths are retired; SDK late-UTD crypto
+ingestion remains. No verification trust/conflict policy or second cache is added.
+
+### Settings metadata demand (#1571)
+
+A successful Room/Space settings read for an SDK-confirmed joined room also
+admits that room as an explicit management demand through the existing
+session-resident subscription coordinator. This demand is distinct from visible
+room-list evidence. The Room actor validates the current session binding and
+backend run generation (distinct from the local room-list projection counter);
+the coordinator rejects stale generations and leave
+fences, unions the room into its existing residency set, and uses ordinary
+exact-set reconciliation. It never creates a second SDK subscription owner,
+clears a leave fence, or changes membership. Repeated reads of a retained room
+are subscription no-ops; a first subscription retains the existing encryption
+invalidation/rotation behavior. Normal session teardown and successful leave
+remain the residency retirement boundaries. Topic observation continues to read
+current SDK state on the existing sync-update relay, without polling.

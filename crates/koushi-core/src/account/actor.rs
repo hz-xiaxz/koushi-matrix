@@ -161,6 +161,16 @@ pub(crate) enum AccountMessage {
     /// A room timeline page for an out-of-band caller (MCP). Answered on the
     /// reply channel only and read from the session, so no timeline actor is
     /// mounted and no GUI state changes.
+    DirectSessionAccessToken {
+        expected: koushi_state::SessionInfo,
+        revision: u64,
+        response: tokio::sync::oneshot::Sender<
+            Result<
+                crate::session_access_token::SessionAccessToken,
+                crate::session_access_token::SessionAccessTokenError,
+            >,
+        >,
+    },
     DirectRoomMessages {
         room_id: String,
         limit: u32,
@@ -1869,6 +1879,20 @@ impl AccountActor {
                 } => {
                     Box::pin(self.handle_direct_search(query, room_ids, content_policy, response))
                         .await;
+                }
+                AccountMessage::DirectSessionAccessToken {
+                    expected,
+                    revision,
+                    response,
+                } => {
+                    if !response.is_closed() {
+                        let result = crate::session_access_token::read_current_session_access_token(
+                            self.session.as_deref(),
+                            &expected,
+                            revision,
+                        );
+                        let _ = response.send(result);
+                    }
                 }
                 AccountMessage::DirectRoomMessages {
                     room_id,

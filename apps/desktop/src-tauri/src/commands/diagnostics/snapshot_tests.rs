@@ -2,6 +2,7 @@ use super::*;
 #[test]
 fn diagnostic_snapshot_maps_structured_snapshot_to_camel_case_frontend_contract() {
     let snapshot = koushi_diagnostics::DiagnosticSnapshot {
+        navigation: Default::default(),
         records: vec![koushi_diagnostics::DiagnosticRecord {
             timestamp_ms: 42,
             event: koushi_diagnostics::DiagnosticEvent::new(
@@ -30,6 +31,7 @@ fn diagnostic_snapshot_maps_structured_snapshot_to_camel_case_frontend_contract(
                 "message": "stage=submit operation=send_reaction"
             }],
             "droppedEntries": 7,
+            "navigation": {"records": [], "evicted_records": 0, "reset_count": 0},
             "slidingSync": {
                 "discoveryState": "not_started",
                 "advertised": false,
@@ -80,6 +82,7 @@ fn diagnostic_snapshot_maps_structured_snapshot_to_camel_case_frontend_contract(
 #[test]
 fn diagnostic_snapshot_serialization_excludes_synthetic_private_values() {
     let snapshot = koushi_diagnostics::DiagnosticSnapshot {
+        navigation: Default::default(),
         records: vec![koushi_diagnostics::DiagnosticRecord {
             timestamp_ms: 42,
             event: koushi_diagnostics::DiagnosticEvent::new(

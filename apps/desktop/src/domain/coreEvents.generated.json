@@ -553,6 +553,7 @@
           "permissions": {
             "can_ban": true,
             "can_change_join_rule": true,
+            "can_change_topic": true,
             "can_edit_roles": true,
             "can_edit_settings": true,
             "can_invite": true,
@@ -602,6 +603,7 @@
           "permissions": {
             "can_ban": true,
             "can_change_join_rule": true,
+            "can_change_topic": true,
             "can_edit_roles": true,
             "can_edit_settings": true,
             "can_invite": true,
@@ -756,9 +758,10 @@
             "!crawler:example.test": {
               "kind": "queued"
             }
-          }
+          },
+          "session_epoch": 42
         },
-        "schema_version": 11
+        "schema_version": 12
       }
     },
     "generation": 1,

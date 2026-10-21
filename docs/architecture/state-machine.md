@@ -7009,3 +7009,116 @@ admission and successful import are separate durable records. Completion
 tombstones re-acknowledge replayed replies even after target narrowing. Storage
 failure or operation timeout stops the worker before further writes; a new
 session reconciles durable records and can retry.
+
+
+## Private current-session token reads (#1519)
+
+Explicit Reveal/Copy has non-secret Pending/Completed/Unavailable operation status.
+Admission requires the exact Ready account/session. Completion on the private reply
+channel is fenced against account/session replacement, lock or logout; closed reply
+owners discard results. No token enters serializable product state or event replay.
+The renderer fences its DOM lifetime and clears on Hide, close and session change.
+
+## Private Recent Activity reads (#1550)
+
+A private Core read obtains the existing Recent projection without transitioning
+Account Activity out of Closed or changing navigation, receipts or unread counts.
+The MCP snapshot lifecycle is Absent -> Retained -> Expired/Invalidated, with
+bounded immutable rows and opaque caller/account/session/query-bound continuation.
+Every page revalidates grants and room eligibility; invalid continuation is an
+explicit resync_required error, never an empty success or silent reset.
+
+
+## Selected settings topic observations (#1571)
+
+An explicit successful settings load establishes the latest target demand. Joined
+room updates wake a local SDK read for that target only. The resulting observation
+updates topic and its exact permission only when session epoch and selected target
+still match. Pending/failed operations, drafts and selected target remain unchanged;
+idempotent observations produce no state change. Session/target replacement clears
+the actor demand, and existing room-observer teardown owns subscription shutdown.
+
+### Topic write settlement requires local SDK commit
+
+A Room/Space topic write remains pending after its HTTP acknowledgement. Before
+sending it, the existing session subscribes to the SDK's room-scoped committed
+update stream. The same bounded operation drives HTTP and room updates together;
+no task or typed-event callback owns another part of its lifetime. Only the last
+`m.room.topic` event with empty state key in a `State::After` batch is canonical
+batch proof. `State::Before` and other room updates wake a local canonical SDK
+state read; timeline events never supply current-state proof. A current-state
+read after acknowledgement also covers already committed/idempotent writes.
+
+Up to 32 distinct canonical proof event IDs are retained privately while awaiting
+the exact acknowledged event ID. An exact current canonical state read can prove
+success independently of queued update history. Otherwise, observed SDK broadcast
+lag/closure, proof overflow, or the ten-second send/commit deadline fails closed
+without resending; lost history itself never proves success. Receiver
+ownership ends on completion, failure, cancellation or timeout. Room-update
+payloads are dropped before any local-store await, and topic contents and event
+IDs are never logged. After the matching commit, the operation returns a fresh
+SDK settings snapshot; a later real remote topic may supersede the local write.
+
+### Bounded SDK repair of omitted requested metadata
+
+Some local Tuwunel responses omit requested canonical topic state even when their
+timeline contains a topic change and the authenticated state endpoint confirms
+that change. The SDK's existing MSC4186 response owner may repair only requested
+`m.room.topic` or `m.room.power_levels` entries with an empty state key that are
+absent from `required_state` but present in the timeline. A supplied canonical
+entry always wins. Timeline contents and outgoing request values are never used
+as replacement state.
+
+Repair uses the SDK's existing requested-state selector-union semantics. Explicit
+room subscriptions receive priority, followed by stable room/type ordering. Each
+response attempts at most eight distinct room/type repairs, with concurrency two,
+one two-second total deadline, no retries, and at most 256 KiB of accepted bytes
+per fetched full event. Each GET uses the same authenticated client and must
+validate the full event's room ID, type, empty state key and event ID.
+
+This work belongs to the existing post-HTTP response task while its position
+guard remains held. Network work happens before acquiring the global state-store
+lock. Validated events enter the ordinary SDK state processor and its existing
+uncancellable persistence/RoomInfo handoff; no session, polling loop, side cache,
+or separate permission/trust decision is introduced.
+
+Failure, timeout, malformed data or budget exhaustion leaves that entry unrepaired
+and preserves ordinary sync processing. Lost metadata is not success evidence;
+the writer's canonical-commit barrier still fails without proof. Bounded repair
+does not promise complete recovery during bursts above its budget. Diagnostics
+are restricted to static reasons and aggregate counts, without identifiers or
+state contents.
+No synthetic topic snapshot, additional session, value cache or network polling
+is used.
+
+
+## Incoming verification recovery scope (#1534)
+
+The existing bounded UnknownSender -> QueryInFlight -> Claimed -> Delivered owner
+also admits in-room requests. Pending keys include transport and room identity,
+and typed delivery is committed exactly once per claimed request. Old/reversed
+key-query responses, expiry and interrupted delivery preserve the existing retry
+and rollback guards. A request in another room or transport cannot match an
+existing string-indexed request without full FlowId equality.
+
+A matching in-room peer Cancel terminalizes the retained request within the same
+bounded owner, including an in-flight claim/device lookup. A later key response
+cannot materialize or publish an actionable canceled request; unrelated room or
+transport flows remain unchanged.
+
+The private access-token disclosure UI is fenced by a non-secret,
+process-unique `session_disclosure_epoch` allocated by the App runtime at creation
+and on every session-state change. It is independent of per-account sync epochs,
+so replacing a runtime with the same account/device cannot preserve a disclosure.
+It is published only as the frontend's `session_epoch`; it contains no identity
+or credential and never authorizes token access. The private token reply retains
+its separate admission/delivery revision checks.
+
+Successful settings loading for a currently joined Room/Space admits an explicit
+management synchronization demand through the existing subscription-residency
+owner (#1571). The current session Arc and backend run generation fence admission (the local
+room-list projection counter is a different lifetime);
+the owner preserves leave tombstones and unions valid demand into the existing
+session-resident set. No GUI timeline is mounted, no separate subscription
+lifecycle is created, and repeated retained-target reads are no-ops. The ordinary
+first-subscription security policy remains in force.

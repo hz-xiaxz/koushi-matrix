@@ -86,6 +86,56 @@ struct ManagerState {
     /// across these joins; manager shutdown drains them instead.
     retiring: Vec<executor::JoinHandle<Result<(), CoreShutdownError>>>,
     shutdown_result: Option<Result<(), CoreShutdownError>>,
+    #[cfg(test)]
+    selection_diagnostics: Mutex<Vec<koushi_diagnostics::NavigationDiagnostic>>,
+}
+
+// Capture before removing/replacing any child, then observe only the final selection.
+struct SelectedAccountObservation {
+    id: AccountTabId,
+    metadata: Option<(
+        u64,
+        crate::navigation_diagnostics::AccountSelectionObservation,
+    )>,
+}
+impl SelectedAccountObservation {
+    fn capture(state: &ManagerState) -> Self {
+        Self {
+            id: state.selected.clone(),
+            metadata: state
+                .tabs
+                .iter()
+                .find(|tab| tab.descriptor.id == state.selected)
+                .map(|tab| {
+                    let snapshot = tab.runtime.attach().snapshot();
+                    (
+                        snapshot.session_disclosure_epoch,
+                        crate::navigation_diagnostics::AccountSelectionObservation::new(&snapshot),
+                    )
+                }),
+        }
+    }
+    fn finish(self, state: &ManagerState, cause: koushi_diagnostics::NavigationCause) {
+        let Some(after) = state
+            .tabs
+            .iter()
+            .find(|tab| tab.descriptor.id == state.selected)
+            .map(|tab| tab.runtime.attach().snapshot())
+        else {
+            return;
+        };
+        let Some((before_epoch, observation)) = self.metadata else {
+            return;
+        };
+        let changed = self.id != state.selected || before_epoch != after.session_disclosure_epoch;
+        if changed || cause == koushi_diagnostics::NavigationCause::SelectAccount {
+            let diagnostic = observation.finish(&after, changed, cause);
+            #[cfg(test)]
+            state.selection_diagnostics.lock().unwrap().push(diagnostic);
+            #[cfg(not(test))]
+            let _ = diagnostic;
+        }
+    }
 }
 
 /// Owns one persistent `CoreRuntime` per account tab. All account runtimes
@@ -156,6 +206,8 @@ impl AccountRuntimeManager {
                 add_return_to: None,
                 retiring: Vec::new(),
                 shutdown_result: None,
+                #[cfg(test)]
+                selection_diagnostics: Mutex::new(Vec::new()),
             }),
             operation_gate: tokio::sync::Mutex::new(()),
             sign_in_attempts: Mutex::new(PendingSignInAttempts::default()),
@@ -274,6 +326,7 @@ impl AccountRuntimeManager {
         let mut old_runtimes = Vec::new();
         let selected_tab_id = {
             let mut state = self.state.lock().expect("account runtime manager mutex");
+            let selection = SelectedAccountObservation::capture(&state);
             let mut keep_add = None;
             if add_runtime_in_use
                 && let Some(add_id) = existing
@@ -340,6 +393,10 @@ impl AccountRuntimeManager {
                     .unwrap_or_else(|| new_tabs[0].descriptor.id.clone());
             }
             state.tabs = new_tabs;
+            selection.finish(
+                &state,
+                koushi_diagnostics::NavigationCause::StartupRestoration,
+            );
             state.selected.clone()
         };
         self.account_work
@@ -604,7 +661,9 @@ impl AccountRuntimeManager {
         }
         let mut state = self.state.lock().expect("account runtime manager mutex");
         if state.tabs.iter().any(|tab| &tab.descriptor.id == id) {
+            let selection = SelectedAccountObservation::capture(&state);
             state.selected = id.clone();
+            selection.finish(&state, koushi_diagnostics::NavigationCause::SelectAccount);
             self.account_work.set_selected_account(Some(id.as_str()));
             Ok(true)
         } else {
@@ -622,7 +681,19 @@ impl AccountRuntimeManager {
     fn add_account_tab_locked(
         &self,
     ) -> Result<AccountTabId, koushi_protocol::failure::CoreFailure> {
+        self.add_account_tab_observed_locked(
+            None,
+            koushi_diagnostics::NavigationCause::SelectAccount,
+        )
+    }
+
+    fn add_account_tab_observed_locked(
+        &self,
+        previous: Option<SelectedAccountObservation>,
+        cause: koushi_diagnostics::NavigationCause,
+    ) -> Result<AccountTabId, koushi_protocol::failure::CoreFailure> {
         let mut state = self.state.lock().expect("account runtime manager mutex");
+        let selection = previous.unwrap_or_else(|| SelectedAccountObservation::capture(&state));
         if state.shutdown_result.is_some() {
             return Err(koushi_protocol::failure::CoreFailure::ShutdownFailed);
         }
@@ -636,6 +707,7 @@ impl AccountRuntimeManager {
                 state.add_return_to = Some(state.selected.clone());
             }
             state.selected = id.clone();
+            selection.finish(&state, cause);
             self.account_work.set_selected_account(Some(id.as_str()));
             return Ok(id);
         }
@@ -660,6 +732,7 @@ impl AccountRuntimeManager {
         });
         state.add_return_to = Some(state.selected.clone());
         state.selected = id.clone();
+        selection.finish(&state, cause);
         self.account_work.set_selected_account(Some(id.as_str()));
         Ok(id)
     }
@@ -686,6 +759,7 @@ impl AccountRuntimeManager {
             if tab.descriptor.account_key.is_some() || !signed_out || state.tabs.len() < 2 {
                 return Ok(false);
             }
+            let selection = SelectedAccountObservation::capture(&state);
             let runtime = state.tabs.remove(position).runtime;
             let return_to = state.add_return_to.take();
             if state.selected == *id {
@@ -698,6 +772,7 @@ impl AccountRuntimeManager {
                             .clone()
                     });
             }
+            selection.finish(&state, koushi_diagnostics::NavigationCause::AccountFallback);
             state
                 .retiring
                 .push(executor::spawn(runtime.shutdown_checked()));
@@ -828,11 +903,12 @@ impl AccountRuntimeManager {
         if !removed {
             return Ok(false);
         }
-        let selected_tab_id = {
+        let (selected_tab_id, pending_selection) = {
             let mut state = self.state.lock().expect("account runtime manager mutex");
             let Some(position) = state.tabs.iter().position(|tab| &tab.descriptor.id == id) else {
                 return Ok(false);
             };
+            let selection = SelectedAccountObservation::capture(&state);
             let runtime = state.tabs.remove(position).runtime;
             if state.selected == *id
                 && let Some(tab) = state
@@ -844,7 +920,13 @@ impl AccountRuntimeManager {
             state
                 .retiring
                 .push(executor::spawn(runtime.shutdown_checked()));
-            state.selected.clone()
+            let pending = if state.tabs.is_empty() {
+                Some(selection)
+            } else {
+                selection.finish(&state, koushi_diagnostics::NavigationCause::AccountFallback);
+                None
+            };
+            (state.selected.clone(), pending)
         };
         self.account_work
             .set_selected_account(Some(selected_tab_id.as_str()));
@@ -853,7 +935,10 @@ impl AccountRuntimeManager {
             .expect("sign-in attempt mutex")
             .forget(id);
         if self.tab_descriptors().is_empty() {
-            self.add_account_tab_locked()?;
+            self.add_account_tab_observed_locked(
+                pending_selection,
+                koushi_diagnostics::NavigationCause::AccountFallback,
+            )?;
         }
         Ok(true)
     }

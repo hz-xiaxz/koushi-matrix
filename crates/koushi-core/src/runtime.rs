@@ -302,6 +302,28 @@ pub enum CoreQaCommand {
 )]
 enum CoreCommandEnvelope {
     ReaderPrepared(readers::ReaderPrepared),
+    DirectSessionAccessToken {
+        expected: koushi_state::SessionInfo,
+        response: oneshot::Sender<
+            Result<
+                crate::session_access_token::SessionAccessToken,
+                crate::session_access_token::SessionAccessTokenError,
+            >,
+        >,
+    },
+    ValidateSessionAccessToken {
+        expected: koushi_state::SessionInfo,
+        revision: u64,
+        response: oneshot::Sender<bool>,
+    },
+    DirectRecentActivity {
+        response: oneshot::Sender<
+            Result<
+                crate::direct_activity::RecentActivitySnapshot,
+                crate::direct_activity::RecentActivityFailure,
+            >,
+        >,
+    },
     #[cfg(test)]
     ResolveReceiptWindow {
         source: koushi_protocol::view::ReceiptSourceRef,
@@ -378,7 +400,10 @@ impl CoreCommandEnvelope {
             }
             Self::RetentionDiagnostics(_) => panic!("expected public command envelope"),
             Self::DirectSearch { .. } => panic!("expected public command envelope"),
-            Self::DirectRoomMessages { .. } => panic!("expected public command envelope"),
+            Self::DirectRoomMessages { .. }
+            | Self::DirectRecentActivity { .. }
+            | Self::DirectSessionAccessToken { .. }
+            | Self::ValidateSessionAccessToken { .. } => panic!("expected public command envelope"),
             Self::DirectAttachment { .. } => panic!("expected public command envelope"),
             Self::TimelineResidencyDiagnostics(_) => panic!("expected public command envelope"),
             #[cfg(test)]
@@ -837,7 +862,10 @@ impl CoreRuntime {
         let composer_draft_lease_changes = composer_draft_leases.subscribe();
         let (composer_draft_rejected_tx, composer_draft_rejected_rx) = mpsc::unbounded_channel();
 
-        let mut initial_state = AppState::default();
+        let mut initial_state = AppState {
+            session_disclosure_epoch: crate::session_access_token::next_disclosure_epoch(),
+            ..Default::default()
+        };
         let (settings_action, settings_load_status) = match settings_store.load() {
             Ok(values) => (
                 AppAction::SettingsLoaded { values },
@@ -919,6 +947,7 @@ impl CoreRuntime {
             room_activity_loaded_for: None,
             account_settings_loaded_for: None,
             state_generation: 0,
+            session_revision: Some(0),
             active_search_request: None,
             pending_composer_draft_persist: None,
             pending_navigation_persist: None,
@@ -1374,6 +1403,7 @@ struct AppActor {
     room_activity_loaded_for: Option<koushi_protocol::SessionKeyId>,
     account_settings_loaded_for: Option<koushi_protocol::SessionKeyId>,
     state_generation: u64,
+    session_revision: Option<u64>,
     pending_composer_draft_persist: Option<PendingComposerDraftPersist>,
     pending_navigation_persist: Option<PendingNavigationPersist>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
@@ -2630,6 +2660,46 @@ impl AppActor {
             CoreCommandEnvelope::TimelineResidencyDiagnostics(response) => {
                 Box::pin(self.handle_timeline_residency_diagnostics(response)).await
             }
+            CoreCommandEnvelope::DirectSessionAccessToken { expected, response } => {
+                if matches!(&self.state.session, SessionState::Ready(actual) if actual.user_id == expected.user_id && actual.device_id == expected.device_id && actual.homeserver == expected.homeserver)
+                    && let Some(revision) = self.session_revision
+                {
+                    let SessionState::Ready(expected) = self.state.session.clone() else {
+                        unreachable!()
+                    };
+                    if let Err(error) =
+                        self.account_actor
+                            .try_send(AccountMessage::DirectSessionAccessToken {
+                                expected,
+                                revision,
+                                response,
+                            })
+                        && let AccountMessage::DirectSessionAccessToken { response, .. } =
+                            error.into_inner()
+                    {
+                        let _ = response.send(Err(
+                            crate::session_access_token::SessionAccessTokenError::Unavailable,
+                        ));
+                    }
+                } else {
+                    let _ = response.send(Err(
+                        crate::session_access_token::SessionAccessTokenError::AccountInactive,
+                    ));
+                }
+                false
+            }
+            CoreCommandEnvelope::ValidateSessionAccessToken {
+                expected,
+                revision,
+                response,
+            } => {
+                let _ = response.send(matches!(&self.state.session, SessionState::Ready(actual) if actual.user_id == expected.user_id && actual.device_id == expected.device_id && actual.homeserver == expected.homeserver) && self.session_revision == Some(revision));
+                false
+            }
+            CoreCommandEnvelope::DirectRecentActivity { response } => {
+                let _ = response.send(self.read_recent_activity());
+                false
+            }
             CoreCommandEnvelope::DirectSearch {
                 query,
                 room_ids,
@@ -2652,6 +2722,42 @@ impl AppActor {
             } => Box::pin(self.handle_direct_room_messages(room_id, limit, from, response)).await,
             envelope => Box::pin(self.handle_public_command(envelope)).await,
         }
+    }
+
+    fn read_recent_activity(
+        &mut self,
+    ) -> Result<
+        crate::direct_activity::RecentActivitySnapshot,
+        crate::direct_activity::RecentActivityFailure,
+    > {
+        let SessionState::Ready(session) = &self.state.session else {
+            return Err(crate::direct_activity::RecentActivityFailure::AccountInactive);
+        };
+        let session = session.clone();
+        let session_revision = self
+            .session_revision
+            .ok_or(crate::direct_activity::RecentActivityFailure::AccountInactive)?;
+        let (recent, _, _) = self.activity_projection.snapshot(&self.state);
+        Ok(crate::direct_activity::RecentActivitySnapshot {
+            session,
+            session_revision,
+            session_epoch: self.state.session_disclosure_epoch,
+            notification_modes: recent
+                .rows
+                .iter()
+                .map(|row| {
+                    (
+                        row.room_id.clone(),
+                        self.state
+                            .room_notification_settings
+                            .get(&row.room_id)
+                            .map(|settings| settings.mode)
+                            .unwrap_or_default(),
+                    )
+                })
+                .collect(),
+            rows: recent.rows,
+        })
     }
 
     #[cfg(test)]
@@ -2890,7 +2996,10 @@ impl AppActor {
             }
             CoreCommandEnvelope::DirectSearch { .. }
             | CoreCommandEnvelope::DirectAttachment { .. }
-            | CoreCommandEnvelope::DirectRoomMessages { .. } => {
+            | CoreCommandEnvelope::DirectRoomMessages { .. }
+            | CoreCommandEnvelope::DirectRecentActivity { .. }
+            | CoreCommandEnvelope::DirectSessionAccessToken { .. }
+            | CoreCommandEnvelope::ValidateSessionAccessToken { .. } => {
                 unreachable!("internal command routed to public handler")
             }
             #[cfg(test)]
@@ -5057,11 +5166,21 @@ impl AppActor {
                         return state_changed;
                     }
                     koushi_protocol::command::RoomCommand::SelectSpace {
-                        request_id: _,
+                        request_id,
                         space_id,
                     } => {
+                        let observation =
+                            crate::navigation_diagnostics::NavigationObservation::begin(
+                                &self.state,
+                                &AppAction::SelectSpace {
+                                    space_id: space_id.clone(),
+                                },
+                                koushi_diagnostics::NavigationOrigin::Unknown,
+                                Some(request_id),
+                            );
                         self.commit_local_navigation(AppAction::SelectSpace { space_id })
                             .await;
+                        observation.finish(&self.state);
                         return state_changed;
                     }
                     _ => {}

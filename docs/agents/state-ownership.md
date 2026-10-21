@@ -1719,3 +1719,19 @@ has caused a real visible bug.
 - Product surfaces that need deterministic headless tooltip coverage must not
   rely on native `title=`; styled reusable tooltips must use `role="tooltip"` and
   `aria-describedby`.
+
+
+## Explicit session-token disclosure and navigation metadata (#1519, #1543)
+
+Access-token responses are private one-shot Core replies, not AppState/CoreEvent
+or the replay ring. Tauri serializes the zeroizing redacted wrapper only for
+explicit Reveal/Copy. Frontend snapshot version 12 adds the non-secret
+`domain.session_epoch`, mirrored from `sliding_sync_account_epoch` and its delta,
+so a replacement session clears transient DOM disclosure even with the same IDs.
+Room/Space settings permissions also carry the exact `can_change_topic` fact.
+
+Navigation export includes an independent bounded ledger and its eviction/reset
+counters. Reducer records with `authoritative_transition=true` describe the
+causal publication. Direct-operation spans record their own before/after
+observations with `authoritative_transition=false`; a concurrent user navigation
+inside an MCP span must not be attributed to the MCP operation.

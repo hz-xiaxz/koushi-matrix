@@ -1,3 +1,4 @@
+import { SessionAccessTokenSection } from "./user-settings/SessionAccessTokenSection";
 import { type FormEvent, type ReactNode, useEffect, useRef, useState } from "react";
 import {
   Bell,
@@ -116,6 +117,9 @@ export function UserSettingsPanel({
   onCancelIdentityReset,
   onSubmitIdentityResetPassword,
   onSubmitIdentityResetOAuth,
+  onRetrieveSessionAccessToken,
+  sessionAccessTokenAvailable = false,
+  sessionAccessTokenEpoch = 0,
   onProbeLocalEncryption,
   onResetLocalData,
   onLogout,
@@ -191,6 +195,9 @@ export function UserSettingsPanel({
   onCancelIdentityReset: (flowId: number) => void;
   onSubmitIdentityResetPassword: (flowId: number, password: string) => void;
   onSubmitIdentityResetOAuth: (flowId: number) => void;
+  onRetrieveSessionAccessToken?: () => Promise<import("../backend/desktopApi").SessionAccessTokenReply>;
+  sessionAccessTokenAvailable?: boolean;
+  sessionAccessTokenEpoch?: number;
   onProbeLocalEncryption: () => void;
   onResetLocalData: () => void;
   onLogout: () => void;
@@ -507,6 +514,14 @@ export function UserSettingsPanel({
               />
               <DetailRow label={t("settings.localStoreLabel")} value={t("settings.localStore")} />
             </div>
+            {settingsScope === "account" && activeCategory === "sessions" && currentSession && onRetrieveSessionAccessToken ? (
+              <SessionAccessTokenSection
+                sessionKey={`${sessionKey(currentSession)}:${sessionAccessTokenEpoch}`}
+                homeserver={currentSession.homeserver} userId={currentSession.user_id}
+                deviceId={currentSession.device_id} available={sessionAccessTokenAvailable}
+                retrieve={onRetrieveSessionAccessToken}
+              />
+            ) : null}
             {currentSessionStatus.status === "failed" ? (
               <p className="session-status-failure">
                 {currentSessionFailureLabel(currentSessionStatus.kind)}

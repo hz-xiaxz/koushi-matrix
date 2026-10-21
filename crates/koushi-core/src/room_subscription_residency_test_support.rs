@@ -296,6 +296,7 @@ impl RoomSubscriptionResidencyHarness {
         assert!(
             room_actor
                 .send(RoomMessage::SessionEstablished {
+                    account_epoch: 0,
                     session: session.clone(),
                 })
                 .await

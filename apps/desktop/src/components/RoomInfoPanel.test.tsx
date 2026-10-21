@@ -133,6 +133,7 @@ describe("RoomInfoPanel", () => {
             permissions: {
               can_edit_settings: true,
               can_change_join_rule: true,
+              can_change_topic: true,
               can_edit_roles: true,
               can_invite: true,
               can_kick: true,
@@ -224,6 +225,7 @@ describe("RoomInfoPanel", () => {
             permissions: {
               can_edit_settings: true,
               can_change_join_rule: true,
+              can_change_topic: true,
               can_edit_roles: true,
               can_invite: true,
               can_kick: true,
@@ -338,6 +340,7 @@ describe("RoomInfoPanel", () => {
             permissions: {
               can_edit_settings: false,
               can_change_join_rule: false,
+              can_change_topic: false,
               can_edit_roles: false,
               can_invite: false,
               can_kick: false,
@@ -383,6 +386,7 @@ describe("RoomInfoPanel", () => {
             permissions: {
               can_edit_settings: false,
               can_change_join_rule: true,
+              can_change_topic: false,
               can_edit_roles: false,
               can_invite: false,
               can_kick: false,
@@ -430,6 +434,7 @@ describe("RoomInfoPanel", () => {
         permissions: {
           can_edit_settings: true,
           can_change_join_rule: true,
+          can_change_topic: true,
           can_edit_roles: true,
           can_invite: true,
           can_kick: true,
@@ -511,6 +516,7 @@ describe("RoomInfoPanel", () => {
             permissions: {
               can_edit_settings: true,
               can_change_join_rule: true,
+              can_change_topic: true,
               can_edit_roles: true,
               can_invite: true,
               can_kick: true,
@@ -644,6 +650,7 @@ describe("RoomInfoPanel", () => {
             permissions: {
               can_edit_settings: true,
               can_change_join_rule: true,
+              can_change_topic: true,
               can_edit_roles: true,
               can_invite: true,
               can_kick: true,
@@ -934,6 +941,7 @@ function roomSettings(overrides: Partial<RoomSettingsSnapshot> = {}): RoomSettin
     permissions: {
       can_edit_settings: true,
       can_change_join_rule: true,
+      can_change_topic: true,
       can_edit_roles: true,
       can_invite: true,
       can_kick: true,
@@ -1735,5 +1743,22 @@ describe("Room Info status summary (#1327)", () => {
       within(propertyCard("join-rule")).getByRole("heading", { name: t("room.joinRule") })
     );
     expect(onRevealSettingHandled).not.toHaveBeenCalled();
+  });
+});
+
+
+describe("topic event permission", () => {
+  test.each([true, false])("topic permission=%s independently controls the editor and command", (canChange) => {
+    const settings = roomSettings();
+    settings.permissions.can_edit_settings = !canChange;
+    settings.permissions.can_change_topic = canChange;
+    const update = vi.fn();
+    render(<RoomInfoPanel room={baseRoom} roomNotificationSettings={idleSettings} spaces={[]} roomManagement={managed(settings)} onUpdateRoomSetting={update} />);
+    const topic = within(propertyCard("topic"));
+    if (!canChange) { expect(topic.queryByRole("button")).toBeNull(); return; }
+    fireEvent.click(topic.getByRole("button", { name: "Edit topic" }));
+    fireEvent.change(topic.getByRole("textbox"), { target: { value: "Topic only" } });
+    fireEvent.click(topic.getByRole("button", { name: "Save topic" }));
+    expect(update).toHaveBeenCalledWith(baseRoom.room_id, { topic: "Topic only" });
   });
 });

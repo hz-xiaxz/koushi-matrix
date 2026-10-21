@@ -83,6 +83,7 @@ fn search_crawl_backlog_summary_reads_only_the_latest_crawler_sample() {
     };
 
     let snapshot = DiagnosticSnapshot {
+        navigation: Default::default(),
         records: vec![
             sample("core.search", 3, 2),
             sample("core.sync", 9, 9),
@@ -96,6 +97,7 @@ fn search_crawl_backlog_summary_reads_only_the_latest_crawler_sample() {
     );
     assert_eq!(
         crate::diagnostics::search_crawl_backlog_summary(&DiagnosticSnapshot {
+            navigation: Default::default(),
             records: Vec::new(),
             dropped_records: 0,
         }),

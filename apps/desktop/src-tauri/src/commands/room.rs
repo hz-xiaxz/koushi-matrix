@@ -1140,6 +1140,11 @@ pub async fn start_direct_message(
     let baseline = event_conn.versioned_snapshot();
     let account_key = account_key_from_app_state(&baseline.state);
     let request_id = event_conn.next_request_id();
+    let operation = event_conn.begin_navigation_operation_for_request(
+        koushi_diagnostics::NavigationCause::StartDm,
+        koushi_diagnostics::NavigationOrigin::RendererProgrammatic,
+        request_id,
+    );
     event_conn
         .command(build_start_direct_message_command(
             request_id,
@@ -1169,6 +1174,7 @@ pub async fn start_direct_message(
         .select_room_and_wait(room_id.clone(), SELECT_ROOM_EVENT_TIMEOUT)
         .await
         .map_err(super::navigation::invoke_error_from_select_room_error)?;
+    operation.finish(true);
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(command_settlement(selected_generation))
 }
@@ -1201,6 +1207,11 @@ pub async fn start_advisory_direct_message(
         koushi_protocol::command::DirectMessageMissingPolicy::Report
     };
     let request_id = event_conn.next_request_id();
+    let operation = event_conn.begin_navigation_operation_for_request(
+        koushi_diagnostics::NavigationCause::StartDm,
+        koushi_diagnostics::NavigationOrigin::RendererProgrammatic,
+        request_id,
+    );
     event_conn
         .command(build_start_direct_message_command(
             request_id, user_id, missing,
@@ -1221,6 +1232,7 @@ pub async fn start_advisory_direct_message(
         .map_err(|error| invoke_error_from_request_outcome("advisory direct message", error))?;
     let room_id = match outcome {
         RequestOutcome::DirectMessageMissing { generation, .. } => {
+            operation.finish(true);
             return Ok(FrontendAdvisoryDirectMessageSettlement {
                 settlement: command_settlement(generation),
                 status: FrontendAdvisoryDirectMessageStatus::Missing,
@@ -1258,6 +1270,7 @@ pub async fn start_advisory_direct_message(
         .select_room_and_wait(room_id.clone(), SELECT_ROOM_EVENT_TIMEOUT)
         .await
         .map_err(super::navigation::invoke_error_from_select_room_error)?;
+    operation.finish(true);
     update_qa_window_title_from_state(&app, state.inner()).await;
     Ok(FrontendAdvisoryDirectMessageSettlement {
         settlement: command_settlement(selected_generation),

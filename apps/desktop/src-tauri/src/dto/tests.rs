@@ -1490,6 +1490,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
     };
 
     let mut state = AppState {
+        session_disclosure_epoch: 42,
         session: SessionState::Ready(session_info.clone()),
         account_management_url: Some(koushi_state::AccountManagementUrl::from_validated(
             "https://account.example.invalid/devices".to_owned(),
@@ -2000,6 +2001,7 @@ fn frontend_app_state_golden_matches_maximally_populated_state() {
             permissions: RoomPermissionFacts {
                 can_edit_settings: true,
                 can_change_join_rule: true,
+                can_change_topic: true,
                 can_edit_roles: true,
                 can_invite: true,
                 can_kick: true,

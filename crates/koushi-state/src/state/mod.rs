@@ -381,6 +381,9 @@ pub struct AppState {
     pub secure_backup_gate: SecureBackupGateState,
     #[serde(skip)]
     pub sliding_sync_account_epoch: u64,
+    /// Core-owned process-unique lifetime fence for transient secret disclosure.
+    #[serde(default)]
+    pub session_disclosure_epoch: u64,
     #[serde(skip)]
     pub sliding_sync_capability: SlidingSyncCapabilityState,
     /// #1238 diagnostic (temporary): see [`ThreadDeliveryDiagnostic`].
@@ -540,6 +543,7 @@ impl Default for AppState {
             session_lock_reason: None,
             secure_backup_gate: SecureBackupGateState::Inactive,
             sliding_sync_account_epoch: 0,
+            session_disclosure_epoch: 0,
             sliding_sync_capability: SlidingSyncCapabilityState::Unknown,
             thread_delivery: ThreadDeliveryDiagnostic::default(),
             thread_unread: BTreeMap::new(),

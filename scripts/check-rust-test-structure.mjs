@@ -1196,8 +1196,15 @@ export function checkSdkRoomManagementMethods() {
   const rule = "sdk.room_management_methods";
   const source = readRustSource("crates/koushi-sdk/src/room_operations.rs");
   const failures = [];
-  for (const fragment of [".set_name(", ".set_room_topic(", ".set_avatar_url(", ".remove_avatar(", ".privacy_settings()", ".update_join_rule(", ".update_room_history_visibility(", ".kick_user(", ".ban_user(", ".unban_user(", ".update_power_levels("]) {
+  for (const fragment of [".set_name(", ".set_avatar_url(", ".remove_avatar(", ".privacy_settings()", ".update_join_rule(", ".update_room_history_visibility(", ".kick_user(", ".ban_user(", ".unban_user(", ".update_power_levels("]) {
     if (!source.includes(fragment)) failures.push(sourceContractFailure(rule, `room management is missing ${fragment}`));
+  }
+  const update = rustItemBody(source, "pub async fn update_room_setting");
+  const topicSource = readRustSource("crates/koushi-sdk/src/room_operations/topic_commit.rs");
+  const topic = rustItemBody(topicSource, "pub(super) async fn update_topic");
+  const commit = rustItemBody(topicSource, "async fn update_topic_with_deadline");
+  if (!update?.includes("topic_commit::update_topic(") || !topic?.includes("update_topic_with_deadline(") || !commit?.includes(".set_room_topic(")) {
+    failures.push(sourceContractFailure(rule, "topic updates must reach the SDK through local-commit settlement"));
   }
   return failures;
 }

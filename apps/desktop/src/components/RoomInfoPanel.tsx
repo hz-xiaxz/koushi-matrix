@@ -253,6 +253,8 @@ export function RoomInfoPanel({
   // #1220: the join-rule control is governed by the event-specific fact, not the
   // aggregate; an account that may change join rules but not rename the room can
   // still hold it. Rust enforces the same single authority before it sends.
+  const mayChangeTopic = Boolean(settings?.permissions.can_change_topic) && Boolean(onUpdateRoomSetting);
+  const readOnlyTopicReason = settings && !settings.permissions.can_change_topic ? t("room.settingNoPermission") : null;
   const mayChangeJoinRule =
     Boolean(settings?.permissions.can_change_join_rule) && Boolean(onUpdateRoomSetting);
   const readOnlyJoinRuleReason =
@@ -295,7 +297,7 @@ export function RoomInfoPanel({
 
   function submitSetting(field: RoomSettingField, change: RoomSettingChange, target: string | null) {
     const allowed =
-      "joinRule" in change || "accessPolicy" in change ? mayChangeJoinRule : canEditSettings;
+      "joinRule" in change || "accessPolicy" in change ? mayChangeJoinRule : "topic" in change ? mayChangeTopic && !settingsPending : canEditSettings;
     if (!allowed) return;
     setSubmission({
       roomId,
@@ -519,9 +521,9 @@ export function RoomInfoPanel({
               saveLabel={t("room.saveTopic")}
               multiline
               syncKey={`${roomId}:topic`}
-              canEdit={mayEditSettings}
+              canEdit={mayChangeTopic}
               busy={settingsPending}
-              readOnlyReason={readOnlyReason}
+              readOnlyReason={readOnlyTopicReason}
               status={fieldStatus("topic")}
               onSave={(next) => submitSetting("topic", { topic: next || null }, next || null)}
             />

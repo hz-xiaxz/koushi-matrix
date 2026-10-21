@@ -114,6 +114,7 @@ export function InlineTextPropertyEditor({
   label,
   value,
   emptyText,
+  editValue,
   display,
   userText = true,
   inputLabel,
@@ -138,6 +139,8 @@ export function InlineTextPropertyEditor({
   /** The confirmed value; empty means unset. */
   value: string;
   emptyText: string;
+  /** Prefill when reopening a failed submission; display remains confirmed. */
+  editValue?: string;
   /** Replaces the plain text rendering of a set value, e.g. with a preview. */
   display?: ReactNode;
   userText?: boolean;
@@ -165,13 +168,13 @@ export function InlineTextPropertyEditor({
   onClear?: () => void;
 }) {
   const [editing, setEditing] = useState(false);
-  const [draft, setDraft] = useState(value);
+  const [draft, setDraft] = useState(editValue ?? value);
   const focus = useEditFocus();
   useImperativeHandle(headingRef, () => focus.headingRef.current as HTMLHeadingElement);
   const trimmed = value.trim();
 
   function open() {
-    setDraft(value);
+    setDraft(editValue ?? value);
     setEditing(true);
     focus.focus("control");
   }

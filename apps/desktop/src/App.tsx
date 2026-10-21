@@ -1,3 +1,5 @@
+import { startNativeEditorHistoryBridge } from "./backend/tauri/nativeEditorHistory";
+import { runFocusedEditorHistory } from "./domain/editorHistory";
 import { HelpDialog } from "./components/HelpDialog";
 import { McpApprovalDialog } from "./components/McpApprovalDialog";
 import { DesktopUpdates } from "./components/DesktopUpdates";
@@ -2793,11 +2795,16 @@ function AccountContent({
       return;
     }
 
+    let stopHistoryBridge: (() => void) | null = null;
     let disposed = false;
     let unlisten: (() => void) | null = null;
     runInBackground(
       desktopEventPort
         .listenMenuActions((payload) => {
+          if (payload === "editorUndo" || payload === "editorRedo") {
+            runFocusedEditorHistory(payload === "editorUndo" ? "undo" : "redo");
+            return;
+          }
           const shortcutId = shortcutActionFromMenuPayload(payload);
           if (shortcutId) {
             shortcutHandler.handle(shortcutId);
@@ -2808,12 +2815,14 @@ function AccountContent({
             dispose();
           } else {
             unlisten = dispose;
+            stopHistoryBridge = startNativeEditorHistoryBridge();
           }
         })
     );
 
     return () => {
       disposed = true;
+      stopHistoryBridge?.();
       unlisten?.();
     };
   }, [shortcutHandler]);
@@ -3965,7 +3974,7 @@ function AccountContent({
   }, []);
 
   const openHomeSelection = useCallback(
-    async (selection = homeSelection, trigger: ActivityOpenTrigger = "other") => {
+    async (selection = homeSelection, trigger: ActivityOpenTrigger = "other", input: import("./backend/desktopApi").NavigationInput = "programmatic") => {
     const transitionStartedAt = Date.now();
     const homeSelectionKind = selection.kind;
     const currentSnapshot = snapshotRef.current;
@@ -4007,7 +4016,7 @@ function AccountContent({
       source: "home.transition",
       message: `stage=after_composer_drain elapsed_ms=${composerDrainFinishedAt - composerDrainStartedAt} outcome=continue`
     });
-    const homeSnapshot = await settleCommandSnapshot(api.selectSpace(null));
+    const homeSnapshot = await settleCommandSnapshot(api.selectSpace(null, input));
     if (spaceNavigationIntentEpochRef.current !== navigationRequestId) {
       return;
     }
@@ -4058,11 +4067,11 @@ function AccountContent({
     [appendDiagnosticLog, homeSelection, invalidatePeoplePanelForNavigation, primaryView, setSnapshot]
   );
 
-  async function selectSpace(spaceId: string | null) {
+  async function selectSpace(spaceId: string | null, input: import("./backend/desktopApi").NavigationInput = "programmatic") {
     setContextMenu(null);
     invalidatePeoplePanelForNavigation();
     if (spaceId === null) {
-      await openHomeActivityView("home_rail");
+      await openHomeActivityView("home_rail", input);
       return;
     }
     const navigationRequestId = ++spaceNavigationIntentEpochRef.current;
@@ -4071,14 +4080,14 @@ function AccountContent({
     }
     if (spaceNavigationIntentEpochRef.current !== navigationRequestId) return;
     setPrimaryView("timeline");
-    await settleCommand(api.selectSpace(spaceId));
+    await settleCommand(api.selectSpace(spaceId, input));
   }
 
   async function reorderSpaces(spaceIds: string[]) {
     await settleCommand(api.reorderSpaces(spaceIds));
   }
 
-  async function selectRoom(roomId: string): Promise<boolean> {
+  async function selectRoom(roomId: string, input: import("./backend/desktopApi").NavigationInput = "programmatic"): Promise<boolean> {
     setContextMenu(null);
     const transitionStartedAt = Date.now();
     const selectedRoom = snapshot?.state.domain.rooms.find((room) => room.room_id === roomId);
@@ -4126,7 +4135,7 @@ function AccountContent({
     });
     let nextSnapshot: DesktopSnapshot;
     try {
-      nextSnapshot = await settleCommandSnapshot(api.selectRoom(roomId));
+      nextSnapshot = await settleCommandSnapshot(api.selectRoom(roomId, input));
     } catch {
       return false;
     }
@@ -4236,9 +4245,9 @@ function AccountContent({
     }
   }
 
-  async function openHomeActivityView(trigger: ActivityOpenTrigger = "activity_sidebar") {
+  async function openHomeActivityView(trigger: ActivityOpenTrigger = "activity_sidebar", input: import("./backend/desktopApi").NavigationInput = "programmatic") {
     setHomeSelection({ kind: "activity" });
-    await openHomeSelection({ kind: "activity" }, trigger);
+    await openHomeSelection({ kind: "activity" }, trigger, input);
   }
 
   async function openHomeExploreView() {
@@ -7306,6 +7315,7 @@ function AccountContent({
       logEntries: [...localDiagnosticSnapshot.entries, ...runtimeSnapshot.entries],
       droppedLogEntries: localDiagnosticSnapshot.droppedEntries + runtimeSnapshot.droppedEntries,
       slidingSyncDiagnostics: runtimeSnapshot.slidingSync,
+      navigationDiagnostics: runtimeSnapshot.navigation,
       securityDiagnostics: qaSecurityDiagnostics(),
       rendererContextDiagnostics: rendererContextDiagnostics ?? undefined
     });
@@ -7851,6 +7861,12 @@ function AccountContent({
           onRefreshCurrentSessionStatus={(trigger) => {
             settleCommandInBackground(api.refreshCurrentSessionStatus(trigger));
           }}
+          sessionAccessTokenAvailable={snapshot.state.domain.session.kind === "ready"}
+          onRetrieveSessionAccessToken={() => {
+            const session = snapshot.state.domain.session;
+            if (session.kind !== "ready") return Promise.reject(new Error("session unavailable"));
+            return api.currentSessionAccessToken(session);
+          }}
           onProbeLocalEncryption={() => {
             runInBackground(probeLocalEncryptionHealth());
           }}
@@ -8050,6 +8066,7 @@ function AccountContent({
           roomInfoReveal={roomInfoReveal}
           onRoomInfoRevealHandled={() => setRoomInfoReveal(null)}
           onUpdateSpaceJoinRule={(spaceId, joinRule) => updateRoomSetting(spaceId, { joinRule })}
+          onUpdateSpaceTopic={(spaceId, topic) => updateRoomSetting(spaceId, { topic })}
           onSetSpaceChildSuggested={(spaceId, childRoomId, suggested) => {
             // The saving/failed state is Rust's; the command returns at admission.
             runInBackground(settleCommand(api.setSpaceChildSuggested(spaceId, childRoomId, suggested)));

@@ -344,7 +344,13 @@ fn desktop_menu_items_include_element_compatible_shortcuts() {
         .iter()
         .position(|item| item.id == "about_koushi")
         .expect("native About Koushi menu item should exist");
-    assert_eq!(about_index, 0);
+    assert_eq!(
+        items
+            .iter()
+            .filter(|item| item.menu == "app")
+            .position(|item| item.id == "about_koushi"),
+        Some(0)
+    );
     assert_eq!(items[about_index].label, "About Koushi");
 
     let app_settings_index = items

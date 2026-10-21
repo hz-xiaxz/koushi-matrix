@@ -37,7 +37,10 @@ async fn actor(
     );
     assert!(
         handle
-            .send(RoomMessage::SessionEstablished { session })
+            .send(RoomMessage::SessionEstablished {
+                session,
+                account_epoch: 0
+            })
             .await
     );
     (handle, action_rx, server_name)

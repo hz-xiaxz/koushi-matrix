@@ -1647,6 +1647,10 @@ pub(super) fn matrix_public_room_from_chunk(
     }
 }
 
+pub(super) fn normalized_room_topic(room: &matrix_sdk::Room) -> Option<String> {
+    room.topic().filter(|topic| !topic.is_empty())
+}
+
 pub(super) async fn matrix_room_settings_snapshot(
     room: &matrix_sdk::Room,
 ) -> MatrixRoomSettingsSnapshot {
@@ -1689,7 +1693,7 @@ pub(super) async fn matrix_room_settings_snapshot(
     MatrixRoomSettingsSnapshot {
         room_id: room.room_id().to_string(),
         name: room.name(),
-        topic: room.topic(),
+        topic: normalized_room_topic(room),
         avatar_url: room.avatar_url().map(|url| url.to_string()),
         canonical_alias: room.canonical_alias().map(|alias| alias.to_string()),
         alternate_aliases: room
@@ -1708,6 +1712,10 @@ pub(super) async fn matrix_room_settings_snapshot(
         permissions: MatrixRoomPermissionFacts {
             can_edit_settings,
             can_change_join_rule,
+            can_change_topic: power_levels.user_can_send_state(
+                own_user_id,
+                matrix_sdk::ruma::events::StateEventType::RoomTopic,
+            ),
             can_edit_roles: power_levels.user_can_send_state(
                 own_user_id,
                 matrix_sdk::ruma::events::StateEventType::RoomPowerLevels,
@@ -2827,7 +2835,7 @@ pub async fn matrix_invite_previews_from_rooms(
             display_name,
             display_name_placeholder,
             avatar_mxc_uri: room.avatar_url().map(|uri| uri.to_string()),
-            topic: room.topic(),
+            topic: normalized_room_topic(&room),
             inviter_display_name,
             inviter_user_id,
             is_dm,

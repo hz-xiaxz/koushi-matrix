@@ -23,6 +23,7 @@ pub fn build_state_delta(
     }
 
     changed_slice!(session);
+    changed_slice!(session_disclosure_epoch);
     changed_slice!(session_lock_reason);
     changed_slice!(secure_backup_gate);
     changed_slice!(device_cleanup);
@@ -622,6 +623,7 @@ fn audit_app_state_delta_slices(state: &AppState) {
         session_lock_reason: _,
         secure_backup_gate: _,
         sliding_sync_account_epoch: _,
+        session_disclosure_epoch: _,
         sliding_sync_capability: _,
         thread_delivery: _,
         thread_unread: _,

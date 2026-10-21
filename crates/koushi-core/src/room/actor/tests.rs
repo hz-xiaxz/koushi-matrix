@@ -142,7 +142,10 @@ async fn navigation_enrichment_refreshes_pins_for_the_current_session_only() {
     enrichment.admit(session_key.clone(), Some(room_id.to_string()), None, false);
     assert!(
         handle
-            .send(RoomMessage::SessionEstablished { session })
+            .send(RoomMessage::SessionEstablished {
+                session,
+                account_epoch: 0
+            })
             .await
     );
     let actions = tokio::time::timeout(Duration::from_secs(5), action_rx.recv())
@@ -242,7 +245,10 @@ async fn pinned_event_network_delay_does_not_block_later_room_work() {
     );
     assert!(
         handle
-            .send(RoomMessage::SessionEstablished { session })
+            .send(RoomMessage::SessionEstablished {
+                session,
+                account_epoch: 0
+            })
             .await
     );
     assert!(

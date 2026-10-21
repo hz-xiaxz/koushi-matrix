@@ -691,3 +691,72 @@ async fn account_runtimes_isolate_account_settings_and_share_app_settings() {
     assert_eq!(manager.selected_tab_id(), add_tab);
     manager.shutdown_all().await;
 }
+
+#[tokio::test]
+async fn account_selection_diagnostics_cover_add_cancel_and_removal_fallbacks() {
+    use koushi_diagnostics::{NavigationCause, NavigationStage};
+    let data = tempfile::tempdir().unwrap();
+    let credentials = tempfile::tempdir().unwrap();
+    let store = StoreActor::with_backend(
+        CredentialStoreBackend::FileDir(FileCredentialStore::new(credentials.path())),
+        data.path().to_path_buf(),
+    );
+    let manager = AccountRuntimeManager::new(
+        store,
+        SettingsStore::new(data.path()),
+        Arc::new(|| Arc::new(crate::native_artifact::NativeArtifactRegistry::new())),
+    );
+    let original = manager.selected_tab_id();
+    manager
+        .bind_authenticated_session(&original, &session("@diagnostic-original:example.invalid"))
+        .await
+        .unwrap();
+    let add = manager.add_account_tab().await.unwrap();
+    assert!(manager.select_tab(&original).await.unwrap());
+    assert_eq!(manager.add_account_tab().await.unwrap(), add);
+    assert!(manager.cancel_add_account_tab(&add).await.unwrap());
+    let replacement = manager.add_account_tab().await.unwrap();
+    manager
+        .bind_authenticated_session(
+            &replacement,
+            &session("@diagnostic-removal:example.invalid"),
+        )
+        .await
+        .unwrap();
+    assert!(manager.remove_signed_out_tab(&replacement).await.unwrap());
+    assert_eq!(manager.selected_tab_id(), original);
+    assert!(manager.remove_signed_out_tab(&original).await.unwrap());
+    assert_eq!(manager.tab_descriptors().len(), 1);
+    let records = manager
+        .state
+        .lock()
+        .unwrap()
+        .selection_diagnostics
+        .lock()
+        .unwrap()
+        .clone();
+    let selected = records
+        .iter()
+        .filter(|record| {
+            record.cause == NavigationCause::SelectAccount
+                && record.stage == NavigationStage::Committed
+        })
+        .count();
+    let fallback = records
+        .iter()
+        .filter(|record| {
+            record.cause == NavigationCause::AccountFallback
+                && record.stage == NavigationStage::Committed
+                && record.authoritative_transition
+        })
+        .count();
+    assert!(
+        selected == 4,
+        "new and existing add-account selections must be diagnosed"
+    );
+    assert!(
+        fallback == 3,
+        "cancel, removal, and final-tab replacement must be diagnosed"
+    );
+    manager.shutdown_all().await;
+}
