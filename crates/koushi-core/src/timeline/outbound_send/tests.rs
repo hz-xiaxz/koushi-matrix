@@ -3738,3 +3738,218 @@ async fn inline_manager_await_drives_every_manager_polled_worker_set() {
         );
     }
 }
+
+/// Drive the same SubmitText-on-thread route used by the desktop composer,
+/// then reduce its actual acceptance, queued, and terminal projections.
+#[tokio::test(start_paused = true)]
+async fn plain_thread_submissions_clear_persisted_drafts_and_settle_after_reopen() {
+    use koushi_state::{AppState, ThreadOpenIntent, ThreadPaneState, reduce};
+
+    let key = thread_key();
+    let TimelineKind::Thread {
+        room_id,
+        root_event_id,
+    } = &key.kind
+    else {
+        unreachable!();
+    };
+    let account = test_session_key();
+    let mut state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: account.homeserver,
+            user_id: account.user_id,
+            device_id: account.device_id,
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        ..AppState::default()
+    };
+    state.timeline.room_id = Some(room_id.clone());
+    state
+        .composer_drafts
+        .apply_thread_draft(
+            room_id.clone(),
+            "$other-root:test".to_owned(),
+            "other draft",
+            1.into(),
+        )
+        .expect("seed an unrelated thread draft");
+    let (enqueue_tx, mut enqueue_rx) = mpsc::unbounded_channel();
+    let mut manager = live_tail_test_manager(HashMap::from([(
+        key.clone(),
+        synthetic_send_timeline_actor_handle(enqueue_tx),
+    )]));
+    let (action_tx, mut action_rx) = mpsc::channel(4);
+    manager.action_tx = action_tx;
+
+    for index in 0..2 {
+        let revision = koushi_state::ComposerDraftRevision::checked_successor(
+            state
+                .composer_drafts
+                .thread_revision(room_id, root_event_id),
+            koushi_state::ComposerDraftRevision::ZERO,
+        )
+        .expect("next draft revision");
+        state
+            .composer_drafts
+            .apply_thread_draft(
+                room_id.clone(),
+                root_event_id.clone(),
+                "thread draft",
+                revision,
+            )
+            .expect("persist the submitted draft");
+        reduce(
+            &mut state,
+            AppAction::OpenThread {
+                room_id: room_id.clone(),
+                root_event_id: root_event_id.clone(),
+                intent: ThreadOpenIntent::ExistingThread,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::ThreadSubscribed {
+                room_id: room_id.clone(),
+                root_event_id: root_event_id.clone(),
+            },
+        );
+        let submission_id = SubmissionId::new(format!("thread-submission-{index}"));
+        manager
+            .handle_command(TimelineCommand::SubmitText {
+                request_id: fake_rid(77_100 + index),
+                expected_account: test_session_key(),
+                submission_id: submission_id.clone(),
+                key: key.clone(),
+                transaction_id: format!("client-thread-{index}"),
+                document: ComposerDocument::from_plain_text("thread draft"),
+                draft_revision: revision,
+            })
+            .await;
+        let request = enqueue_rx
+            .try_recv()
+            .expect("thread text reaches SDK enqueue");
+        assert!(matches!(
+            request.payload,
+            TimelineSendEnqueuePayload::Text { .. }
+        ));
+        let accepted = action_rx
+            .try_recv()
+            .expect("thread composer acceptance before SDK enqueue completes");
+        assert!(matches!(accepted.as_slice(),
+            [AppAction::ThreadSubmissionAcceptedAtRevision { submission_id: accepted, .. }]
+            if accepted == &submission_id
+        ));
+        for action in accepted {
+            reduce(&mut state, action);
+        }
+        assert!(
+            state
+                .timeline
+                .submission_registry
+                .accepted_submission_ids
+                .contains(&submission_id)
+        );
+        assert_eq!(
+            state
+                .composer_drafts
+                .composer_for_thread(room_id, root_event_id)
+                .draft,
+            "thread draft"
+        );
+        assert!(
+            request
+                .response
+                .send(Ok(SendEnqueueSuccess::terminal_only(format!(
+                    "sdk-thread-{index}"
+                ))))
+                .is_ok(),
+            "SDK enqueue succeeds"
+        );
+        manager.join_send_enqueue_workers().await;
+        let queued = action_rx
+            .try_recv()
+            .expect("durable enqueue clears the composer");
+        for action in queued {
+            reduce(&mut state, action);
+        }
+        assert!(
+            state
+                .timeline
+                .submission_registry
+                .queued_submission_ids
+                .contains(&submission_id)
+        );
+        assert!(
+            state
+                .composer_drafts
+                .composer_for_thread(room_id, root_event_id)
+                .draft
+                .is_empty()
+        );
+        reduce(&mut state, AppAction::CloseThread);
+        // Remote delivery can finish after the user closes the thread pane.
+        apply_send_completion_observation_and_handoff(
+            &manager.send_completion,
+            &manager.terminal_ingress,
+            key.room_id(),
+            SendCompletionObservation::Sent {
+                sdk_transaction_id: format!("sdk-thread-{index}"),
+                event_id: format!("$thread-event-{index}:test"),
+            },
+        );
+        let handoff = manager
+            .terminal_rx
+            .recv()
+            .await
+            .expect("remote send terminal");
+        manager.handle_send_terminal_handoff(handoff).await;
+        for action in action_rx.try_recv().expect("terminal reducer projection") {
+            reduce(&mut state, action);
+        }
+        assert!(
+            state
+                .timeline
+                .submission_registry
+                .settled_submission_ids
+                .contains(&submission_id)
+        );
+        assert!(
+            !state
+                .timeline
+                .submission_registry
+                .accepted_submission_ids
+                .contains(&submission_id)
+        );
+        reduce(
+            &mut state,
+            AppAction::OpenThread {
+                room_id: room_id.clone(),
+                root_event_id: root_event_id.clone(),
+                intent: ThreadOpenIntent::ExistingThread,
+            },
+        );
+        reduce(
+            &mut state,
+            AppAction::ThreadSubscribed {
+                room_id: room_id.clone(),
+                root_event_id: root_event_id.clone(),
+            },
+        );
+        let ThreadPaneState::Open { composer, .. } = &state.thread else {
+            panic!("thread must reopen");
+        };
+        assert!(
+            composer.draft.is_empty(),
+            "sent text must not return as a draft"
+        );
+        assert!(composer.pending_submission_id.is_none());
+        assert!(composer.pending_transaction_id.is_none());
+        assert_eq!(
+            state
+                .composer_drafts
+                .composer_for_thread(room_id, "$other-root:test")
+                .draft,
+            "other draft"
+        );
+    }
+}
