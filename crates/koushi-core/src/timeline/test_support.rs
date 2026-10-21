@@ -182,6 +182,7 @@ pub(super) fn live_tail_test_manager(
         send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
         read_workers: ReadWorkerSupervisor::unavailable(),
         typing_lane: TypingLane::unavailable(),
+        mutation_lane: Default::default(),
         action_tx,
         event_tx,
         msg_tx,

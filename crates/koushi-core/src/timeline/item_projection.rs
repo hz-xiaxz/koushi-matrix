@@ -1,7 +1,6 @@
 use std::borrow::Cow;
 use std::collections::{BTreeMap, BTreeSet, HashMap, HashSet};
 use std::sync::Arc;
-use std::time::Instant;
 
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_sdk::MatrixClientSession;
@@ -36,7 +35,6 @@ use matrix_sdk_ui::timeline::{
 };
 use tokio::sync::mpsc;
 
-use crate::account_work::AccountWorkKind;
 use crate::event_projection::{
     message_actions_for_timeline_item, message_source_for_timeline_item,
 };
@@ -53,7 +51,7 @@ use koushi_protocol::event::{
     TimelineNoticeI18nKey, TimelineSendFailureReason, TimelineSendState, TimelineSpoilerSpan,
     TimelineUnableToDecrypt, TimelineUnableToDecryptReason,
 };
-use koushi_protocol::failure::{CoreFailure, TimelineFailureKind};
+use koushi_protocol::failure::TimelineFailureKind;
 use koushi_protocol::ids::{RequestId, TimelineKey, TimelineKind};
 
 // BEGIN GENERATED SIBLING IMPORTS
@@ -62,9 +60,7 @@ use super::actor::{
     reserve_canonical_activity_action,
 };
 use super::composer::ruma_mentions_from_intent;
-use super::diagnostics::{
-    trace_timeline_actor_operation, trace_timeline_actor_scan, trace_timeline_link_preview,
-};
+use super::diagnostics::trace_timeline_link_preview;
 use super::manager::TimelineManagerActor;
 use super::media::PrivateMediaEntry;
 use super::navigation::{TimelineActorGenerationGate, send_generation_fenced};
@@ -135,12 +131,6 @@ fn spawn_link_preview_fetch(
     })
 }
 
-struct ReactionTargetState {
-    item_id: TimelineEventItemId,
-    can_react: bool,
-    my_reaction_event_id: Option<String>,
-}
-
 impl TimelineActor {
     pub(super) async fn handle_load_message_source(
         &mut self,
@@ -157,381 +147,6 @@ impl TimelineActor {
             key: self.key.clone(),
             source: Box::new(source),
         }));
-    }
-    pub(super) async fn handle_edit_text(
-        &mut self,
-        request_id: RequestId,
-        event_id: String,
-        document: ComposerDocument,
-        formatting_options: ComposerFormattingOptions,
-    ) {
-        // Edits go through the SDK Timeline so the Set diff on the original
-        // item is produced locally (send-queue local echo) instead of
-        // depending on the server echoing the edit back through sync —
-        // some Sliding Sync implementations do not deliver it reliably (Phase 5
-        // review finding). Canon rule 1: relay the SDK.
-        let candidates = self.item_ids_for_event(&event_id);
-        if candidates.is_empty() {
-            trace_message_edit_lifecycle("opened", "text", 0, 0, None, None);
-            trace_message_edit_lifecycle("settled", "text", 0, 0, None, Some("failed"));
-            self.emit_failure(
-                request_id,
-                CoreFailure::TimelineOperationFailed {
-                    kind: TimelineFailureKind::Sdk,
-                },
-            );
-            return;
-        }
-        // The replacement shape is a Rust-owned decision: the GUI submits only
-        // the new visible text, so core resolves what the target event actually
-        // is before choosing between a caption edit and a text replacement.
-        let items = self.timeline.items().await;
-        let mut result = Ok(());
-        let mut diagnostic_target = "text";
-        let mut diagnostic_original_mention_count = 0;
-        let mut diagnostic_final_mention_count = 0;
-        let mut diagnostic_revision_mention_count = 0;
-        for item_id in &candidates {
-            let target = edit_target_msgtype(&items, item_id);
-            diagnostic_target = if target.is_some_and(msgtype_carries_editable_caption) {
-                "media_caption"
-            } else {
-                "text"
-            };
-            let original_mentions = mention_summary_for_message_type(target);
-            diagnostic_original_mention_count =
-                original_mentions.0.len() + usize::from(original_mentions.1);
-            trace_message_edit_lifecycle(
-                "opened",
-                diagnostic_target,
-                diagnostic_original_mention_count,
-                0,
-                None,
-                None,
-            );
-            let content =
-                edited_document_content_for_edit_target(target, &document, formatting_options);
-            trace_message_edit_target(target, &content);
-            let (final_mention_count, revision_mention_count) =
-                mention_counts_for_edit(target, &content);
-            diagnostic_final_mention_count = final_mention_count;
-            diagnostic_revision_mention_count = revision_mention_count;
-            trace_message_edit_lifecycle(
-                "submitted",
-                diagnostic_target,
-                diagnostic_original_mention_count,
-                final_mention_count,
-                Some(revision_mention_count),
-                None,
-            );
-            result = self.timeline.edit(item_id, content).await;
-            match &result {
-                Err(matrix_sdk_ui::timeline::Error::EventNotInTimeline(_)) => continue,
-                _ => break,
-            }
-        }
-
-        trace_message_edit_lifecycle(
-            "settled",
-            diagnostic_target,
-            diagnostic_original_mention_count,
-            diagnostic_final_mention_count,
-            Some(diagnostic_revision_mention_count),
-            Some(if result.is_ok() { "success" } else { "failed" }),
-        );
-
-        if result.is_err() {
-            self.emit_failure(
-                request_id,
-                CoreFailure::TimelineOperationFailed {
-                    kind: TimelineFailureKind::Sdk,
-                },
-            );
-        }
-        // Edit success: the local-echo Set diff on the original item identity
-        // arrives through the subscription; no dedicated EditCompleted event.
-    }
-    pub(super) async fn handle_redact(&mut self, request_id: RequestId, event_id: String) {
-        // Same rationale as edits: redact through the SDK Timeline so the
-        // diff is produced locally instead of waiting for the server echo.
-        let candidates = self.item_ids_for_event(&event_id);
-        if candidates.is_empty() {
-            self.emit_failure(
-                request_id,
-                CoreFailure::TimelineOperationFailed {
-                    kind: TimelineFailureKind::Sdk,
-                },
-            );
-            return;
-        }
-        let _interactive = self
-            .account_work
-            .begin_interactive(AccountWorkKind::MessageSend);
-        let mut result = Ok(());
-        for item_id in &candidates {
-            result = self.timeline.redact(item_id, None).await;
-            match &result {
-                Err(matrix_sdk_ui::timeline::Error::EventNotInTimeline(_)) => continue,
-                _ => break,
-            }
-        }
-
-        if result.is_err() {
-            self.emit_failure(
-                request_id,
-                CoreFailure::TimelineOperationFailed {
-                    kind: TimelineFailureKind::Sdk,
-                },
-            );
-        }
-        // Redact success: timeline diff reflects it (removal or redacted-state Set diff).
-    }
-    pub(super) async fn handle_send_reaction(
-        &mut self,
-        request_id: RequestId,
-        event_id: String,
-        reaction_key: String,
-    ) {
-        let started = Instant::now();
-        trace_timeline_actor_operation(
-            "actor_start",
-            "send_reaction",
-            request_id,
-            &self.key,
-            None,
-            None,
-        );
-        if reaction_key.trim().is_empty() {
-            trace_timeline_actor_operation(
-                "actor_finish",
-                "send_reaction",
-                request_id,
-                &self.key,
-                Some(started.elapsed().as_millis()),
-                Some("invalid_target"),
-            );
-            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidReactionTarget);
-            return;
-        }
-
-        let Some(target) = self
-            .reaction_target_state(request_id, "send_reaction", &event_id, &reaction_key)
-            .await
-        else {
-            trace_timeline_actor_operation(
-                "actor_finish",
-                "send_reaction",
-                request_id,
-                &self.key,
-                Some(started.elapsed().as_millis()),
-                Some("target_missing"),
-            );
-            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidReactionTarget);
-            return;
-        };
-        if let Err(kind) =
-            validate_send_reaction(target.can_react, target.my_reaction_event_id.as_deref())
-        {
-            trace_timeline_actor_operation(
-                "actor_finish",
-                "send_reaction",
-                request_id,
-                &self.key,
-                Some(started.elapsed().as_millis()),
-                Some("invalid_state"),
-            );
-            self.emit_timeline_failure(request_id, kind);
-            return;
-        }
-
-        let sdk_started = Instant::now();
-        match self
-            .timeline
-            .toggle_reaction(&target.item_id, &reaction_key)
-            .await
-        {
-            Ok(true) => {
-                trace_timeline_actor_operation(
-                    "sdk_done",
-                    "send_reaction",
-                    request_id,
-                    &self.key,
-                    Some(sdk_started.elapsed().as_millis()),
-                    Some("sent"),
-                );
-                trace_timeline_actor_operation(
-                    "actor_finish",
-                    "send_reaction",
-                    request_id,
-                    &self.key,
-                    Some(started.elapsed().as_millis()),
-                    Some("success"),
-                );
-            }
-            Ok(false) => {
-                trace_timeline_actor_operation(
-                    "sdk_done",
-                    "send_reaction",
-                    request_id,
-                    &self.key,
-                    Some(sdk_started.elapsed().as_millis()),
-                    Some("invalid_state"),
-                );
-                trace_timeline_actor_operation(
-                    "actor_finish",
-                    "send_reaction",
-                    request_id,
-                    &self.key,
-                    Some(started.elapsed().as_millis()),
-                    Some("invalid_state"),
-                );
-                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidReactionState);
-            }
-            Err(error) => {
-                trace_timeline_actor_operation(
-                    "sdk_done",
-                    "send_reaction",
-                    request_id,
-                    &self.key,
-                    Some(sdk_started.elapsed().as_millis()),
-                    Some("sdk_error"),
-                );
-                trace_timeline_actor_operation(
-                    "actor_finish",
-                    "send_reaction",
-                    request_id,
-                    &self.key,
-                    Some(started.elapsed().as_millis()),
-                    Some("sdk_error"),
-                );
-                self.emit_timeline_failure(request_id, classify_reaction_error(&error));
-            }
-        }
-    }
-    pub(super) async fn handle_redact_reaction(
-        &mut self,
-        request_id: RequestId,
-        event_id: String,
-        reaction_key: String,
-        reaction_event_id: String,
-    ) {
-        let started = Instant::now();
-        trace_timeline_actor_operation(
-            "actor_start",
-            "redact_reaction",
-            request_id,
-            &self.key,
-            None,
-            None,
-        );
-        if reaction_key.trim().is_empty() || reaction_event_id.trim().is_empty() {
-            trace_timeline_actor_operation(
-                "actor_finish",
-                "redact_reaction",
-                request_id,
-                &self.key,
-                Some(started.elapsed().as_millis()),
-                Some("invalid_target"),
-            );
-            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidReactionTarget);
-            return;
-        }
-
-        let Some(target) = self
-            .reaction_target_state(request_id, "redact_reaction", &event_id, &reaction_key)
-            .await
-        else {
-            trace_timeline_actor_operation(
-                "actor_finish",
-                "redact_reaction",
-                request_id,
-                &self.key,
-                Some(started.elapsed().as_millis()),
-                Some("target_missing"),
-            );
-            self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidReactionTarget);
-            return;
-        };
-        if let Err(kind) = validate_redact_reaction(
-            target.can_react,
-            target.my_reaction_event_id.as_deref(),
-            &reaction_event_id,
-        ) {
-            trace_timeline_actor_operation(
-                "actor_finish",
-                "redact_reaction",
-                request_id,
-                &self.key,
-                Some(started.elapsed().as_millis()),
-                Some("invalid_state"),
-            );
-            self.emit_timeline_failure(request_id, kind);
-            return;
-        }
-
-        let sdk_started = Instant::now();
-        match self
-            .timeline
-            .toggle_reaction(&target.item_id, &reaction_key)
-            .await
-        {
-            Ok(false) => {
-                trace_timeline_actor_operation(
-                    "sdk_done",
-                    "redact_reaction",
-                    request_id,
-                    &self.key,
-                    Some(sdk_started.elapsed().as_millis()),
-                    Some("redacted"),
-                );
-                trace_timeline_actor_operation(
-                    "actor_finish",
-                    "redact_reaction",
-                    request_id,
-                    &self.key,
-                    Some(started.elapsed().as_millis()),
-                    Some("success"),
-                );
-            }
-            Ok(true) => {
-                trace_timeline_actor_operation(
-                    "sdk_done",
-                    "redact_reaction",
-                    request_id,
-                    &self.key,
-                    Some(sdk_started.elapsed().as_millis()),
-                    Some("invalid_state"),
-                );
-                trace_timeline_actor_operation(
-                    "actor_finish",
-                    "redact_reaction",
-                    request_id,
-                    &self.key,
-                    Some(started.elapsed().as_millis()),
-                    Some("invalid_state"),
-                );
-                self.emit_timeline_failure(request_id, TimelineFailureKind::InvalidReactionState);
-            }
-            Err(error) => {
-                trace_timeline_actor_operation(
-                    "sdk_done",
-                    "redact_reaction",
-                    request_id,
-                    &self.key,
-                    Some(sdk_started.elapsed().as_millis()),
-                    Some("sdk_error"),
-                );
-                trace_timeline_actor_operation(
-                    "actor_finish",
-                    "redact_reaction",
-                    request_id,
-                    &self.key,
-                    Some(started.elapsed().as_millis()),
-                    Some("sdk_error"),
-                );
-                self.emit_timeline_failure(request_id, classify_reaction_error(&error));
-            }
-        }
     }
     pub(super) async fn handle_ignored_users_updated(
         &mut self,
@@ -1150,19 +765,6 @@ impl TimelineActor {
             is_edited: false,
         }
     }
-    /// Resolve the timeline item identity for `event_id`, falling back to the
-    /// local-echo transaction identity for events this actor sent whose
-    /// remote echo has not arrived.
-    fn item_ids_for_event(&self, event_id: &str) -> Vec<TimelineEventItemId> {
-        let mut ids = Vec::with_capacity(2);
-        if let Ok(parsed) = matrix_sdk::ruma::EventId::parse(event_id) {
-            ids.push(TimelineEventItemId::EventId(parsed));
-        }
-        if let Some(txn) = self.sent_event_txns.get(event_id) {
-            ids.push(TimelineEventItemId::TransactionId(txn.clone()));
-        }
-        ids
-    }
     pub(super) fn timeline_contains_event_id(&self, event_id: &str) -> bool {
         self.navigation_items.iter().any(
             |item| matches!(&item.id, TimelineItemId::Event { event_id: id } if id == event_id),
@@ -1219,75 +821,6 @@ impl TimelineActor {
                 .and_then(megolm_message_index_from_original_json);
             return Some(source);
         }
-        None
-    }
-    async fn reaction_target_state(
-        &self,
-        request_id: RequestId,
-        trace_kind: &'static str,
-        event_id: &str,
-        reaction_key: &str,
-    ) -> Option<ReactionTargetState> {
-        let started = Instant::now();
-        let parsed_event_id = match matrix_sdk::ruma::EventId::parse(event_id) {
-            Ok(event_id) => event_id,
-            Err(_) => {
-                trace_timeline_actor_scan(
-                    "target_scan",
-                    trace_kind,
-                    request_id,
-                    &self.key,
-                    0,
-                    started.elapsed().as_millis(),
-                    false,
-                );
-                return None;
-            }
-        };
-        let items = self.timeline.items().await;
-        let item_count = items.len();
-        for item in items.iter().rev() {
-            let TimelineItemKind::Event(event_item) = item.kind() else {
-                continue;
-            };
-            if !event_item
-                .event_id()
-                .map(|candidate| candidate.as_str() == parsed_event_id.as_str())
-                .unwrap_or(false)
-            {
-                continue;
-            }
-
-            let projected = sdk_item_to_timeline_item(&self.key, item, self.own_user_id.as_deref());
-            let my_reaction_event_id = projected
-                .reactions
-                .iter()
-                .find(|reaction| reaction.key == reaction_key)
-                .and_then(|reaction| reaction.my_reaction_event_id.clone());
-            trace_timeline_actor_scan(
-                "target_scan",
-                trace_kind,
-                request_id,
-                &self.key,
-                item_count,
-                started.elapsed().as_millis(),
-                true,
-            );
-            return Some(ReactionTargetState {
-                item_id: TimelineEventItemId::EventId(parsed_event_id),
-                can_react: projected.can_react,
-                my_reaction_event_id,
-            });
-        }
-        trace_timeline_actor_scan(
-            "target_scan",
-            trace_kind,
-            request_id,
-            &self.key,
-            item_count,
-            started.elapsed().as_millis(),
-            false,
-        );
         None
     }
 }
@@ -1364,16 +897,24 @@ pub(super) async fn apply_link_previews_to_item(
         return;
     };
 
-    let is_encrypted = match matrix_sdk::ruma::RoomId::parse(room_id) {
-        Ok(room_id) => match session.client().get_room(&room_id) {
-            Some(room) => match room.latest_encryption_state().await {
-                Ok(state) => state.is_encrypted(),
-                Err(_) => false,
-            },
-            None => false,
-        },
-        Err(_) => false,
-    };
+    // Projection must never fetch room state over HTTP. Unknown encryption
+    // requires both global policies, unless the user supplied a room override.
+    let encryption = matrix_sdk::ruma::RoomId::parse(room_id)
+        .ok()
+        .and_then(|room_id| session.client().get_room(&room_id))
+        .map(|room| room.encryption_state());
+    let known_encrypted = encryption
+        .filter(|state| !state.is_unknown())
+        .map(|state| state.is_encrypted());
+    if known_encrypted.is_none()
+        && !context
+            .room_enabled
+            .unwrap_or(context.unencrypted_global_enabled && context.encrypted_global_enabled)
+    {
+        item.link_previews = context.hidden_event_ids.contains(event_id).then(Vec::new);
+        return;
+    }
+    let is_encrypted = known_encrypted.unwrap_or(false);
 
     item.link_previews = crate::link_preview::link_previews_for_message(
         item.body.as_deref(),
@@ -4037,7 +3578,7 @@ fn msgtype_media_shape(msgtype: &MessageType) -> Option<MediaMessageShape> {
 /// Media message types carry the attachment in the same `m.room.message`
 /// content as the caption, and the caption-preserving SDK path supports exactly
 /// the types that `msgtype_media_shape` recognises.
-fn msgtype_carries_editable_caption(msgtype: &MessageType) -> bool {
+pub(super) fn msgtype_carries_editable_caption(msgtype: &MessageType) -> bool {
     msgtype_media_shape(msgtype).is_some()
 }
 
@@ -4057,7 +3598,7 @@ fn msgtype_carries_editable_caption(msgtype: &MessageType) -> bool {
 ///
 /// Returns `None` when the target is absent from the timeline or is not an
 /// `m.room.message` (state events, polls, stickers).
-fn edit_target_msgtype<'items>(
+pub(super) fn edit_target_msgtype<'items>(
     items: &'items eyeball_im::Vector<Arc<SdkTimelineItem>>,
     item_id: &TimelineEventItemId,
 ) -> Option<&'items MessageType> {
@@ -4093,7 +3634,7 @@ fn edit_target_msgtype<'items>(
 /// therefore edit the caption in place; everything else keeps the plain-text
 /// replacement. This decision stays in core because the GUI submits only the new
 /// visible text and never sees the original Matrix content.
-fn edited_document_content_for_edit_target(
+pub(super) fn edited_document_content_for_edit_target(
     msgtype: Option<&MessageType>,
     document: &ComposerDocument,
     formatting_options: ComposerFormattingOptions,
@@ -4174,7 +3715,7 @@ fn message_edit_target_token(msgtype: Option<&MessageType>) -> &'static str {
 ///
 /// Private-data-free: message type tokens and presence booleans only, never
 /// bodies, captions, filenames, MXC URIs, event ids, or raw SDK errors.
-fn trace_message_edit_target(msgtype: Option<&MessageType>, content: &EditedContent) {
+pub(super) fn trace_message_edit_target(msgtype: Option<&MessageType>, content: &EditedContent) {
     let media = msgtype.and_then(msgtype_media_shape);
     koushi_diagnostics::record(
         DiagnosticEvent::new(
@@ -4212,7 +3753,9 @@ fn trace_message_edit_target(msgtype: Option<&MessageType>, content: &EditedCont
     );
 }
 
-fn mention_summary_for_message_type(msgtype: Option<&MessageType>) -> (HashSet<String>, bool) {
+pub(super) fn mention_summary_for_message_type(
+    msgtype: Option<&MessageType>,
+) -> (HashSet<String>, bool) {
     let Some(msgtype) = msgtype else {
         return (HashSet::new(), false);
     };
@@ -4237,7 +3780,7 @@ fn mention_summary_for_message_type(msgtype: Option<&MessageType>) -> (HashSet<S
     (users, room)
 }
 
-fn mention_counts_for_edit(
+pub(super) fn mention_counts_for_edit(
     original: Option<&MessageType>,
     edited: &EditedContent,
 ) -> (usize, usize) {
@@ -4269,7 +3812,7 @@ fn mention_counts_for_edit(
     (final_count, revision_count)
 }
 
-fn trace_message_edit_lifecycle(
+pub(super) fn trace_message_edit_lifecycle(
     stage: &'static str,
     target: &'static str,
     original_mention_count: usize,
@@ -4502,7 +4045,7 @@ pub(super) fn sdk_vector_diffs_to_timeline_diffs(
     converted
 }
 
-fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFailureKind {
+pub(super) fn classify_reaction_error(err: &matrix_sdk_ui::timeline::Error) -> TimelineFailureKind {
     match err {
         matrix_sdk_ui::timeline::Error::EventNotInTimeline(_) => {
             TimelineFailureKind::InvalidReactionTarget

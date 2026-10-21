@@ -781,7 +781,9 @@ impl TimelineActor {
             self.generation,
             batch_id,
             diffs,
-        ) {
+        )
+        .accepted
+        {
             self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
         }
     }

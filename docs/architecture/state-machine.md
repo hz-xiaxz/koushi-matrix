@@ -7127,3 +7127,50 @@ the owner preserves leave tombstones and unions valid demand into the existing
 session-resident set. No GUI timeline is mounted, no separate subscription
 lifecycle is created, and repeated retained-target reads are no-ops. The ordinary
 first-subscription security policy remains in force.
+
+## Timeline Mutation Lane (#1482)
+
+```mermaid
+stateDiagram-v2
+    [*] --> Idle
+    Idle --> Executing: valid admission
+    Executing --> ExecutingQueued: admission below bounds
+    ExecutingQueued --> ExecutingQueued: queued expiry or stale generation / fail and release
+    Executing --> TimedOutExecuting: client deadline / fail once, retain SDK execution
+    ExecutingQueued --> TimedOutExecuting: active deadline / fail once, retain queue
+    Executing --> Idle: SDK completion / settle
+    TimedOutExecuting --> Idle: SDK completion / release only
+    ExecutingQueued --> Executing: SDK completion / start next valid request
+    TimedOutExecuting --> Executing: SDK completion / start next valid queued request
+    Executing --> Idle: retire presentations, cancel and await owner
+    ExecutingQueued --> Idle: retire presentations, cancel and await owner
+    TimedOutExecuting --> Idle: retire presentations, cancel and await owner
+```
+
+Session manager command admission transfers edit/redact/reaction work to a
+retained execution owner. Each per-view/generation/event FIFO has states Idle,
+Executing, ExecutingQueued and TimedOutExecuting. Idle admission starts one SDK
+future; further admissions queue below eight entries. Global occupancy is 64,
+including ingress and timed-out execution. Rejection emits QueueOverflow.
+
+Before execution, invalid originating generation emits NotSubscribed. Target
+content and own reaction presence are revalidated on that view's SDK controller;
+a pending local reaction also prevents a second add. Existing success remains
+SDK diffs only; failure emits correlated OperationFailed. Different views have
+independent controllers and retain existing SDK queue/cache/sync observation.
+
+Each admission has one 30-second client deadline. A queued expiry fails/removes
+that operation and releases its permit. An executing expiry emits one failure
+and enters TimedOutExecuting, retaining the future, target and permit until SDK
+settlement so rollback can finish; no successor overtakes it. SDK completion
+settles a still-live request or only releases an already-timed-out execution,
+then starts the next valid unexpired request. Duplicate/retired completion is
+inert. Unsubscribe/replacement invalidates queued work but leaves active work
+owned. Shutdown closes admission, fails queued requests, retires presentation
+actors, then cancels and awaits the execution owner. A drop-backed guard settles
+any still-retained request exactly once on cancellation.
+
+Pending sends record coordinator insertion and actor publication as distinct
+stages with one opaque lifecycle correlation. Actor publication means a
+successful generation-fenced InitialItems/ItemsUpdated containing the pending
+row. It does not mean renderer receipt; no renderer receipt channel is added.

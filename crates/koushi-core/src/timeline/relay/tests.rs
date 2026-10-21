@@ -50,6 +50,7 @@ fn mixed_bound_and_unbound_local_echo_batch_keeps_exactly_one_row_per_send() {
     let make_projection = |sequence, client: &str, sdk: Option<&str>| {
         let render_id = sdk.unwrap_or(client);
         PendingSendProjection {
+            lifecycle_trace: None,
             key: key.clone(),
             sequence,
             client_txn_id: client.to_owned(),
@@ -372,15 +373,18 @@ async fn relay_overflow_recovery_subscribes_once_emits_snapshot_then_next_live_u
         .expect("replacement generation must be accepted");
     let diffs =
         sdk_vector_diffs_to_timeline_diffs(&sdk_diffs, 0, &key, None, &HashMap::new(), None, None);
-    assert!(emit_items_updated_for_generation(
-        &event_tx,
-        &actor_generations,
-        &key,
-        actor_generation,
-        generation,
-        TimelineBatchId(0),
-        diffs,
-    ));
+    assert!(
+        emit_items_updated_for_generation(
+            &event_tx,
+            &actor_generations,
+            &key,
+            actor_generation,
+            generation,
+            TimelineBatchId(0),
+            diffs,
+        )
+        .accepted
+    );
     assert!(matches!(
         event_rx.recv().await,
         Ok(CoreEvent::Timeline(TimelineEvent::ItemsUpdated {
@@ -591,18 +595,21 @@ async fn stale_generation_prepared_initial_window_does_not_commit_or_publish() {
     };
     let (event_tx, mut event_rx) = broadcast::channel(8);
 
-    assert!(!commit_prepared_initial_window_for_generation(
-        &mut navigation_items,
-        &mut display_projection,
-        &event_tx,
-        &actor_generations,
-        &key,
-        stale_generation,
-        InitialItemsRequestIdentity::recovery(),
-        TimelineGeneration(2),
-        Vec::new(),
-        prepared,
-    ));
+    assert!(
+        !commit_prepared_initial_window_for_generation(
+            &mut navigation_items,
+            &mut display_projection,
+            &event_tx,
+            &actor_generations,
+            &key,
+            stale_generation,
+            InitialItemsRequestIdentity::recovery(),
+            TimelineGeneration(2),
+            Vec::new(),
+            prepared,
+        )
+        .accepted
+    );
 
     assert_eq!(navigation_items, vec![original]);
     assert_eq!(display_projection, display_before);

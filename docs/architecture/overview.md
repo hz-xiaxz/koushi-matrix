@@ -1270,11 +1270,9 @@ relay that model, not fight it.
     inline, so pending-send publication and diff batches queued behind it
     (#1481). Sends, adds of reactions, and redactions enqueue through the SDK
     send queue and return after local echo, and receipt/fully-read operations
-    already use manager-owned read workers. Two pre-existing direct waits are
-    recorded deviations, tracked for their own slice: removing a remote
-    reaction redacts through `Room::redact`, and preparing a remote edit can
-    fetch `/event` on a cache miss. New or changed handlers comply
-    immediately; the migration is a recorded inventory, not a silent one.
+    already use manager-owned read workers. Editing, redacting, and reaction
+    changes use the session-owned mutation execution lane below (#1482), so
+    remote reaction removal and edit preparation cannot block presentation.
     - Typing notices are room-scoped, not timeline-scoped. One lane owns them
       per room, shared by the room, thread, and focused views of that room, and
       admission does not require a subscribed `TimelineActor`. Admission rejects
@@ -2626,3 +2624,47 @@ are subscription no-ops; a first subscription retains the existing encryption
 invalidation/rotation behavior. Normal session teardown and successful leave
 remain the residency retirement boundaries. Topic observation continues to read
 current SDK state on the existing sync-update relay, without polling.
+
+### Timeline mutation execution (#1482)
+
+The TimelineManager owns one retained independently scheduled execution owner.
+That owner polls SDK mutation futures even while manager or presentation mailboxes
+are full. EditText, Redact, SendReaction and RedactReaction share FIFO per
+(TimelineKey, actor generation, target event). Different views retain independent
+SDK controllers; this migration preserves their existing observation semantics
+and adds no cross-view freshness guarantee. Workers validate current target
+content and own reaction presence (including pending local reactions) before
+calling public SDK Timeline APIs. SDK local echoes remain authoritative.
+
+At most 64 operations, including ingress, queued, active and timed-out execution,
+retain permits. Each target has at most eight queued operations plus one active.
+Admission is nonblocking; exhaustion produces correlated QueueOverflow. Each
+request has one admission-relative 30-second settlement deadline, including while
+queued. Expired queued work fails and releases its permit without executing.
+Timed-out active work fails once but keeps its SDK future and permit until SDK
+settlement, quarantining the target and allowing optimistic SDK rollback to run.
+The SDK retry policy is unchanged and has no claimed finite total duration.
+
+Queued invalid actor generations fail NotSubscribed before execution. Active
+execution continues across unsubscribe/replacement; old controllers cannot
+publish through the existing generation fences. Shutdown closes admission and
+fails queued work, continues polling active SDK futures while presentation actors
+are retired, then cancels and awaits the execution owner. Unexpected owner drop
+aborts as a fail-safe. Drop-backed settlement guards ensure retained requests
+receive at most one failure, including teardown. Workers never send completions
+through actor/manager mailboxes.
+
+Pending-send diagnostic correlation distinguishes coordinator insertion from
+successful generation-fenced actor publication of a pending row. Broadcast
+publication is not renderer receipt or paint. Renderer receipt is unobserved
+without a separate transport acknowledgement; no display liveness inference may
+be made from coordinator insertion alone. Diagnostics carry only opaque local
+correlation, safe stage tokens and timing.
+
+Timeline link-preview projection reads only the SDK's synchronized cached room
+encryption state, never `latest_encryption_state` or another HTTP lookup. For
+Unknown or missing room state, an explicit room override applies; otherwise both
+global encrypted and unencrypted preview policies must permit previews. Known
+room state keeps the corresponding existing policy. Unknown-state suppression
+is reevaluated on the next diff, replay or policy projection; this introduces no
+room-encryption observer and promises no immediate encryption-only repaint.

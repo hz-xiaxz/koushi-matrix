@@ -623,6 +623,7 @@ pub struct TimelineManagerActor {
     /// Session/manager-owned room-scoped typing lane (#1481). Typing HTTP must
     /// never be awaited in an actor mailbox handler.
     pub(super) typing_lane: TypingLane,
+    pub(super) mutation_lane: super::mutation::MutationLane,
     pub(super) action_tx: mpsc::Sender<Vec<AppAction>>,
     pub(super) event_tx: broadcast::Sender<CoreEvent>,
     pub(super) msg_tx: mpsc::Sender<TimelineMessage>,
@@ -719,6 +720,7 @@ impl TimelineManagerActor {
             send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
             read_workers: ReadWorkerSupervisor::unavailable(),
             typing_lane: TypingLane::unavailable(),
+            mutation_lane: Default::default(),
             thread_root_order: TimelineThreadRootOrder::LatestReply,
             hide_redacted: false,
             action_tx,
@@ -824,6 +826,7 @@ impl TimelineManagerActor {
                 send_read_receipts,
             ),
             typing_lane,
+            mutation_lane: Default::default(),
             thread_root_order: TimelineThreadRootOrder::LatestReply,
             hide_redacted: false,
             action_tx,
@@ -1254,6 +1257,7 @@ impl TimelineManagerActor {
         // Stop accepting commands, then join session-owned enqueue workers
         // while the sole global terminal observer remains live. A worker may
         // still bind a durably saved SDK transaction during this phase.
+        self.mutation_lane.begin_shutdown();
         Box::pin(self.focused_builds.cancel_all()).await;
         self.read_workers.cancel_all();
         self.read_workers.publish_persistence();
@@ -1285,6 +1289,7 @@ impl TimelineManagerActor {
         for handle in timeline_actors {
             Box::pin(handle.stop()).await;
         }
+        Box::pin(self.mutation_lane.stop()).await;
         apply_send_completion_observation_loss_and_handoff(
             &self.send_completion,
             &self.terminal_ingress,
@@ -1708,36 +1713,26 @@ impl TimelineManagerActor {
                 event_id,
                 document,
             } => {
-                // Edits format their replacement body, so they must carry the
-                // same composer formatting options the send path uses. Without
-                // this an edit re-formatted the body with the defaults and math
-                // mode OFF was silently ignored.
-                Box::pin(self.route_to_actor_or_fail(
+                self.route_mutation(
                     request_id,
                     &key,
-                    TimelineActorMessage::EditText {
-                        request_id,
+                    super::mutation::Mutation::Edit {
                         event_id,
                         document,
-                        formatting_options: self.composer_formatting_options,
+                        formatting: self.composer_formatting_options,
                     },
-                ))
-                .await;
+                );
             }
             TimelineCommand::Redact {
                 request_id,
                 key,
                 event_id,
             } => {
-                Box::pin(self.route_to_actor_or_fail(
+                self.route_mutation(
                     request_id,
                     &key,
-                    TimelineActorMessage::Redact {
-                        request_id,
-                        event_id,
-                    },
-                ))
-                .await;
+                    super::mutation::Mutation::Redact { event_id },
+                );
             }
             TimelineCommand::SendReaction {
                 request_id,
@@ -1746,16 +1741,14 @@ impl TimelineManagerActor {
                 reaction_key,
             } => {
                 trace_timeline_route("manager_received", "send_reaction", request_id, &key);
-                Box::pin(self.route_to_actor_or_fail(
+                self.route_mutation(
                     request_id,
                     &key,
-                    TimelineActorMessage::SendReaction {
-                        request_id,
+                    super::mutation::Mutation::AddReaction {
                         event_id,
                         reaction_key,
                     },
-                ))
-                .await;
+                );
             }
             TimelineCommand::RedactReaction {
                 request_id,
@@ -1765,17 +1758,15 @@ impl TimelineManagerActor {
                 reaction_event_id,
             } => {
                 trace_timeline_route("manager_received", "redact_reaction", request_id, &key);
-                Box::pin(self.route_to_actor_or_fail(
+                self.route_mutation(
                     request_id,
                     &key,
-                    TimelineActorMessage::RedactReaction {
-                        request_id,
+                    super::mutation::Mutation::RemoveReaction {
                         event_id,
                         reaction_key,
                         reaction_event_id,
                     },
-                ))
-                .await;
+                );
             }
             TimelineCommand::SendReadReceipt {
                 request_id,
@@ -2668,6 +2659,40 @@ impl TimelineManagerActor {
             self.emit_typing_settlement(settlement);
         }
     }
+    fn route_mutation(
+        &mut self,
+        request_id: RequestId,
+        key: &TimelineKey,
+        mutation: super::mutation::Mutation,
+    ) {
+        let context =
+            self.timelines
+                .get(key)
+                .and_then(|handle| match handle.enqueue_context.as_ref() {
+                    Some(super::outbound_send::TimelineSendEnqueueContext::Matrix(context)) => {
+                        Some(super::mutation::MutationContext {
+                            key: key.clone(),
+                            generation: context.actor_generation?,
+                            gate: self.timeline_actor_generations.clone(),
+                            timeline: context.timeline.clone()?,
+                            account_work: self.account_work.clone(),
+                            sent_event_txns: context.sent_event_txns.clone(),
+                        })
+                    }
+                    _ => None,
+                });
+        if let Some(context) = context {
+            self.mutation_lane
+                .admit(context, request_id, mutation, self.event_tx.clone());
+        } else {
+            self.emit_failure(
+                request_id,
+                CoreFailure::TimelineOperationFailed {
+                    kind: TimelineFailureKind::NotSubscribed,
+                },
+            );
+        }
+    }
     async fn route_to_actor_or_fail(
         &mut self,
         request_id: RequestId,
@@ -2768,9 +2793,6 @@ pub(super) fn internal_timeline_request_id() -> RequestId {
         sequence: 0,
     }
 }
-
-#[cfg(test)]
-mod edit_text_formatting_tests;
 
 #[cfg(test)]
 mod thread_mention_projection_tests;

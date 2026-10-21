@@ -94,21 +94,24 @@ async fn focused_projection_commit_does_not_require_a_core_event_consumer() {
         _ => unreachable!("focused test key"),
     };
 
-    assert!(emit_initial_items_for_generation(
-        &event_tx,
-        &generations,
-        &key,
-        actor_generation,
-        InitialItemsRequestIdentity::fresh(request_id),
-        TimelineGeneration(0),
-        vec![timeline_item(
-            &target_event_id,
-            Some("target"),
-            "@alice:test",
-            false
-        )],
-        Vec::new(),
-    ));
+    assert!(
+        emit_initial_items_for_generation(
+            &event_tx,
+            &generations,
+            &key,
+            actor_generation,
+            InitialItemsRequestIdentity::fresh(request_id),
+            TimelineGeneration(0),
+            vec![timeline_item(
+                &target_event_id,
+                Some("target"),
+                "@alice:test",
+                false
+            )],
+            Vec::new(),
+        )
+        .accepted
+    );
     let committed = focused_projection_rx
         .recv()
         .await

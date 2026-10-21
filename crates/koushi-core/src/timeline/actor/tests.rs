@@ -31,6 +31,7 @@ fn pending_terminal_already_in_canonical_window_is_selected_for_convergence() {
         event_id: "$prior:test".to_owned(),
     };
     let projection = PendingSendProjection {
+        lifecycle_trace: None,
         key,
         sequence: 1,
         client_txn_id: "client-prior".to_owned(),

@@ -563,7 +563,8 @@ pub(super) fn emit_timeline_events_with_lease(
     event_tx: &broadcast::Sender<CoreEvent>,
     lease: &TimelineActorGenerationLease,
     events: Vec<TimelineEvent>,
-) {
+) -> bool {
+    let mut published = true;
     for event in events {
         let focused_commit = match &event {
             TimelineEvent::InitialItems {
@@ -591,11 +592,20 @@ pub(super) fn emit_timeline_events_with_lease(
             }
             _ => None,
         };
-        let _ = event_tx.send(CoreEvent::Timeline(event));
+        published &= event_tx.send(CoreEvent::Timeline(event)).is_ok();
         if let Some(commit) = focused_commit {
             lease.gate.publish_focused_projection_commit(commit);
         }
     }
+    published
+}
+
+/// Generation acceptance advances actor state even without broadcast receivers.
+/// Publication diagnostics must use the separate successful-send outcome.
+#[derive(Default)]
+pub(super) struct TimelineEmissionOutcome {
+    pub(super) accepted: bool,
+    pub(super) published: bool,
 }
 
 /// Publish one validated display-relative `ItemsUpdated` batch.
@@ -607,11 +617,11 @@ pub(super) fn emit_items_updated_for_generation(
     generation: TimelineGeneration,
     batch_id: TimelineBatchId,
     diffs: Vec<TimelineDiff>,
-) -> bool {
+) -> TimelineEmissionOutcome {
     let Some(lease) = timeline_actor_generations.try_acquire(key, actor_generation) else {
-        return false;
+        return TimelineEmissionOutcome::default();
     };
-    emit_timeline_events_with_lease(
+    let published = emit_timeline_events_with_lease(
         event_tx,
         &lease,
         vec![TimelineEvent::ItemsUpdated {
@@ -621,7 +631,10 @@ pub(super) fn emit_items_updated_for_generation(
             diffs,
         }],
     );
-    true
+    TimelineEmissionOutcome {
+        accepted: true,
+        published,
+    }
 }
 
 /// A fresh actor projection is already display-relative. Canonical navigation
@@ -639,12 +652,12 @@ pub(super) fn emit_initial_items_for_generation(
     generation: TimelineGeneration,
     items: Vec<TimelineItem>,
     prefix_events: Vec<TimelineEvent>,
-) -> bool {
+) -> TimelineEmissionOutcome {
     let Some(lease) = timeline_actor_generations.try_acquire(key, actor_generation) else {
-        return false;
+        return TimelineEmissionOutcome::default();
     };
     emit_timeline_events_with_lease(event_tx, &lease, prefix_events);
-    emit_timeline_events_with_lease(
+    let published = emit_timeline_events_with_lease(
         event_tx,
         &lease,
         vec![TimelineEvent::InitialItems {
@@ -656,7 +669,10 @@ pub(super) fn emit_initial_items_for_generation(
             items,
         }],
     );
-    true
+    TimelineEmissionOutcome {
+        accepted: true,
+        published,
+    }
 }
 
 pub(super) struct PreparedInitialWindow {
@@ -680,16 +696,16 @@ pub(super) fn commit_prepared_initial_window_for_generation(
     generation: TimelineGeneration,
     prefix_events: Vec<TimelineEvent>,
     prepared: PreparedInitialWindow,
-) -> bool {
+) -> TimelineEmissionOutcome {
     let Some(lease) = timeline_actor_generations.try_acquire(key, actor_generation) else {
-        return false;
+        return TimelineEmissionOutcome::default();
     };
     if let Some(candidate_navigation_items) = prepared.navigation_items {
         *navigation_items = candidate_navigation_items;
     }
     *display_projection = prepared.display_projection;
     emit_timeline_events_with_lease(event_tx, &lease, prefix_events);
-    emit_timeline_events_with_lease(
+    let published = emit_timeline_events_with_lease(
         event_tx,
         &lease,
         vec![TimelineEvent::InitialItems {
@@ -701,7 +717,10 @@ pub(super) fn commit_prepared_initial_window_for_generation(
             items: prepared.emitted_items,
         }],
     );
-    true
+    TimelineEmissionOutcome {
+        accepted: true,
+        published,
+    }
 }
 
 #[expect(
@@ -1231,10 +1250,15 @@ impl TimelineActor {
         let items = self.navigation_items[window.clone()].to_vec();
         let item_count = items.len();
         trace_timeline_items("replay_initial", &self.key, &items);
-        let mut candidate_display_projection =
-            DisplayProjectionState::from_canonical_window(&self.navigation_items, window);
+        let mut candidate_display_projection = self.display_projection.clone();
         let candidate_context = self.display_projection_context();
-        candidate_display_projection.reproject(&candidate_context);
+        // Replay preserves manager-owned pending rows and suppressed late SDK
+        // echoes, including when the previous broadcast had no receivers.
+        candidate_display_projection.rematerialize_window(
+            &self.navigation_items,
+            window,
+            &candidate_context,
+        );
         let emitted = commit_prepared_initial_window_for_generation(
             &mut self.navigation_items,
             &mut self.display_projection,
@@ -1251,7 +1275,13 @@ impl TimelineActor {
                 navigation_items: None,
             },
         );
-        if emitted {
+        if emitted.published {
+            super::outbound_send::record_initial_pending_publication(
+                &self.pending_send_projections,
+                self.display_projection.display_items(),
+            );
+        }
+        if emitted.accepted {
             let _ = self.thread_attention.reconcile(
                 &self.key,
                 &self.navigation_items,
@@ -1264,7 +1294,7 @@ impl TimelineActor {
             self.emit_navigation_if_changed();
         }
         record_subscribe_stage(
-            if emitted {
+            if emitted.accepted {
                 "replay_initial_emitted"
             } else {
                 "replay_initial_rejected_stale_generation"
@@ -1322,8 +1352,12 @@ impl TimelineActor {
     }
     /// Emit one display-relative batch through the current actor generation.
     pub(super) fn emit_items_updated(&mut self, diffs: Vec<TimelineDiff>) -> bool {
+        let traces = super::outbound_send::pending_publication_traces(
+            &self.pending_send_projections,
+            &diffs,
+        );
         let batch_id = self.next_batch_id;
-        if super::navigation::emit_items_updated_for_generation(
+        let outcome = super::navigation::emit_items_updated_for_generation(
             &self.event_tx,
             &self.timeline_actor_generations,
             &self.key,
@@ -1331,7 +1365,11 @@ impl TimelineActor {
             self.generation,
             batch_id,
             diffs,
-        ) {
+        );
+        if outcome.published {
+            super::outbound_send::record_pending_publication(traces);
+        }
+        if outcome.accepted {
             self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
             true
         } else {
@@ -1359,7 +1397,9 @@ impl TimelineActor {
             self.generation,
             batch_id,
             display_diffs,
-        ) {
+        )
+        .accepted
+        {
             self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
             true
         } else {

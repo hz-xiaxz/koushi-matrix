@@ -2266,11 +2266,14 @@ export function checkCoreTimelineCancelQueueOrder() {
 
 export function checkCoreTimelineSignalTraces() {
   const rule = "core.timeline.signal_traces";
-  const sources = ["item_projection.rs", "diagnostics.rs", "manager.rs", "read_state.rs"].map(timelineSource);
+  const sources = ["item_projection.rs", "diagnostics.rs", "manager.rs", "read_state.rs", "mutation/context.rs"].map(timelineSource);
   const failures = [];
+  const mutation = timelineSource("mutation/context.rs");
   for (const kind of ["send_reaction", "redact_reaction"]) {
-    if (!sources.some((source) => new RegExp(`trace_timeline_actor_operation\\(\\s*\\"actor_start\\",\\s*\\"${kind}\\"`).test(source))) failures.push(sourceContractFailure(rule, `${kind} lacks actor-start tracing`));
-    if (!sources.some((source) => new RegExp(`trace_timeline_actor_operation\\(\\s*\\"actor_finish\\",\\s*\\"${kind}\\"`).test(source))) failures.push(sourceContractFailure(rule, `${kind} lacks actor-finish tracing`));
+    if (!mutation.includes(`"${kind}"`)) failures.push(sourceContractFailure(rule, `${kind} lacks mutation-kind tracing`));
+  }
+  for (const stage of ["actor_start", "actor_finish", "sdk_done"]) {
+    if (!new RegExp(`trace_timeline_actor_operation\\(\\s*"${stage}",\\s*kind`).test(mutation)) failures.push(sourceContractFailure(rule, `reaction execution lacks ${stage} tracing`));
   }
   for (const kind of ["send_read_receipt", "set_fully_read"]) {
     if (!sources.some((source) => new RegExp(`trace_timeline_route\\(\\s*\\"manager_received\\",\\s*\\"${kind}\\"`).test(source))) failures.push(sourceContractFailure(rule, `${kind} lacks manager-admission tracing`));

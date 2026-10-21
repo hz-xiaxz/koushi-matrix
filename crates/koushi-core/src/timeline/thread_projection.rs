@@ -1926,7 +1926,9 @@ impl TimelineActor {
                     self.generation,
                     batch_id,
                     display_diffs,
-                ) {
+                )
+                .accepted
+                {
                     self.next_batch_id = koushi_protocol::ids::TimelineBatchId(batch_id.0 + 1);
                     self.emit_navigation_if_changed();
                 }

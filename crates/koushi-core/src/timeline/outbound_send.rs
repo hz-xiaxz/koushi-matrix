@@ -152,9 +152,11 @@ pub(super) struct MatrixTimelineSendEnqueueContext {
     pub(super) key: TimelineKey,
     pub(super) room: matrix_sdk::Room,
     pub(super) timeline: Option<Arc<Timeline>>,
+    pub(super) actor_generation: Option<u64>,
     pub(super) session: Arc<MatrixClientSession>,
     pub(super) cleanup: Option<TimelineActorCleanupIngress>,
     pub(super) diagnostic_trace: Option<SendLifecycleTrace>,
+    pub(super) sent_event_txns: super::mutation::SentEventTransactions,
 }
 
 #[derive(Clone)]
@@ -394,6 +396,7 @@ pub(super) enum PendingSendPhase {
 
 #[derive(Clone)]
 pub(super) struct PendingSendProjection {
+    pub(super) lifecycle_trace: Option<SendLifecycleTrace>,
     pub(super) key: TimelineKey,
     pub(super) sequence: u64,
     pub(super) client_txn_id: String,
@@ -402,6 +405,52 @@ pub(super) struct PendingSendProjection {
     pub(super) handle: Option<matrix_sdk::send_queue::SendHandle>,
     pub(super) terminal_event_id: Option<String>,
     pub(super) phase: PendingSendPhase,
+}
+
+/// Only row-bearing diffs count as publication, never coordinator insertion,
+/// an empty batch, a removed row or a stale-generation attempt.
+pub(super) fn pending_publication_traces(
+    projections: &[PendingSendProjection],
+    diffs: &[koushi_protocol::event::TimelineDiff],
+) -> Vec<SendLifecycleTrace> {
+    use koushi_protocol::event::TimelineDiff;
+    projections
+        .iter()
+        .filter(|projection| {
+            diffs.iter().any(|diff| match diff {
+                TimelineDiff::PushFront { item }
+                | TimelineDiff::PushBack { item }
+                | TimelineDiff::Insert { item, .. }
+                | TimelineDiff::Set { item, .. } => item.id == projection.item.id,
+                TimelineDiff::Reset { items } => {
+                    items.iter().any(|item| item.id == projection.item.id)
+                }
+                _ => false,
+            })
+        })
+        .filter_map(|projection| projection.lifecycle_trace.clone())
+        .collect()
+}
+pub(super) fn record_pending_publication(traces: Vec<SendLifecycleTrace>) {
+    for mut trace in traces {
+        trace.stage_once("pending_projection_published");
+    }
+}
+pub(super) fn initial_pending_publication_traces(
+    projections: &[PendingSendProjection],
+    items: &[TimelineItem],
+) -> Vec<SendLifecycleTrace> {
+    projections
+        .iter()
+        .filter(|projection| items.iter().any(|item| item.id == projection.item.id))
+        .filter_map(|projection| projection.lifecycle_trace.clone())
+        .collect()
+}
+pub(super) fn record_initial_pending_publication(
+    projections: &[PendingSendProjection],
+    items: &[TimelineItem],
+) {
+    record_pending_publication(initial_pending_publication_traces(projections, items));
 }
 
 #[derive(Clone)]
@@ -1282,9 +1331,11 @@ impl TimelineManagerActor {
                 key: key.clone(),
                 room,
                 timeline: None,
+                actor_generation: None,
                 session: Arc::clone(session),
                 cleanup: None,
                 diagnostic_trace: None,
+                sent_event_txns: Default::default(),
             }))
         }))
     }
@@ -1367,6 +1418,7 @@ impl TimelineManagerActor {
             request_id,
             !matches!(projection, SendComposerProjection::None),
             Some(PendingSendProjection {
+                lifecycle_trace: None,
                 key: key.clone(),
                 sequence: 0,
                 client_txn_id,
@@ -1515,6 +1567,7 @@ impl TimelineManagerActor {
             request_id,
             true,
             Some(PendingSendProjection {
+                lifecycle_trace: None,
                 key: key.clone(),
                 sequence: 0,
                 client_txn_id: transaction_id.clone(),
@@ -2092,6 +2145,8 @@ impl TimelineActor {
                 self.update_send_status(&sdk_txn_str, TimelineSendState::Sent);
                 self.send_handles.remove(&sdk_txn_str);
                 self.sent_event_txns
+                    .lock()
+                    .expect("sent event transactions")
                     .insert(event_id.to_string(), transaction_id.clone());
             }
             RoomSendQueueUpdate::MediaUpload {
@@ -2447,7 +2502,7 @@ impl SendLifecycleTrace {
     }
 
     #[cfg(test)]
-    fn correlation(&self) -> u64 {
+    pub(super) fn correlation(&self) -> u64 {
         self.state
             .lock()
             .map(|state| state.correlation)
@@ -2706,9 +2761,7 @@ impl SendCompletionRegistration {
     ) -> Self {
         let mut lifecycle_trace = SendLifecycleTrace::new(&key, settles_composer);
         lifecycle_trace.stage("accepted");
-        if projection.is_some() {
-            lifecycle_trace.stage("pending_projection_inserted");
-        }
+        let has_projection = projection.is_some();
         let registration_id = {
             let mut coordinator = coordinator
                 .lock()
@@ -2720,6 +2773,7 @@ impl SendCompletionRegistration {
             let registration_id = coordinator.next_registration_id;
             if let Some(projection) = projection.as_mut() {
                 projection.sequence = registration_id;
+                projection.lifecycle_trace = Some(lifecycle_trace.clone());
             }
             coordinator.registrations.insert(
                 registration_id,
@@ -2738,6 +2792,9 @@ impl SendCompletionRegistration {
                     projection,
                 },
             );
+            if has_projection {
+                lifecycle_trace.stage("pending_projection_inserted");
+            }
             registration_id
         };
         Self {

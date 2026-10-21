@@ -9,10 +9,7 @@ use koushi_sdk::{
     MatrixLiveTailRefreshCancellation, MatrixLiveTailRefreshResult, MatrixTimelineGapError,
     MatrixTimelineGapInspection, MatrixTimelineGapRepairResult,
 };
-use koushi_state::{
-    AppAction, ComposerDocument, ComposerFormattingOptions, TimelineMediaGalleryItem,
-    TimelineThreadRootOrder,
-};
+use koushi_state::{AppAction, TimelineMediaGalleryItem, TimelineThreadRootOrder};
 
 use matrix_sdk::send_queue::{RoomSendQueueUpdate, SendHandle};
 use matrix_sdk_ui::timeline::Timeline;
@@ -343,27 +340,6 @@ pub(super) enum TimelineActorMessage {
         request_id: RequestId,
         event_id: String,
         outcome: MediaDownloadOutcome,
-    },
-    EditText {
-        request_id: RequestId,
-        event_id: String,
-        document: ComposerDocument,
-        formatting_options: ComposerFormattingOptions,
-    },
-    Redact {
-        request_id: RequestId,
-        event_id: String,
-    },
-    SendReaction {
-        request_id: RequestId,
-        event_id: String,
-        reaction_key: String,
-    },
-    RedactReaction {
-        request_id: RequestId,
-        event_id: String,
-        reaction_key: String,
-        reaction_event_id: String,
     },
     ApplyReadSuccess {
         kind: ReadActorApplyKind,
@@ -860,7 +836,7 @@ pub(super) struct TimelineActor {
     /// address local-echo items whose remote echo has not arrived (e.g.
     /// some Sliding Sync implementations do not echo own events into the timeline),
     /// so edit/redact by event id can fall back to the transaction identity.
-    pub(super) sent_event_txns: HashMap<String, matrix_sdk::ruma::OwnedTransactionId>,
+    pub(super) sent_event_txns: super::mutation::SentEventTransactions,
     /// event_id -> SDK media source. This cache may contain encrypted media
     /// keys/hashes and must never be serialized or logged.
     pub(super) media_sources: HashMap<String, PrivateMediaEntry>,
@@ -1111,18 +1087,7 @@ impl TimelineActor {
         if diffs.is_empty() {
             return;
         }
-        let batch_id = self.next_batch_id;
-        if super::navigation::emit_items_updated_for_generation(
-            &self.event_tx,
-            &self.timeline_actor_generations,
-            &self.key,
-            self.actor_generation,
-            self.generation,
-            batch_id,
-            diffs,
-        ) {
-            self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
-        }
+        self.emit_items_updated(diffs);
     }
 
     pub(super) async fn refresh_pending_send_projection(
@@ -1186,21 +1151,8 @@ impl TimelineActor {
         // Manager-owned pending sends can carry quotes whose originals are not
         // in the canonical batch; start their lookups here too.
         self.maybe_hydrate_reply_quotes();
-        if !diffs.is_empty() {
-            let batch_id = self.next_batch_id;
-            if super::navigation::emit_items_updated_for_generation(
-                &self.event_tx,
-                &self.timeline_actor_generations,
-                &self.key,
-                self.actor_generation,
-                self.generation,
-                batch_id,
-                diffs,
-            ) {
-                self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
-            } else {
-                return false;
-            }
+        if !diffs.is_empty() && !self.emit_items_updated(diffs) {
+            return false;
         }
         true
     }
@@ -1419,7 +1371,9 @@ impl TimelineActor {
                 self.generation,
                 batch_id,
                 display_diffs,
-            ) {
+            )
+            .accepted
+            {
                 self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
                 // A reprojected root can move the read divider's display row.
                 self.emit_navigation_if_changed();
@@ -1871,6 +1825,10 @@ impl TimelineActor {
         // Activity mirror below.
         let generation = TimelineGeneration(0);
         let initial_display_items = display_projection.display_items().to_vec();
+        let initial_pending_traces = super::outbound_send::initial_pending_publication_traces(
+            &pending_send_projections,
+            &initial_display_items,
+        );
         let initial_emitted = emit_initial_items_for_generation(
             &event_tx,
             &timeline_actor_generations,
@@ -1881,6 +1839,10 @@ impl TimelineActor {
             initial_display_items,
             Vec::new(),
         );
+        if initial_emitted.published {
+            super::outbound_send::record_pending_publication(initial_pending_traces);
+        }
+        let initial_emitted = initial_emitted.accepted;
         record_subscribe_stage(
             if initial_emitted {
                 "initial_emitted"
@@ -2004,14 +1966,17 @@ impl TimelineActor {
         if matches!(key.kind, TimelineKind::Room { .. }) {
             gap_repair.observe_live_edge_target(rendered_live_edge_target(&navigation_items));
         }
+        let sent_event_txns = super::mutation::SentEventTransactions::default();
         let enqueue_context =
             TimelineSendEnqueueContext::Matrix(Box::new(MatrixTimelineSendEnqueueContext {
                 key: key.clone(),
                 room: timeline.room().clone(),
                 timeline: Some(Arc::clone(&timeline)),
+                actor_generation: Some(actor_generation),
                 session: Arc::clone(&session),
                 cleanup: Some(actor_cleanup_tx),
                 diagnostic_trace: None,
+                sent_event_txns: sent_event_txns.clone(),
             }));
         let (position_tx, position_rx) = watch::channel(Arc::new(
             TimelinePositionIndex::from_items(actor_generation, generation, &navigation_items),
@@ -2057,7 +2022,7 @@ impl TimelineActor {
             send_handles,
             pending_send_projections,
             own_user_id,
-            sent_event_txns: HashMap::new(),
+            sent_event_txns,
             media_sources,
             media_downloads_in_progress: HashSet::new(),
             media_download_tasks: HashMap::new(),
@@ -2222,31 +2187,30 @@ impl TimelineActor {
                     let Some(control) = control else { break };
                     self.handle_relay_control(control).await;
                 }
-                batch = async {
-                    match self.relay_data_rx.as_mut() {
-                        Some(receiver) => receiver.recv().await,
-                        None => futures_util::future::pending().await,
+                input = async {
+                    // Fair selection within ordinary work. Cleanup/control stay
+                    // above this branch, but sustained relay data cannot starve
+                    // pending projections and send terminals in the mailbox.
+                    tokio::select! {
+                        msg = self.msg_rx.recv() => Ok(msg),
+                        batch = async {
+                            match self.relay_data_rx.as_mut() {
+                                Some(receiver) => receiver.recv().await,
+                                None => futures_util::future::pending().await,
+                            }
+                        } => Err(batch),
                     }
-                } => {
-                    if let Some(TimelineRelayBatch {
-                        generation,
-                        diffs,
-                        thread_attention_provenance,
-                        gap_repair_projections,
-                    }) = batch
-                        && let Some(diffs) = accepted_relay_batch(self.generation, generation, diffs) {
+                } => match input {
+                    Ok(Some(message)) => self.handle_msg(message).await,
+                    Ok(None) => break,
+                    Err(Some(TimelineRelayBatch { generation, diffs, thread_attention_provenance, gap_repair_projections })) => {
+                        if let Some(diffs) = accepted_relay_batch(self.generation, generation, diffs) {
                             self.relay_restart_backoff.reset_after_live_batch();
-                            self.handle_diff_batch(
-                                diffs,
-                                thread_attention_provenance,
-                                gap_repair_projections,
-                            ).await;
+                            self.handle_diff_batch(diffs, thread_attention_provenance, gap_repair_projections).await;
                         }
-                }
-                msg = self.msg_rx.recv() => {
-                    let Some(msg) = msg else { break };
-                    self.handle_msg(msg).await;
-                }
+                    }
+                    Err(None) => { self.relay_data_rx = None; }
+                },
             }
             self.finish_ready_causal_projection_handoffs().await;
             self.maybe_refill_reset_room_cache().await;
@@ -2786,42 +2750,6 @@ impl TimelineActor {
             } => {
                 Box::pin(self.handle_media_download_finished(request_id, event_id, outcome)).await;
             }
-            TimelineActorMessage::EditText {
-                request_id,
-                event_id,
-                document,
-                formatting_options,
-            } => {
-                Box::pin(self.handle_edit_text(request_id, event_id, document, formatting_options))
-                    .await;
-            }
-            TimelineActorMessage::Redact {
-                request_id,
-                event_id,
-            } => {
-                Box::pin(self.handle_redact(request_id, event_id)).await;
-            }
-            TimelineActorMessage::SendReaction {
-                request_id,
-                event_id,
-                reaction_key,
-            } => {
-                Box::pin(self.handle_send_reaction(request_id, event_id, reaction_key)).await;
-            }
-            TimelineActorMessage::RedactReaction {
-                request_id,
-                event_id,
-                reaction_key,
-                reaction_event_id,
-            } => {
-                Box::pin(self.handle_redact_reaction(
-                    request_id,
-                    event_id,
-                    reaction_key,
-                    reaction_event_id,
-                ))
-                .await;
-            }
             TimelineActorMessage::ApplyReadSuccess {
                 kind,
                 event_id,
@@ -2884,7 +2812,9 @@ impl TimelineActor {
                             self.generation,
                             batch_id,
                             diffs,
-                        ) {
+                        )
+                        .accepted
+                        {
                             self.next_batch_id = TimelineBatchId(batch_id.0 + 1);
                             self.emit_navigation_if_changed();
                         }
