@@ -125,6 +125,12 @@ older messages (yesterday, weekday within the past week, month/day this year,
 year for earlier years). Hover or focus a timestamp to read the full date and
 time. Date labels update at local midnight and when the window resumes.
 
+When a thread root moves to its latest reply position in the room timeline,
+its original date and time appear on a separate **Posted** line above the
+message, including the weekday and the year for earlier years. The reply
+summary shows **Latest reply** with its own date and time below the reply
+button. Hover or focus either timestamp for the full date and time.
+
 Undo/Redo uses the focused message editor's history in room, thread and message
 editing composers. Use Cmd+Z / Shift+Cmd+Z on macOS; Ctrl+Z / Ctrl+Y or
 Ctrl+Shift+Z on Windows/Linux. **Edit → Undo/Redo** uses the same history.
