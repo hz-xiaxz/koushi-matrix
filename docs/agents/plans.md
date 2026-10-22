@@ -46,6 +46,11 @@ a `CoreConnection` per requested account, never opens a crypto store, keeps
 Matrix credentials inside Koushi, and replaces push with a user-configured,
 account-bound event cursor.
 
+[#1482 timeline mutation execution](../plans/2026-10-22-issue1482-timeline-mutations.md)
+moves edit/redact/reaction operations to a bounded session-owned execution owner,
+retains SDK rollback after client expiry, and separates pending insertion from
+actor publication. The extended inventory retains recovery/forward HTTP work.
+
 [#1481 room-scoped typing lane](../plans/2026-10-16-issue1481-typing-lane.md)
 moves the outbound `Room::typing_notice` HTTP call off the `TimelineActor`
 mailbox loop into a session-owned, room-scoped bounded FIFO lane so pending-send

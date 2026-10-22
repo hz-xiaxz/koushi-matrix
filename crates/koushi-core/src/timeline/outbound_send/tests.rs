@@ -817,6 +817,7 @@ async fn duplicate_submission_routes_one_manager_enqueue_worker() {
         send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
         read_workers: ReadWorkerSupervisor::unavailable(),
         typing_lane: TypingLane::unavailable(),
+        mutation_lane: Default::default(),
         action_tx,
         event_tx,
         msg_tx,
@@ -908,6 +909,7 @@ async fn duplicate_submission_routes_one_manager_enqueue_worker() {
             fake_rid(7_400 + index as u64),
             true,
             Some(PendingSendProjection {
+                lifecycle_trace: None,
                 key: key.clone(),
                 sequence: 0,
                 item: pending_send_item(&client_txn_id, "body", None, None, None),
@@ -1297,6 +1299,7 @@ async fn shutdown_cleans_captured_room_keys_before_acknowledging() {
         send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
         read_workers: ReadWorkerSupervisor::unavailable(),
         typing_lane: TypingLane::unavailable(),
+        mutation_lane: Default::default(),
         action_tx,
         event_tx,
         msg_tx: msg_tx.clone(),
@@ -1393,6 +1396,7 @@ async fn manager_enqueue_worker_waits_for_reducer_acceptance_delivery() {
         send_enqueue_workers: SendEnqueueWorkerSupervisor::new(terminal_ingress.clone()),
         read_workers: ReadWorkerSupervisor::unavailable(),
         typing_lane: TypingLane::unavailable(),
+        mutation_lane: Default::default(),
         action_tx,
         event_tx,
         msg_tx,
@@ -1744,6 +1748,7 @@ fn local_echo_before_sdk_bind_preserves_fallback_until_terminal() {
         fake_rid(7401),
         true,
         Some(PendingSendProjection {
+            lifecycle_trace: None,
             key: key.clone(),
             sequence: 0,
             client_txn_id: "client-prebind".to_owned(),
@@ -1806,6 +1811,7 @@ fn send_queue_local_echo_alone_keeps_the_fallback_row_through_sent() {
     let (ingress, _terminal_rx) = TimelineSendTerminalIngress::channel();
     let key = room_key();
     let fallback = |client_txn_id: &str| PendingSendProjection {
+        lifecycle_trace: None,
         key: key.clone(),
         sequence: 0,
         client_txn_id: client_txn_id.to_owned(),
@@ -1915,6 +1921,7 @@ fn settled_sdk_row_stays_visible_until_its_remote_event_is_canonical() {
         fake_rid(7413),
         true,
         Some(PendingSendProjection {
+            lifecycle_trace: None,
             key: key.clone(),
             sequence: 0,
             client_txn_id: "client-settled".to_owned(),
@@ -1966,6 +1973,7 @@ fn pending_projection_uses_exact_ids_and_converges_with_or_without_local_echo() 
     let (ingress, _terminal_rx) = TimelineSendTerminalIngress::channel();
     let key = room_key();
     let projection = |client_txn_id: &str| PendingSendProjection {
+        lifecycle_trace: None,
         key: key.clone(),
         sequence: 0,
         client_txn_id: client_txn_id.to_owned(),
@@ -2168,6 +2176,7 @@ fn pending_projection_capacity_is_hard_bounded() {
             fake_rid(8_000 + index as u64),
             true,
             Some(PendingSendProjection {
+                lifecycle_trace: None,
                 key: key.clone(),
                 sequence: 0,
                 item: pending_send_item(&client_txn_id, "body", None, None, None),
@@ -2231,6 +2240,7 @@ async fn causal_hydration_retry_rearms_after_a_failed_exact_event_fetch() {
         fake_rid(8_999),
         true,
         Some(PendingSendProjection {
+            lifecycle_trace: None,
             key: key.clone(),
             sequence: 0,
             client_txn_id: "client-hydration-retry".to_owned(),
@@ -2303,6 +2313,7 @@ fn hydrated_sent_projection_cache_evicts_oldest_without_consuming_active_capacit
             fake_rid(9_000 + index as u64),
             true,
             Some(PendingSendProjection {
+                lifecycle_trace: None,
                 key: key.clone(),
                 sequence: 0,
                 item: pending_send_item(&client_txn_id, "body", None, None, None),

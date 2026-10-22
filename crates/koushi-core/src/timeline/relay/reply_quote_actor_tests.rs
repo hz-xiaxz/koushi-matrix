@@ -208,6 +208,7 @@ async fn redacting_a_canonical_original_refreshes_a_pending_only_reply() {
         Some(alice.as_str()),
     );
     let projection = PendingSendProjection {
+        lifecycle_trace: None,
         key: fixture.key.clone(),
         sequence: 1,
         client_txn_id: PENDING_TXN.to_owned(),

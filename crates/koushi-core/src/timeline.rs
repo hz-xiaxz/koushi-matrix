@@ -59,6 +59,7 @@ pub(crate) mod html_sanitize;
 mod item_projection;
 mod manager;
 mod media;
+mod mutation;
 pub(crate) use direct_attachment::{AttachmentFailure, fetch_attachment};
 pub(crate) use direct_room_messages::read_room_messages;
 mod navigation;
@@ -106,3 +107,7 @@ pub(crate) use residency::{
     TimelineSubscriptionResidencyHandle, TimelineSubscriptionResidencyPermit,
     VisibleRoomObservation,
 };
+
+#[cfg(test)]
+#[path = "../tests/timeline_mutations/mod.rs"]
+mod mutation_tests;
