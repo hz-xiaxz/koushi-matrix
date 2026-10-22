@@ -91,7 +91,7 @@ import {
   renderPlainTextBody,
   type OpenMatrixTargetHandler
 } from "./TimelineMessageBody";
-import { uiDateTimeFormat, uiListFormat } from "../../domain/intlFormatCache";
+import { uiDateTimeFormat, uiListFormat, uiNumberFormat } from "../../domain/intlFormatCache";
 
 export type TimelineThreadAttention = {
   rootEventId: string;
@@ -1240,10 +1240,10 @@ export function TimelineItemRow({
             className="thread-summary-chip thread-new-replies-chip"
             type="button"
             aria-label={t("timeline.openThreadSummary", { summary: threadNotificationsText })}
+            title={threadNotificationsText}
             onClick={submitOpenThread}
           >
-            <MessageCircle size={13} />
-            <span>{threadNotificationsText}</span>
+            <span>{uiNumberFormat().format(threadUnreadCount)}</span>
           </button>
         ) : null}
         {canShowThreadSummary ? (

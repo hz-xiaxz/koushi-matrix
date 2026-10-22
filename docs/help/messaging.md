@@ -66,8 +66,9 @@ Use a message's actions to choose **Reply to message** for a reply in the room,
 or **Reply in thread** to open a thread. In a thread, use its separate reply
 composer. Check which composer is active before sending.
 
-Select a message's reply count to open its existing thread. Koushi's thread
-composer sends replies in that thread; it does not offer nested threads.
+Select a message's reply count to open its existing thread. A red number shows
+unread replies; select it to open the thread. Koushi's thread composer sends
+replies in that thread; it does not offer nested threads.
 
 ## Edit or remove a message
 
