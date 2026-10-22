@@ -393,6 +393,28 @@ Original+Keep HEIF selection to the converted variant the same item already
 caches. An Original+Keep selection therefore previews `image/jpeg`-class bytes
 while its descriptor keeps the original filename, byte count and dimensions.
 
+JPEG outputs composite transparent pixels over white before resampling and
+encoding, including native decoded pixels and history-export thumbnails.
+Fully transparent RGB values must not affect the result; partially transparent
+shadows blend with white, and opaque content retains its colors. Conversion
+preserves the image bounds without adding padding or cropping. PNG/WebP
+outputs retain alpha, and an unscaled Original+Keep retains the source bytes.
+Alpha-preserving resampling filters premultiplied color channels and converts
+back to straight alpha afterwards; invisible source RGB must not affect the
+visible output on either light or dark backgrounds. Re-encoded ordinary raster
+images apply all eight EXIF orientations to pixels before metadata is stripped.
+Dimension probes and untouched-original descriptors report the oriented display
+dimensions without decoding pixels; native decoders already supply upright
+pixels and must not be rotated a second time.
+For ordinary PNG/JPEG/WebP sources, re-encoding retains an embedded RGB ICC
+profile as rendering metadata while stripping EXIF/XMP and other source
+metadata. Untagged inputs keep the existing sRGB interpretation. Conversions
+with a non-RGB ICC profile or a profiled CMYK source fail through the existing
+original-file fallback, rather than silently dropping the profile or attaching
+it to incompatible RGB pixels. Native HEIF pixels already arrive as SDR sRGB.
+Animation detection reads container flags/chunks, never arbitrary pixel or
+profile bytes that happen to contain an animation marker.
+
 A lazily selected pair whose encode fails settles instead of staying pending
 (#1147): `encode_output` returns the typed `MediaPreparationFailureKind`, and
 `MediaStagingService` publishes `StagedUploadPreparation::Failed` with

@@ -10,11 +10,11 @@ pub use decoded::{DecodeLimits, DecodedRgbaImage, DecodedRgbaImageError};
 pub use image_kind::{ImageKind, image_kind};
 pub use thumbnail::thumbnail_jpeg;
 
-use std::io::Cursor;
+use std::{borrow::Cow, io::Cursor};
 
 use image::{
-    DynamicImage, ExtendedColorType, GenericImageView, ImageEncoder, ImageFormat, ImageReader,
-    Limits, RgbaImage,
+    DynamicImage, ExtendedColorType, GenericImageView, ImageDecoder, ImageEncoder, ImageFormat,
+    ImageReader, Limits, RgbaImage,
     codecs::{jpeg::JpegEncoder, png::PngEncoder, webp::WebPEncoder},
     imageops::FilterType,
 };
@@ -206,8 +206,8 @@ pub fn prepare_image_output(
         });
     }
 
-    let decoded = match source_format {
-        PreparedImageFormat::Heif => decode_heif(source, heif.expect("recognized HEIF"))?,
+    let (decoded, icc_profile) = match source_format {
+        PreparedImageFormat::Heif => (decode_heif(source, heif.expect("recognized HEIF"))?, None),
         _ => decode_with_limits(source, guessed.expect("recognized image format"))
             .map_err(|_| ImagePreparationError::Decode)?,
     };
@@ -217,13 +217,14 @@ pub fn prepare_image_output(
         ImageOutputFormat::Jpeg => PreparedImageFormat::Jpeg,
         ImageOutputFormat::WebP => PreparedImageFormat::WebP,
     };
-    let scaled = scale_linearly(&decoded, request.resize);
+    let scaled = scale_linearly(&decoded, request.resize, target_format);
     let mut variant = encoded_variant(
         &request.identity(),
         filename,
         target_format,
         &scaled,
         policy.quality_percent,
+        icc_profile.as_deref(),
     )?;
     variant.recommended = false;
     Ok(variant)
@@ -272,19 +273,20 @@ pub fn prepare_image_output_fitted(
     if !decodable {
         return Err(ImagePreparationError::UnsupportedFormat);
     }
-    let decoded = match source_format {
-        PreparedImageFormat::Heif => decode_heif(source, heif.expect("recognized HEIF"))?,
+    let (decoded, icc_profile) = match source_format {
+        PreparedImageFormat::Heif => (decode_heif(source, heif.expect("recognized HEIF"))?, None),
         _ => decode_with_limits(source, guessed.expect("recognized image format"))
             .map_err(|_| ImagePreparationError::Decode)?,
     };
     let long_edge = target_long_edge.max(1);
-    let scaled = resize_to_long_edge(&decoded, long_edge);
+    let scaled = resize_to_long_edge(&decoded, long_edge, target_format);
     let mut variant = encoded_variant(
         &format!("fit-{long_edge}-{}", format.token()),
         filename,
         target_format,
         &scaled,
         policy.quality_percent,
+        icc_profile.as_deref(),
     )?;
     variant.recommended = false;
     Ok(variant)
@@ -315,7 +317,7 @@ pub fn prepare_decoded_image_output(
     let scaled = if request.resize == ImageResizeScale::Original {
         image
     } else {
-        scale_linearly(&image, request.resize)
+        scale_linearly(&image, request.resize, target_format)
     };
     encoded_variant(
         &request.identity(),
@@ -323,22 +325,28 @@ pub fn prepare_decoded_image_output(
         target_format,
         &scaled,
         policy.quality_percent,
+        None,
     )
 }
 
 /// Halve each dimension per scale step, never below one pixel.
-fn scale_linearly(image: &DynamicImage, resize: ImageResizeScale) -> DynamicImage {
+fn scale_linearly(
+    image: &DynamicImage,
+    resize: ImageResizeScale,
+    format: PreparedImageFormat,
+) -> DynamicImage {
+    let image = jpeg_background(image, format);
     let divisor = resize.divisor();
     if divisor <= 1 {
-        return image.clone();
+        return image.into_owned();
     }
     let (width, height) = image.dimensions();
     let target_width = (width / divisor).max(1);
     let target_height = (height / divisor).max(1);
     if (target_width, target_height) == (width, height) {
-        return image.clone();
+        return image.into_owned();
     }
-    image.resize_exact(target_width, target_height, FilterType::Lanczos3)
+    resize_with_alpha(&image, target_width, target_height)
 }
 
 pub fn prepare_image_variants(
@@ -362,7 +370,9 @@ pub fn prepare_image_variants(
         .map(|probe| probe.mime_type)
         .unwrap_or_else(|| actual_mime(format));
     let decoded = match format {
-        PreparedImageFormat::Heif => decode_heif(source, heif.expect("recognized HEIF")).ok(),
+        PreparedImageFormat::Heif => decode_heif(source, heif.expect("recognized HEIF"))
+            .ok()
+            .map(|image| (image, None)),
         PreparedImageFormat::Png | PreparedImageFormat::Jpeg | PreparedImageFormat::WebP
             if !animated_webp(source) && !animated_png(source) =>
         {
@@ -372,7 +382,7 @@ pub fn prepare_image_variants(
     };
     let dimensions = decoded
         .as_ref()
-        .map(GenericImageView::dimensions)
+        .map(|(image, _)| image.dimensions())
         .unwrap_or((0, 0));
     let mut variants = vec![PreparedImageVariant {
         id: "original".to_owned(),
@@ -386,11 +396,12 @@ pub fn prepare_image_variants(
         recommended: false,
     }];
 
-    let Some(decoded) = decoded else {
+    let Some((decoded, icc_profile)) = decoded else {
         variants[0].recommended = true;
         return Ok(variants);
     };
-    let resized = resize_to_long_edge(&decoded, policy.target_long_edge.max(1));
+    let long_edge = policy.target_long_edge.max(1);
+    let resized = resize_to_long_edge(&decoded, long_edge, format);
     match format {
         PreparedImageFormat::Png => {
             variants.push(encoded_variant(
@@ -399,6 +410,7 @@ pub fn prepare_image_variants(
                 PreparedImageFormat::Png,
                 &resized,
                 policy.quality_percent,
+                icc_profile.as_deref(),
             )?);
             variants.push(encoded_variant(
                 "webp",
@@ -406,6 +418,7 @@ pub fn prepare_image_variants(
                 PreparedImageFormat::WebP,
                 &resized,
                 policy.quality_percent,
+                icc_profile.as_deref(),
             )?);
         }
         PreparedImageFormat::Jpeg => {
@@ -415,6 +428,7 @@ pub fn prepare_image_variants(
                 PreparedImageFormat::Jpeg,
                 &resized,
                 policy.quality_percent,
+                icc_profile.as_deref(),
             )?);
             variants.push(encoded_variant(
                 "webp",
@@ -422,6 +436,7 @@ pub fn prepare_image_variants(
                 PreparedImageFormat::WebP,
                 &resized,
                 policy.quality_percent,
+                icc_profile.as_deref(),
             )?);
         }
         PreparedImageFormat::WebP => variants.push(encoded_variant(
@@ -430,14 +445,19 @@ pub fn prepare_image_variants(
             PreparedImageFormat::WebP,
             &resized,
             policy.quality_percent,
+            icc_profile.as_deref(),
         )?),
         PreparedImageFormat::Heif => {
+            // The alpha-preserving variants below still use `resized`; JPEG
+            // must composite the source before its own resampling.
+            let jpeg = resize_to_long_edge(&decoded, long_edge, PreparedImageFormat::Jpeg);
             variants.push(encoded_variant(
                 "resized-jpeg",
                 filename,
                 PreparedImageFormat::Jpeg,
-                &resized,
+                &jpeg,
                 policy.quality_percent,
+                None,
             )?);
             variants.push(encoded_variant(
                 "resized-webp",
@@ -445,6 +465,7 @@ pub fn prepare_image_variants(
                 PreparedImageFormat::WebP,
                 &resized,
                 policy.quality_percent,
+                None,
             )?);
             variants.push(encoded_variant(
                 "resized-png",
@@ -452,6 +473,7 @@ pub fn prepare_image_variants(
                 PreparedImageFormat::Png,
                 &resized,
                 policy.quality_percent,
+                None,
             )?);
         }
         PreparedImageFormat::Gif | PreparedImageFormat::Other => {}
@@ -475,25 +497,29 @@ fn encoded_variant(
     format: PreparedImageFormat,
     image: &DynamicImage,
     quality_percent: u8,
+    icc_profile: Option<&[u8]>,
 ) -> Result<PreparedImageVariant, ImagePreparationError> {
     let (width, height) = image.dimensions();
     let mut bytes = Vec::new();
     match format {
         PreparedImageFormat::Png => {
             let rgba = image.to_rgba8();
-            PngEncoder::new(&mut bytes)
+            with_color_profile(PngEncoder::new(&mut bytes), icc_profile)?
                 .write_image(&rgba, width, height, ExtendedColorType::Rgba8)
                 .map_err(|_| ImagePreparationError::Encode)?;
         }
         PreparedImageFormat::Jpeg => {
-            let rgb = image.to_rgb8();
-            JpegEncoder::new_with_quality(&mut bytes, quality_percent.clamp(1, 100))
-                .write_image(&rgb, width, height, ExtendedColorType::Rgb8)
-                .map_err(|_| ImagePreparationError::Encode)?;
+            let rgb = jpeg_background(image, format).to_rgb8();
+            with_color_profile(
+                JpegEncoder::new_with_quality(&mut bytes, quality_percent.clamp(1, 100)),
+                icc_profile,
+            )?
+            .write_image(&rgb, width, height, ExtendedColorType::Rgb8)
+            .map_err(|_| ImagePreparationError::Encode)?;
         }
         PreparedImageFormat::WebP => {
             let rgba = image.to_rgba8();
-            WebPEncoder::new_lossless(&mut bytes)
+            with_color_profile(WebPEncoder::new_lossless(&mut bytes), icc_profile)?
                 .write_image(&rgba, width, height, ExtendedColorType::Rgba8)
                 .map_err(|_| ImagePreparationError::Encode)?;
         }
@@ -531,16 +557,62 @@ pub fn probe_image_dimensions(source: &[u8]) -> Option<(u32, u32)> {
     read_dimensions_with_limits(source, format).ok()
 }
 
-fn resize_to_long_edge(image: &DynamicImage, target_long_edge: u32) -> DynamicImage {
+/// Resolve JPEG's missing alpha channel before filtering, so invisible RGB
+/// cannot bleed into edges. Other encodings keep their alpha untouched.
+fn jpeg_background(image: &DynamicImage, format: PreparedImageFormat) -> Cow<'_, DynamicImage> {
+    if format != PreparedImageFormat::Jpeg || !image.color().has_alpha() {
+        return Cow::Borrowed(image);
+    }
+    let rgb = image::RgbImage::from_fn(image.width(), image.height(), |x, y| {
+        let pixel = image.get_pixel(x, y);
+        let alpha = u32::from(pixel[3]);
+        image::Rgb(std::array::from_fn(|channel| {
+            ((u32::from(pixel[channel]) * alpha + 255 * (255 - alpha) + 127) / 255) as u8
+        }))
+    });
+    Cow::Owned(DynamicImage::ImageRgb8(rgb))
+}
+
+/// Filtering straight-alpha RGB would make invisible colors bleed into edges.
+fn resize_with_alpha(image: &DynamicImage, width: u32, height: u32) -> DynamicImage {
+    if !image.color().has_alpha() {
+        return image.resize_exact(width, height, FilterType::Lanczos3);
+    }
+    let mut pixels = image.to_rgba8();
+    for pixel in pixels.pixels_mut() {
+        let alpha = u32::from(pixel[3]);
+        for channel in &mut pixel.0[..3] {
+            *channel = ((u32::from(*channel) * alpha + 127) / 255) as u8;
+        }
+    }
+    let mut resized = image::imageops::resize(&pixels, width, height, FilterType::Lanczos3);
+    for pixel in resized.pixels_mut() {
+        let alpha = u32::from(pixel[3]);
+        for channel in &mut pixel.0[..3] {
+            *channel = (u32::from(*channel) * 255 + alpha / 2)
+                .checked_div(alpha)
+                .unwrap_or(0)
+                .min(255) as u8;
+        }
+    }
+    DynamicImage::ImageRgba8(resized)
+}
+
+fn resize_to_long_edge(
+    image: &DynamicImage,
+    target_long_edge: u32,
+    format: PreparedImageFormat,
+) -> DynamicImage {
+    let image = jpeg_background(image, format);
     let (width, height) = image.dimensions();
     let long_edge = width.max(height);
     if long_edge <= target_long_edge {
-        return image.clone();
+        return image.into_owned();
     }
     let scale = target_long_edge as f64 / long_edge as f64;
     let target_width = ((width as f64 * scale).round() as u32).max(1);
     let target_height = ((height as f64 * scale).round() as u32).max(1);
-    image.resize_exact(target_width, target_height, FilterType::Lanczos3)
+    resize_with_alpha(&image, target_width, target_height)
 }
 
 fn prepared_format(format: Option<ImageFormat>) -> PreparedImageFormat {
@@ -593,7 +665,40 @@ fn normalized_filename(filename: &str, extension: &str) -> String {
 }
 
 fn animated_webp(source: &[u8]) -> bool {
-    source.windows(4).any(|window| window == b"ANIM")
+    if source.len() < 12 || &source[..4] != b"RIFF" || &source[8..12] != b"WEBP" {
+        return false;
+    }
+    let length = u32::from_le_bytes(source[4..8].try_into().expect("four-byte RIFF length"));
+    let Some(riff) = (length as usize)
+        .checked_add(8)
+        .and_then(|end| source.get(..end))
+    else {
+        return false;
+    };
+    let mut offset = 12usize;
+    while let Some(header) = riff.get(offset..offset.saturating_add(8)) {
+        let length =
+            u32::from_le_bytes(header[4..8].try_into().expect("four-byte chunk length")) as usize;
+        let Some(end) = offset
+            .checked_add(8)
+            .and_then(|start| start.checked_add(length))
+        else {
+            return false;
+        };
+        let Some(body) = riff.get(offset + 8..end) else {
+            return false;
+        };
+        if &header[..4] == b"ANIM"
+            || (&header[..4] == b"VP8X" && body.first().is_some_and(|flags| flags & 0x02 != 0))
+        {
+            return true;
+        }
+        let Some(next) = end.checked_add(length % 2) else {
+            return false;
+        };
+        offset = next;
+    }
+    false
 }
 
 fn animated_png(source: &[u8]) -> bool {
@@ -621,17 +726,54 @@ fn animated_png(source: &[u8]) -> bool {
     false
 }
 
+fn with_color_profile<E: ImageEncoder>(
+    mut encoder: E,
+    profile: Option<&[u8]>,
+) -> Result<E, ImagePreparationError> {
+    if let Some(profile) = profile {
+        encoder
+            .set_icc_profile(profile.to_vec())
+            .map_err(|_| ImagePreparationError::Encode)?;
+    }
+    Ok(encoder)
+}
+
+/// Pixel encoders here produce RGB, so a profile for another channel model
+/// must use the existing original-file fallback instead of mislabelling RGB.
+fn rgb_icc_profile(decoder: &mut impl ImageDecoder) -> image::ImageResult<Option<Vec<u8>>> {
+    let profile = decoder.icc_profile()?;
+    if profile.as_ref().is_some_and(|profile| {
+        profile.get(16..20) != Some(b"RGB ")
+            || decoder.original_color_type() == ExtendedColorType::Cmyk8
+    }) {
+        return Err(image::ImageError::Unsupported(
+            image::error::UnsupportedError::from_format_and_kind(
+                image::error::ImageFormatHint::Unknown,
+                image::error::UnsupportedErrorKind::GenericFeature(
+                    "non-RGB color profile".to_owned(),
+                ),
+            ),
+        ));
+    }
+    Ok(profile)
+}
+
 fn decode_with_limits(
     source: &[u8],
     format: ImageFormat,
-) -> Result<DynamicImage, image::ImageError> {
+) -> Result<(DynamicImage, Option<Vec<u8>>), image::ImageError> {
     let mut reader = ImageReader::with_format(Cursor::new(source), format);
     let mut limits = Limits::default();
     limits.max_image_width = Some(MAX_DECODED_DIMENSION);
     limits.max_image_height = Some(MAX_DECODED_DIMENSION);
     limits.max_alloc = Some(MAX_DECODED_ALLOCATION);
     reader.limits(limits);
-    reader.decode()
+    let mut decoder = reader.into_decoder()?;
+    let profile = rgb_icc_profile(&mut decoder)?;
+    let orientation = decoder.orientation()?;
+    let mut image = DynamicImage::from_decoder(decoder)?;
+    image.apply_orientation(orientation);
+    Ok((image, profile))
 }
 
 fn read_dimensions_with_limits(
@@ -644,8 +786,17 @@ fn read_dimensions_with_limits(
     limits.max_image_height = Some(MAX_DECODED_DIMENSION);
     limits.max_alloc = Some(MAX_DECODED_ALLOCATION);
     reader.limits(limits);
-    let dimensions = reader.into_dimensions()?;
-    validate_decoded_dimensions(dimensions)
+    let mut decoder = reader.into_decoder()?;
+    let (width, height) = validate_decoded_dimensions(decoder.dimensions())?;
+    let orientation = decoder.orientation()?;
+    use image::metadata::Orientation;
+    Ok(match orientation {
+        Orientation::Rotate90
+        | Orientation::Rotate270
+        | Orientation::Rotate90FlipH
+        | Orientation::Rotate270FlipH => (height, width),
+        _ => (width, height),
+    })
 }
 
 fn validate_decoded_dimensions(dimensions: (u32, u32)) -> Result<(u32, u32), image::ImageError> {
