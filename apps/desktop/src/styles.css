@@ -4964,13 +4964,19 @@ button:disabled {
 }
 
 .thread-new-replies-chip {
-  border-color: var(--unread);
-  color: var(--brand);
-  background: var(--selected);
+  min-inline-size: 28px;
+  justify-content: center;
+  padding-inline: 4px;
+  border: 0;
+  border-radius: 4px;
+  color: var(--mention);
+  background: transparent;
+  font-variant-numeric: tabular-nums;
 }
 
 .thread-new-replies-chip:hover {
-  background: var(--selected-strong);
+  background: transparent;
+  text-decoration: underline;
 }
 
 .reply-link {
