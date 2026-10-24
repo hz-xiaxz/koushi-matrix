@@ -28,6 +28,13 @@ only through the task table below.
 - Voice/video calls and recorded voice messages remain deferred. Do not open
   feature issues for them without explicit user approval to revisit scope.
 
+## Rust builds
+
+- Run Rust build commands through kache with `KACHE_EXPLAIN_MISS=1` so a cache
+  miss records dependency-level digests for `kache why-miss`, for example
+  `KACHE_EXPLAIN_MISS=1 cargo build`. Keep it scoped to the invocation; see
+  [environment](docs/agents/environment.md#kache-miss-diagnostics).
+
 ## Read by task
 
 Read only the rows that match the task, and only their relevant sections.
