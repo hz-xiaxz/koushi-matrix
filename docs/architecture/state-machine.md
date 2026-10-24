@@ -3280,7 +3280,12 @@ sanitizes it before exposing it through `TimelineItem.formatted`.
   that value to CSS/markup only and must not infer msgtype from body text.
 - `TimelineItem.formatted` carries a safe render contract: sanitized HTML,
   plain text derived from that sanitized tree, and extracted code-block metadata
-  (`language` plus code body).
+  (`language` plus code body). The plain text concatenates the sanitized text
+  nodes without block separators, and every projected offset (spoilers, link
+  ranges) addresses that text. Clickable URL ranges are detected with block
+  boundaries (`p`, `li`, `br`, and the other block elements) preserved and then
+  mapped back onto it, so a bare URL at the end of one item cannot swallow the
+  next item's first word (#1596).
 - Spoiler semantics are Rust-owned. Plain `||spoiler||` fallback text is
   normalized to display text plus `TimelineItem.spoiler_spans`; sanitized
   Matrix HTML `<span data-mx-spoiler>` is preserved as a reveal affordance and
@@ -6484,7 +6489,11 @@ transport or to one country's infrastructure. The app must be running to send.
   (`override > content > room > sender > underride`), so a keyword wins over a room rule
   while a mute, which is an override, still wins over the keyword. The list is bounded,
   a pattern is bounded and trimmed, a duplicate is refused rather than written twice,
-  and a failed write is reported as a failure instead of being shown as saved. The rule
+  and a failed write is reported as a failure instead of being shown as saved. The
+  duplicate comparison is the homeserver's own: full Unicode lowercase folding of both
+  sides (`koushi_state::matrix_case_key`), so `café`/`CAFÉ` and `σίγμα`/`ΣΊΓΜΑ` are one
+  keyword, while width or other compatibility variants stay distinct because the
+  homeserver keeps them distinct. The rule
   name is minted from the pattern rather than taken from the user: a prefix this client
   owns plus a hash of the trimmed text, so the same keyword cannot become two rules, no
   pattern text travels in a URL path, and an id that collides with a different pattern is
@@ -6517,8 +6526,10 @@ transport or to one country's infrastructure. The app must be running to send.
   is byte-identical it reuses its idempotency key; otherwise it takes a new window
   key, preferring a possible duplicate notice to resending obsolete text. Subject,
   title, and body are notification payload text owned by Core, not the React message
-  catalog: they never render inside the app and are English until localization is
-  decided. The queue is in-memory and bounded and is discarded on exit; there is no
+  catalog: they never render inside the app, and they are rendered through the Rust
+  notification catalog in the app language, resolved at send or retry time, so a held
+  or retried delivery is worded in the locale current when it is sent (#1476). The
+  queue is in-memory and bounded and is discarded on exit; there is no
   durable outbox. The last outcome is projected per destination: accepted by the
   service, invalid credential, not permitted, rejected, rate limited, or transport
   failure. Only a rate limit or a transport failure is retried, at most three
