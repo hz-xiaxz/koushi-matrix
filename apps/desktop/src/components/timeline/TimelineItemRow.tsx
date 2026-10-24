@@ -140,6 +140,8 @@ export interface TimelineRowActionHandlers {
    * rather than swallowing the click.
    */
   onOpenMatrixTarget?: OpenMatrixTargetHandler;
+  /** #1592: opens the original message a reply quote previews. */
+  onOpenReplyQuote?: (roomId: string, eventId: string) => void;
   onOpenSenderProfile?: (roomId: string, userId: string) => void;
 }
 
@@ -344,6 +346,7 @@ export function TimelineItemRow({
   onRetrySend = ignoreSendQueueAction,
   onCancelSend = ignoreSendQueueAction,
   onOpenMatrixTarget,
+  onOpenReplyQuote,
   onOpenSenderProfile,
   onStartDirectMessage,
   senderHasUnconfirmedDevices = false,
@@ -421,6 +424,7 @@ export function TimelineItemRow({
   onRetrySend?: TimelineRowActionHandlers["onRetrySend"];
   onCancelSend?: TimelineRowActionHandlers["onCancelSend"];
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];
+  onOpenReplyQuote?: TimelineRowActionHandlers["onOpenReplyQuote"];
   onOpenSenderProfile?: TimelineRowActionHandlers["onOpenSenderProfile"];
   onStartDirectMessage?: (userId: string) => void;
   /** #1494: Rust lists this row's sender in `sender_device_advisories`. */
@@ -852,37 +856,108 @@ export function TimelineItemRow({
         * <span className="message-emote-sender">{senderDisplayLabel}</span>
       </span>
     ) : null;
-  const replyQuoteContent =
-    !isRedacted && item.reply_quote ? (
-      <div className="reply-quote" data-reply-state={item.reply_quote.state}>
-        {replyQuoteShowsSender(item.reply_quote) ? (
+  const replyQuote = !isRedacted ? item.reply_quote : null;
+  const replyQuoteOpenable = Boolean(
+    replyQuote?.can_open && replyQuote.permalink && onOpenReplyQuote
+  );
+  const openReplyQuote = () => {
+    if (replyQuote?.can_open && replyQuote.permalink && onOpenReplyQuote) {
+      onOpenReplyQuote(roomId, replyQuote.event_id);
+    }
+  };
+  const replyQuoteContent = replyQuote ? (
+    <div
+      className={`reply-quote${replyQuoteOpenable ? " is-openable" : ""}`}
+      data-reply-state={replyQuote.state}
+      onClick={
+        replyQuoteOpenable
+          ? (event) => {
+              const target = event.target;
+              // Interactive content inside the preview keeps its own action;
+              // only the preview's background activates the quote.
+              if (
+                target instanceof Element &&
+                target.closest(
+                  "a, button, input, select, textarea, [role='button'], [role='link']"
+                )
+              ) {
+                return;
+              }
+              openReplyQuote();
+            }
+          : undefined
+      }
+    >
+      {replyQuoteShowsSender(replyQuote) ? (
+        replyQuoteOpenable ? (
+          <a
+            className="reply-quote-sender reply-quote-link"
+            href={replyQuote.permalink ?? undefined}
+            aria-label={t("timeline.openOriginalMessage")}
+            onClick={(event) => {
+              event.preventDefault();
+              event.stopPropagation();
+              openReplyQuote();
+            }}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" || event.key === " ") {
+                event.preventDefault();
+                event.stopPropagation();
+                openReplyQuote();
+              }
+            }}
+          >
+            {peopleFacingLabel(replyQuote.sender_label)}
+          </a>
+        ) : (
           <div className="reply-quote-sender" dir="auto">
-            {peopleFacingLabel(item.reply_quote.sender_label)}
+            {peopleFacingLabel(replyQuote.sender_label)}
           </div>
-        ) : null}
-        <div className="reply-quote-body" dir="auto">
-          {item.reply_quote.formatted
-            ? renderFormattedBody(
-                item.reply_quote.formatted,
-                [],
-                codeBlockWrap,
-                onCopyText,
-                [],
-                spoilerState,
-                onOpenMatrixTarget,
-                // #1328: a quote previews the quoted message, so it pills that
-                // message's mentions instead of rendering bare matrix.to links.
-                {
-                  userIds: new Set(item.reply_quote.mentioned_user_ids ?? []),
-                  // A formatted body pills only `matrix.to` anchors, so a quote
-                  // has no room-mention form to mark.
-                  room: false
-                }
-              )
-            : replyQuoteBody(item.reply_quote)}
-        </div>
+        )
+      ) : replyQuoteOpenable ? (
+        <a
+          className="reply-quote-sender reply-quote-link"
+          href={replyQuote.permalink ?? undefined}
+          aria-label={t("timeline.openOriginalMessage")}
+          onClick={(event) => {
+            event.preventDefault();
+            event.stopPropagation();
+            openReplyQuote();
+          }}
+          onKeyDown={(event) => {
+            if (event.key === "Enter" || event.key === " ") {
+              event.preventDefault();
+              event.stopPropagation();
+              openReplyQuote();
+            }
+          }}
+        >
+          {t("timeline.openOriginalMessage")}
+        </a>
+      ) : null}
+      <div className="reply-quote-body" dir="auto">
+        {replyQuote.formatted
+          ? renderFormattedBody(
+              replyQuote.formatted,
+              [],
+              codeBlockWrap,
+              onCopyText,
+              [],
+              spoilerState,
+              onOpenMatrixTarget,
+              // #1328: a quote previews the quoted message, so it pills that
+              // message's mentions instead of rendering bare matrix.to links.
+              {
+                userIds: new Set(replyQuote.mentioned_user_ids ?? []),
+                // A formatted body pills only `matrix.to` anchors, so a quote
+                // has no room-mention form to mark.
+                room: false
+              }
+            )
+          : replyQuoteBody(replyQuote)}
       </div>
-    ) : null;
+    </div>
+  ) : null;
   const bodyContent = isRedacted ? (
     <div className="message-body message-redacted" dir="auto">
       {t("timeline.redactedMessage")}

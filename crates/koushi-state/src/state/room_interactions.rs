@@ -83,6 +83,14 @@ pub struct ReplyQuote {
     /// marks its anchors as the pills its own row would.
     #[serde(default, skip_serializing_if = "Vec::is_empty")]
     pub mentioned_user_ids: Vec<String>,
+    /// The canonical `matrix.to` link Rust projects for the quoted event.
+    #[serde(default, skip_serializing_if = "Option::is_none")]
+    pub permalink: Option<String>,
+    /// Whether the quote's current state may open the original. Only `Ready`
+    /// and `Redacted` quotes are openable; unresolved and terminal states stay
+    /// inert.
+    #[serde(default)]
+    pub can_open: bool,
     pub state: ReplyQuoteState,
 }
 
@@ -108,6 +116,11 @@ impl fmt::Debug for ReplyQuote {
                     .map(|_| "ReplyQuoteFormattedBody(..)"),
             )
             .field("mentioned_user_ids", &self.mentioned_user_ids.len())
+            .field(
+                "permalink",
+                &self.permalink.as_ref().map(|_| "Permalink(..)"),
+            )
+            .field("can_open", &self.can_open)
             .field("state", &self.state)
             .finish()
     }

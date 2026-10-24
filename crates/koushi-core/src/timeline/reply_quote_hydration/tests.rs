@@ -81,7 +81,7 @@ fn known_original_resolves_pending_reply_immediately() {
         .into_iter()
         .map(str::to_owned)
         .collect::<Vec<_>>();
-    let originals = known_originals(&targets, &[], &canonical);
+    let originals = known_originals("!room:example.invalid", &targets, &[], &canonical);
     let changed = overlay_reply_quotes(
         pending.iter_mut(),
         |event_id| originals.get(event_id).cloned(),
@@ -94,17 +94,28 @@ fn known_original_resolves_pending_reply_immediately() {
     assert_eq!(quote.body_preview.as_deref(), Some("hello world"));
     assert_eq!(quote.sender.as_deref(), Some("@alice:example.invalid"));
     assert_eq!(quote.sender_label.as_deref(), Some("Alice"));
+    assert!(quote.can_open);
+    assert_eq!(
+        quote.permalink.as_deref(),
+        Some("https://matrix.to/#/!room%3Aexample.invalid/%24original%3Aexample.invalid")
+    );
 }
 
 #[test]
 fn redacted_original_projects_redacted_quote() {
     let mut original = original_item(ORIGINAL, "gone");
     original.is_redacted = true;
-    let quote = reply_quote_from_timeline_item(ORIGINAL, &original).expect("quote");
+    let quote = reply_quote_from_timeline_item("!room:example.invalid", ORIGINAL, &original)
+        .expect("quote");
     assert_eq!(quote.state, ReplyQuoteState::Redacted);
     assert_eq!(quote.body_preview, None);
     // A redacted original has no pills to preview either.
     assert!(quote.mentioned_user_ids.is_empty());
+    assert!(quote.can_open);
+    assert_eq!(
+        quote.permalink.as_deref(),
+        Some("https://matrix.to/#/!room%3Aexample.invalid/%24original%3Aexample.invalid")
+    );
 }
 
 #[test]
@@ -114,7 +125,8 @@ fn quote_carries_the_original_mentions_so_the_preview_pills_them() {
     let mut original = original_item(ORIGINAL, "harness ada please look");
     original.mentioned_user_ids = vec!["@ada:example.invalid".to_owned()];
 
-    let quote = reply_quote_from_timeline_item(ORIGINAL, &original).expect("quote");
+    let quote = reply_quote_from_timeline_item("!room:example.invalid", ORIGINAL, &original)
+        .expect("quote");
 
     assert_eq!(quote.state, ReplyQuoteState::Ready);
     assert_eq!(quote.mentioned_user_ids, ["@ada:example.invalid"]);

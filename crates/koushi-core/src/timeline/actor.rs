@@ -1983,6 +1983,7 @@ impl TimelineActor {
         ));
         let mut reply_quote_hydration =
             super::reply_quote_hydration::ReplyQuoteHydration::default();
+        reply_quote_hydration.set_room_id(key.room_id());
         if let TimelineKind::Thread { root_event_id, .. } = &key.kind {
             // A Thread actor's root is never evicted: replies to it must always
             // resolve even after the ledger fills up.

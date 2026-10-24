@@ -25,6 +25,7 @@ pub enum NavigationCause {
     ActivityNavigation,
     SearchNavigation,
     PinnedNavigation,
+    ReplyQuoteNavigation,
     StartupRestoration,
     DirectRead,
     DirectSearch,

@@ -1845,6 +1845,17 @@ describe("desktop integration source guards", () => {
     expect(source).not.toContain("onRetryPinnedEvent");
   });
 
+  test("reply quote navigation delegates presentation and failure to Rust", () => {
+    const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
+    const start = source.indexOf("async function openReplyQuoteEvent");
+    const end = source.indexOf("async function openPinnedEvent", start);
+    const openReplyQuoteSource = source.slice(start, end);
+
+    expect(openReplyQuoteSource).toContain("api.openReplyQuoteEvent(roomId, eventId)");
+    expect(openReplyQuoteSource).not.toContain("scrollIntoView");
+    expect(openReplyQuoteSource).not.toContain("navigationFailure");
+  });
+
   test("search result selection is snapshot-driven and does not scroll the DOM", () => {
     const source = readFileSync(new URL("./App.tsx", import.meta.url), "utf8");
     const selectSearchResultStart = source.indexOf("function selectSearchResult");

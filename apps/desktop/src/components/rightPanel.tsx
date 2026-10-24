@@ -192,6 +192,7 @@ export function ContextualRightPanel({
   onRecoverySecretPresenceChange,
   onReply,
   onOpenMatrixTarget,
+  onOpenReplyQuote,
   onResultSelect,
   onSubmitRecovery,
   onAcceptVerification,
@@ -378,6 +379,7 @@ export function ContextualRightPanel({
   onRecoverySecretPresenceChange: (value: boolean) => void;
   onReply: TimelineRowActionHandlers["onReply"];
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];
+  onOpenReplyQuote?: TimelineRowActionHandlers["onOpenReplyQuote"];
   onResultSelect: (roomId: string, eventId: string) => void;
   onSubmitRecovery: (event: FormEvent<HTMLFormElement>) => void;
   onAcceptVerification: (flowId: number) => void;
@@ -515,6 +517,9 @@ export function ContextualRightPanel({
   const threadReplyStable = useStableEvent(onReply);
   const threadOpenMatrixTargetStable = useStableEvent(
     (...args: Parameters<NonNullable<typeof onOpenMatrixTarget>>) => onOpenMatrixTarget?.(...args)
+  );
+  const threadOpenReplyQuoteStable = useStableEvent(
+    (...args: Parameters<NonNullable<typeof onOpenReplyQuote>>) => onOpenReplyQuote?.(...args)
   );
   const threadOpenSenderProfileStable = useStableEvent(
     (...args: Parameters<NonNullable<typeof onOpenSenderProfile>>) =>
@@ -1118,6 +1123,7 @@ export function ContextualRightPanel({
               }
               onReply={onReply}
               onOpenMatrixTarget={onOpenMatrixTarget}
+              onOpenReplyQuote={onOpenReplyQuote}
               resolveComposerKeyAction={onResolveComposerKeyAction}
               liveSignals={snapshot.state.domain.live_signals}
               profileUsers={snapshot.state.domain.profile.users}
@@ -1246,6 +1252,9 @@ export function ContextualRightPanel({
             currentUserId={currentUserId ?? undefined}
             ignoredUserIds={snapshot.state.domain.profile.ignored_user_ids}
             onOpenMatrixTarget={onOpenMatrixTarget ? threadOpenMatrixTargetStable : undefined}
+            onOpenReplyQuote={
+              onOpenReplyQuote ? threadOpenReplyQuoteStable : undefined
+            }
             onOpenSenderProfile={onOpenSenderProfile ? threadOpenSenderProfileStable : undefined}
             senderDeviceAdvisoryUserIds={
               snapshot.state.domain.sender_device_advisories.rooms[threadRoomId]

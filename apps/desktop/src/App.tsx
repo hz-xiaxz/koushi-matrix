@@ -5745,6 +5745,10 @@ function AccountContent({
     setRightPanelMode("pinned");
   }
 
+  async function openReplyQuoteEvent(roomId: string, eventId: string) {
+    await settleCommand(api.openReplyQuoteEvent(roomId, eventId));
+  }
+
   async function openPinnedEvent(
     roomId: string,
     eventId: string,
@@ -7662,6 +7666,9 @@ function AccountContent({
             onOpenMatrixTarget={(target) => {
               runInBackground(openMatrixTarget(target));
             }}
+            onOpenReplyQuote={(roomId, eventId) => {
+              runInBackground(openReplyQuoteEvent(roomId, eventId));
+            }}
             onOpenSenderProfile={(roomId, userId) => {
               runInBackground(openRoomUserProfile(roomId, userId));
             }}
@@ -7915,6 +7922,9 @@ function AccountContent({
           }}
           onForceRotateOutboundSession={forceRotateOutboundSession}
           historyExportControls={historyExportControls}
+          onOpenReplyQuote={(roomId, eventId) => {
+            runInBackground(openReplyQuoteEvent(roomId, eventId));
+          }}
           onOpenSenderProfile={(roomId, userId) => {
             runInBackground(openRoomUserProfile(roomId, userId));
           }}

@@ -4543,6 +4543,29 @@ button:disabled {
   background: var(--surface-hover);
 }
 
+/* #1592: only a Rust-openable quote gets pointer, hover, and focus
+   affordances; loading and terminal quotes stay inert. */
+.reply-quote.is-openable {
+  cursor: pointer;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease;
+}
+
+.reply-quote.is-openable:hover {
+  border-inline-start-color: var(--brand-hover);
+  background: color-mix(in srgb, var(--brand) 6%, var(--surface-raised));
+}
+
+.reply-quote.is-openable:active {
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface-raised));
+}
+
+.reply-quote.is-openable:has(.reply-quote-link:focus-visible) {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
 .reply-quote-sender {
   min-width: 0;
   overflow: hidden;
@@ -4551,6 +4574,21 @@ button:disabled {
   font-weight: 800;
   text-overflow: ellipsis;
   white-space: nowrap;
+}
+
+.reply-quote-link {
+  justify-self: start;
+  max-width: 100%;
+  text-decoration: none;
+}
+
+.reply-quote-link:hover {
+  color: var(--text);
+  text-decoration: underline;
+}
+
+.reply-quote-link:focus-visible {
+  outline: none;
 }
 
 .reply-quote-body {

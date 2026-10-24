@@ -1829,6 +1829,7 @@ export const zhHans: Catalog = {
   "timeline.replyQuoteUnavailable": "原始消息不可用",
   "timeline.replyQuoteUnknownSender": "未知发送者",
   "timeline.replyQuoteUnsupported": "不支持的消息",
+  "timeline.openOriginalMessage": "打开原消息",
   "timeline.replyToMessage": "回复消息",
   "timeline.replyInThread": "在讨论串中回复",
   "timeline.messageActions": "消息操作",

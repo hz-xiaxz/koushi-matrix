@@ -618,6 +618,18 @@ describe("styles.css token system", () => {
     expect(rule).toContain("object-fit: cover");
   });
 
+  test("only an openable reply quote gains pointer, hover, active, and focus states (#1592)", () => {
+    const openable = selectorBlock(".reply-quote.is-openable");
+    expect(openable).toContain("cursor: pointer");
+    expect(selectorBlock(".reply-quote.is-openable:hover")).toContain("background:");
+    expect(selectorBlock(".reply-quote.is-openable:active")).toContain("background:");
+    expect(
+      selectorBlock(".reply-quote.is-openable:has(.reply-quote-link:focus-visible)")
+    ).toContain("outline:");
+    // The sender line is the single link; the preview body is never wrapped.
+    expect(selectorBlock(".reply-quote-link")).toContain("text-decoration: none");
+  });
+
   test("fixed Lucide icon sizes stay centralized in ICON_SIZE", () => {
     expect(uiSharedSource).toContain("const ICON_SIZE");
     // No icon-rendering module may hard-code a numeric `size={N}`; all fixed sizes

@@ -746,6 +746,7 @@ export function TimelinePane({
   onRedactMessage,
   onReply,
   onOpenMatrixTarget,
+  onOpenReplyQuote,
   onOpenSenderProfile,
   onStartDirectMessage,
   onOpenSenderDeviceAdvisory,
@@ -805,6 +806,7 @@ export function TimelinePane({
   onRedactMessage: (roomId: string, eventId: string) => void;
   onReply: TimelineRowActionHandlers["onReply"];
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];
+  onOpenReplyQuote?: TimelineRowActionHandlers["onOpenReplyQuote"];
   onOpenSenderProfile?: TimelineRowActionHandlers["onOpenSenderProfile"];
   onStartDirectMessage?: (userId: string) => void;
   onOpenSenderDeviceAdvisory?: OpenSenderDeviceAdvisory;
@@ -973,6 +975,9 @@ export function TimelinePane({
     // A pane without in-app navigation must leave matrix.to links external,
     // so absence stays absent rather than becoming a click-swallowing no-op.
     onOpenMatrixTarget ?? (() => undefined)
+  );
+  const onOpenReplyQuoteStable = useStableEvent(
+    onOpenReplyQuote ?? (() => undefined)
   );
   const onOpenSenderProfileStable = useStableEvent(
     onOpenSenderProfile ?? (() => undefined)
@@ -1209,6 +1214,9 @@ export function TimelinePane({
               transport={timelineTransport}
               onReply={onReplyStable}
               onOpenMatrixTarget={onOpenMatrixTarget ? onOpenMatrixTargetStable : undefined}
+              onOpenReplyQuote={
+                onOpenReplyQuote ? onOpenReplyQuoteStable : undefined
+              }
               onOpenSenderProfile={
                 onOpenSenderProfile ? onOpenSenderProfileStable : undefined
               }

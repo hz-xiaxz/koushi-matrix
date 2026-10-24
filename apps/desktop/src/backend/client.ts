@@ -1328,6 +1328,10 @@ export class TauriDesktopApi implements DesktopApi {
     return this.invokeCommand<CommandSettlement>("open_notification_event", { roomId, eventId });
   }
 
+  async openReplyQuoteEvent(roomId: string, eventId: string): Promise<CommandSettlement> {
+    return this.invokeCommand<CommandSettlement>("open_reply_quote_event", { roomId, eventId });
+  }
+
   async dismissEventNavigationFailure(): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("dismiss_event_navigation_failure", {});
   }

@@ -518,6 +518,8 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
             sender_label: None,
             body_preview: Some("quoted preview".to_owned()),
             mentioned_user_ids: vec!["@quoted:example.test".to_owned()],
+            permalink: None,
+            can_open: false,
             formatted: Some(ReplyQuoteFormattedBody {
                 html: "<p>quoted <strong>preview</strong></p><pre><code class=\"language-rust\">fn main() {}</code></pre>".to_owned(),
                 plain_text: "quoted previewfn main() {}".to_owned(),
@@ -867,6 +869,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
                 "mentioned_user_ids": [
                     "@quoted:example.test"
                 ],
+                "can_open": false,
                 "formatted": {
                     "html": "<p>quoted <strong>preview</strong></p><pre><code class=\"language-rust\">fn main() {}</code></pre>",
                     "plain_text": "quoted previewfn main() {}",

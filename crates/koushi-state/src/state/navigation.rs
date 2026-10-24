@@ -19,6 +19,10 @@ pub enum EventNavigationSource {
     /// is selected before the event lookup, so the user still ends up in the
     /// right room when the target is gone.
     Notification,
+    /// A reply quote's "open original message" activation. The quote already
+    /// names one exact event, so a missing target fails with the existing
+    /// navigation surface instead of landing at the live edge.
+    ReplyQuote,
 }
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq, Serialize, Deserialize)]

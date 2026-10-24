@@ -780,6 +780,7 @@ fn reply_quote_projection_retains_sanitized_formatted_body() {
 
     let projection = message_projection_from_msgtype(&msgtype, "plain fallback");
     let quote = reply_quote_from_message_projection(
+        "!room:example.invalid",
         "$root:example.invalid",
         Some("@bob:example.invalid".to_owned()),
         Some(projection),
@@ -793,6 +794,43 @@ fn reply_quote_projection_retains_sanitized_formatted_body() {
     assert_eq!(formatted.code_blocks.len(), 1);
     assert_eq!(formatted.code_blocks[0].language.as_deref(), Some("rust"));
     assert_eq!(formatted.code_blocks[0].body, "fn main() {}");
+}
+
+#[test]
+fn reply_quote_carries_the_rust_owned_permalink_and_openability() {
+    let projection = message_projection_from_msgtype(
+        &MessageType::Text(TextMessageEventContent::plain("quoted body")),
+        "quoted body",
+    );
+    let ready = reply_quote_from_message_projection(
+        "!room:example.invalid",
+        "$root:example.invalid",
+        Some("@bob:example.invalid".to_owned()),
+        Some(projection),
+        Vec::new(),
+    );
+
+    assert_eq!(ready.state, ReplyQuoteState::Ready);
+    assert!(ready.can_open);
+    assert_eq!(
+        ready.permalink.as_deref(),
+        Some("https://matrix.to/#/!room%3Aexample.invalid/%24root%3Aexample.invalid")
+    );
+
+    let unsupported = reply_quote_from_message_projection(
+        "!room:example.invalid",
+        "$root:example.invalid",
+        None,
+        None,
+        Vec::new(),
+    );
+
+    assert_eq!(unsupported.state, ReplyQuoteState::Unsupported);
+    assert!(!unsupported.can_open);
+    assert_eq!(
+        unsupported.permalink.as_deref(),
+        Some("https://matrix.to/#/!room%3Aexample.invalid/%24root%3Aexample.invalid")
+    );
 }
 
 #[test]
@@ -823,6 +861,7 @@ fn captionless_media_projections_can_reply_and_keep_filename_reply_quotes() {
         assert!(actions.can_reply, "{filename} should be replyable");
 
         let quote = reply_quote_from_message_projection(
+            "!room:example.invalid",
             "$captionless-media:test",
             None,
             Some(projection),

@@ -208,6 +208,7 @@ impl NavigationObservation {
                     EventNavigationSource::Activity => NavigationCause::ActivityNavigation,
                     EventNavigationSource::Search => NavigationCause::SearchNavigation,
                     EventNavigationSource::Pinned => NavigationCause::PinnedNavigation,
+                    EventNavigationSource::ReplyQuote => NavigationCause::ReplyQuoteNavigation,
                 },
                 true,
                 !ready,

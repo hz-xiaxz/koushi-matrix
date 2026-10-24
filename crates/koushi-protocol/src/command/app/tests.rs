@@ -35,6 +35,10 @@ fn navigate_to_event_is_correlated_and_redacts_identifiers() {
         "\"activity\""
     );
     assert_eq!(
+        serde_json::to_string(&EventNavigationSource::ReplyQuote).unwrap(),
+        "\"replyQuote\""
+    );
+    assert_eq!(
         serde_json::to_string(&EventNavigationMissingTargetPolicy::LiveFallback).unwrap(),
         "\"liveFallback\""
     );

@@ -1956,6 +1956,8 @@ export interface ReplyQuote {
   sender_label?: string | null;
   body_preview: string | null;
   formatted?: ReplyQuoteFormattedBody | null;
+  permalink?: string | null;
+  can_open?: boolean;
   state: ReplyQuoteState;
 }
 

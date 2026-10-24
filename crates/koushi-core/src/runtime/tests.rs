@@ -3608,7 +3608,8 @@ async fn run_app_actor_cross_room_missing_navigation(
                     } if current_source == source
                 ),
                 koushi_state::EventNavigationSource::Pinned
-                | koushi_state::EventNavigationSource::Notification => matches!(
+                | koushi_state::EventNavigationSource::Notification
+                | koushi_state::EventNavigationSource::ReplyQuote => matches!(
                     snapshot.navigation.event_navigation,
                     koushi_state::EventNavigationState::Failed {
                         source: current_source,
@@ -3631,7 +3632,8 @@ async fn run_app_actor_cross_room_missing_navigation(
             IntentOutcome::BenignNoOp(IntentNoOpReason::TimelineTargetMissing)
         }
         koushi_state::EventNavigationSource::Pinned
-        | koushi_state::EventNavigationSource::Notification => {
+        | koushi_state::EventNavigationSource::Notification
+        | koushi_state::EventNavigationSource::ReplyQuote => {
             IntentOutcome::FailedNoOp(IntentNoOpReason::TimelineTargetMissing)
         }
     };
@@ -3694,6 +3696,20 @@ async fn app_actor_cross_room_missing_activity_search_fallback_and_pinned_failur
         pinned.navigation.event_navigation,
         koushi_state::EventNavigationState::Failed {
             source: koushi_state::EventNavigationSource::Pinned,
+            failure_kind: koushi_state::EventNavigationFailureKind::TargetMissing,
+            ..
+        }
+    ));
+
+    let reply_quote = run_app_actor_cross_room_missing_navigation(
+        koushi_state::EventNavigationSource::ReplyQuote,
+        koushi_protocol::command::EventNavigationMissingTargetPolicy::Fail,
+    )
+    .await;
+    assert!(matches!(
+        reply_quote.navigation.event_navigation,
+        koushi_state::EventNavigationState::Failed {
+            source: koushi_state::EventNavigationSource::ReplyQuote,
             failure_kind: koushi_state::EventNavigationFailureKind::TargetMissing,
             ..
         }
@@ -4438,7 +4454,8 @@ async fn run_event_navigation_latest_source_case(
                     } if current_source == second_source
                 ),
                 koushi_state::EventNavigationSource::Pinned
-                | koushi_state::EventNavigationSource::Notification => matches!(
+                | koushi_state::EventNavigationSource::Notification
+                | koushi_state::EventNavigationSource::ReplyQuote => matches!(
                     snapshot.navigation.event_navigation,
                     koushi_state::EventNavigationState::Failed {
                         source: current_source,
@@ -4464,7 +4481,8 @@ async fn run_event_navigation_latest_source_case(
             IntentOutcome::BenignNoOp(IntentNoOpReason::TimelineTargetMissing)
         }
         koushi_state::EventNavigationSource::Pinned
-        | koushi_state::EventNavigationSource::Notification => {
+        | koushi_state::EventNavigationSource::Notification
+        | koushi_state::EventNavigationSource::ReplyQuote => {
             IntentOutcome::FailedNoOp(IntentNoOpReason::TimelineTargetMissing)
         }
     };

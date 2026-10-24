@@ -69,6 +69,7 @@ describe("DesktopApi command contract", () => {
         "stopHistoryExport",
         "retryHistoryExport",
         "openNotificationEvent",
+        "openReplyQuoteEvent",
         "loadAccountNotifications",
         "loadContactSecurity",
         "closeContactSecurity",
