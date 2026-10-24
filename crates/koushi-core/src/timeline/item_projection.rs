@@ -2077,7 +2077,9 @@ pub(super) fn sdk_item_to_timeline_item_with_send_states(
             let in_reply_to_event_id = in_reply_to
                 .as_ref()
                 .map(|details| details.event_id.to_string());
-            let reply_quote = in_reply_to.as_ref().map(reply_quote_from_details);
+            let reply_quote = in_reply_to
+                .as_ref()
+                .map(|details| reply_quote_from_details(key.room_id(), details));
             let thread_root = event_item
                 .content()
                 .thread_root()
@@ -2346,9 +2348,20 @@ pub(super) fn link_ranges_for_message_projection(
     }
 }
 
-fn reply_quote_from_details(details: &InReplyToDetails) -> ReplyQuote {
+fn reply_quote_openability(
+    room_id: &str,
+    event_id: &str,
+    state: ReplyQuoteState,
+) -> (Option<String>, bool) {
+    let permalink = crate::event_projection::matrix_to_event_permalink(room_id, event_id);
+    let can_open =
+        permalink.is_some() && matches!(state, ReplyQuoteState::Ready | ReplyQuoteState::Redacted);
+    (permalink, can_open)
+}
+
+fn reply_quote_from_details(room_id: &str, details: &InReplyToDetails) -> ReplyQuote {
     match &details.event {
-        TimelineDetails::Ready(event) => reply_quote_from_embedded_event(details, event),
+        TimelineDetails::Ready(event) => reply_quote_from_embedded_event(room_id, details, event),
         // SDK details are an input, not the authority: the owning actor's
         // reply quote hydration settles unresolved originals (#1120).
         TimelineDetails::Unavailable | TimelineDetails::Pending | TimelineDetails::Error(_) => {
@@ -2364,11 +2377,14 @@ fn reply_quote_from_details(details: &InReplyToDetails) -> ReplyQuote {
 /// `TimelineItem`. Returns `None` while the original cannot be rendered yet
 /// (undecryptable), so the caller keeps the quote unresolved.
 pub(super) fn reply_quote_from_timeline_item(
+    room_id: &str,
     event_id: &str,
     item: &TimelineItem,
 ) -> Option<ReplyQuote> {
     let sender = item.sender.clone();
     if item.is_redacted {
+        let (permalink, can_open) =
+            reply_quote_openability(room_id, event_id, ReplyQuoteState::Redacted);
         return Some(ReplyQuote {
             event_id: event_id.to_owned(),
             sender,
@@ -2376,6 +2392,8 @@ pub(super) fn reply_quote_from_timeline_item(
             body_preview: None,
             formatted: None,
             mentioned_user_ids: Vec::new(),
+            permalink,
+            can_open,
             state: ReplyQuoteState::Redacted,
         });
     }
@@ -2401,6 +2419,7 @@ pub(super) fn reply_quote_from_timeline_item(
     } else {
         ReplyQuoteState::Unsupported
     };
+    let (permalink, can_open) = reply_quote_openability(room_id, event_id, state);
     Some(ReplyQuote {
         event_id: event_id.to_owned(),
         sender,
@@ -2408,23 +2427,31 @@ pub(super) fn reply_quote_from_timeline_item(
         body_preview,
         formatted,
         mentioned_user_ids: item.mentioned_user_ids.clone(),
+        permalink,
+        can_open,
         state,
     })
 }
 
 fn reply_quote_from_embedded_event(
+    room_id: &str,
     details: &InReplyToDetails,
     event: &EmbeddedEvent,
 ) -> ReplyQuote {
     let sender = Some(event.sender.to_string());
     if event.content.is_redacted() {
+        let event_id = details.event_id.as_str();
+        let (permalink, can_open) =
+            reply_quote_openability(room_id, event_id, ReplyQuoteState::Redacted);
         return ReplyQuote {
-            event_id: details.event_id.to_string(),
+            event_id: event_id.to_owned(),
             sender,
             sender_label: None,
             body_preview: None,
             formatted: None,
             mentioned_user_ids: Vec::new(),
+            permalink,
+            can_open,
             state: ReplyQuoteState::Redacted,
         };
     }
@@ -2448,6 +2475,7 @@ fn reply_quote_from_embedded_event(
         })
         .unwrap_or_default();
     reply_quote_from_message_projection(
+        room_id,
         details.event_id.as_ref(),
         sender,
         projection,
@@ -2456,6 +2484,7 @@ fn reply_quote_from_embedded_event(
 }
 
 fn reply_quote_from_message_projection(
+    room_id: &str,
     event_id: &str,
     sender: Option<String>,
     projection: Option<MessageProjection>,
@@ -2474,6 +2503,7 @@ fn reply_quote_from_message_projection(
         ReplyQuoteState::Unsupported
     };
 
+    let (permalink, can_open) = reply_quote_openability(room_id, event_id, state);
     ReplyQuote {
         event_id: event_id.to_owned(),
         sender,
@@ -2481,6 +2511,8 @@ fn reply_quote_from_message_projection(
         body_preview,
         formatted,
         mentioned_user_ids,
+        permalink,
+        can_open,
         state,
     }
 }

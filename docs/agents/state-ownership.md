@@ -803,7 +803,12 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   `ReplyQuoteState` and optional preview only; it must not look up reply bodies,
   classify redactions, retry lookups, or patch quote state after a send.
   `Loading` and `Failed` are rendered as their catalog text, never as an
-  unknown sender or a missing original.
+  unknown sender or a missing original. The quote's `permalink` and `can_open`
+  are Rust-owned: React renders the provided `href` and dispatches
+  `openReplyQuoteEvent`, and must not build `matrix.to` links or infer
+  openability from the quote state. The activation navigates through the
+  `ReplyQuote` event-navigation source, so missing targets settle through the
+  existing Rust failure surface.
 - `TimelineItem.actions` is a Rust-owned action-affordance projection. React may
   render/copy only the DTO-provided body/permalink affordances; it must not build
   `matrix.to` permalinks, infer copy/forward/source eligibility from event ids,

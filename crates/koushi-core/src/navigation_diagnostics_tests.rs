@@ -404,6 +404,10 @@ fn event_admission_preserves_bounded_source_categories() {
             EventNavigationSource::Pinned,
             NavigationCause::PinnedNavigation,
         ),
+        (
+            EventNavigationSource::ReplyQuote,
+            NavigationCause::ReplyQuoteNavigation,
+        ),
     ] {
         koushi_diagnostics::reset_navigation();
         let mut state = state();

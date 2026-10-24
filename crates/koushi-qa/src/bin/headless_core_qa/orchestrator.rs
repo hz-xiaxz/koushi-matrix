@@ -59,6 +59,55 @@ use super::{
     SyncCommand, TimelineBottomArrival, TimelineCommand, TimelineKey, TimelineKind,
     TimelineUnreadPosition, TimelineViewportObservation,
 };
+use koushi_protocol::CoreEvent;
+use koushi_protocol::command::EventNavigationMissingTargetPolicy;
+use koushi_state::{EventNavigationSource, EventNavigationState, FocusedContextState};
+
+/// #1592: a reply quote opens the original through the focused-context
+/// navigation path, not by scrolling React state. Wait for Rust to anchor the
+/// reply-quote source and open the exact room/event.
+async fn wait_for_reply_quote_jump(
+    conn: &mut CoreConnection,
+    room_id: &str,
+    event_id: &str,
+    label: &str,
+) -> Result<(), String> {
+    let matches = |state: &AppState| {
+        matches!(
+            &state.navigation.event_navigation,
+            EventNavigationState::Anchored {
+                source: EventNavigationSource::ReplyQuote,
+                ..
+            }
+        ) && matches!(
+            &state.focused_context,
+            FocusedContextState::Open {
+                room_id: focused_room_id,
+                event_id: focused_event_id,
+                ..
+            } if focused_room_id == room_id && focused_event_id == event_id
+        )
+    };
+    if matches(&conn.snapshot()) {
+        return Ok(());
+    }
+    tokio::time::timeout(EVENT_TIMEOUT, async {
+        loop {
+            match conn.recv_event().await {
+                Ok(CoreEvent::OperationFailed { failure, .. }) => {
+                    return Err(format!("{label}: navigation failed: {failure:?}"));
+                }
+                Ok(_) => {}
+                Err(error) => return Err(format!("{label}: event stream failed: {error:?}")),
+            }
+            if matches(&conn.snapshot()) {
+                return Ok(());
+            }
+        }
+    })
+    .await
+    .map_err(|_| format!("{label}: timed out waiting for the reply quote jump"))?
+}
 
 async fn wait_for_redact_edit_snapshot(
     conn: &mut CoreConnection,
@@ -864,7 +913,39 @@ pub(super) async fn run_async(config: QaConfig, scenario: QaScenario) -> Result<
         {
             return Err("reply_quote failed: quote was not ready".to_owned());
         }
+        if !reply_quote.can_open
+            || !reply_quote
+                .permalink
+                .as_deref()
+                .is_some_and(|permalink| permalink.starts_with("https://matrix.to/#/"))
+        {
+            return Err("reply_quote failed: quote is not Rust-openable".to_owned());
+        }
         println!("reply_quote=ok");
+
+        // #1592: activating the quote opens the original through Rust-owned
+        // focused-context navigation, not a React scroll.
+        let jump_id = conn_a.next_request_id();
+        conn_a
+            .command(CoreCommand::App(AppCommand::NavigateToEvent {
+                request_id: jump_id,
+                room_id: room_id.clone(),
+                event_id: event1_id.clone(),
+                source: EventNavigationSource::ReplyQuote,
+                missing_target_policy: EventNavigationMissingTargetPolicy::Fail,
+            }))
+            .await
+            .map_err(|e| format!("submit reply quote jump: {e}"))?;
+        wait_for_reply_quote_jump(&mut conn_a, &room_id, &event1_id, "reply quote jump").await?;
+        println!("reply_quote_jump=ok");
+
+        let close_focused_id = conn_a.next_request_id();
+        conn_a
+            .command(CoreCommand::App(AppCommand::CloseFocusedContext {
+                request_id: close_focused_id,
+            }))
+            .await
+            .map_err(|e| format!("close reply quote jump: {e}"))?;
 
         let pin_id = conn_a.next_request_id();
         conn_a

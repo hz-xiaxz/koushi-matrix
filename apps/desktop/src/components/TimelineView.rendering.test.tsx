@@ -382,6 +382,175 @@ describe("TimelineView", () => {
     expect(quote?.textContent).not.toContain("fallback preview");
   });
 
+  it("turns an openable reply quote into one Rust-linked control without nested anchors", () => {
+    const openQuote = vi.fn();
+    const permalink =
+      "https://matrix.to/#/!room%3Aexample.invalid/%24openable-root%3Aexample.invalid";
+    const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: KEY,
+        generation: 1,
+        items: [
+          {
+            ...message("$openable-reply", "Reply with an openable quote"),
+            in_reply_to_event_id: "$openable-root:example.invalid",
+            reply_quote: {
+              event_id: "$openable-root:example.invalid",
+              sender: "@alice:example.invalid",
+              sender_label: "Alice",
+              body_preview: "Original quoted body",
+              permalink,
+              can_open: true,
+              state: "ready"
+            }
+          }
+        ]
+      }
+    });
+
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={baseTransport({})}
+          onReply={vi.fn()}
+          onOpenThread={vi.fn()}
+          onOpenReplyQuote={openQuote}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    const row = screen.getByText("Reply with an openable quote").closest("article");
+    const quote = row!.querySelector<HTMLElement>(".reply-quote")!;
+    expect(quote.classList.contains("is-openable")).toBe(true);
+    const link = within(quote).getByRole("link", { name: "Open original message" });
+    expect(link.getAttribute("href")).toBe(permalink);
+
+    fireEvent.keyDown(link, { key: "Enter" });
+    fireEvent.keyDown(link, { key: " " });
+    fireEvent.click(link);
+    fireEvent.click(within(quote).getByText("Original quoted body"));
+
+    expect(openQuote).toHaveBeenCalledTimes(4);
+    for (const call of openQuote.mock.calls) {
+      expect(call).toEqual([
+        "!room:example.invalid",
+        "$openable-root:example.invalid"
+      ]);
+    }
+    expect(quote.querySelectorAll("a a")).toHaveLength(0);
+  });
+
+  it("keeps a link inside an openable reply quote on its own target", () => {
+    const openQuote = vi.fn();
+    const openTarget = vi.fn();
+    const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+      InitialItems: {
+        request_id: null,
+        key: KEY,
+        generation: 1,
+        items: [
+          {
+            ...message("$inner-link-reply", "Reply with an inner link quote"),
+            in_reply_to_event_id: "$inner-link-root:example.invalid",
+            reply_quote: {
+              event_id: "$inner-link-root:example.invalid",
+              sender: "@alice:example.invalid",
+              sender_label: "Alice",
+              body_preview: "Original with a link",
+              permalink:
+                "https://matrix.to/#/!room%3Aexample.invalid/%24inner-link-root%3Aexample.invalid",
+              can_open: true,
+              formatted: {
+                html: '<p>Original <a href="https://matrix.to/#/%40bob%3Aexample.invalid">@Bob</a></p>',
+                plain_text: "Original @Bob",
+                code_blocks: []
+              },
+              state: "ready"
+            }
+          }
+        ]
+      }
+    });
+
+    render(
+      <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+        <TimelineView
+          timelineKey={KEY}
+          roomId="!room:example.invalid"
+          transport={baseTransport({})}
+          onReply={vi.fn()}
+          onOpenThread={vi.fn()}
+          onOpenMatrixTarget={openTarget}
+          onOpenReplyQuote={openQuote}
+        />
+      </TimelineStoreContext.Provider>
+    );
+
+    const row = screen.getByText("Reply with an inner link quote").closest("article");
+    const quote = row!.querySelector<HTMLElement>(".reply-quote")!;
+    fireEvent.click(within(quote).getByRole("link", { name: "@Bob" }));
+
+    expect(openQuote).not.toHaveBeenCalled();
+    expect(openTarget).toHaveBeenCalledWith({
+      kind: "user",
+      userId: "@bob:example.invalid"
+    });
+  });
+
+  it.each(["loading", "missing", "unsupported", "failed"] as const)(
+    "keeps a %s reply quote inert without link affordances",
+    (state) => {
+      const openQuote = vi.fn();
+      const store: TimelineStoreState = applyTimelineEvent(createTimelineStore(), {
+        InitialItems: {
+          request_id: null,
+          key: KEY,
+          generation: 1,
+          items: [
+            {
+              ...message(`$inert-${state}-reply`, "Reply with an inert quote"),
+              in_reply_to_event_id: "$inert-root:example.invalid",
+              reply_quote: {
+                event_id: "$inert-root:example.invalid",
+                sender: "@alice:example.invalid",
+                sender_label: "Alice",
+                body_preview: null,
+                permalink:
+                  "https://matrix.to/#/!room%3Aexample.invalid/%24inert-root%3Aexample.invalid",
+                can_open: false,
+                state
+              }
+            }
+          ]
+        }
+      });
+
+      render(
+        <TimelineStoreContext.Provider value={{ store, setStore: vi.fn() }}>
+          <TimelineView
+            timelineKey={KEY}
+            roomId="!room:example.invalid"
+            transport={baseTransport({})}
+            onReply={vi.fn()}
+            onOpenThread={vi.fn()}
+            onOpenReplyQuote={openQuote}
+          />
+        </TimelineStoreContext.Provider>
+      );
+
+      const row = screen.getByText("Reply with an inert quote").closest("article");
+      const quote = row!.querySelector<HTMLElement>(".reply-quote")!;
+      expect(quote.classList.contains("is-openable")).toBe(false);
+      expect(quote.querySelector(".reply-quote-link")).toBeNull();
+      expect(quote.querySelector("[tabindex]")).toBeNull();
+      fireEvent.click(quote);
+      expect(openQuote).not.toHaveBeenCalled();
+    }
+  );
+
   it("ensures the timeline subscription after registering the CoreEvent listener", async () => {
     const calls: string[] = [];
     let listener: ((payload: CoreEventPayload) => void) | null = null;

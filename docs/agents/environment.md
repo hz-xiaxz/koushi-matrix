@@ -220,6 +220,25 @@ can refill the removed directories without recompiling.
 Do not use that cleanup for source files, `Cargo.lock`, `node_modules`, QA
 artifacts, or uncommitted work. Rebuild the needed target after cleanup.
 
+## kache miss diagnostics
+
+When investigating a Rust build cache miss, set `KACHE_EXPLAIN_MISS=1` on the
+build invocation. It records dependency-artifact and native-link input digests
+that `kache why-miss` needs to name the originating dependency; without it the
+report says `dependency_recording_missing: true`.
+
+```bash
+KACHE_EXPLAIN_MISS=1 cargo build
+KACHE_EXPLAIN_MISS=1 cargo test -p koushi-state --test navigation_state
+kache why-miss koushi-core
+```
+
+The setting is scoped to that invocation. Do not change global Cargo or kache
+configuration, build profiles, or cache contents to diagnose a miss. Routine
+builds do not need the variable; enable it when the source, compiler, and
+argument digests are unchanged but a miss still occurs, or when a `why-miss`
+report asks for dependency recording.
+
 ## Reusing a debug build
 
 Build the debug app once, then reuse it with `--skip-build` (optionally

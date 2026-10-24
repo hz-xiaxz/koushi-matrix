@@ -1221,11 +1221,21 @@ missing result, or a settled focused projection without the target, permits the
 Activity/Search live fallback; transport, timeout, storage, and other SDK
 errors remain failures. AppActor owns the focused-context deadline and publishes
 `Failed` for a current timeout. A newer outer operation supersedes the prior
-owner across room, thread, date-jump, return-live, Activity, Search, and Pinned
-navigation; displaced work settles benignly and cannot mutate presentation,
-ownership, or the waiter. Rust publishes every terminal or clear state before
-releasing its public waiter. The operation is transient and is not persisted
-with navigation preferences.
+owner across room, thread, date-jump, return-live, Activity, Search, Pinned, and
+reply-quote navigation; displaced work settles benignly and cannot mutate
+presentation, ownership, or the waiter. Rust publishes every terminal or clear
+state before releasing its public waiter. The operation is transient and is not
+persisted with navigation preferences.
+
+A reply quote's open-original activation is the same outer operation with source
+`ReplyQuote`. Rust projects the quote's canonical `matrix.to` permalink and a
+`can_open` flag from its state; only `Ready` and `Redacted` quotes activate, while
+`Loading`, `Missing`, `Unsupported`, and `Failed` quotes stay inert. The source
+uses the failing missing-target policy: a deleted or forbidden original settles
+`Failed` and uses the existing navigation-failure surface instead of landing at
+the live edge. Presentation opens the focused context at the event, where the
+row applies the transient target emphasis, rather than scrolling the main room
+timeline; React never builds the permalink or decides openability.
 
 ```mermaid
 stateDiagram-v2

@@ -701,6 +701,30 @@ fn reply_quote_dto_can_represent_absent_non_reply_quote() {
 }
 
 #[test]
+fn reply_quote_debug_redacts_event_body_and_permalink() {
+    let quote = ReplyQuote {
+        event_id: "$root:example.invalid".to_owned(),
+        sender: Some("@ada:example.invalid".to_owned()),
+        sender_label: Some("Ada".to_owned()),
+        body_preview: Some("quoted body".to_owned()),
+        mentioned_user_ids: vec!["@bob:example.invalid".to_owned()],
+        permalink: Some(
+            "https://matrix.to/#/!room:example.invalid/$root:example.invalid".to_owned(),
+        ),
+        can_open: true,
+        formatted: None,
+        state: ReplyQuoteState::Ready,
+    };
+
+    let debug = format!("{quote:?}");
+    assert!(debug.contains("Permalink(..)"), "{debug}");
+    assert!(debug.contains("can_open: true"), "{debug}");
+    assert!(!debug.contains("$root:example.invalid"), "{debug}");
+    assert!(!debug.contains("quoted body"), "{debug}");
+    assert!(!debug.contains("https://matrix.to"), "{debug}");
+}
+
+#[test]
 fn reply_quote_state_wire_names_cover_hydration_lifecycle() {
     for (state, wire) in [
         (ReplyQuoteState::Loading, "loading"),

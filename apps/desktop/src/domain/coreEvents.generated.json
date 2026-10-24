@@ -2066,6 +2066,7 @@
             "reactions": [],
             "reply_quote": {
               "body_preview": "quoted preview",
+              "can_open": false,
               "event_id": "$root1",
               "formatted": {
                 "code_blocks": [

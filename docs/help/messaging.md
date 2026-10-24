@@ -70,6 +70,11 @@ Select a message's reply count to open its existing thread. A red number shows
 unread replies; select it to open the thread. Koushi's thread composer sends
 replies in that thread; it does not offer nested threads.
 
+Select the sender line at the top of a reply preview to open the original
+message. Koushi shows it in a focused context and briefly highlights it. Links
+inside the preview still open their own targets. If the original is unavailable,
+Koushi explains that instead of jumping elsewhere.
+
 ## Edit or remove a message
 
 Open the message's context menu. For an editable message you sent, choose

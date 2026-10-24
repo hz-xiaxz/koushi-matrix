@@ -140,7 +140,7 @@ fn event_navigation_is_transient_when_navigation_is_persisted() {
 }
 
 #[test]
-fn activity_and_search_missing_targets_fall_back_but_pinned_fails() {
+fn activity_and_search_missing_targets_fall_back_but_exact_targets_fail() {
     for source in [
         EventNavigationSource::Activity,
         EventNavigationSource::Search,
@@ -157,28 +157,29 @@ fn activity_and_search_missing_targets_fall_back_but_pinned_fails() {
         ));
     }
 
-    let mut state = ready_navigation_state();
-    reduce(
-        &mut state,
-        AppAction::EventNavigationStarted {
-            source: EventNavigationSource::Pinned,
-        },
-    );
-    reduce(
-        &mut state,
-        AppAction::EventNavigationFailed {
-            generation: 1,
-            kind: EventNavigationFailureKind::TargetMissing,
-        },
-    );
-    assert!(matches!(
-        &state.navigation.event_navigation,
-        EventNavigationState::Failed {
-            source: EventNavigationSource::Pinned,
-            failure_kind: EventNavigationFailureKind::TargetMissing,
-            ..
-        }
-    ));
+    for source in [
+        EventNavigationSource::Pinned,
+        EventNavigationSource::Notification,
+        EventNavigationSource::ReplyQuote,
+    ] {
+        let mut state = ready_navigation_state();
+        reduce(&mut state, AppAction::EventNavigationStarted { source });
+        reduce(
+            &mut state,
+            AppAction::EventNavigationFailed {
+                generation: 1,
+                kind: EventNavigationFailureKind::TargetMissing,
+            },
+        );
+        assert!(matches!(
+            &state.navigation.event_navigation,
+            EventNavigationState::Failed {
+                source: actual,
+                failure_kind: EventNavigationFailureKind::TargetMissing,
+                ..
+            } if *actual == source
+        ));
+    }
 }
 
 #[test]

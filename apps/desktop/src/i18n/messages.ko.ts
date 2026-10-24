@@ -1829,6 +1829,7 @@ export const ko: Catalog = {
   "timeline.replyQuoteUnavailable": "원본 메시지를 사용할 수 없음",
   "timeline.replyQuoteUnknownSender": "알 수 없는 보낸 사람",
   "timeline.replyQuoteUnsupported": "지원되지 않는 메시지",
+  "timeline.openOriginalMessage": "원본 메시지 열기",
   "timeline.replyToMessage": "메시지에 답장",
   "timeline.replyInThread": "스레드에서 답장",
   "timeline.messageActions": "메시지 작업",

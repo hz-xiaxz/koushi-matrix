@@ -1819,6 +1819,7 @@ export type MessageId =
   | "timeline.replyQuoteUnavailable"
   | "timeline.replyQuoteUnknownSender"
   | "timeline.replyQuoteUnsupported"
+  | "timeline.openOriginalMessage"
   | "timeline.replyToMessage"
   | "timeline.replyInThread"
   | "timeline.messageActions"
@@ -4247,6 +4248,7 @@ const en: Catalog = {
   "timeline.replyQuoteUnavailable": "Original message unavailable",
   "timeline.replyQuoteUnknownSender": "Unknown sender",
   "timeline.replyQuoteUnsupported": "Unsupported message",
+  "timeline.openOriginalMessage": "Open original message",
   "timeline.replyToMessage": "Reply to message",
   "timeline.replyInThread": "Reply in thread",
   "timeline.messageActions": "Message actions",
@@ -6558,6 +6560,7 @@ const ja: Catalog = {
   "timeline.replyQuoteUnavailable": "元のメッセージを利用できません",
   "timeline.replyQuoteUnknownSender": "不明な送信者",
   "timeline.replyQuoteUnsupported": "未対応のメッセージ",
+  "timeline.openOriginalMessage": "元のメッセージを開く",
   "timeline.replyToMessage": "メッセージに返信",
   "timeline.replyInThread": "スレッドで返信",
   "timeline.messageActions": "メッセージ操作",

@@ -1822,6 +1822,7 @@ pub fn run() {
             commands::navigation::dismiss_unverified_own_sessions_alert,
             commands::navigation::open_pinned_event,
             commands::navigation::open_notification_event,
+            commands::navigation::open_reply_quote_event,
             commands::navigation::select_search_result,
             commands::navigation::close_focused_context,
             commands::navigation::open_timeline_at_timestamp,

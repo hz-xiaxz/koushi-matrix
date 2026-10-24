@@ -135,7 +135,7 @@ enum EntryState {
     Queued {
         attempts: Attempts,
     },
-    Settled(ReplyQuote),
+    Settled(Box<ReplyQuote>),
 }
 
 #[derive(Debug, Default)]
@@ -146,13 +146,26 @@ pub(super) struct ReplyQuoteHydration {
     next_token: HydrationToken,
     /// An original that is never evicted (a Thread actor's root).
     retained: Option<String>,
+    /// The actor's room, used to project a settled quote's canonical link.
+    room_id: String,
 }
 
 impl ReplyQuoteHydration {
+    /// Bind the ledger to the room whose items it projects. Called once when
+    /// the owning actor starts; tests that construct the ledger directly keep
+    /// the empty default.
+    pub(super) fn set_room_id(&mut self, room_id: &str) {
+        self.room_id = room_id.to_owned();
+    }
+
+    fn room_id(&self) -> &str {
+        &self.room_id
+    }
+
     /// The settled quote for `original_event_id`, if the ledger has one.
     pub(super) fn settled_quote(&self, original_event_id: &str) -> Option<&ReplyQuote> {
         match self.entries.get(original_event_id)? {
-            EntryState::Settled(quote) => Some(quote),
+            EntryState::Settled(quote) => Some(quote.as_ref()),
             _ => None,
         }
     }
@@ -182,10 +195,10 @@ impl ReplyQuoteHydration {
         let event_id = quote.event_id.clone();
         match self.entries.get_mut(&event_id) {
             Some(EntryState::Settled(existing)) => {
-                if *existing == quote {
+                if **existing == quote {
                     return LearnOutcome::default();
                 }
-                *existing = quote;
+                **existing = quote;
                 LearnOutcome {
                     updated: true,
                     superseded_task: false,
@@ -196,7 +209,7 @@ impl ReplyQuoteHydration {
                     state,
                     EntryState::InFlight { .. } | EntryState::RetryWait { .. }
                 );
-                *state = EntryState::Settled(quote);
+                *state = EntryState::Settled(Box::new(quote));
                 LearnOutcome {
                     updated: false,
                     superseded_task,
@@ -205,7 +218,8 @@ impl ReplyQuoteHydration {
             None => {
                 if self.make_room() {
                     self.order.push_back(event_id.clone());
-                    self.entries.insert(event_id, EntryState::Settled(quote));
+                    self.entries
+                        .insert(event_id, EntryState::Settled(Box::new(quote)));
                 }
                 LearnOutcome::default()
             }
@@ -255,7 +269,7 @@ impl ReplyQuoteHydration {
         let mut retry_kind = RetryKind::Transient;
         let settled = match outcome {
             OriginalLookupOutcome::Loaded(item) => {
-                match reply_quote_from_timeline_item(event_id, &item) {
+                match reply_quote_from_timeline_item(self.room_id(), event_id, &item) {
                     Some(quote) => Some(quote),
                     None => {
                         attempts.undecryptable += 1;
@@ -287,7 +301,7 @@ impl ReplyQuoteHydration {
         match settled {
             Some(quote) => {
                 self.entries
-                    .insert(event_id.to_owned(), EntryState::Settled(quote));
+                    .insert(event_id.to_owned(), EntryState::Settled(Box::new(quote)));
             }
             None => {
                 let delay = retry_delay(retry_kind, attempts);
@@ -419,6 +433,8 @@ pub(super) fn placeholder_quote(event_id: &str, state: ReplyQuoteState) -> Reply
         body_preview: None,
         formatted: None,
         mentioned_user_ids: Vec::new(),
+        permalink: None,
+        can_open: false,
         state,
     }
 }
@@ -513,7 +529,7 @@ pub(super) fn learn_projected_originals<'a>(
         if !hydration.tracks(event_id) {
             continue;
         }
-        if let Some(quote) = reply_quote_from_timeline_item(event_id, item) {
+        if let Some(quote) = reply_quote_from_timeline_item(hydration.room_id(), event_id, item) {
             let outcome = hydration.learn(quote);
             record_learn(refreshes, event_id.to_owned(), outcome);
         }
@@ -534,6 +550,7 @@ fn timeline_diff_items_mut(diffs: &mut [TimelineDiff]) -> impl Iterator<Item = &
 /// Project the originals for `targets` found in `batch` (preferred) or in
 /// `canonical`, in a single pass per source.
 fn known_originals(
+    room_id: &str,
     targets: &[String],
     batch: &[&TimelineItem],
     canonical: &[TimelineItem],
@@ -551,7 +568,7 @@ fn known_originals(
         if !wanted.contains(event_id) || !seen.insert(event_id.to_owned()) {
             continue;
         }
-        if let Some(quote) = reply_quote_from_timeline_item(event_id, item) {
+        if let Some(quote) = reply_quote_from_timeline_item(room_id, event_id, item) {
             originals.insert(event_id.to_owned(), quote);
         }
     }
@@ -663,7 +680,12 @@ impl TimelineActor {
             for item in timeline_diff_items_mut(diffs) {
                 items.push(&*item);
             }
-            known_originals(&targets, &items, &self.navigation_items)
+            known_originals(
+                self.reply_quote_hydration.room_id(),
+                &targets,
+                &items,
+                &self.navigation_items,
+            )
         };
         for (target, quote) in &originals {
             let outcome = self.reply_quote_hydration.learn(quote.clone());
@@ -701,7 +723,12 @@ impl TimelineActor {
         if targets.is_empty() {
             return;
         }
-        let canonical = known_originals(&targets, &[], &self.navigation_items);
+        let canonical = known_originals(
+            self.reply_quote_hydration.room_id(),
+            &targets,
+            &[],
+            &self.navigation_items,
+        );
         let originals = merge_originals_for(&targets, batch_originals, canonical);
         let mut refreshes = ReplyQuoteRefreshes::default();
         learn_derived_originals(&mut self.reply_quote_hydration, &mut refreshes, &originals);
@@ -729,7 +756,12 @@ impl TimelineActor {
             .map(str::to_owned)
             .collect::<Vec<_>>();
         if !targets.is_empty() {
-            let originals = known_originals(&targets, &[], &self.navigation_items);
+            let originals = known_originals(
+                self.reply_quote_hydration.room_id(),
+                &targets,
+                &[],
+                &self.navigation_items,
+            );
             let mut core_diffs = Vec::new();
             for (index, item) in self.navigation_items.iter_mut().enumerate() {
                 if overlay_reply_quotes(
@@ -754,7 +786,12 @@ impl TimelineActor {
                 .into_iter()
                 .map(str::to_owned)
                 .collect::<Vec<_>>();
-            known_originals(&pending_targets, &[], &self.navigation_items)
+            known_originals(
+                self.reply_quote_hydration.room_id(),
+                &pending_targets,
+                &[],
+                &self.navigation_items,
+            )
         };
         let hydration = &self.reply_quote_hydration;
         let context = self.display_projection_context();

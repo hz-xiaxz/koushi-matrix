@@ -248,6 +248,30 @@ pub async fn open_notification_event(
     .await
 }
 
+/// Open the original message a reply quote points at.
+///
+/// The quote already names one exact event, so a miss uses the failing policy
+/// and the runtime's existing navigation-failure surface; the user stays in
+/// the room and the quote remains inert.
+#[tauri::command]
+pub async fn open_reply_quote_event(
+    account_tab_id: Option<String>,
+    room_id: String,
+    event_id: String,
+    app: AppHandle,
+    state: State<'_, CoreRuntimeState>,
+) -> Result<FrontendCommandSettlement, String> {
+    navigate_to_event(
+        room_id,
+        event_id,
+        account_tab_id.as_deref(),
+        koushi_state::EventNavigationSource::ReplyQuote,
+        app,
+        state,
+    )
+    .await
+}
+
 #[tauri::command]
 pub async fn select_search_result(
     account_tab_id: Option<String>,
@@ -391,7 +415,8 @@ fn event_navigation_policy(
             koushi_core::EventNavigationMissingTargetPolicy::LiveFallback
         }
         koushi_state::EventNavigationSource::Pinned
-        | koushi_state::EventNavigationSource::Notification => {
+        | koushi_state::EventNavigationSource::Notification
+        | koushi_state::EventNavigationSource::ReplyQuote => {
             koushi_core::EventNavigationMissingTargetPolicy::Fail
         }
     }

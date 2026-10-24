@@ -362,6 +362,7 @@ export const TimelineView = memo(function TimelineView({
   transport,
   onReply,
   onOpenMatrixTarget,
+  onOpenReplyQuote,
   onOpenSenderProfile,
   onStartDirectMessage,
   senderDeviceAdvisoryUserIds,
@@ -418,6 +419,8 @@ export const TimelineView = memo(function TimelineView({
   transport: TimelineTransport;
   onReply: TimelineRowActionHandlers["onReply"];
   onOpenMatrixTarget?: TimelineRowActionHandlers["onOpenMatrixTarget"];
+  /** #1592: opens the message a reply quote previews. */
+  onOpenReplyQuote?: TimelineRowActionHandlers["onOpenReplyQuote"];
   onOpenSenderProfile?: TimelineRowActionHandlers["onOpenSenderProfile"];
   onStartDirectMessage?: (userId: string) => void;
   /** #1494: `sender_device_advisories.rooms[roomId]`, rendered as-is. */
@@ -3718,9 +3721,12 @@ export const TimelineView = memo(function TimelineView({
                 isPinned={contentEventId ? pinnedEventIds.includes(contentEventId) : false}
                 isContinuation={isContinuation}
                 isTarget={
-                  presentationContext === "thread" &&
-                  initialTargetEventId !== null &&
-                  (contentEventId === initialTargetEventId || activityEventId === initialTargetEventId)
+                  (presentationContext === "thread" &&
+                    initialTargetEventId !== null &&
+                    (contentEventId === initialTargetEventId ||
+                      activityEventId === initialTargetEventId)) ||
+                  (focusedTimelineTargetEventId !== null &&
+                    contentEventId === focusedTimelineTargetEventId)
                 }
                 onRequestRoomKey={onRequestRoomKey}
                 onRequestHistoryKeys={onRequestHistoryKeys}
@@ -3734,6 +3740,7 @@ export const TimelineView = memo(function TimelineView({
                 onSaveMediaFile={transport.saveMediaFile}
                 forwardDestinations={effectiveForwardDestinations}
                 onOpenMatrixTarget={onOpenMatrixTarget}
+                onOpenReplyQuote={onOpenReplyQuote}
                 onOpenSenderProfile={onOpenSenderProfile}
                 onStartDirectMessage={onStartDirectMessage}
                 senderHasUnconfirmedDevices={Boolean(

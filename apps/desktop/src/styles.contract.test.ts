@@ -593,9 +593,7 @@ describe("styles.css token system", () => {
     // #453: hover, :focus-visible and the checked state all shared one brand-fill
     // rule, so pointing at an OFF switch made it look ON and the control read as
     // an insert-LaTeX action instead of a toggle. Keep the two treatments apart.
-    const hoverBlock = selectorBlock(
-      ".composer-math-toggle:hover,\n.composer-math-toggle:focus-visible"
-    );
+    const hoverBlock = selectorBlock(".composer-math-toggle:hover");
     const checkedBlock = selectorBlock('.composer-math-toggle[aria-checked="true"]');
     expect(hoverBlock).toBeTruthy();
     expect(checkedBlock).toBeTruthy();
@@ -616,6 +614,67 @@ describe("styles.css token system", () => {
     expect(rule).toContain("inline-size: 100%");
     expect(rule).toContain("block-size: 100%");
     expect(rule).toContain("object-fit: cover");
+  });
+
+  test("only an openable reply quote gains pointer, hover, active, and focus states (#1592)", () => {
+    const openable = selectorBlock(".reply-quote.is-openable");
+    expect(openable).toContain("cursor: pointer");
+    expect(selectorBlock(".reply-quote.is-openable:hover")).toContain("background:");
+    expect(selectorBlock(".reply-quote.is-openable:active")).toContain("background:");
+    expect(
+      selectorBlock(".reply-quote.is-openable:has(.reply-quote-link:focus-visible)")
+    ).toContain("outline:");
+    // The sender line is the single link; the preview body is never wrapped.
+    expect(selectorBlock(".reply-quote-link")).toContain("text-decoration: none");
+  });
+
+  test("secondary, primary, and toggle controls share one interaction contract (#1599)", () => {
+    // Neutral controls darken their own surface; hover never turns a secondary
+    // button into a brand-filled primary action.
+    const neutralHover = selectorBlock(
+      ".room-share-link-button:hover,\n.room-status-badge-link:hover"
+    );
+    expect(neutralHover).toContain("var(--surface-hover)");
+    expect(neutralHover).not.toContain("var(--brand)");
+    expect(selectorBlock(".message-send-action:hover")).toContain("var(--surface-hover)");
+
+    // A press darkens the same surface one step further; it never jumps to a
+    // different fill than the control's own idle/hover treatment.
+    expect(
+      selectorBlock(".room-share-link-button:active,\n.room-status-badge-link:active")
+    ).toContain("background:");
+    expect(selectorBlock(".message-send-action:active")).toContain("background:");
+    expect(selectorBlock(".settings-toggle-row:active")).toContain("background:");
+    expect(selectorBlock(".access-choice-item:active")).toContain("background:");
+    expect(selectorBlock(".profile-settings-action:active:not(:disabled)")).toContain(
+      "background:"
+    );
+
+    // A primary action is the only neutral-sized control that fills with brand,
+    // and its hover has its own darker brand step.
+    expect(selectorBlock(".profile-settings-action.is-primary")).toContain("var(--brand)");
+    expect(
+      lastSelectorBlock(".profile-settings-action.is-primary:hover:not(:disabled)")
+    ).toContain("var(--brand-hover)");
+
+    // A selected toggle and a selected radio card both use the same weak brand
+    // fill; hover on an unselected control stays neutral.
+    expect(lastSelectorBlock('.settings-toggle-row[aria-checked="true"]')).toContain(
+      "var(--brand-weak)"
+    );
+    expect(lastSelectorBlock(".composer-math-toggle:hover")).not.toContain("var(--brand-weak)");
+    expect(lastSelectorBlock('.composer-math-toggle[aria-checked="true"]')).toContain(
+      "var(--brand-weak)"
+    );
+    expect(lastSelectorBlock('.access-choice-item[data-selected="true"]')).toContain(
+      "var(--brand-weak)"
+    );
+
+    // A static status summary must not paint a button chip around itself.
+    expect(selectorBlock(".room-status-badge")).toContain("background: transparent");
+    expect(selectorBlock(".room-status-badge.room-status-badge-link")).toContain(
+      "var(--surface)"
+    );
   });
 
   test("fixed Lucide icon sizes stay centralized in ICON_SIZE", () => {

@@ -207,6 +207,8 @@ fn timeline_item_serializes_reply_quote_without_debugging_body() {
             sender_label: None,
             body_preview: Some("quoted body".to_owned()),
             mentioned_user_ids: Vec::new(),
+            permalink: Some("https://matrix.to/#/!room:test/$root:test".to_owned()),
+            can_open: true,
             formatted: Some(koushi_state::ReplyQuoteFormattedBody {
                 html: "<p>quoted <strong>body</strong></p>".to_owned(),
                 plain_text: "quoted body".to_owned(),
@@ -248,6 +250,8 @@ fn timeline_item_serializes_reply_quote_without_debugging_body() {
                     "plain_text": "quoted body",
                     "code_blocks": []
             },
+                "permalink": "https://matrix.to/#/!room:test/$root:test",
+                "can_open": true,
                 "state": "ready"
         })
     );
@@ -255,6 +259,8 @@ fn timeline_item_serializes_reply_quote_without_debugging_body() {
     assert!(debug.contains("reply_quote"));
     assert!(!debug.contains("quoted body"), "{debug}");
     assert!(!debug.contains("$root:test"), "{debug}");
+    // TimelineItem's Debug renders the quote state, never its permalink.
+    assert!(!debug.contains("https://matrix.to"), "{debug}");
 }
 #[test]
 fn timeline_item_serializes_formatted_body_without_debugging_content() {

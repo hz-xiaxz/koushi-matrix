@@ -960,6 +960,8 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
                 body_preview: Some("quoted".to_owned()),
                 formatted: None,
                 mentioned_user_ids: Vec::new(),
+                permalink: None,
+                can_open: false,
                 state: koushi_state::ReplyQuoteState::Ready,
             }),
             thread_root: None,

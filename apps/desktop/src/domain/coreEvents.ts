@@ -801,6 +801,10 @@ export interface ReplyQuote {
   // #1328: the quoted message's `m.mentions` facts, so the preview pills the
   // same anchors the quoted row does.
   mentioned_user_ids?: string[];
+  /** Canonical `matrix.to` link Rust projects for the original. */
+  permalink?: string | null;
+  /** Whether the quote's current Rust state may open the original. */
+  can_open?: boolean;
   state: ReplyQuoteState;
 }
 

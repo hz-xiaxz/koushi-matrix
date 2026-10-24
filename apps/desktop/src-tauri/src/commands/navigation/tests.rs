@@ -161,6 +161,14 @@ fn event_navigation_source_selects_the_only_allowed_missing_target_policy() {
         event_navigation_policy(koushi_state::EventNavigationSource::Pinned),
         koushi_core::EventNavigationMissingTargetPolicy::Fail
     );
+    assert_eq!(
+        event_navigation_policy(koushi_state::EventNavigationSource::Notification),
+        koushi_core::EventNavigationMissingTargetPolicy::Fail
+    );
+    assert_eq!(
+        event_navigation_policy(koushi_state::EventNavigationSource::ReplyQuote),
+        koushi_core::EventNavigationMissingTargetPolicy::Fail
+    );
 }
 
 #[test]

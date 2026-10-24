@@ -1829,6 +1829,7 @@ export const zhHant: Catalog = {
   "timeline.replyQuoteUnavailable": "無法取得原始訊息",
   "timeline.replyQuoteUnknownSender": "未知的傳送者",
   "timeline.replyQuoteUnsupported": "不支援的訊息",
+  "timeline.openOriginalMessage": "開啟原訊息",
   "timeline.replyToMessage": "回覆訊息",
   "timeline.replyInThread": "在討論串中回覆",
   "timeline.messageActions": "訊息操作",
