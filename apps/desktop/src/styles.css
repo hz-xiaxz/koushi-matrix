@@ -390,6 +390,20 @@ button:disabled {
   cursor: not-allowed;
 }
 
+/* #1599: one focus ring for the secondary and toggle controls that otherwise
+   style their own idle, hover, and selected states. */
+.room-share-link-button:focus-visible,
+.room-status-badge-link:focus-visible,
+.profile-settings-action:focus-visible,
+.message-send-action:focus-visible,
+.timeline-send-bar-action:focus-visible,
+.settings-toggle-row:focus-visible,
+.composer-math-toggle:focus-visible,
+.room-status-badge[tabindex]:focus-visible {
+  outline: 2px solid var(--brand);
+  outline-offset: 2px;
+}
+
 .sr-only {
   position: absolute;
   width: 1px;
@@ -3853,18 +3867,22 @@ button:disabled {
   border: 1px solid var(--line);
   border-radius: 6px;
   color: var(--text);
-  background: var(--surface-hover);
+  background: var(--surface);
   font-size: 12px;
   font-weight: 800;
   letter-spacing: 0;
 }
 
 .timeline-send-bar-action:hover,
-.timeline-send-bar-action:focus-visible,
-.message-send-action:hover,
-.message-send-action:focus-visible {
-  color: var(--brand-contrast);
-  background: var(--brand);
+.message-send-action:hover {
+  border-color: color-mix(in srgb, var(--text) 28%, var(--line));
+  color: var(--text);
+  background: var(--surface-hover);
+}
+
+.timeline-send-bar-action:active,
+.message-send-action:active {
+  background: color-mix(in srgb, var(--text) 8%, var(--surface-hover));
 }
 
 .timeline-send-bar-action.danger,
@@ -3873,9 +3891,8 @@ button:disabled {
 }
 
 .timeline-send-bar-action.danger:hover,
-.timeline-send-bar-action.danger:focus-visible,
-.message-send-action.danger:hover,
-.message-send-action.danger:focus-visible {
+.message-send-action.danger:hover {
+  border-color: var(--danger);
   color: var(--danger);
   background: var(--surface-hover);
 }
@@ -5688,13 +5705,16 @@ mark {
   line-height: 1;
 }
 
-/* Hover and focus signal "actionable", never "on". Only aria-checked does that,
-   so the current state stays readable while the pointer is on the control. */
-.composer-math-toggle:hover,
-.composer-math-toggle:focus-visible {
+/* Hover signals "actionable", never "on". Only aria-checked does that, so the
+   current state stays readable while the pointer is on the control. */
+.composer-math-toggle:hover {
   color: var(--text);
-  border-color: var(--brand);
+  border-color: color-mix(in srgb, var(--text) 28%, var(--line));
   background: var(--surface-hover);
+}
+
+.composer-math-toggle:active {
+  background: color-mix(in srgb, var(--text) 8%, var(--surface-hover));
 }
 
 .composer-math-toggle[aria-checked="true"] {
@@ -8134,10 +8154,27 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
   cursor: pointer;
 }
 
+/* #1599: a static status summary is not a button; only its editable/link form
+   keeps the chip surface and interaction states. */
+.room-status-badge {
+  border-color: transparent;
+  background: transparent;
+}
+
+.room-status-badge.room-status-badge-link {
+  border-color: var(--line);
+  background: var(--surface);
+}
+
 .room-share-link-button:hover,
-.room-share-link-button:focus-visible {
-  border-color: var(--brand);
-  color: var(--brand);
+.room-status-badge-link:hover {
+  border-color: color-mix(in srgb, var(--text) 28%, var(--line));
+  background: var(--surface-hover);
+}
+
+.room-share-link-button:active,
+.room-status-badge-link:active {
+  background: color-mix(in srgb, var(--text) 8%, var(--surface-hover));
 }
 
 .settings-summary-tile {
@@ -8282,7 +8319,21 @@ dialog.timeline-media-viewer-overlay::backdrop { background: transparent; }
 
 .settings-toggle-row:hover,
 .settings-toggle-row:focus-visible {
+  border-color: color-mix(in srgb, var(--text) 28%, var(--line));
   background: var(--surface-hover);
+}
+
+.settings-toggle-row:active {
+  background: color-mix(in srgb, var(--text) 8%, var(--surface-hover));
+}
+
+.settings-toggle-row[aria-checked="true"] {
+  border-color: var(--brand);
+  background: var(--brand-weak);
+}
+
+.settings-toggle-row[aria-checked="true"]:hover {
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface-hover));
 }
 
 .settings-toggle-copy {
@@ -9161,6 +9212,15 @@ kbd {
   font-weight: 800;
 }
 
+.profile-settings-action:hover:not(:disabled) {
+  border-color: color-mix(in srgb, var(--text) 28%, var(--line));
+  background: var(--surface-hover);
+}
+
+.profile-settings-action:active:not(:disabled) {
+  background: color-mix(in srgb, var(--text) 8%, var(--surface-hover));
+}
+
 .profile-settings-action:disabled,
 .profile-settings-field input:disabled,
 .profile-settings-field textarea:disabled,
@@ -9372,9 +9432,22 @@ kbd {
   cursor: pointer;
 }
 
+.access-choice-item:hover {
+  border-color: color-mix(in srgb, var(--text) 28%, var(--line));
+  background: var(--surface-hover);
+}
+
+.access-choice-item:active {
+  background: color-mix(in srgb, var(--text) 8%, var(--surface-hover));
+}
+
 .access-choice-item[data-selected="true"] {
   border-color: var(--brand);
-  background: color-mix(in srgb, var(--brand) 8%, transparent);
+  background: var(--brand-weak);
+}
+
+.access-choice-item[data-selected="true"]:hover {
+  background: color-mix(in srgb, var(--brand) 12%, var(--surface-hover));
 }
 
 .access-choice-item input {
@@ -9489,11 +9562,6 @@ kbd {
 
 .room-status-badge-link {
   cursor: pointer;
-}
-
-.room-status-badge-link:hover,
-.room-status-badge-link:focus-visible {
-  border-color: var(--brand);
 }
 
 /* #935: Space access. The mode reads as the section's headline fact. */
@@ -10627,6 +10695,17 @@ kbd {
 .settings-assistants-snippet { display: flex; gap: 8px; align-items: flex-start; }
 .settings-assistants-action { display: grid; gap: 6px; justify-items: start; margin-block-end: 10px; }
 .profile-settings-action.is-primary { border-color: var(--brand); color: var(--brand-contrast); background: var(--brand); }
+.profile-settings-action.is-primary:hover:not(:disabled) {
+  border-color: var(--brand-hover);
+  background: var(--brand-hover);
+}
+.profile-settings-action.is-primary:active:not(:disabled) {
+  background: color-mix(in srgb, black 10%, var(--brand-hover));
+}
+.profile-settings-action.is-danger:hover:not(:disabled) {
+  border-color: var(--danger);
+  background: color-mix(in srgb, var(--danger) 10%, var(--surface));
+}
 .settings-assistants-result { margin: 0 0 10px; font-size: 13px; }
 .settings-assistants-result p { margin: 0 0 6px; }
 .settings-assistants-result.is-success { color: var(--success); }
