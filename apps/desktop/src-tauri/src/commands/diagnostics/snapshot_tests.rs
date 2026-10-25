@@ -456,15 +456,32 @@ fn diagnostic_snapshot_distinguishes_retained_events_from_overwritten_reader_pos
                     inline_slot_bytes_lower_bound: 2048,
                 },
             ),
+            (
+                2,
+                koushi_core::runtime::EventQueueDiagnostics {
+                    capacity_events: 8,
+                    retained_events: 0,
+                    receiver_count: 0,
+                    inline_slot_bytes_lower_bound: 2048,
+                },
+            ),
         ],
         &[
             (
                 0,
                 Some(koushi_core::runtime::EventReceiverDiagnostics {
+                    subscribed: true,
                     unread_position_distance_events: 23,
                 }),
             ),
             (1, None),
+            (
+                2,
+                Some(koushi_core::runtime::EventReceiverDiagnostics {
+                    subscribed: false,
+                    unread_position_distance_events: 0,
+                }),
+            ),
         ],
     );
     let exported = snapshot_with_media_memory_summaries(
@@ -503,4 +520,18 @@ fn diagnostic_snapshot_distinguishes_retained_events_from_overwritten_reader_pos
             .contains("cached_command_receiver_status=not_cached_or_busy")
     );
     assert!(!missing.message.contains("cached_command_pending_events=0"));
+    let unsubscribed = rows
+        .iter()
+        .find(|row| row.message.contains("account_index=2"))
+        .unwrap();
+    assert!(
+        unsubscribed
+            .message
+            .contains("cached_command_receiver_status=not_subscribed")
+    );
+    assert!(
+        unsubscribed
+            .message
+            .contains("cached_command_pending_events=0")
+    );
 }

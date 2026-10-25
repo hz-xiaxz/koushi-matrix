@@ -262,7 +262,11 @@ fn record_event_queue_summaries(
             event = event
                 .field(DiagnosticField::token(
                     "cached_command_receiver_status",
-                    "available",
+                    if receiver.subscribed {
+                        "available"
+                    } else {
+                        "not_subscribed"
+                    },
                 ))
                 .field(DiagnosticField::count(
                     "cached_command_unread_position_distance_events",

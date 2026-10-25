@@ -113,7 +113,7 @@ pub(super) fn scripted_connection(
             media_staging: Arc::new(MediaStagingService::new(Arc::new(
                 crate::media_preparation::MediaPreparationService::default(),
             ))),
-            event_rx,
+            event_rx: Some(event_rx),
             snapshot_rx,
             next_sequence: AtomicU64::new(1),
         },
@@ -921,7 +921,7 @@ async fn timeline_sender_label_and_reaction_sender_preview_follow_people_facing_
         media_staging: Arc::new(MediaStagingService::new(Arc::new(
             crate::media_preparation::MediaPreparationService::default(),
         ))),
-        event_rx,
+        event_rx: Some(event_rx),
         snapshot_rx,
         next_sequence: AtomicU64::new(1),
     };

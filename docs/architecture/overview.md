@@ -304,6 +304,15 @@ recovers a lagged consumer from the latest snapshot, and awaits ordered
 shutdown without importing Tauri. Serialized `FrontendDesktopSnapshot` mirrors
 remain adapter-only in `apps/desktop/src-tauri`.
 
+Connections used only for commands and latest-wins watch snapshots attach with
+`CoreRuntime::attach_without_events`; they never create a broadcast receiver.
+Desktop cached command connections and account snapshot watchers use this mode.
+Attempting an event receive on such a connection reports a closed stream and
+never creates a lazy subscription. Event forwarders and event-based operation
+waiters retain eager `attach()` subscriptions, established before submission so
+that early terminal events cannot be missed. An idle command or snapshot owner
+must not retain historical broadcast payloads.
+
 ### Core request outcomes (Phase A, issue #755)
 
 `koushi-core` owns request settlement through the closed, non-serde
@@ -2582,7 +2591,8 @@ invalidates cursors; fresh reads cannot recover evicted history.
 Diagnostic export observes each account's event broadcast without creating a
 receiver or consuming events. It reports retained event count, receiver count,
 capacity and a lower bound for inline event slots. Cached command connections
-report their unread position distance separately, including positions already
+report `not_subscribed`; an absent or busy cached connection remains distinct.
+For subscribed connections, unread position distance includes positions already
 overwritten by the ring. Nested payload heap bytes remain explicitly unavailable;
 inline slots are never presented as the broadcast's total retained heap.
 

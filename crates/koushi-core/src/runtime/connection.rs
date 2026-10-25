@@ -281,7 +281,7 @@ pub struct CoreConnection {
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
     pub(super) native_artifacts: Arc<dyn NativeArtifactPort>,
     pub(super) media_staging: Arc<MediaStagingService>,
-    pub(super) event_rx: broadcast::Receiver<CoreEvent>,
+    pub(super) event_rx: Option<broadcast::Receiver<CoreEvent>>,
     pub(super) snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
     next_sequence: AtomicU64,
 }
@@ -321,6 +321,20 @@ impl CoreRuntime {
     /// Attach a consumer. Returns its connection handle; the handle's
     /// `RuntimeConnectionId` is the only id its commands may carry.
     pub fn attach(&self) -> CoreConnection {
+        self.attach_with_event_receiver(Some(self.event_tx.subscribe()))
+    }
+
+    /// Attach for commands and watch snapshots only. Never subscribes to the
+    /// event broadcast, including when an event receive is attempted. Use
+    /// `attach()` before submitting operations that need event-based settlement.
+    pub fn attach_without_events(&self) -> CoreConnection {
+        self.attach_with_event_receiver(None)
+    }
+
+    fn attach_with_event_receiver(
+        &self,
+        event_rx: Option<broadcast::Receiver<CoreEvent>>,
+    ) -> CoreConnection {
         CoreConnection {
             view_scopes: self.view_scopes.clone(),
             connection_id: RuntimeConnectionId(
@@ -330,7 +344,7 @@ impl CoreRuntime {
             composer_draft_leases: Arc::clone(&self.composer_draft_leases),
             native_artifacts: Arc::clone(&self.native_artifacts),
             media_staging: Arc::clone(&self.media_staging),
-            event_rx: self.event_tx.subscribe(),
+            event_rx,
             snapshot_rx: self.snapshot_rx.clone(),
             next_sequence: AtomicU64::new(1),
         }
@@ -916,7 +930,7 @@ impl CoreConnection {
                 media_staging: Arc::new(MediaStagingService::new(Arc::new(
                     crate::media_preparation::MediaPreparationService::default(),
                 ))),
-                event_rx,
+                event_rx: Some(event_rx),
                 snapshot_rx,
                 next_sequence: AtomicU64::new(1),
             },
@@ -1281,14 +1295,23 @@ impl CoreConnection {
     /// Receive the next event. On lag, intermediate events were dropped for
     /// this consumer; resync from [`Self::snapshot`].
     pub async fn recv_event(&mut self) -> Result<CoreEvent, EventStreamLag> {
-        match self.event_rx.recv().await {
+        match Self::recv_raw_event(&mut self.event_rx).await {
             Ok(event) => Ok(self.project_event_for_consumer(event)),
             Err(broadcast::error::RecvError::Lagged(skipped)) => Err(EventStreamLag { skipped }),
             Err(broadcast::error::RecvError::Closed) => {
-                // Runtime shut down; surface as lag so callers resync and
-                // observe the final snapshot.
+                // No event subscription or runtime shut down; preserve the
+                // closed-stream surface so callers can observe the snapshot.
                 Err(EventStreamLag { skipped: 0 })
             }
+        }
+    }
+
+    pub(super) async fn recv_raw_event(
+        receiver: &mut Option<broadcast::Receiver<CoreEvent>>,
+    ) -> Result<CoreEvent, broadcast::error::RecvError> {
+        match receiver {
+            Some(receiver) => receiver.recv().await,
+            None => Err(broadcast::error::RecvError::Closed),
         }
     }
 
@@ -1486,7 +1509,7 @@ impl CoreConnection {
             }
 
             tokio::select! {
-                event = self.event_rx.recv(), if event_stream_open => match event {
+                event = Self::recv_raw_event(&mut self.event_rx), if event_stream_open => match event {
                     Ok(CoreEvent::OperationFailed {
                         request_id: failed_request_id,
                         ..

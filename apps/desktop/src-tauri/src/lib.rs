@@ -94,6 +94,9 @@ pub(crate) struct ReaderSubscriptionEntry {
 
 type AccountConnections = Arc<TokioMutex<HashMap<AccountTabId, Arc<TokioMutex<CoreConnection>>>>>;
 
+#[cfg(test)]
+mod event_subscription_tests;
+
 #[derive(Clone)]
 pub(crate) struct SelectedCoreConnection {
     runtime: Arc<AccountRuntimeManager>,
@@ -139,7 +142,7 @@ impl SelectedCoreConnection {
             } else {
                 let connection = self
                     .runtime
-                    .tab_connection(id)
+                    .tab_connection_without_events(id)
                     .ok_or_else(|| "account tab does not exist".to_owned())?;
                 let connection = Arc::new(TokioMutex::new(connection));
                 connections.insert(id.clone(), Arc::clone(&connection));
@@ -355,7 +358,7 @@ impl CoreRuntimeState {
 
     pub(crate) async fn restart_account_tab_watchers(&self, app: tauri::AppHandle) {
         self.stop_account_tab_watchers().await;
-        let tabs = self.runtime.tab_connections();
+        let tabs = self.runtime.tab_connections_without_events();
         let known: Vec<_> = tabs.iter().map(|(tab, _)| tab.id.clone()).collect();
         commands::native_attention::notification::clear_notifications_for_missing_tabs(&known)
             .await;
@@ -489,7 +492,7 @@ fn session_info_for_account(
 pub(crate) fn account_tabs_snapshot(runtime: &AccountRuntimeManager) -> AccountTabsSnapshot {
     let selected_tab_id = runtime.selected_tab_id().as_str().to_owned();
     let tab_states = runtime
-        .tab_connections()
+        .tab_connections_without_events()
         .into_iter()
         .map(|(tab, connection)| (tab, connection.snapshot()))
         .collect::<Vec<_>>();

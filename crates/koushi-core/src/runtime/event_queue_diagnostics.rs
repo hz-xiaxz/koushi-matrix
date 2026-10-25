@@ -15,6 +15,7 @@ pub struct EventQueueDiagnostics {
 
 #[derive(Clone, Copy, Debug, Eq, PartialEq)]
 pub struct EventReceiverDiagnostics {
+    pub subscribed: bool,
     /// Sender position minus reader position. May exceed the ring capacity;
     /// those excess positions have already been overwritten, not retained.
     pub unread_position_distance_events: usize,
@@ -35,7 +36,11 @@ impl CoreRuntime {
 impl CoreConnection {
     pub fn event_receiver_diagnostics(&self) -> EventReceiverDiagnostics {
         EventReceiverDiagnostics {
-            unread_position_distance_events: self.event_rx.len(),
+            subscribed: self.event_rx.is_some(),
+            unread_position_distance_events: self
+                .event_rx
+                .as_ref()
+                .map_or(0, |receiver| receiver.len()),
         }
     }
 }
