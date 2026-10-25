@@ -205,6 +205,15 @@ binaries in `target/debug`) inherits it. Export `CARGO_PROFILE_DEV_DEBUG=1` for 
 full-symbol LLDB/GDB session; ordinary work never needs it. Distribution builds
 strip debug information.
 
+Release proc-macros and build scripts stay unstripped. Cargo's default
+`strip = "debuginfo"` on `[profile.release.build-override]` leaves
+`LC_SYMTAB.stroff` misaligned, and macOS 27 dyld refuses to load those dylibs.
+`tauri build` then fails with missing crates such as `serde_derive`. The
+workspace sets `strip = "none"` for that override only. Shipped release
+binaries still follow the release profile. Upstream rustc 1.99 aligns the
+string pool (rust-lang/rust#157750); keep this override until the pinned
+toolchain includes that compiler.
+
 A large `target/` directory is disposable: after changing toolchains, profiles,
 or large feature matrices, remove the stale root target rather than preserving
 incompatible incremental artifacts:

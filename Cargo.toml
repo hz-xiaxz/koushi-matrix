@@ -68,3 +68,10 @@ debug-assertions = true
 overflow-checks = true
 incremental = false
 strip = "symbols"
+
+# Cargo strips debuginfo from release proc-macros and build scripts. With rustc
+# 1.96 that strip leaves LC_SYMTAB.stroff misaligned, and macOS 27 dyld refuses
+# to load the dylib (rust-lang/rust#157750). These host artifacts are not
+# shipped; release binaries keep the release profile's own strip setting.
+[profile.release.build-override]
+strip = "none"
