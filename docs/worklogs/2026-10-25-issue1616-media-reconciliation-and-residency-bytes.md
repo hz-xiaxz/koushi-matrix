@@ -24,6 +24,10 @@ a stale entry that no longer had a resident projection.
 The map is metadata only (`PrivateMediaEntry` holds a source, mimetype, size and
 dimensions), so this is bounded lifetime hygiene, not a large byte win.
 
+A download can outlive its timeline item, so completion now releases the entry
+when the event is no longer resident (`handle_media_download_finished`) instead
+of waiting for the next removal batch or reset.
+
 ## Residency byte diagnostics
 
 `TimelinePositionIndex` now carries two lower bounds, computed where the index
