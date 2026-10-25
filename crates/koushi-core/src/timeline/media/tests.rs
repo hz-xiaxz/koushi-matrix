@@ -17,6 +17,19 @@ use super::super::item_projection::attachment_info_for_upload;
 use super::super::test_support::{room_key, timeline_item, timeline_media_item};
 use super::{authoritative_media_gallery_replacement, media_gallery_items_from_timeline_items};
 
+fn media_entry() -> super::PrivateMediaEntry {
+    super::PrivateMediaEntry {
+        source: matrix_sdk::ruma::events::room::MediaSource::Plain(
+            matrix_sdk::ruma::OwnedMxcUri::from("mxc://test/media"),
+        ),
+        thumbnail_source: None,
+        mimetype: None,
+        size: 0,
+        width: None,
+        height: None,
+    }
+}
+
 #[test]
 fn media_gallery_projection_keeps_event_media_newest_first() {
     let mut transaction_media = timeline_media_item(
@@ -133,19 +146,7 @@ fn relay_overflow_authoritative_snapshot_replaces_media_gallery_and_emits_action
 fn media_source_reconciliation_drops_removed_events_but_keeps_downloads() {
     let mut media_sources = std::collections::HashMap::new();
     for event_id in ["$resident:test", "$removed:test", "$downloading:test"] {
-        media_sources.insert(
-            event_id.to_owned(),
-            super::PrivateMediaEntry {
-                source: matrix_sdk::ruma::events::room::MediaSource::Plain(
-                    matrix_sdk::ruma::OwnedMxcUri::from("mxc://test/media"),
-                ),
-                thumbnail_source: None,
-                mimetype: None,
-                size: 0,
-                width: None,
-                height: None,
-            },
-        );
+        media_sources.insert(event_id.to_owned(), media_entry());
     }
     let resident: std::collections::HashSet<String> =
         ["$resident:test".to_owned()].into_iter().collect();
@@ -157,6 +158,25 @@ fn media_source_reconciliation_drops_removed_events_but_keeps_downloads() {
     assert!(media_sources.contains_key("$resident:test"));
     assert!(media_sources.contains_key("$downloading:test"));
     assert!(!media_sources.contains_key("$removed:test"));
+}
+
+#[test]
+fn completed_download_releases_media_source_only_when_the_event_left_the_window() {
+    let mut media_sources = std::collections::HashMap::new();
+    media_sources.insert("$gone:test".to_owned(), media_entry());
+    media_sources.insert("$resident:test".to_owned(), media_entry());
+    let items = vec![timeline_item(
+        "$resident:test",
+        Some("text"),
+        "@bob:test",
+        false,
+    )];
+
+    super::release_removed_media_source(&mut media_sources, &items, "$gone:test");
+    assert!(!media_sources.contains_key("$gone:test"));
+
+    super::release_removed_media_source(&mut media_sources, &items, "$resident:test");
+    assert!(media_sources.contains_key("$resident:test"));
 }
 
 #[test]

@@ -515,7 +515,7 @@ impl TimelineActor {
                 }));
                 self.emit_action_reliable(AppAction::MediaDownloadUpdated {
                     room_id: self.key.room_id().to_owned(),
-                    event_id,
+                    event_id: event_id.clone(),
                     state: ready.download_state,
                 })
                 .await;
@@ -524,6 +524,10 @@ impl TimelineActor {
                 self.emit_download_failed(request_id, &event_id, kind).await;
             }
         }
+        // A download can outlive its timeline item: the removal-batch
+        // reconciliation keeps in-flight entries, so completion releases the
+        // metadata once nothing needs it anymore.
+        release_removed_media_source(&mut self.media_sources, &self.navigation_items, &event_id);
     }
     async fn emit_media_download_current_state(&self, request_id: RequestId, event_id: &str) {
         let total = self
@@ -664,6 +668,24 @@ pub(super) fn retain_resident_media_sources(
     media_sources.retain(|event_id, _| {
         resident_event_ids.contains(event_id) || downloads_in_progress.contains(event_id)
     });
+}
+
+/// Release `event_id`'s media metadata when its event is no longer resident.
+///
+/// Completion-time counterpart of `retain_resident_media_sources`: a download
+/// that outlived its timeline item was kept while in flight, so the finished
+/// worker must release it once the item is gone.
+pub(super) fn release_removed_media_source(
+    media_sources: &mut HashMap<String, PrivateMediaEntry>,
+    resident_items: &[TimelineItem],
+    event_id: &str,
+) {
+    let resident = resident_items.iter().any(|item| {
+        matches!(&item.id, TimelineItemId::Event { event_id: resident } if resident == event_id)
+    });
+    if !resident {
+        media_sources.remove(event_id);
+    }
 }
 
 /// Download one media event into the account's managed cache, without a
