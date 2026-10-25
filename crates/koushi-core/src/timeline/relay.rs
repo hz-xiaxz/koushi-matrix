@@ -610,6 +610,20 @@ impl TimelineActor {
                 for diff in &sdk_diffs {
                     Self::apply_sdk_media_cache_diff(&mut self.media_sources, diff);
                 }
+                if sdk_diffs
+                    .iter()
+                    .any(super::media::sdk_media_diff_removes_items)
+                {
+                    // SDK removal diffs do not name the removed events; the
+                    // committed window is the authoritative resident set.
+                    let resident =
+                        super::outbound_send::canonical_event_ids(navigation_items.iter());
+                    super::media::retain_resident_media_sources(
+                        &mut self.media_sources,
+                        &resident,
+                        &self.media_downloads_in_progress,
+                    );
+                }
 
                 let emitted_batch_id = self.next_batch_id;
                 record_thread_projection(

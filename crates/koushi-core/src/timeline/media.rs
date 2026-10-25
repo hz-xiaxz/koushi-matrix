@@ -1,4 +1,4 @@
-use std::collections::HashMap;
+use std::collections::{HashMap, HashSet};
 use std::path::{Path, PathBuf};
 use std::sync::Arc;
 use std::time::Duration;
@@ -626,9 +626,44 @@ impl TimelineActor {
             VectorDiff::Remove { .. }
             | VectorDiff::Truncate { .. }
             | VectorDiff::PopFront
-            | VectorDiff::PopBack => {}
+            | VectorDiff::PopBack => {
+                // The diff does not carry the removed values, so the caller
+                // reconciles the map against the resident window after the
+                // batch; see `retain_resident_media_sources`.
+            }
         }
     }
+}
+
+/// Whether this diff can leave a media entry without a resident item.
+pub(super) fn sdk_media_diff_removes_items(
+    diff: &eyeball_im::VectorDiff<Arc<SdkTimelineItem>>,
+) -> bool {
+    use eyeball_im::VectorDiff;
+
+    matches!(
+        diff,
+        VectorDiff::Remove { .. }
+            | VectorDiff::Truncate { .. }
+            | VectorDiff::PopFront
+            | VectorDiff::PopBack
+    )
+}
+
+/// Drop media metadata for events that are no longer resident.
+///
+/// `media_sources` mirrors the resident projection, and SDK removal diffs do
+/// not name the removed events, so the caller passes the committed window.
+/// An entry whose download is still in flight is kept: the worker and the
+/// progress events still read it after the item has left the window.
+pub(super) fn retain_resident_media_sources(
+    media_sources: &mut HashMap<String, PrivateMediaEntry>,
+    resident_event_ids: &HashSet<String>,
+    downloads_in_progress: &HashSet<String>,
+) {
+    media_sources.retain(|event_id, _| {
+        resident_event_ids.contains(event_id) || downloads_in_progress.contains(event_id)
+    });
 }
 
 /// Download one media event into the account's managed cache, without a
@@ -795,185 +830,4 @@ fn classify_media_download_error(error: &matrix_sdk::Error) -> TimelineFailureKi
 }
 
 #[cfg(test)]
-mod tests {
-
-    use koushi_state::{AppAction, TimelineMediaKind as GalleryTimelineMediaKind};
-
-    use matrix_sdk::attachment::AttachmentInfo;
-
-    use koushi_protocol::command::{UploadMediaKind, UploadMediaRequest};
-    use koushi_protocol::event::{TimelineDiff, TimelineItemId, TimelineMediaKind};
-
-    use matrix_sdk::ruma::uint;
-
-    use koushi_protocol::command::{
-        ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
-        ImageUploadVariantInfo, ImageUploadVariantKind,
-    };
-
-    use super::super::display_projection::apply_timeline_diffs_to_items;
-    use super::super::item_projection::attachment_info_for_upload;
-    use super::super::test_support::{room_key, timeline_item, timeline_media_item};
-    use super::{authoritative_media_gallery_replacement, media_gallery_items_from_timeline_items};
-
-    #[test]
-    fn media_gallery_projection_keeps_event_media_newest_first() {
-        let mut transaction_media = timeline_media_item(
-            "$local:test",
-            "@me:test",
-            None,
-            3,
-            "local.png",
-            TimelineMediaKind::Image,
-        );
-        transaction_media.id = TimelineItemId::Transaction {
-            transaction_id: "txn-local".to_owned(),
-        };
-        let items = vec![
-            timeline_media_item(
-                "$old:test",
-                "@alice:test",
-                Some("Alice"),
-                1,
-                "old.png",
-                TimelineMediaKind::Image,
-            ),
-            timeline_item("$text:test", Some("text"), "@bob:test", false),
-            transaction_media,
-            timeline_media_item(
-                "$new:test",
-                "@carol:test",
-                Some("Carol"),
-                2,
-                "new.png",
-                TimelineMediaKind::Image,
-            ),
-        ];
-
-        let gallery = media_gallery_items_from_timeline_items(&room_key(), &items);
-
-        assert_eq!(gallery.len(), 2);
-        assert_eq!(gallery[0].event_id, "$new:test");
-        assert_eq!(gallery[0].sender.as_deref(), Some("@carol:test"));
-        assert_eq!(gallery[0].sender_label.as_deref(), Some("Carol"));
-        assert_eq!(gallery[0].timestamp_ms, 2);
-        assert_eq!(gallery[0].media.kind, GalleryTimelineMediaKind::Image);
-        assert_eq!(gallery[0].media.filename, "new.png");
-        assert!(gallery[0].media.source.encrypted);
-        assert_eq!(
-            gallery[0].media.thumbnail.as_ref().map(|thumb| thumb.width),
-            Some(Some(160))
-        );
-        assert_eq!(gallery[1].event_id, "$old:test");
-    }
-
-    #[test]
-    fn media_gallery_projection_recomputes_after_timeline_diffs() {
-        let mut items = vec![
-            timeline_media_item(
-                "$old:test",
-                "@alice:test",
-                None,
-                1,
-                "old.png",
-                TimelineMediaKind::Image,
-            ),
-            timeline_media_item(
-                "$new:test",
-                "@bob:test",
-                None,
-                2,
-                "new.png",
-                TimelineMediaKind::Image,
-            ),
-        ];
-
-        apply_timeline_diffs_to_items(&mut items, &[TimelineDiff::Remove { index: 1 }]);
-        let gallery = media_gallery_items_from_timeline_items(&room_key(), &items);
-        assert_eq!(gallery.len(), 1);
-        assert_eq!(gallery[0].event_id, "$old:test");
-
-        apply_timeline_diffs_to_items(&mut items, &[TimelineDiff::Reset { items: Vec::new() }]);
-        assert!(media_gallery_items_from_timeline_items(&room_key(), &items).is_empty());
-    }
-
-    #[test]
-    fn relay_overflow_authoritative_snapshot_replaces_media_gallery_and_emits_action() {
-        let key = room_key();
-        let old_navigation = vec![timeline_media_item(
-            "$old:test",
-            "@alice:test",
-            None,
-            1,
-            "old.png",
-            TimelineMediaKind::Image,
-        )];
-        let new_navigation = vec![timeline_media_item(
-            "$new:test",
-            "@bob:test",
-            None,
-            2,
-            "new.png",
-            TimelineMediaKind::Image,
-        )];
-        let old_gallery = media_gallery_items_from_timeline_items(&key, &old_navigation);
-        let replacement =
-            authoritative_media_gallery_replacement(&key, &old_gallery, &new_navigation)
-                .expect("changed authoritative snapshot must emit gallery replacement");
-        assert_eq!(replacement.items.len(), 1);
-        assert_eq!(replacement.items[0].event_id, "$new:test");
-        assert!(matches!(
-            replacement.action,
-            AppAction::MediaGalleryUpdated { items, .. }
-                if items.len() == 1 && items[0].event_id == "$new:test"
-        ));
-    }
-
-    #[test]
-    fn attachment_info_for_image_upload_uses_selected_variant_metadata() {
-        let request = UploadMediaRequest {
-            filename: "private-screenshot.jpg".to_owned(),
-            mime_type: "image/jpeg".to_owned(),
-            bytes: vec![1, 2, 3, 4],
-            kind: UploadMediaKind::Image {
-                width: Some(1200),
-                height: Some(900),
-            },
-            compression: Some(ImageUploadCompressionState {
-                mode: koushi_state::ImageUploadCompressionMode::Always,
-                policy: ImageUploadCompressionPolicy::default(),
-                original: ImageUploadVariantInfo {
-                    mime_type: "image/jpeg".to_owned(),
-                    byte_count: 3_200_000,
-                    dimensions: Some(ImageUploadDimensions {
-                        width: 4032,
-                        height: 3024,
-                    }),
-                },
-                selected: ImageUploadVariantInfo {
-                    mime_type: "image/jpeg".to_owned(),
-                    byte_count: 4,
-                    dimensions: Some(ImageUploadDimensions {
-                        width: 1200,
-                        height: 900,
-                    }),
-                },
-                selected_variant: ImageUploadVariantKind::Compressed,
-                skipped_small_image: false,
-                metadata_stripped: true,
-                thumbnail_refreshed: true,
-            }),
-            thumbnail: None,
-            caption: None,
-        };
-
-        match attachment_info_for_upload(&request) {
-            AttachmentInfo::Image(info) => {
-                assert_eq!(info.width, Some(uint!(1200)));
-                assert_eq!(info.height, Some(uint!(900)));
-                assert_eq!(info.size, Some(uint!(4)));
-            }
-            other => panic!("expected image info, got {other:?}"),
-        }
-    }
-}
+mod tests;

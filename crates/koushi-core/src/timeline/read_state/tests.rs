@@ -907,6 +907,8 @@ fn actor_handle_with_positions(
     let (control_tx, control_rx) = mpsc::channel(32);
     let (_position_tx, position_rx) = watch::channel(Arc::new(TimelinePositionIndex {
         generation: u128::from(actor_generation) << 64,
+        resident_item_struct_bytes: 0,
+        resident_item_text_bytes: 0,
         ranks: positions
             .into_iter()
             .map(|(event_id, rank)| (event_id.to_owned(), rank))
@@ -938,6 +940,8 @@ async fn restored_read_waits_for_authoritative_reconciliation_before_retrying() 
     let (control_tx, mut control_rx) = mpsc::channel(8);
     let (_position_tx, position_rx) = watch::channel(Arc::new(TimelinePositionIndex {
         generation: u128::from(7_u64) << 64,
+        resident_item_struct_bytes: 0,
+        resident_item_text_bytes: 0,
         ranks: HashMap::from([("$desired:test".to_owned(), 5)]),
     }));
     let actor_handle = TimelineActorHandle {
@@ -1117,6 +1121,8 @@ async fn reconnect_preserves_a_bounded_reconciliation_wake_for_new_read_waiters(
     let (control_tx, _control_rx) = mpsc::channel(1);
     let (_position_tx, position_rx) = watch::channel(Arc::new(TimelinePositionIndex {
         generation: u128::from(7_u64) << 64,
+        resident_item_struct_bytes: 0,
+        resident_item_text_bytes: 0,
         ranks: HashMap::new(),
     }));
     let actor_handle = TimelineActorHandle {
@@ -1332,6 +1338,8 @@ async fn authoritative_server_ahead_clears_restored_read_without_network_retry()
     let (control_tx, _control_rx) = mpsc::channel(1);
     let (_position_tx, position_rx) = watch::channel(Arc::new(TimelinePositionIndex {
         generation: u128::from(7_u64) << 64,
+        resident_item_struct_bytes: 0,
+        resident_item_text_bytes: 0,
         ranks: HashMap::from([
             ("$desired:test".to_owned(), 5),
             ("$server-ahead:test".to_owned(), 6),
@@ -1406,6 +1414,8 @@ async fn authoritative_reconciliation_keeps_unordered_remaining_candidate_pendin
     let (control_tx, mut control_rx) = mpsc::channel(1);
     let (_position_tx, position_rx) = watch::channel(Arc::new(TimelinePositionIndex {
         generation: u128::from(7_u64) << 64,
+        resident_item_struct_bytes: 0,
+        resident_item_text_bytes: 0,
         ranks: HashMap::from([
             ("$positioned:test".to_owned(), 5),
             ("$server-ahead:test".to_owned(), 6),
@@ -1464,6 +1474,8 @@ async fn stalled_read_receipt_worker_does_not_block_cached_subscription_replay()
     let (control_tx, mut control_rx) = mpsc::channel(2);
     let (_position_tx, position_rx) = watch::channel(Arc::new(TimelinePositionIndex {
         generation: 11,
+        resident_item_struct_bytes: 0,
+        resident_item_text_bytes: 0,
         ranks: HashMap::from([("$read-target:test".to_owned(), 7)]),
     }));
     let actor_handle = TimelineActorHandle {
@@ -1538,6 +1550,8 @@ async fn newer_positioned_read_target_cancels_stale_worker_and_settles_both_wait
     let (control_tx, _control_rx) = mpsc::channel(2);
     let (_position_tx, position_rx) = watch::channel(Arc::new(TimelinePositionIndex {
         generation: 12,
+        resident_item_struct_bytes: 0,
+        resident_item_text_bytes: 0,
         ranks: HashMap::from([
             ("$read-old:test".to_owned(), 7),
             ("$read-new:test".to_owned(), 8),

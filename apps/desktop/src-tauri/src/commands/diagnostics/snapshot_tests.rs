@@ -365,6 +365,8 @@ fn diagnostic_snapshot_exports_the_timeline_residency_summary() {
         resident_focused_actors: 1,
         resident_event_items: 19_200,
         deepest_actor_event_items: 512,
+        resident_item_struct_bytes: 4_608_000,
+        resident_item_text_bytes: 9_600_000,
     };
     let rows: &[(
         usize,
@@ -408,6 +410,16 @@ fn diagnostic_snapshot_exports_the_timeline_residency_summary() {
         account_row
             .message
             .contains("deepest_actor_event_items=512")
+    );
+    assert!(
+        account_row
+            .message
+            .contains("resident_item_struct_bytes=4608000")
+    );
+    assert!(
+        account_row
+            .message
+            .contains("resident_item_text_bytes=9600000")
     );
     let serialized = serde_json::to_string(&exported).unwrap();
     for forbidden in [

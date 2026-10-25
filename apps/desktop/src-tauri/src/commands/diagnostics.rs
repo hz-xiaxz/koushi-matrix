@@ -201,6 +201,14 @@ fn record_timeline_residency_summaries(
                 .field(DiagnosticField::count(
                     "deepest_actor_event_items",
                     diagnostics.deepest_actor_event_items,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_item_struct_bytes",
+                    diagnostics.resident_item_struct_bytes,
+                ))
+                .field(DiagnosticField::count(
+                    "resident_item_text_bytes",
+                    diagnostics.resident_item_text_bytes,
                 )),
         );
     }

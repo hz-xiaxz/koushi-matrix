@@ -3469,14 +3469,21 @@ pub(super) fn cache_sdk_item_media_source(
     let Some(event_id) = event_item.event_id() else {
         return;
     };
-    let Some(message) = event_item.content().as_message() else {
-        return;
-    };
-    let Some(entry) = private_media_entry_from_msgtype(message.msgtype()) else {
-        return;
-    };
+    // A `Set` diff can carry an edited event that no longer has media, so an
+    // absent media entry must clear any metadata cached for the same event.
+    let entry = event_item
+        .content()
+        .as_message()
+        .and_then(|message| private_media_entry_from_msgtype(message.msgtype()));
 
-    cache.insert(event_id.to_string(), entry);
+    match entry {
+        Some(entry) => {
+            cache.insert(event_id.to_string(), entry);
+        }
+        None => {
+            cache.remove(event_id.as_str());
+        }
+    }
 }
 
 pub(super) fn attachment_info_for_upload(request: &UploadMediaRequest) -> AttachmentInfo {
