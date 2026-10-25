@@ -1,6 +1,7 @@
 #[cfg(test)]
 use std::collections::BTreeSet;
 use std::collections::{BTreeMap, HashMap, HashSet};
+use std::mem::size_of;
 use std::sync::{Arc, Mutex};
 
 use futures_util::StreamExt;
@@ -641,9 +642,18 @@ pub(super) struct TimelineActorHandle {
     pub(super) enqueue_context: Option<TimelineSendEnqueueContext>,
 }
 
+fn text_len(text: &str) -> u64 {
+    u64::try_from(text.len()).unwrap_or(u64::MAX)
+}
+
 pub(super) struct TimelinePositionIndex {
     pub(super) generation: u128,
     pub(super) ranks: HashMap<String, u64>,
+    /// Lower bound of the resident projection's inline struct bytes (#1394).
+    pub(super) resident_item_struct_bytes: u64,
+    /// Bytes of resident message text this actor projects (#1394). Lower
+    /// bound only: shared and derived allocations are not counted.
+    pub(super) resident_item_text_bytes: u64,
 }
 
 impl TimelinePositionIndex {
@@ -663,7 +673,26 @@ impl TimelinePositionIndex {
                 Some((event_id.clone(), rank.try_into().unwrap_or(u64::MAX)))
             })
             .collect();
-        Self { generation, ranks }
+        let resident_item_struct_bytes = u64::try_from(items.len())
+            .unwrap_or(u64::MAX)
+            .saturating_mul(size_of::<TimelineItem>() as u64);
+        let resident_item_text_bytes = items.iter().fold(0_u64, |total, item| {
+            let mut bytes = total;
+            if let Some(body) = &item.body {
+                bytes = bytes.saturating_add(text_len(body));
+            }
+            if let Some(formatted) = &item.formatted {
+                bytes = bytes.saturating_add(text_len(&formatted.html));
+                bytes = bytes.saturating_add(text_len(&formatted.plain_text));
+            }
+            bytes
+        });
+        Self {
+            generation,
+            ranks,
+            resident_item_struct_bytes,
+            resident_item_text_bytes,
+        }
     }
 
     pub(super) fn evidence(

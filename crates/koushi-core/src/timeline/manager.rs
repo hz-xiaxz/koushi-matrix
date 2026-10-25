@@ -98,34 +98,41 @@ pub struct TimelineResidencyDiagnostics {
     /// Canonical event items held by all resident actors, and the deepest one.
     pub resident_event_items: u64,
     pub deepest_actor_event_items: u64,
+    /// Lower-bound bytes of the resident projection: `size_of::<TimelineItem>()`
+    /// per item plus the message text each actor holds (#1394).
+    pub resident_item_struct_bytes: u64,
+    pub resident_item_text_bytes: u64,
 }
 
 fn initial_thread_backfill_is_authoritative(end_reached: bool, item_count: usize) -> bool {
     end_reached || item_count > 0
 }
 
-/// Fold one `(kind, canonical event-item count)` row per resident actor into a
-/// [`TimelineResidencyDiagnostics`] snapshot (#1394). An actor without position
-/// evidence contributes an actor but no depth.
+/// Fold one `(kind, canonical event-item count, struct bytes, text bytes)` row
+/// per resident actor into a [`TimelineResidencyDiagnostics`] snapshot (#1394).
+/// An actor without position evidence contributes an actor but no depth.
 pub(super) fn fold_residency_actors<'a>(
     session_resident_rooms: usize,
     actual_room_subscriptions: usize,
-    actors: impl IntoIterator<Item = (&'a TimelineKind, Option<usize>)>,
+    actors: impl IntoIterator<Item = (&'a TimelineKind, Option<(usize, u64, u64)>)>,
 ) -> TimelineResidencyDiagnostics {
     let mut diagnostics = TimelineResidencyDiagnostics {
         session_resident_rooms: session_resident_rooms as u64,
         actual_room_subscriptions: actual_room_subscriptions as u64,
         ..TimelineResidencyDiagnostics::default()
     };
-    for (kind, event_items) in actors {
+    for (kind, evidence) in actors {
         diagnostics.resident_actors += 1;
         match kind {
             TimelineKind::Room { .. } => diagnostics.resident_room_actors += 1,
             TimelineKind::Thread { .. } => diagnostics.resident_thread_actors += 1,
             TimelineKind::Focused { .. } => diagnostics.resident_focused_actors += 1,
         }
-        let event_items = event_items.unwrap_or(0) as u64;
+        let (event_items, struct_bytes, text_bytes) = evidence.unwrap_or((0, 0, 0));
+        let event_items = event_items as u64;
         diagnostics.resident_event_items += event_items;
+        diagnostics.resident_item_struct_bytes += struct_bytes;
+        diagnostics.resident_item_text_bytes += text_bytes;
         diagnostics.deepest_actor_event_items =
             diagnostics.deepest_actor_event_items.max(event_items);
     }
@@ -2191,10 +2198,14 @@ impl TimelineManagerActor {
             self.timelines.iter().map(|(key, handle)| {
                 (
                     &key.kind,
-                    handle
-                        .position_rx
-                        .as_ref()
-                        .map(|position| position.borrow().ranks.len()),
+                    handle.position_rx.as_ref().map(|position| {
+                        let position = position.borrow();
+                        (
+                            position.ranks.len(),
+                            position.resident_item_struct_bytes,
+                            position.resident_item_text_bytes,
+                        )
+                    }),
                 )
             }),
         )

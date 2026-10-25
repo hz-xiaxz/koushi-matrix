@@ -1082,10 +1082,10 @@ fn residency_diagnostics_partitions_actors_and_sums_canonical_depth() {
         9,
         7,
         [
-            (&room, Some(120)),
+            (&room, Some((120, 1_000, 2_000))),
             (&room, None),
-            (&thread, Some(30)),
-            (&focused, Some(4)),
+            (&thread, Some((30, 300, 400))),
+            (&focused, Some((4, 40, 50))),
         ],
     );
     assert_eq!(diagnostics.session_resident_rooms, 9);
@@ -1096,4 +1096,6 @@ fn residency_diagnostics_partitions_actors_and_sums_canonical_depth() {
     assert_eq!(diagnostics.resident_focused_actors, 1);
     assert_eq!(diagnostics.resident_event_items, 154);
     assert_eq!(diagnostics.deepest_actor_event_items, 120);
+    assert_eq!(diagnostics.resident_item_struct_bytes, 1_340);
+    assert_eq!(diagnostics.resident_item_text_bytes, 2_450);
 }
