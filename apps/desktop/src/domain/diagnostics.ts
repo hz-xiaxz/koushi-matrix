@@ -18,6 +18,7 @@ import {
 import type { RightPanelMode } from "./rightPanel";
 import type { QaSendSmokeStatus } from "./qaSendSmoke";
 import type { UiLatencyDiagnostics } from "./uiLatency";
+import type { RendererMemoryDiagnostics } from "./rendererMemoryDiagnostics";
 
 export interface DiagnosticLogEntry {
   timestampMs: number;
@@ -221,6 +222,7 @@ export interface RendererContextDiagnostics {
   mountedTimelineRows: number;
   jsHeapUsedBytes: number | null;
   jsHeapTotalBytes: number | null;
+  memoryDetails?: RendererMemoryDiagnostics;
 }
 
 export function createDiagnosticLogBuffer(
@@ -483,7 +485,38 @@ function formatRendererContextDiagnostics(
     `renderer.js_heap_accuracy=${jsHeapAvailable ? "engine_reported_approximate" : "unavailable"}`,
     `renderer.js_heap_used_bytes=${formatOptionalBytes(context.jsHeapUsedBytes)}`,
     `renderer.js_heap_total_bytes=${formatOptionalBytes(context.jsHeapTotalBytes)}`,
-    "renderer.js_heap_scope=javascript_heap_only_excludes_webkit_gpu_and_native"
+    "renderer.js_heap_scope=javascript_heap_only_excludes_webkit_gpu_and_native",
+    ...formatRendererMemoryDetails(context.memoryDetails)
+  ];
+}
+
+function formatRendererMemoryDetails(details: RendererMemoryDiagnostics | undefined): string[] {
+  if (!details) return [];
+  return [
+    `renderer.dom_nodes=${normalizedCount(details.domNodes)}`,
+    `renderer.dom_elements=${normalizedCount(details.domElements)}`,
+    `renderer.dom_text_utf16_bytes_estimate=${normalizedCount(details.domTextUtf16BytesEstimate)}`,
+    "renderer.dom_scope=attached_document_excludes_detached_nodes_and_shadow_roots",
+    `renderer.image_natural_rgba_bytes_estimate=${normalizedCount(details.imageNaturalRgbaBytesEstimate)}`,
+    `renderer.unique_image_natural_rgba_bytes_estimate=${normalizedCount(details.uniqueImageNaturalRgbaBytesEstimate)}`,
+    `renderer.unique_image_sources=${normalizedCount(details.uniqueImageSources)}`,
+    `renderer.images_with_natural_size=${normalizedCount(details.imagesWithNaturalSize)}`,
+    `renderer.pending_images=${normalizedCount(details.pendingImages)}`,
+    `renderer.broken_images=${normalizedCount(details.brokenImages)}`,
+    "renderer.image_memory_scope=document_images_natural_size_rgba8_reference_not_measured_decoded_memory",
+    `renderer.canvases=${normalizedCount(details.canvases)}`,
+    `renderer.canvas_rgba_bytes_estimate=${normalizedCount(details.canvasRgbaBytesEstimate)}`,
+    "renderer.canvas_memory_scope=backing_dimensions_rgba8_reference_not_measured_gpu_memory",
+    `renderer.object_urls=${normalizedCount(details.objectUrls)}`,
+    `renderer.object_url_blob_bytes=${normalizedCount(details.objectUrlBlobBytes)}`,
+    "renderer.object_url_scope=logical_blob_sizes_not_resident_memory",
+    `renderer.timeline_store_keys=${formatOptionalBytes(details.timelineStoreKeys)}`,
+    `renderer.timeline_store_items=${formatOptionalBytes(details.timelineStoreItems)}`,
+    `renderer.timeline_store_text_utf16_bytes_estimate=${formatOptionalBytes(details.timelineStoreTextUtf16BytesEstimate)}`,
+    "renderer.timeline_store_scope=renderer_store_only",
+    "renderer.text_memory_scope=per_reference_utf16_representation_not_unique_heap",
+    "renderer.webkit_process_footprint_bytes=unavailable",
+    "renderer.gpu_memory_bytes=unavailable"
   ];
 }
 

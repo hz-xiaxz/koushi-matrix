@@ -559,6 +559,18 @@ impl AccountRuntimeManager {
         rows
     }
 
+    /// Observe the existing buses without attaching diagnostic receivers.
+    pub fn event_queue_diagnostics(&self) -> Vec<(usize, crate::runtime::EventQueueDiagnostics)> {
+        self.state
+            .lock()
+            .expect("account runtime manager mutex")
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(index, tab)| (index, tab.runtime.event_queue_diagnostics()))
+            .collect()
+    }
+
     pub fn tab_connections(&self) -> Vec<(AccountTabDescriptor, CoreConnection)> {
         self.state
             .lock()

@@ -432,3 +432,75 @@ fn diagnostic_snapshot_exports_the_timeline_residency_summary() {
         assert!(!serialized.contains(forbidden));
     }
 }
+
+#[test]
+fn diagnostic_snapshot_distinguishes_retained_events_from_overwritten_reader_positions() {
+    let _guard = koushi_diagnostics::test_support::lock();
+    record_event_queue_summaries(
+        &[
+            (
+                0,
+                koushi_core::runtime::EventQueueDiagnostics {
+                    capacity_events: 8,
+                    retained_events: 8,
+                    receiver_count: 2,
+                    inline_slot_bytes_lower_bound: 2048,
+                },
+            ),
+            (
+                1,
+                koushi_core::runtime::EventQueueDiagnostics {
+                    capacity_events: 8,
+                    retained_events: 0,
+                    receiver_count: 0,
+                    inline_slot_bytes_lower_bound: 2048,
+                },
+            ),
+        ],
+        &[
+            (
+                0,
+                Some(koushi_core::runtime::EventReceiverDiagnostics {
+                    unread_position_distance_events: 23,
+                }),
+            ),
+            (1, None),
+        ],
+    );
+    let exported = snapshot_with_media_memory_summaries(
+        koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats::default(),
+        koushi_core::media_preparation::MediaPreparationStats::default(),
+        &memory_audit_fixture(),
+        &[],
+        &[],
+        koushi_core::SlidingSyncDiagnosticsSnapshot::default(),
+    );
+    let rows = exported
+        .entries
+        .iter()
+        .filter(|row| row.source == "core.event_queue")
+        .collect::<Vec<_>>();
+    let measured = rows
+        .iter()
+        .find(|row| row.message.contains("account_index=0"))
+        .unwrap();
+    for field in [
+        "retained_events=8",
+        "receiver_count=2",
+        "cached_command_pending_events=8",
+        "cached_command_overwritten_positions=15",
+        "payload_heap_bytes=unavailable",
+    ] {
+        assert!(measured.message.contains(field));
+    }
+    let missing = rows
+        .iter()
+        .find(|row| row.message.contains("account_index=1"))
+        .unwrap();
+    assert!(
+        missing
+            .message
+            .contains("cached_command_receiver_status=not_cached_or_busy")
+    );
+    assert!(!missing.message.contains("cached_command_pending_events=0"));
+}

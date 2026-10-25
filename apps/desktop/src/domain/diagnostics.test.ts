@@ -497,7 +497,17 @@ describe("diagnosticReport", () => {
         mountedImages: 12,
         mountedTimelineRows: 34,
         jsHeapUsedBytes: 12_345_678,
-        jsHeapTotalBytes: 23_456_789
+        jsHeapTotalBytes: 23_456_789,
+        memoryDetails: {
+          domNodes: 50, domElements: 40, domTextUtf16BytesEstimate: 120,
+          imageNaturalRgbaBytesEstimate: 80_000,
+          uniqueImageNaturalRgbaBytesEstimate: 40_000, uniqueImageSources: 2,
+          imagesWithNaturalSize: 4, pendingImages: 1, brokenImages: 0,
+          canvases: 1, canvasRgbaBytesEstimate: 400,
+          objectUrls: 2, objectUrlBlobBytes: 350,
+          timelineStoreKeys: 3, timelineStoreItems: 240,
+          timelineStoreTextUtf16BytesEstimate: 2048
+        }
       }
     });
 
@@ -513,6 +523,14 @@ describe("diagnosticReport", () => {
     expect(measured).toContain("renderer.js_heap_accuracy=engine_reported_approximate");
     expect(measured).toContain("renderer.js_heap_used_bytes=12345678");
     expect(measured).toContain("renderer.js_heap_total_bytes=23456789");
+    expect(measured).toContain("renderer.dom_nodes=50");
+    expect(measured).toContain("renderer.dom_scope=attached_document_excludes_detached_nodes_and_shadow_roots");
+    expect(measured).toContain("renderer.unique_image_natural_rgba_bytes_estimate=40000");
+    expect(measured).toContain("renderer.object_url_blob_bytes=350");
+    expect(measured).toContain("renderer.timeline_store_items=240");
+    expect(measured).toContain("renderer.webkit_process_footprint_bytes=unavailable");
+    expect(measured).toContain("renderer.gpu_memory_bytes=unavailable");
+    expect(measured).toContain("not_measured_decoded_memory");
     expect(measured).toContain(
       "renderer.js_heap_scope=javascript_heap_only_excludes_webkit_gpu_and_native"
     );

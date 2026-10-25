@@ -2577,6 +2577,26 @@ expose snapshot time, bounded observed coverage, truncation, content availabilit
 and continuation. Exhaustion makes no claim of complete Matrix history. Restart
 invalidates cursors; fresh reads cannot recover evicted history.
 
+## Memory-retention diagnostic sampling
+
+Diagnostic export observes each account's event broadcast without creating a
+receiver or consuming events. It reports retained event count, receiver count,
+capacity and a lower bound for inline event slots. Cached command connections
+report their unread position distance separately, including positions already
+overwritten by the ring. Nested payload heap bytes remain explicitly unavailable;
+inline slots are never presented as the broadcast's total retained heap.
+
+Renderer export samples DOM counts, image natural-size RGBA8 reference sizes,
+canvas backing-store reference sizes, live renderer-owned Blob URLs and timeline
+store counts/text lengths. These are counts and representation-size estimates,
+not WebKit allocator or GPU measurements. Repeated image sources are also counted
+once in a separate estimate. DOM traversal covers the attached document, excluding
+detached nodes and shadow roots; image estimates exclude CSS background images
+and WebKit's internal caches. No DOM nodes, source URLs or message text survive
+sampling. Object-URL accounting follows existing creation/revocation owners and
+never changes their lifetime. Unsupported JS-heap, WebContent-footprint and GPU
+measurements stay unavailable; sampling never forces collection or eviction.
+
 ## Causal navigation diagnostics (#1543)
 
 Rust observes authoritative before/after account, Space and room state at every

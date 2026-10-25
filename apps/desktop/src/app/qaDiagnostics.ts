@@ -1,5 +1,7 @@
 import type { RendererContextDiagnostics, SecurityDiagnostics } from "../domain/diagnostics";
 import type { QaDomDiagnostics, QaTimelineDiagnostics } from "../domain/qaTitle";
+import type { TimelineStoreState } from "../domain/timelineStore";
+import { collectRendererMemoryDiagnostics } from "../domain/rendererMemoryDiagnostics";
 
 export const INITIAL_TIMELINE_DIAGNOSTICS: QaTimelineDiagnostics = {
   visibleItems: 0,
@@ -70,7 +72,7 @@ function imageSrcScheme(src: string): string {
  * captured, and the mounted-row count is a single one-shot query rather than a
  * per-frame traversal.
  */
-export function qaRendererContextDiagnostics(): RendererContextDiagnostics {
+export function qaRendererContextDiagnostics(store?: TimelineStoreState): RendererContextDiagnostics {
   const jsHeap = performanceJsHeapBytes();
   return {
     viewportWidth: normalizedDimension(window.innerWidth),
@@ -82,7 +84,8 @@ export function qaRendererContextDiagnostics(): RendererContextDiagnostics {
     mountedImages: document.images.length,
     mountedTimelineRows: document.querySelectorAll(".timeline-item-frame").length,
     jsHeapUsedBytes: jsHeap?.usedBytes ?? null,
-    jsHeapTotalBytes: jsHeap?.totalBytes ?? null
+    jsHeapTotalBytes: jsHeap?.totalBytes ?? null,
+    memoryDetails: collectRendererMemoryDiagnostics(store)
   };
 }
 

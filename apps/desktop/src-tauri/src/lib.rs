@@ -163,6 +163,30 @@ impl SelectedCoreConnection {
         None
     }
 
+    /// Observe only already-cached command connections. A busy connection is
+    /// unavailable rather than making a diagnostic export wait on product work.
+    pub(crate) async fn cached_event_receiver_diagnostics(
+        &self,
+    ) -> Vec<(
+        usize,
+        Option<koushi_core::runtime::EventReceiverDiagnostics>,
+    )> {
+        let tabs = self.runtime.tab_descriptors();
+        let connections = self.connections.lock().await;
+        tabs.iter()
+            .enumerate()
+            .map(|(index, tab)| {
+                let sample = connections.get(&tab.id).and_then(|connection| {
+                    connection
+                        .try_lock()
+                        .ok()
+                        .map(|connection| connection.event_receiver_diagnostics())
+                });
+                (index, sample)
+            })
+            .collect()
+    }
+
     pub(crate) async fn clear_cached_connections(&self) {
         self.connections.lock().await.clear();
     }
