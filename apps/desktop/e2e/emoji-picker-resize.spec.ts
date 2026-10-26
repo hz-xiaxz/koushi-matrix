@@ -254,6 +254,24 @@ test("every edge and corner of the frame resizes from the composer picker", asyn
   expectNear(afterBody.height, beforeBody.height, "body drag keeps the height");
 });
 
+test("a drag past the layer boundary keeps the pinned opposite edge in place", async ({ page }) => {
+  await page.setViewportSize({ width: 700, height: 650 });
+  await gotoReadyShell(page);
+  await openComposerPicker(page);
+
+  // The layer clamps the rendered box into its bounds. The pinned edge must not
+  // travel with that clamp: only the grabbed edge may stop at the boundary.
+  const left = await dragAndMeasure(page, "left", -600, 0);
+  expectNear(left.after.right, left.before.right, "left edge keeps the right edge past the boundary");
+  expect(left.after.left).toBeGreaterThanOrEqual(15);
+  expect(left.after.width).toBeGreaterThan(0);
+
+  const top = await dragAndMeasure(page, "top", 0, -600);
+  expectNear(top.after.bottom, top.before.bottom, "top edge keeps the bottom edge past the boundary");
+  expect(top.after.top).toBeGreaterThanOrEqual(15);
+  expect(top.after.height).toBeGreaterThan(0);
+});
+
 test("the focused frame handle resizes with the keyboard and the size survives reopen", async ({
   page
 }) => {
