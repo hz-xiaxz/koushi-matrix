@@ -15,13 +15,14 @@ const IGNORED_USER_UPDATE_FAILED_MESSAGE: &str = "Ignored user list could not be
 
 pub(crate) fn handle_own_profile_updated(
     state: &mut AppState,
-    profile: crate::state::OwnProfile,
+    mut profile: crate::state::OwnProfile,
 ) -> Vec<AppEffect> {
     if !is_session_ready(state) {
         return Vec::new();
     }
 
     let own_user_id = session_user_id(state).map(str::to_owned);
+    preserve_own_avatar_thumbnail(&state.profile.own, &mut profile);
     state.profile.own = profile;
     crate::state::refresh_profile_user_display_projection(
         &mut state.profile,
@@ -384,7 +385,7 @@ pub(crate) fn handle_profile_update_requested(
 pub(crate) fn handle_profile_update_succeeded(
     state: &mut AppState,
     request_id: u64,
-    profile: crate::state::OwnProfile,
+    mut profile: crate::state::OwnProfile,
 ) -> Vec<AppEffect> {
     if state.profile.update.request_id() != Some(request_id) {
         return Vec::new();
@@ -392,6 +393,7 @@ pub(crate) fn handle_profile_update_succeeded(
 
     let own_user_id = session_user_id(state).map(str::to_owned);
     state.profile.update = crate::state::ProfileUpdateState::Idle;
+    preserve_own_avatar_thumbnail(&state.profile.own, &mut profile);
     state.profile.own = profile;
     crate::state::refresh_profile_user_display_projection(
         &mut state.profile,
@@ -535,4 +537,18 @@ pub(crate) fn update_avatar_thumbnail(
     }
     current.thumbnail = thumbnail;
     true
+}
+
+// Own metadata is authoritative about the source, not a reset of its download.
+// Preserve from this owner only: another copy of the same source may be stale.
+fn preserve_own_avatar_thumbnail(
+    previous: &crate::state::OwnProfile,
+    incoming: &mut crate::state::OwnProfile,
+) {
+    if let (Some(previous), Some(incoming)) = (&previous.avatar, &mut incoming.avatar)
+        && previous.mxc_uri == incoming.mxc_uri
+        && incoming.thumbnail == AvatarThumbnailState::NotRequested
+    {
+        incoming.thumbnail = previous.thumbnail.clone();
+    }
 }

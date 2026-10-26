@@ -723,3 +723,22 @@ describe("diagnosticReport", () => {
     ], droppedEntries: 1 });
   });
 });
+
+
+test("reports own-avatar state and image event totals without profile or media identifiers", async () => {
+  const snapshot = await createDesktopApiFixture().getSnapshot();
+  snapshot.state.domain.profile.own = {
+    display_name: "Synthetic private display name",
+    avatar: { mxc_uri: "mxc://synthetic.invalid/private-avatar", thumbnail: { kind: "failed", request_id: 17, failureKind: "network" } }
+  };
+  const report = diagnosticReport({
+    snapshot, panelMode: "closed", sendStatus: "idle",
+    timelineDiagnostics: { visibleItems: 0, downloadedItems: 0, backfill: "idle", avatarMxcItems: 0, avatarReadyItems: 0, avatarPendingItems: 0, avatarFailedItems: 0, avatarMissingItems: 0, avatarRenderedImages: 0, avatarBrokenImages: 0 },
+    domDiagnostics: { screen: "timeline", rootChildren: 1, bodyTextLength: 0 },
+    uiLatencyDiagnostics: { samples: 0, lastFrameGapMs: 0, averageFrameGapMs: 0, maxFrameGapMs: 0, longFrameCount: 0 }
+  });
+  expect(report).toContain("Own avatar (renderer snapshot): avatar_present=true thumbnail=failed failure=network");
+  expect(report).toMatch(/Avatar image events: loads=\d+ errors=\d+ scope=entity_avatar_hook_page_lifetime_events_not_unique_images_or_own_avatar_only/);
+  expect(report).not.toContain("private-avatar");
+  expect(report).not.toContain("Synthetic private display name");
+});

@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useState } from "react";
+import { recordAvatarImageEvent } from "../domain/avatarImageDiagnostics";
 
 export const AVATAR_IMAGE_RETRY_DELAY_MS = 10_000;
 
@@ -41,11 +42,13 @@ export function useRecoverableImageSource(sourceUrl: string | null): {
 
   const onImageError = useCallback(() => {
     if (sourceUrl) {
+      recordAvatarImageEvent("error");
       setFailedSourceUrl(sourceUrl);
     }
   }, [sourceUrl]);
 
   const onImageLoad = useCallback(() => {
+    recordAvatarImageEvent("load");
     setFailedSourceUrl((current) => (current === sourceUrl ? null : current));
   }, [sourceUrl]);
 

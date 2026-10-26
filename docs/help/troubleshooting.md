@@ -221,6 +221,12 @@ right of the window, select **Save to file…**, and attach the saved
 that it omits private data: no message text, room or member names, Matrix IDs,
 email addresses, or file paths.
 
+For a missing avatar, save a report while the image is missing, before restarting.
+Initials alone do not establish that the server-side profile image was removed.
+The report distinguishes the local own-profile thumbnail state and retained-byte
+presence from renderer image load/error event totals. Those event totals cover
+all avatar slots since the page opened; they do not identify individual images.
+
 For memory growth, save reports before and after the activity that increases
 memory. Each report samples event-queue retention and renderer DOM, image,
 canvas, Blob URL and timeline-store counts. Image and text byte estimates are

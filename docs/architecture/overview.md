@@ -2588,6 +2588,17 @@ invalidates cursors; fresh reads cannot recover evicted history.
 
 ## Memory-retention diagnostic sampling
 
+Avatar export samples each account's published own-profile thumbnail state and
+coarse failure kind, plus whether a Ready source still has retained bytes. It
+borrows the published state without subscribing to events or cloning AppState;
+cache presence uses a non-touching probe and cannot refresh LRU recency. State
+and byte presence are a non-atomic observation, not a promise about later loads.
+No profile identity, MXC, source reference, URL, or image content is exported.
+Renderer recoverable-image hooks retain only saturating page-lifetime load/error
+event totals. These include all hook users, not unique images or own-avatar-only
+failures, and survive replacement of failed images by fallback initials. They
+add no request, retry, timer, or eviction policy.
+
 Diagnostic export observes each account's event broadcast without creating a
 receiver or consuming events. It reports retained event count, receiver count,
 capacity and a lower bound for inline event slots. Cached command connections

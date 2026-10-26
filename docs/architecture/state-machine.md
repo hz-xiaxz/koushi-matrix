@@ -3357,6 +3357,13 @@ timeline and profile surfaces; it is not evidence of membership in a room.
 `AppState.profile.local_aliases` holds personal local display
 aliases keyed by Matrix user id, and room/space/invite summaries carry their
 own avatar DTOs.
+Own-profile metadata refresh and matching profile-update completion preserve the
+previous own avatar's thumbnail state only when the incoming avatar has the
+same exact MXC and `NotRequested`. This includes in-flight and terminal states;
+metadata refresh must not reset their request/deduplication lifetime. Explicit
+incoming thumbnail state wins. A changed MXC starts its own lifetime and `None`
+removes the avatar. Thumbnail state from another user's or room's copy must not
+override the previous own avatar during this merge.
 React renders these DTOs and dispatches typed profile commands only; it must not
 query Matrix profiles, parse MXC URIs, upload avatar bytes outside the command
 boundary, resolve personal aliases locally, or infer profile operation success

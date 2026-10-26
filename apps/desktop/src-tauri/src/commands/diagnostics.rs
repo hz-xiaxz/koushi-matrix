@@ -319,6 +319,14 @@ fn snapshot_with_media_memory_summaries(
 pub async fn get_diagnostic_snapshot(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDiagnosticLogSnapshot, String> {
+    for (index, (_, connection)) in state
+        .runtime
+        .tab_connections_without_events()
+        .iter()
+        .enumerate()
+    {
+        connection.record_own_avatar_diagnostics(index as u64);
+    }
     let queues = state.runtime.event_queue_diagnostics();
     let receivers = state.connection.cached_event_receiver_diagnostics().await;
     record_event_queue_summaries(&queues, &receivers);

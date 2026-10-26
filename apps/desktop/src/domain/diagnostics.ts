@@ -19,6 +19,7 @@ import type { RightPanelMode } from "./rightPanel";
 import type { QaSendSmokeStatus } from "./qaSendSmoke";
 import type { UiLatencyDiagnostics } from "./uiLatency";
 import type { RendererMemoryDiagnostics } from "./rendererMemoryDiagnostics";
+import { avatarImageDiagnostics } from "./avatarImageDiagnostics";
 
 export interface DiagnosticLogEntry {
   timestampMs: number;
@@ -295,12 +296,16 @@ export function diagnosticReport({
   const roomClassification = summarizeRoomClassification(snapshot);
   const diagnosticLog = formatDiagnosticLog(logEntries);
   const securityDiagnosticLog = formatSecurityDiagnostics(securityDiagnostics);
+  const ownAvatar = snapshot.state.domain.profile.own.avatar;
+  const avatarImages = avatarImageDiagnostics();
   const lines = [
     "Koushi diagnostics",
     `Koushi version: ${koushiVersion}`,
     `Generated at: ${new Date().toISOString()}`,
     `Session: ${snapshot.state.domain.session.kind}`,
     `Sync: ${syncStateLabel(snapshot.state.domain.sync)}`,
+    `Own avatar (renderer snapshot): avatar_present=${Boolean(ownAvatar)} thumbnail=${ownAvatar?.thumbnail.kind ?? "absent"} failure=${ownAvatar?.thumbnail.kind === "failed" ? ownAvatar.thumbnail.failureKind : "none"}`,
+    `Avatar image events: loads=${avatarImages.loads} errors=${avatarImages.errors} scope=entity_avatar_hook_page_lifetime_events_not_unique_images_or_own_avatar_only`,
     `Rooms: ${snapshot.state.domain.rooms.length}`,
     `Spaces: ${snapshot.state.domain.spaces.length}`,
     `Room classification: domain_dms=${roomClassification.domainDms} sidebar_dms=${roomClassification.sidebarDms} room_list_items=${roomClassification.roomListItems} room_list_dm_items=${roomClassification.roomListDmItems} active_filter=${roomClassification.activeFilter}`,

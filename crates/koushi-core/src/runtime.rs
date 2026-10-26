@@ -8,6 +8,7 @@
 //!   `StateDelta` per processed command batch
 
 mod activity;
+mod avatar_diagnostics;
 mod composer;
 mod connection;
 mod deferred_dispatch;
