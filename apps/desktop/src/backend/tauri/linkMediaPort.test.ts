@@ -92,6 +92,11 @@ describe("Tauri link/media port", () => {
       "koushi-media://localhost/download/jpg/1234567890123456/6543210987654321"
     );
     expect(
+      tauriLinkMediaPort.renderableMediaDownloadSourceUrl(DOWNLOAD_REF, "image/jpg")
+    ).toBe(
+      "koushi-media://localhost/download/jpg/1234567890123456/6543210987654321"
+    );
+    expect(
       tauriLinkMediaPort.mediaSourceUrl(DOWNLOAD_REF, "image/png")
     ).toBe(
       "koushi-media://localhost/download/png/1234567890123456/6543210987654321"

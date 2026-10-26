@@ -14,6 +14,7 @@ const DOWNLOAD_SOURCE_REF = /^download\/(\d{1,16})\/(\d{1,16})$/;
 const MEDIA_DOWNLOAD_MIME_TOKENS: Readonly<Record<string, string>> = {
   "image/png": "png",
   "image/jpeg": "jpg",
+  "image/jpg": "jpg",
   "image/gif": "gif",
   "image/webp": "webp",
   "image/avif": "avif"
