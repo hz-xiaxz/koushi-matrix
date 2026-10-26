@@ -9,6 +9,7 @@ mod dto;
 pub mod image_io_decoder;
 pub mod keyring_backend;
 mod mcp;
+mod media_download;
 mod media_save;
 mod oidc_browser;
 mod process_memory;
@@ -1459,6 +1460,14 @@ pub fn run() {
         .plugin(tauri_plugin_deep_link::init())
         .register_uri_scheme_protocol("koushi-thumbnail", move |_, request| {
             renderable_thumbnail_protocol_response(request)
+        })
+        .register_uri_scheme_protocol("koushi-media", |context, request| {
+            let cache_roots = context
+                .app_handle()
+                .try_state::<CoreRuntimeState>()
+                .map(|state| state.runtime.media_cache_dirs())
+                .unwrap_or_default();
+            media_download::protocol_response(&request, &cache_roots)
         })
         .plugin(tauri_plugin_opener::init())
         .plugin(tauri_plugin_dialog::init())

@@ -1685,7 +1685,7 @@ fn media_download_failed_does_not_replace_ready_media_for_active_room() {
     state.timeline.media_downloads.insert(
         "$ev:example.invalid".to_owned(),
         TimelineMediaDownloadState::Ready {
-            source_url: "/tmp/koushi-media.bin".to_owned(),
+            source_ref: "download/1234567890123456/6543210987654321".to_owned(),
             width: Some(100),
             height: Some(80),
             mime_type: Some("image/png".to_owned()),
@@ -1712,7 +1712,7 @@ fn media_download_failed_does_not_replace_ready_media_for_active_room() {
     assert_eq!(
         state.timeline.media_downloads.get("$ev:example.invalid"),
         Some(&TimelineMediaDownloadState::Ready {
-            source_url: "/tmp/koushi-media.bin".to_owned(),
+            source_ref: "download/1234567890123456/6543210987654321".to_owned(),
             width: Some(100),
             height: Some(80),
             mime_type: Some("image/png".to_owned()),
@@ -1731,7 +1731,7 @@ fn media_download_updated_ignored_for_inactive_room() {
             room_id: "!other:example.invalid".to_owned(),
             event_id: "$ev:example.invalid".to_owned(),
             state: TimelineMediaDownloadState::Ready {
-                source_url: "/tmp/x.png".to_owned(),
+                source_ref: "download/1234567890123456/6543210987654321".to_owned(),
                 width: Some(100),
                 height: Some(100),
                 mime_type: Some("image/png".to_owned()),

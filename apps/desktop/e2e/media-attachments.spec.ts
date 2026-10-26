@@ -10,7 +10,8 @@
  *  4. Indeterminate state when progress is null (pending with no bytes/total).
  *  5. Dedupe: a second click while pending does NOT dispatch a second
  *     download_media command.
- *  6. Ready image state renders <img> preview from Rust-owned source_url;
+ *  6. Ready image state renders <img> preview (the browser harness supplies a
+ *     data URL; Rust emits an opaque download ref in production);
  *     hover/focus reveals image-scoped details + download controls.
  *  7. Ready non-image state renders a transport-safe download button (not img),
  *     and repeated clicks keep ready state without re-dispatching download_media.
@@ -313,7 +314,7 @@ test("download button is disabled while pending, preventing duplicate dispatch",
 // 6. Ready image — img preview rendered
 // ---------------------------------------------------------------------------
 
-test("ready image state renders img element with Rust-owned source_url", async ({ page }) => {
+test("ready image state renders an img preview", async ({ page }) => {
   await gotoReadyShell(page);
   const eventId = "$media-ready-img:example.invalid";
   await seedTimelineItems(page, [makeImageItem(eventId)]);
@@ -322,7 +323,7 @@ test("ready image state renders img element with Rust-owned source_url", async (
   const syntheticUrl = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
   await pushMediaDownloadState(page, eventId, {
     kind: "ready",
-    source_url: syntheticUrl,
+    source_ref: syntheticUrl,
     width: 800,
     height: 600,
     mime_type: "image/jpeg"
@@ -360,7 +361,7 @@ test("ready image details action exposes metadata and click opens viewer without
   const syntheticUrl = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
   await pushMediaDownloadState(page, eventId, {
     kind: "ready",
-    source_url: syntheticUrl,
+    source_ref: syntheticUrl,
     width: 800,
     height: 600,
     mime_type: "image/jpeg"
@@ -401,7 +402,7 @@ test("timeline media viewer keeps image inside the visible stage", async ({ page
   const syntheticUrl = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
   await pushMediaDownloadState(page, eventId, {
     kind: "ready",
-    source_url: syntheticUrl,
+    source_ref: syntheticUrl,
     width: 4800,
     height: 3600,
     mime_type: "image/jpeg"
@@ -466,7 +467,7 @@ test("thread panel ready image preview fits inside the panel width", async ({
   const syntheticUrl = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
   await pushMediaDownloadState(page, eventId, {
     kind: "ready",
-    source_url: syntheticUrl,
+    source_ref: syntheticUrl,
     width: 2048,
     height: 1188,
     mime_type: "image/jpeg"
@@ -532,7 +533,7 @@ test("panel resize keeps image frames in step with their images", async ({ page 
   );
   await pushMediaDownloadState(page, threadEventId, {
     kind: "ready",
-    source_url: syntheticUrl,
+    source_ref: syntheticUrl,
     width: 800,
     height: 600,
     mime_type: "image/jpeg"
@@ -541,7 +542,7 @@ test("panel resize keeps image frames in step with their images", async ({ page 
   await seedTimelineItems(page, [makeImageItem(roomEventId)]);
   await pushMediaDownloadState(page, roomEventId, {
     kind: "ready",
-    source_url: syntheticUrl,
+    source_ref: syntheticUrl,
     width: 800,
     height: 600,
     mime_type: "image/jpeg"
@@ -650,7 +651,7 @@ test("ready file state shows download button, not img element", async ({ page })
   const syntheticUrl = "data:application/pdf;base64,JVBERi0=";
   await pushMediaDownloadState(page, eventId, {
     kind: "ready",
-    source_url: syntheticUrl,
+    source_ref: syntheticUrl,
     width: null,
     height: null,
     mime_type: "application/pdf"
@@ -674,7 +675,7 @@ test("ready file download button is repeatable without redispatching download_me
   const syntheticUrl = "data:application/pdf;base64,JVBERi0=";
   await pushMediaDownloadState(page, eventId, {
     kind: "ready",
-    source_url: syntheticUrl,
+    source_ref: syntheticUrl,
     width: null,
     height: null,
     mime_type: "application/pdf"
@@ -760,7 +761,7 @@ test("macOS media viewer leaves the native window buttons above its toolbar", as
   await seedTimelineItems(page, [makeImageItem(eventId)]);
   await pushMediaDownloadState(page, eventId, {
     kind: "ready",
-    source_url: "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==",
+    source_ref: "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==",
     width: 800, height: 600, mime_type: "image/jpeg"
   });
   await page.locator(`[data-event-id="${eventId}"]`).getByRole("button", { name: t("timeline.mediaOpenFile") }).click();
@@ -792,7 +793,7 @@ test("short encrypted image keeps both controls and encryption badge inside its 
   const syntheticUrl = "data:image/gif;base64,R0lGODlhAQABAAAAACH5BAEKAAEALAAAAAABAAEAAAICTAEAOw==";
   await pushMediaDownloadState(page, eventId, {
     kind: "ready",
-    source_url: syntheticUrl,
+    source_ref: syntheticUrl,
     width: 4000,
     height: 50,
     mime_type: "image/jpeg"

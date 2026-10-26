@@ -656,7 +656,7 @@ mod tests {
         );
 
         let ready = TimelineMediaDownloadState::Ready {
-            source_url: "/data/image.png".to_owned(),
+            source_ref: "download/1234567890123456/6543210987654321".to_owned(),
             width: Some(640),
             height: Some(480),
             mime_type: Some("image/png".to_owned()),
@@ -665,7 +665,7 @@ mod tests {
             serde_json::to_value(&ready).unwrap(),
             json!({
                 "kind": "ready",
-                "source_url": "/data/image.png",
+                "source_ref": "download/1234567890123456/6543210987654321",
                 "width": 640,
                 "height": 480,
                 "mime_type": "image/png"

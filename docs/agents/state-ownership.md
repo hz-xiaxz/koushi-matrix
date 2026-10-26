@@ -950,8 +950,10 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   a room title in React.
 - `AvatarImage.mxc_uri` is metadata, not a render URL. GUI code renders an `<img>`
   only for `AvatarThumbnailState::Ready.source_url`; otherwise it uses the
-  colored-initial fallback. This keeps the current #15 media contract intact
-  because timeline `download_media` emits byte counts only.
+  colored-initial fallback. Timeline downloads follow the same opaque-reference
+  rule: `TimelineMediaDownloadState::Ready.source_ref` names the managed cache
+  entry (`download/<room-hash>/<event-hash>`), and only the platform port turns
+  it into a render or save URL; no filesystem path crosses the boundary.
 - Profile update completion settles a user-visible pending state. Actor code must
   deliver `ProfileUpdateSucceeded` / `ProfileUpdateFailed` reliably via the action
   channel, not as a best-effort notification that can leave settings controls
@@ -1114,13 +1116,14 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
 - Core owns downloaded-media save policy through `MediaSaveFilesystem`: source
   emptiness/URL/absolute checks, canonical cache/source containment, symlink and
   component-prefix rejection, destination admission, parent creation ordering,
-  and copy admission. Tauri resolves the app-data cache root and selected
-  destination, and supplies only the native syscall port; paths never enter
-  Core state, events, commands, or diagnostics. Port and policy failures expose
-  closed private-safe kinds, never paths or raw filesystem errors. Linux
-  coverage uses deterministic port fakes plus a real temporary symlink escape;
-  Windows junction/canonicalization and short-name assumptions remain covered
-  by the hosted Windows gate rather than Core path normalization.
+  and copy admission. Tauri resolves the app-data cache root, the opaque
+  `download/<room-hash>/<event-hash>` ref from `TimelineMediaDownloadState::Ready`,
+  and the selected destination, and supplies only the native syscall port; paths
+  never enter Core state, events, commands, or diagnostics. Port and policy
+  failures expose closed private-safe kinds, never paths or raw filesystem
+  errors. Linux coverage uses deterministic port fakes plus a real temporary
+  symlink escape; Windows junction/canonicalization and short-name assumptions
+  remain covered by the hosted Windows gate rather than Core path normalization.
 - History export is Rust-owned end to end. `AppState.history_export` (Tauri
   `ui.history_export`) carries the request id, the room or Space scope, the
   range, and per-room phase, counts, skip reason, failure kind, and display

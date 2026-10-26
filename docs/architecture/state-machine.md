@@ -3040,9 +3040,12 @@ stateDiagram-v2
   remain inside Rust actor-private SDK media sources and are never serialized to
   React.
 - `DownloadMedia` resolves the actor-private media source by event id and emits
-  `MediaDownloadCompleted` with `byte_count` only. A future GUI save/open flow
-  must use a Rust-owned platform port or Tauri command that does not put bytes
-  into React state.
+  `MediaDownloadCompleted` with `byte_count` and an opaque app-owned
+  `source_ref` naming the managed cache entry, plus safe media metadata (mime
+  type and dimensions). A ref is `download/<room-hash>/<event-hash>`; it never
+  contains a filesystem path. The Tauri adapter resolves a ref to a render URL
+  or to the cache file for save/open, so local paths and bytes never enter Core
+  state, events, commands, or the webview.
 - Phase B GUI wiring is a transport client only: picker, paste, and full-surface
   HTML5 drop all enter one ingestion adapter that captures the current
   `ComposerTarget` and bytes before asynchronous staging. Tauri disables native
@@ -3559,11 +3562,12 @@ stateDiagram-v2
   A working set larger than the cache therefore settles into retained sources
   plus capacity failures instead of evicting and refetching forever. This bounds
   re-requesting; it never justifies a `Ready` that points at missing bytes.
-- The existing timeline media download contract emits byte counts only and does
-  not put downloaded bytes in React state. Avatar thumbnail source references
-  are opaque app-owned handles produced by Rust/platform media handling;
-  decrypted bytes, encrypted media keys, local filesystem paths, and raw SDK
-  errors stay outside snapshots and QA output.
+- The timeline media download contract emits byte counts, safe media metadata,
+  and an opaque app-owned `source_ref`; it does not put downloaded bytes in React
+  state. Avatar thumbnail and timeline download source references are opaque
+  app-owned handles produced by Rust/platform media handling; decrypted bytes,
+  encrypted media keys, local filesystem paths, and raw SDK errors stay outside
+  snapshots and QA output.
 
 ## Ignore, Block, And Report
 

@@ -23,7 +23,9 @@ pub enum TimelineMediaDownloadState {
         progress: Option<MediaTransferProgress>,
     },
     Ready {
-        source_url: String,
+        /// Opaque app-owned cache handle (`download/<room-hash>/<event-hash>`),
+        /// never a filesystem path. The platform adapter resolves it.
+        source_ref: String,
         width: Option<u64>,
         height: Option<u64>,
         mime_type: Option<String>,

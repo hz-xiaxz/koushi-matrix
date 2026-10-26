@@ -29,7 +29,7 @@ import type { TimelineTransport } from "./TimelineTransport";
 
 export type TimelineMediaViewerItem = {
   sourceUrl: string;
-  downloadSourceUrl: string;
+  downloadSourceRef: string;
   filename: string;
   size: number | null;
   mimeType: string | null;
@@ -150,11 +150,18 @@ export function TimelineMediaAttachment({
   } as CSSProperties;
   const readyImageDownload =
     downloadState?.kind === "ready" && media.kind === "Image" ? downloadState : null;
-  const readyImagePreview =
+  const readyImageMimeType = readyImageDownload?.mime_type ?? media.mimetype;
+  // An unknown image type has no protocol token; fall back to the plain
+  // download card instead of an <img> with an empty src.
+  const readyImageSourceUrl =
     readyImageDownload === null
       ? null
+      : mediaSourceUrl(readyImageDownload.source_ref, readyImageMimeType) || null;
+  const readyImagePreview =
+    readyImageDownload === null || readyImageSourceUrl === null
+      ? null
       : {
-          sourceUrl: mediaSourceUrl(readyImageDownload.source_url),
+          sourceUrl: readyImageSourceUrl,
           width: readyImageDownload.width,
           height: readyImageDownload.height
         };
@@ -163,10 +170,10 @@ export function TimelineMediaAttachment({
       ? null
       : {
           sourceUrl: readyImagePreview.sourceUrl,
-          downloadSourceUrl: readyImageDownload.source_url,
+          downloadSourceRef: readyImageDownload.source_ref,
           filename: media.filename,
           size: media.size,
-          mimeType: readyImageDownload?.mime_type ?? media.mimetype,
+          mimeType: readyImageMimeType,
           width: readyImagePreview.width,
           height: readyImagePreview.height,
           encrypted: media.source.encrypted,
@@ -191,13 +198,13 @@ export function TimelineMediaAttachment({
     }
     saveIntentRef.current = false;
     void saveMediaSource(
-      downloadState.source_url,
-      mediaSourceUrl(downloadState.source_url),
+      downloadState.source_ref,
+      mediaSourceUrl(downloadState.source_ref, downloadState.mime_type ?? media.mimetype),
       media.filename,
       saveName,
       onSaveMediaFile
     );
-  }, [downloadState, media.filename, onSaveMediaFile, saveName]);
+  }, [downloadState, media.filename, media.mimetype, onSaveMediaFile, saveName]);
   useEffect(() => {
     if (!detailsOpen) {
       return;
@@ -337,7 +344,7 @@ export function TimelineMediaAttachment({
                     onClick={(event) => {
                       event.stopPropagation();
                       void saveMediaSource(
-                        readyImageDownload.source_url,
+                        readyImageDownload.source_ref,
                         readyImagePreview.sourceUrl,
                         media.filename,
                         saveName,
@@ -483,8 +490,11 @@ export function TimelineMediaAttachment({
                 aria-label={t("timeline.downloadMedia", { filename: media.filename })}
                 onClick={() => {
                   void saveMediaSource(
-                    downloadState.source_url,
-                    mediaSourceUrl(downloadState.source_url),
+                    downloadState.source_ref,
+                    mediaSourceUrl(
+                      downloadState.source_ref,
+                      downloadState.mime_type ?? media.mimetype
+                    ),
                     media.filename,
                     saveName,
                     onSaveMediaFile
@@ -639,7 +649,7 @@ export function TimelineMediaViewer({
                   aria-label={t("timeline.downloadMedia", { filename: item.filename })}
                   onClick={() => {
                     void saveMediaSource(
-                      item.downloadSourceUrl,
+                      item.downloadSourceRef,
                       item.sourceUrl,
                       item.filename,
                       item.saveName,

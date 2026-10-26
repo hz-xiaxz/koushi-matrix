@@ -965,7 +965,7 @@ fn core_event_wire_format_matches_checked_in_contract_artifact() {
             request_id,
             key: key.clone(),
             event_id: "$media1".to_owned(),
-            source_url: "/data/media_downloads/!r:example.test/$media1.bin".to_owned(),
+            source_ref: "download/1234567890123456/6543210987654321".to_owned(),
             byte_count: 68,
             mimetype: Some("image/png".to_owned()),
             width: Some(2),

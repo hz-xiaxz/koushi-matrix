@@ -35,7 +35,7 @@ describe("link/media platform selection", () => {
     await runtime.saveReadyMediaFile("asset://account-media", "account.png", "tab-alice");
 
     expect(tauriLinkMediaPort.openHttpUrl).toHaveBeenCalledWith("https://example.com/path");
-    expect(tauriLinkMediaPort.mediaSourceUrl).toHaveBeenCalledWith("/tmp/media.png");
+    expect(tauriLinkMediaPort.mediaSourceUrl).toHaveBeenCalledWith("/tmp/media.png", undefined);
     expect(tauriLinkMediaPort.saveMediaFile).toHaveBeenCalledWith(
       "asset://media",
       "media.png",
@@ -63,7 +63,7 @@ describe("link/media platform selection", () => {
 
     expect(browserLinkMediaPort.openHttpUrl).toHaveBeenCalledTimes(1);
     expect(browserLinkMediaPort.openHttpUrl).toHaveBeenCalledWith("https://example.com/path");
-    expect(browserLinkMediaPort.mediaSourceUrl).toHaveBeenCalledWith("/tmp/media.png");
+    expect(browserLinkMediaPort.mediaSourceUrl).toHaveBeenCalledWith("/tmp/media.png", undefined);
     expect(browserLinkMediaPort.saveMediaFile).toHaveBeenCalledWith(
       "/tmp/media.png",
       "media.png",

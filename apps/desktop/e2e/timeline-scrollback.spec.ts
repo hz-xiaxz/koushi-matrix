@@ -1118,7 +1118,7 @@ test("known-dimension media keeps row height stable across download completion",
             request_id: "media-request",
             key,
             event_id: "$image70",
-            source_url: "appmedia://synthetic-image",
+            source_ref: "appmedia://synthetic-image",
             byte_count: 12345,
             mimetype: "image/png",
             width: 2048,
@@ -1134,7 +1134,7 @@ test("known-dimension media keeps row height stable across download completion",
   await page.evaluate(() =>
     window.__harness.setMediaDownloadState("$image70", {
       kind: "ready",
-      source_url: "appmedia://synthetic-image",
+      source_ref: "appmedia://synthetic-image",
       width: 2048,
       height: 1188,
       mime_type: "image/png"
@@ -1203,7 +1203,7 @@ test("missing-dimension media keeps row height stable across download completion
             request_id: "media-missing-request",
             key,
             event_id: "$image-missing70",
-            source_url: "appmedia://synthetic-image-missing",
+            source_ref: "appmedia://synthetic-image-missing",
             byte_count: 12345,
             mimetype: "image/png",
             width: 2048,
@@ -1218,7 +1218,7 @@ test("missing-dimension media keeps row height stable across download completion
   await page.evaluate(() =>
     window.__harness.setMediaDownloadState("$image-missing70", {
       kind: "ready",
-      source_url: "appmedia://synthetic-image-missing",
+      source_ref: "appmedia://synthetic-image-missing",
       width: 2048,
       height: 1188,
       mime_type: "image/png"

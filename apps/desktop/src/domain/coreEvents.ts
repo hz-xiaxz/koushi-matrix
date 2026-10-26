@@ -631,7 +631,7 @@ export type TimelineEvent =
         request_id: RequestId;
         key: TimelineKey;
         event_id: string;
-        source_url: string;
+        source_ref: string;
         byte_count: number;
         mimetype: string | null;
         width: number | null;

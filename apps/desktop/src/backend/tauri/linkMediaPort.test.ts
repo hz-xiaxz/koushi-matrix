@@ -26,6 +26,8 @@ afterEach(() => {
   vi.clearAllMocks();
 });
 
+const DOWNLOAD_REF = "download/1234567890123456/6543210987654321";
+
 describe("Tauri link/media port", () => {
   it("opens through Tauri and falls back to an isolated browser window", async () => {
     await tauriLinkMediaPort.openHttpUrl("https://example.com/");
@@ -75,6 +77,40 @@ describe("Tauri link/media port", () => {
     ).toBeNull();
   });
 
+  it("mints a media protocol URL only for a validated download ref", () => {
+    expect(
+      tauriLinkMediaPort.renderableMediaDownloadSourceUrl(DOWNLOAD_REF, "image/png")
+    ).toBe(
+      "koushi-media://localhost/download/png/1234567890123456/6543210987654321"
+    );
+    expect(
+      tauriLinkMediaPort.renderableMediaDownloadSourceUrl(
+        DOWNLOAD_REF,
+        "image/jpeg; charset=binary"
+      )
+    ).toBe(
+      "koushi-media://localhost/download/jpg/1234567890123456/6543210987654321"
+    );
+    expect(
+      tauriLinkMediaPort.mediaSourceUrl(DOWNLOAD_REF, "image/png")
+    ).toBe(
+      "koushi-media://localhost/download/png/1234567890123456/6543210987654321"
+    );
+    expect(
+      tauriLinkMediaPort.renderableMediaDownloadSourceUrl(DOWNLOAD_REF, "application/pdf")
+    ).toBeNull();
+    expect(
+      tauriLinkMediaPort.renderableMediaDownloadSourceUrl("../private.bin", "image/png")
+    ).toBeNull();
+    expect(
+      tauriLinkMediaPort.renderableMediaDownloadSourceUrl(
+        "download/1/2/3",
+        "image/png"
+      )
+    ).toBeNull();
+    expect(tauriLinkMediaPort.mediaSourceUrl(DOWNLOAD_REF, "application/pdf")).toBe("");
+  });
+
   it("mints the Windows localhost thumbnail URI on Windows", () => {
     const platform = Object.getOwnPropertyDescriptor(window.navigator, "platform");
     Object.defineProperty(window.navigator, "platform", {
@@ -88,6 +124,11 @@ describe("Tauri link/media port", () => {
       expect(
         tauriLinkMediaPort.renderableThumbnailSourceUrl("link-preview/fedcba9876543210")
       ).toBe("http://koushi-thumbnail.localhost/link-preview/fedcba9876543210");
+      expect(
+        tauriLinkMediaPort.renderableMediaDownloadSourceUrl(DOWNLOAD_REF, "image/png")
+      ).toBe(
+        "http://koushi-media.localhost/download/png/1234567890123456/6543210987654321"
+      );
     } finally {
       if (platform) {
         Object.defineProperty(window.navigator, "platform", platform);
@@ -96,7 +137,7 @@ describe("Tauri link/media port", () => {
   });
 
   it("preserves the default-path, dialog and save command contract", async () => {
-    await tauriLinkMediaPort.saveMediaFile("asset://media", ' report:*?.png ', null);
+    await tauriLinkMediaPort.saveMediaFile(DOWNLOAD_REF, ' report:*?.png ', null);
 
     // #1135: Core owns the naming policy, so it receives the attachment's own
     // filename and the facts the renderer resolved.
@@ -112,7 +153,7 @@ describe("Tauri link/media port", () => {
       defaultPath: "/downloads/default.png"
     });
     expect(invoke).toHaveBeenCalledWith("save_downloaded_media", {
-      sourceUrl: "asset://media",
+      sourceRef: DOWNLOAD_REF,
       destinationPath: "/downloads/chosen.png"
     });
   });
@@ -121,7 +162,7 @@ describe("Tauri link/media port", () => {
     // 2026-10-05T09:19:00Z; the offset the platform resolves for that instant is
     // forwarded as minutes ahead of UTC, which is what Core's policy expects.
     const timestampMs = 1_791_191_940_000;
-    await tauriLinkMediaPort.saveMediaFile("asset://media", "image.png", {
+    await tauriLinkMediaPort.saveMediaFile(DOWNLOAD_REF, "image.png", {
       kind: "image",
       timestampMs
     });
@@ -136,7 +177,7 @@ describe("Tauri link/media port", () => {
   });
 
   it("forwards an empty filename to the naming policy instead of renaming it first", async () => {
-    await tauriLinkMediaPort.saveMediaFile("asset://media", "   ", {
+    await tauriLinkMediaPort.saveMediaFile(DOWNLOAD_REF, "   ", {
       kind: "image",
       timestampMs: null
     });
@@ -154,14 +195,14 @@ describe("Tauri link/media port", () => {
     const accountTabId = "account:alice";
     setRendererSelectedAccountTabId(accountTabId);
     await tauriLinkMediaPort.saveMediaFile(
-      "/accounts/alice/media-downloads/item.bin",
+      DOWNLOAD_REF,
       "media.png",
       null,
       accountTabId
     );
 
     expect(invoke).toHaveBeenCalledWith("save_downloaded_media", {
-      sourceUrl: "/accounts/alice/media-downloads/item.bin",
+      sourceRef: DOWNLOAD_REF,
       destinationPath: "/downloads/chosen.png",
       accountTabId
     });
@@ -177,7 +218,7 @@ describe("Tauri link/media port", () => {
 
     await expect(
       tauriLinkMediaPort.saveMediaFile(
-        "/accounts/alice/media-downloads/item.bin",
+        DOWNLOAD_REF,
         "media.png",
         null,
         accountTabId
@@ -188,7 +229,7 @@ describe("Tauri link/media port", () => {
 
   it("does not save when the dialog is cancelled", async () => {
     vi.mocked(saveDialog).mockResolvedValueOnce(null);
-    await tauriLinkMediaPort.saveMediaFile("asset://media", "media.png", null);
+    await tauriLinkMediaPort.saveMediaFile(DOWNLOAD_REF, "media.png", null);
 
     expect(invoke).not.toHaveBeenCalledWith("save_downloaded_media", expect.anything());
   });

@@ -2744,7 +2744,7 @@ test("room selection ignores unrelated avatar thumbnail bursts headlessly", asyn
             mxc_uri: `mxc://example.invalid/unrelated-avatar-${index}`,
             thumbnail: {
               kind: "ready",
-              source_url: "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
+              source_ref: "data:image/gif;base64,R0lGODlhAQABAAAAACw=",
               width: 1,
               height: 1,
               mime_type: "image/gif"
