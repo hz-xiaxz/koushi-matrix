@@ -75,7 +75,6 @@ interface PickerResizeDrag {
   pointer: { x: number; y: number };
   /** Panel rectangle when the drag began: the grabbed edges move from here. */
   rect: FloatingRect;
-  bounds: FloatingRect;
   /** Physical edges the grabbed handle moves: -1 is the left/top one. */
   horizontal: -1 | 0 | 1;
   vertical: -1 | 0 | 1;
@@ -189,11 +188,16 @@ export function EmojiPicker({
     size ? constrainPickerSize(...size) : [EMOJI_PICKER_INLINE_SIZE_PX, EMOJI_PICKER_BLOCK_SIZE_PX]
   );
   const drag = useRef<PickerResizeDrag | null>(null);
-  /** Rectangle a pointer resize pinned; until it is set the panel is anchored. */
+  /**
+   * Edges a pointer resize must hold still (one per axis); until set, the panel
+   * is anchored.
+   */
   const [pinnedGeometry, setPinnedGeometry] = useState<{
-    left: number;
+    bottom: number | null;
+    left: number | null;
     marked: FrameZoneName;
-    top: number;
+    right: number | null;
+    top: number | null;
   } | null>(null);
   const [query, setQuery] = useState("");
   const [activeCategory, setActiveCategory] = useState<
@@ -316,7 +320,6 @@ export function EmojiPicker({
     event.preventDefault();
     const rect = panelRef.current.getBoundingClientRect();
     drag.current = {
-      bounds: resolvedPlacement.bounds,
       horizontal: zone.horizontal,
       marked: markedZone,
       moved: false,
@@ -342,13 +345,16 @@ export function EmojiPicker({
         : start.rect.bottom - start.rect.top + start.vertical * (event.clientY - start.pointer.y),
     );
     start.moved = true;
-    const shownWidth = Math.min(start.size[0], start.bounds.right - start.bounds.left);
-    const shownHeight = Math.min(start.size[1], start.bounds.bottom - start.bounds.top);
     setDraftSize(start.size);
+    // Record the edge this gesture must hold still. The rendered size is
+    // narrowed from that edge to the layer bounds, so dragging an edge past a
+    // boundary cannot translate the opposite edge (#1613).
     setPinnedGeometry({
-      left: start.horizontal < 0 ? start.rect.right - shownWidth : start.rect.left,
+      bottom: start.vertical < 0 ? start.rect.bottom : null,
+      left: start.horizontal < 0 ? null : start.rect.left,
       marked: start.marked,
-      top: start.vertical < 0 ? start.rect.bottom - shownHeight : start.rect.top,
+      right: start.horizontal < 0 ? start.rect.right : null,
+      top: start.vertical < 0 ? null : start.rect.top,
     });
   };
 

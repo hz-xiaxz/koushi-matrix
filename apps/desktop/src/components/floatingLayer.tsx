@@ -341,24 +341,52 @@ export function floatingPlacementStyle(
  * Style a panel at a rectangle the user dragged.
  *
  * A resize moves the panel off its anchor, so the pinned rectangle replaces
- * the anchor-derived one; it is still clamped into the same bounds, and the
- * caller's preferred size is only narrowed for the rendered box exactly as the
- * resolver narrows it, so a temporary small window cannot overwrite it.
+ * the anchor-derived one. Each axis records the edge the drag must not move:
+ * `left`/`top` stay fixed for a right/bottom-edge drag, `right`/`bottom` for a
+ * left/top-edge drag. The rendered size is narrowed from that edge to the
+ * layer bounds, so a drag past a boundary stops the grabbed edge instead of
+ * translating the pinned one (#1613). The caller's preferred size is kept, not
+ * overwritten, so a temporary small window cannot lose it.
  */
 export function pinnedPlacementStyle(
   resolved: FloatingPlacementResult,
-  pinned: { left: number; top: number },
+  pinned: {
+    left: number | null;
+    right: number | null;
+    top: number | null;
+    bottom: number | null;
+  },
   inlineSize: number,
   blockSize: number,
 ): CSSProperties {
   const { bounds } = resolved;
-  const inline = Math.min(inlineSize, bounds.right - bounds.left);
-  const block = Math.min(blockSize, bounds.bottom - bounds.top);
+  const maxInline = Math.max(0, bounds.right - bounds.left);
+  const maxBlock = Math.max(0, bounds.bottom - bounds.top);
+  const inline = Math.min(
+    inlineSize,
+    maxInline,
+    pinned.right !== null
+      ? Math.max(0, pinned.right - bounds.left)
+      : pinned.left !== null
+        ? Math.max(0, bounds.right - pinned.left)
+        : maxInline,
+  );
+  const block = Math.min(
+    blockSize,
+    maxBlock,
+    pinned.bottom !== null
+      ? Math.max(0, pinned.bottom - bounds.top)
+      : pinned.top !== null
+        ? Math.max(0, bounds.bottom - pinned.top)
+        : maxBlock,
+  );
+  const left = pinned.right !== null ? pinned.right - inline : (pinned.left ?? bounds.left);
+  const top = pinned.bottom !== null ? pinned.bottom - block : (pinned.top ?? bounds.top);
   return {
     blockSize: `${block}px`,
     inlineSize: `${inline}px`,
-    left: `${clamp(pinned.left, bounds.left, Math.max(bounds.left, bounds.right - inline))}px`,
-    top: `${clamp(pinned.top, bounds.top, Math.max(bounds.top, bounds.bottom - block))}px`,
+    left: `${clamp(left, bounds.left, Math.max(bounds.left, bounds.right - inline))}px`,
+    top: `${clamp(top, bounds.top, Math.max(bounds.top, bounds.bottom - block))}px`,
   };
 }
 
