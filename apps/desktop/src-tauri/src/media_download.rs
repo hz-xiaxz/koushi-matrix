@@ -184,18 +184,21 @@ mod tests {
         std::fs::write(&outside, b"secret").expect("outside file");
         let link = root.join("1234567890123456").join("1111111111111111.bin");
         #[cfg(unix)]
-        std::os::unix::fs::symlink(&outside, &link).expect("symlink");
+        {
+            std::os::unix::fs::symlink(&outside, &link).expect("symlink");
+            let response = protocol_response(
+                &request("/download/png/1234567890123456/1111111111111111"),
+                std::slice::from_ref(&root),
+            );
+            assert_eq!(response.status(), StatusCode::NOT_FOUND);
+        }
         #[cfg(not(unix))]
         {
-            drop(link);
+            // Windows junctions and symlinks need privileges; the hosted
+            // Windows gate covers those assumptions instead.
+            assert!(!link.exists());
             drop(outside);
-            return;
         }
-        let response = protocol_response(
-            &request("/download/png/1234567890123456/1111111111111111"),
-            std::slice::from_ref(&root),
-        );
-        assert_eq!(response.status(), StatusCode::NOT_FOUND);
         drop(temp);
     }
 }
