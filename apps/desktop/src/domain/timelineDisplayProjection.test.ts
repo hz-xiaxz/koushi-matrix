@@ -89,6 +89,55 @@ describe("Rust timeline display adapter", () => {
     });
   });
 
+  test("puts a root-less thread placeholder inside its reply's day (#1620)", () => {
+    const dayOne = Date.UTC(2027, 0, 1, 12);
+    const dayTwo = Date.UTC(2027, 0, 2, 18);
+    const before = message("$before", dayOne);
+    const after = message("$after", dayTwo + 60_000);
+    const divider = (id: string, timestamp: number): TimelineItem => ({
+      ...message(id, timestamp),
+      id: { Synthetic: { synthetic_id: `date-divider-input-${id}` } }
+    });
+    const placeholderKinds = [
+      { kind: "threadRootPending" as const },
+      { kind: "threadRootFailed" as const, failure_kind: "notFound" as const }
+    ];
+
+    for (const placeholderKind of placeholderKinds) {
+      const placeholder: TimelineItem = {
+        ...message("$reply", dayTwo),
+        id: { Synthetic: { synthetic_id: "thread-root-slot:$hidden-root" } },
+        timestamp_ms: null,
+        display_metadata: {
+          row_id: "thread-root:$hidden-root",
+          kind: placeholderKind,
+          content_event_id: "$hidden-root",
+          activity_event_id: "$reply",
+          display_timestamp_ms: dayTwo
+        }
+      };
+
+      const rows = projectTimelineDisplayRows([
+        divider("$day-one", dayOne),
+        before,
+        placeholder,
+        divider("$day-two", dayTwo),
+        after
+      ]);
+
+      expect(rows.filter((row) => row.kind === "dateDivider")).toHaveLength(2);
+      const dayTwoDivider = rows.findIndex(
+        (row) => row.kind === "dateDivider" && row.display_timestamp_ms === dayTwo
+      );
+      expect(dayTwoDivider, placeholderKind.kind).toBeGreaterThan(-1);
+      expect(rows[dayTwoDivider + 1]).toMatchObject({
+        kind: placeholderKind.kind,
+        row_id: "thread-root:$hidden-root"
+      });
+      expect(rows[dayTwoDivider + 1]?.display_timestamp_ms).toBe(dayTwo);
+    }
+  });
+
   test("preserves renderer date dividers without changing Rust event order", () => {
     const first = message("$a", Date.UTC(2027, 0, 1));
     const second = message("$b", Date.UTC(2027, 0, 2));

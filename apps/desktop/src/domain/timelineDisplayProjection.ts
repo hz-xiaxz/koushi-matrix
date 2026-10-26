@@ -166,7 +166,15 @@ function rebuildDateDividers(rows: readonly TimelineDisplayRow[]): TimelineDispl
 function isDateDividerSource(row: TimelineDisplayRow): boolean {
   return (
     !row.item.is_hidden &&
-    ("Event" in row.item.id || "Transaction" in row.item.id)
+    ("Event" in row.item.id ||
+      "Transaction" in row.item.id ||
+      // A root-less thread placeholder is a Synthetic row positioned at its
+      // latest reply, and Rust gives it that reply's display timestamp. It
+      // must start its reply's day (#1620) instead of staying under the
+      // previous day until the next real event supplies a separator.
+      row.kind === "threadRoot" ||
+      row.kind === "threadRootPending" ||
+      row.kind === "threadRootFailed")
   );
 }
 
