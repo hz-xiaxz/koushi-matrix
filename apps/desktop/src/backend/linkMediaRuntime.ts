@@ -16,8 +16,8 @@ export async function openExternalHttpUrl(rawUrl: string): Promise<void> {
   await activePort().openHttpUrl(url);
 }
 
-export function mediaSourceUrl(sourceUrl: string): string {
-  return activePort().mediaSourceUrl(sourceUrl);
+export function mediaSourceUrl(sourceRef: string, mimeType?: string | null): string {
+  return activePort().mediaSourceUrl(sourceRef, mimeType);
 }
 
 export function renderableThumbnailSourceUrl(sourceRef: string): string | null {
@@ -25,11 +25,11 @@ export function renderableThumbnailSourceUrl(sourceRef: string): string | null {
 }
 
 export async function saveReadyMediaFile(
-  sourceUrl: string,
+  sourceRef: string,
   filename: string,
   accountTabId?: string,
   saveName: MediaSaveNameFacts | null = null
 ): Promise<void> {
   const port = activePort();
-  await port.saveMediaFile(sourceUrl, filename, saveName, accountTabId);
+  await port.saveMediaFile(sourceRef, filename, saveName, accountTabId);
 }

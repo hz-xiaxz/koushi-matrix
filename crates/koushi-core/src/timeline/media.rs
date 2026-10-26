@@ -45,7 +45,10 @@ pub(super) struct PrivateMediaEntry {
 
 pub(super) struct MediaDownloadReady {
     download_state: TimelineMediaDownloadState,
-    source_url: String,
+    /// Opaque cache handle for Core state/events; the local path stays private.
+    source_ref: String,
+    /// Managed cache file, kept actor-private for save/open callers.
+    path: PathBuf,
     byte_count: u64,
     mimetype: Option<String>,
     width: Option<u64>,
@@ -55,6 +58,20 @@ pub(super) struct MediaDownloadReady {
 pub(super) enum MediaDownloadOutcome {
     Ready(MediaDownloadReady),
     Failed(TimelineFailureKind),
+}
+
+/// The image sniffers need at most 12 bytes; 32 leaves room for a future kind.
+const MEDIA_DOWNLOAD_MIME_SNIFF_BYTES: usize = 32;
+
+/// A cached download has no event metadata to copy a mime type from, so read
+/// just the header. Renderable images must carry their type for the platform
+/// protocol that serves them (#1619).
+async fn sniff_image_mime(path: &Path) -> Option<String> {
+    use tokio::io::AsyncReadExt;
+    let mut file = tokio::fs::File::open(path).await.ok()?;
+    let mut header = [0u8; MEDIA_DOWNLOAD_MIME_SNIFF_BYTES];
+    let read = file.read(&mut header).await.ok()?;
+    koushi_media::image_kind(&header[..read]).map(|kind| kind.mime_type.to_owned())
 }
 
 fn media_download_selection_token(selection: &MediaDownloadSelection) -> &'static str {
@@ -394,27 +411,34 @@ impl TimelineActor {
 
         // Matrix IDs contain ':' which is not valid in Windows path components.
         // Use hashed path components so the local path is portable and private.
-        let dir_name = sanitize_matrix_id_for_path(&room_id);
-        let file_name = format!("{}.bin", sanitize_matrix_id_for_path(&event_id));
-        let dir = data_dir.join("media-downloads").join(dir_name);
-        let path = dir.join(file_name);
+        let room_hash = sanitize_matrix_id_for_path(&room_id);
+        let event_hash = sanitize_matrix_id_for_path(&event_id);
+        // The ref names the managed entry but carries no path: only the hashed
+        // components are visible to React and the platform adapter (#1619).
+        let source_ref = crate::media_download_ref::media_download_ref(&room_hash, &event_hash);
+        let dir = data_dir.join("media-downloads").join(&room_hash);
+        let path = dir.join(format!("{event_hash}.bin"));
         if let Ok(metadata) = tokio::fs::metadata(&path).await
             && metadata.is_file()
             && metadata.len() > 0
         {
             let byte_count = metadata.len();
-            let source_url = path.to_string_lossy().into_owned();
+            let mimetype = match entry.mimetype.clone() {
+                Some(mimetype) => Some(mimetype),
+                None => sniff_image_mime(&path).await,
+            };
             trace_media_download_worker("cache_hit", &request, Some(byte_count), None, None);
             return MediaDownloadOutcome::Ready(MediaDownloadReady {
                 download_state: TimelineMediaDownloadState::Ready {
-                    source_url: source_url.clone(),
+                    source_ref: source_ref.clone(),
                     width: entry.width,
                     height: entry.height,
-                    mime_type: entry.mimetype.clone(),
+                    mime_type: mimetype.clone(),
                 },
-                source_url,
+                source_ref,
+                path,
                 byte_count,
-                mimetype: entry.mimetype,
+                mimetype,
                 width: entry.width,
                 height: entry.height,
             });
@@ -477,18 +501,22 @@ impl TimelineActor {
             return MediaDownloadOutcome::Failed(TimelineFailureKind::Sdk);
         }
 
-        let source_url = path.to_string_lossy().into_owned();
+        let mimetype = match entry.mimetype.clone() {
+            Some(mimetype) => Some(mimetype),
+            None => koushi_media::image_kind(&bytes).map(|kind| kind.mime_type.to_owned()),
+        };
         trace_media_download_worker("completed", &request, Some(byte_count), None, None);
         MediaDownloadOutcome::Ready(MediaDownloadReady {
             download_state: TimelineMediaDownloadState::Ready {
-                source_url: source_url.clone(),
+                source_ref: source_ref.clone(),
                 width: entry.width,
                 height: entry.height,
-                mime_type: entry.mimetype.clone(),
+                mime_type: mimetype.clone(),
             },
-            source_url,
+            source_ref,
+            path,
             byte_count,
-            mimetype: entry.mimetype,
+            mimetype,
             width: entry.width,
             height: entry.height,
         })
@@ -507,7 +535,7 @@ impl TimelineActor {
                     request_id,
                     key: self.key.clone(),
                     event_id: event_id.clone(),
-                    source_url: ready.source_url,
+                    source_ref: ready.source_ref,
                     byte_count: ready.byte_count,
                     mimetype: ready.mimetype,
                     width: ready.width,
@@ -712,11 +740,7 @@ pub(super) async fn download_media_to_cache(
     )
     .await;
     match outcome {
-        MediaDownloadOutcome::Ready(ready) => Ok((
-            std::path::PathBuf::from(ready.source_url),
-            ready.byte_count,
-            ready.mimetype,
-        )),
+        MediaDownloadOutcome::Ready(ready) => Ok((ready.path, ready.byte_count, ready.mimetype)),
         MediaDownloadOutcome::Failed(kind) => Err(kind),
     }
 }

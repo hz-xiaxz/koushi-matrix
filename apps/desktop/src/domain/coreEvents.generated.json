@@ -1749,7 +1749,7 @@
           "connection_id": 3,
           "sequence": 7
         },
-        "source_url": "/data/media_downloads/!r:example.test/$media1.bin",
+        "source_ref": "download/1234567890123456/6543210987654321",
         "width": 2
       }
     },

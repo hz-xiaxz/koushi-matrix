@@ -9,7 +9,7 @@ afterEach(cleanup);
 
 const item: TimelineMediaViewerItem = {
   sourceUrl: "blob:viewer-image",
-  downloadSourceUrl: "blob:viewer-image",
+  downloadSourceRef: "blob:viewer-image",
   filename: "viewer-image.png",
   size: 2048,
   mimeType: "image/png",

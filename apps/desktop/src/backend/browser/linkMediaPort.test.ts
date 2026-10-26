@@ -23,7 +23,29 @@ test("browser link/media operations use native web behavior", async () => {
   expect(
     browserLinkMediaPort.renderableThumbnailSourceUrl("avatar/0123456789abcdef")
   ).toBeNull();
+  expect(
+    browserLinkMediaPort.renderableMediaDownloadSourceUrl(
+      "download/1234567890123456/6543210987654321",
+      "image/png"
+    )
+  ).toBe(
+    "koushi-media://localhost/download/png/1234567890123456/6543210987654321"
+  );
+  expect(
+    browserLinkMediaPort.mediaSourceUrl(
+      "download/1234567890123456/6543210987654321",
+      "image/webp"
+    )
+  ).toBe(
+    "koushi-media://localhost/download/webp/1234567890123456/6543210987654321"
+  );
+  expect(
+    browserLinkMediaPort.renderableMediaDownloadSourceUrl(
+      "download/1234567890123456/6543210987654321",
+      "application/pdf"
+    )
+  ).toBeNull();
   await expect(
-    browserLinkMediaPort.saveMediaFile("/tmp/media.png", "media.png", null)
+    browserLinkMediaPort.saveMediaFile("download/123/456", "media.png", null)
   ).resolves.toBe(undefined);
 });

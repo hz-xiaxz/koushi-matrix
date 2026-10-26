@@ -1351,7 +1351,7 @@ pub async fn download_media(
 #[tauri::command]
 pub async fn save_downloaded_media(
     account_tab_id: Option<String>,
-    source_url: String,
+    source_ref: String,
     destination_path: String,
     state: State<'_, CoreRuntimeState>,
 ) -> Result<(), String> {
@@ -1362,11 +1362,15 @@ pub async fn save_downloaded_media(
         .runtime
         .media_cache_dir_for_tab(&tab_id)
         .ok_or_else(|| "media cache is unavailable".to_owned())?;
+    // React only names the opaque ref; the adapter resolves it inside the
+    // account's managed cache (#1619).
+    let source_path = crate::media_download::cache_path_for_tab(&cache_root, &source_ref)
+        .ok_or_else(|| "media download reference is unavailable".to_owned())?;
     let filesystem = crate::media_save::NativeMediaSaveFilesystem;
     koushi_core::save_downloaded_media(
         &filesystem,
         &cache_root,
-        std::path::Path::new(source_url.trim()),
+        &source_path,
         std::path::Path::new(destination_path.trim()),
     )
     .map_err(|error| error.to_string())

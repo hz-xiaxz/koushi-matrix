@@ -54,7 +54,7 @@ export interface TimelineTransport {
   downloadMedia(roomId: string, eventId: string): Promise<void>;
   /** Save an already downloaded media file through the host desktop shell. */
   saveMediaFile?(
-    sourceUrl: string,
+    sourceRef: string,
     filename: string,
     saveName?: MediaSaveNameFacts | null
   ): Promise<void>;

@@ -125,11 +125,11 @@ export function createTauriTimelineTransport(accountTabId?: string): TimelineTra
       await invokeAccount("download_media", { roomId, eventId });
     },
     async saveMediaFile(
-      sourceUrl: string,
+      sourceRef: string,
       filename: string,
       saveName: MediaSaveNameFacts | null = null
     ) {
-      await saveReadyMediaFile(sourceUrl, filename, accountTabId, saveName);
+      await saveReadyMediaFile(sourceRef, filename, accountTabId, saveName);
     },
     async downloadAvatarThumbnail(mxcUri: string): Promise<string> {
       return invokeAccount<string>("download_avatar_thumbnail", { mxcUri });

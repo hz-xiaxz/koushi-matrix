@@ -147,7 +147,7 @@ describe("TimelineView", () => {
         mediaDownloads={{
           "$ready-image": {
             kind: "ready",
-            source_url: "appmedia://synthetic-image",
+            source_ref: "download/1111111111111111/2222222222222222",
             width: 2048,
             height: 1188,
             mime_type: "image/png"
@@ -215,7 +215,7 @@ describe("TimelineView", () => {
         mediaDownloads={{
           "$ready-file": {
             kind: "ready",
-            source_url: "asset://localhost/notes.pdf",
+            source_ref: "download/3333333333333333/4444444444444444",
             width: null,
             height: null,
             mime_type: "application/pdf"
@@ -294,7 +294,7 @@ describe("TimelineView", () => {
         mediaDownloads={{
           "$idle-file": {
             kind: "ready",
-            source_url: "asset://localhost/notes.pdf",
+            source_ref: "download/3333333333333333/4444444444444444",
             width: null,
             height: null,
             mime_type: "application/pdf"
@@ -304,7 +304,7 @@ describe("TimelineView", () => {
     );
 
     await waitFor(() =>
-      expect(saveMediaFile).toHaveBeenCalledWith("asset://localhost/notes.pdf", "notes.pdf", {
+      expect(saveMediaFile).toHaveBeenCalledWith("download/3333333333333333/4444444444444444", "notes.pdf", {
         kind: "file",
         timestampMs: 1_800_000_000_000
       })
@@ -352,7 +352,7 @@ describe("TimelineView", () => {
         mediaDownloads={{
           "$ready-without-click": {
             kind: "ready",
-            source_url: "asset://localhost/notes.pdf",
+            source_ref: "download/3333333333333333/4444444444444444",
             width: null,
             height: null,
             mime_type: "application/pdf"
@@ -421,7 +421,7 @@ describe("TimelineView", () => {
         mediaDownloads={{
           "$retry-file": {
             kind: "ready",
-            source_url: "asset://localhost/notes.pdf",
+            source_ref: "download/3333333333333333/4444444444444444",
             width: null,
             height: null,
             mime_type: "application/pdf"
@@ -431,7 +431,7 @@ describe("TimelineView", () => {
     );
 
     await waitFor(() =>
-      expect(saveMediaFile).toHaveBeenCalledWith("asset://localhost/notes.pdf", "notes.pdf", {
+      expect(saveMediaFile).toHaveBeenCalledWith("download/3333333333333333/4444444444444444", "notes.pdf", {
         kind: "file",
         timestampMs: 1_800_000_000_000
       })
@@ -474,7 +474,7 @@ describe("TimelineView", () => {
         mediaDownloads={{
           "$ready-image": {
             kind: "ready",
-            source_url: "asset://localhost/original-photo.png",
+            source_ref: "download/1234567890123456/6543210987654321",
             width: 2048,
             height: 1188,
             mime_type: "image/png"
@@ -503,7 +503,7 @@ describe("TimelineView", () => {
 
     await waitFor(() => {
       expect(saveMediaFile).toHaveBeenCalledWith(
-        "asset://localhost/original-photo.png",
+        "download/1234567890123456/6543210987654321",
         "photo.png",
         { kind: "image", timestampMs: 1_800_000_000_000 }
       );
@@ -584,7 +584,7 @@ describe("TimelineView", () => {
         mediaDownloads={{
           "$ready-image": {
             kind: "ready",
-            source_url: "asset://localhost/original-photo.png",
+            source_ref: "download/1234567890123456/6543210987654321",
             width: 2048,
             height: 1188,
             mime_type: "image/png"
@@ -630,7 +630,7 @@ describe("TimelineView", () => {
     expect(viewer.textContent).toContain("photo.png");
     expect(viewer.textContent).toContain("407 KB");
     expect(viewer.querySelector<HTMLImageElement>(".timeline-media-viewer-image")?.src).toContain(
-      "asset://localhost/original-photo.png"
+      "koushi-media://localhost/download/png/1234567890123456/6543210987654321"
     );
 
     fireEvent.click(screen.getByRole("button", { name: "Close media viewer" }));
@@ -656,7 +656,7 @@ describe("TimelineView", () => {
         mediaDownloads={{
           "$ready-image": {
             kind: "ready",
-            source_url: "asset://localhost/original-photo.png",
+            source_ref: "download/1234567890123456/6543210987654321",
             width: 2048,
             height: 1188,
             mime_type: "image/png"
@@ -714,7 +714,7 @@ describe("TimelineView", () => {
         mediaDownloads={{
           "$ready-image": {
             kind: "ready",
-            source_url: "asset://localhost/original-photo.png",
+            source_ref: "download/1234567890123456/6543210987654321",
             width: 2048,
             height: 1188,
             mime_type: "image/png"
@@ -792,7 +792,7 @@ describe("TimelineView", () => {
         mediaDownloads={{
           "$ready-image": {
             kind: "ready",
-            source_url: "asset://localhost/original-photo.png",
+            source_ref: "download/1234567890123456/6543210987654321",
             width: 2048,
             height: 1188,
             mime_type: "image/png"

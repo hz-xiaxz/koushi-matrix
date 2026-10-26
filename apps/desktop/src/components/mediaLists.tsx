@@ -81,7 +81,10 @@ function RoomMediaGallery({
         const download = mediaDownloads[item.event_id];
         const previewUrl =
           item.media.kind === "Image" && download?.kind === "ready"
-            ? mediaSourceUrl(download.source_url)
+            ? mediaSourceUrl(
+                download.source_ref,
+                download.mime_type ?? item.media.mimetype
+              )
             : null;
         return (
           <button
@@ -141,7 +144,10 @@ function MediaViewer({
   const download = mediaDownloads[item.event_id];
   const sourceUrl =
     item.media.kind === "Image" && download?.kind === "ready"
-      ? mediaSourceUrl(download.source_url)
+      ? mediaSourceUrl(
+          download.source_ref,
+          download.mime_type ?? item.media.mimetype
+        )
       : null;
 
   return (

@@ -4,6 +4,7 @@ import { openUrl } from "@tauri-apps/plugin-opener";
 
 import { t, tInvariant } from "../../i18n/messages";
 import type { LinkMediaPort } from "../linkMediaPort";
+import { renderableMediaDownloadSourceUrl } from "../linkMediaPort";
 import { isRendererSelectedAccountTabId } from "../client";
 
 function safeDownloadFilename(filename: string): string {
@@ -11,15 +12,23 @@ function safeDownloadFilename(filename: string): string {
   return (trimmed || "download").replace(/[\\/:*?"<>|]+/g, "_");
 }
 
-function renderableThumbnailProtocolBase(): string {
+function platformProtocolBase(protocol: string): string {
   const platform =
     typeof navigator === "undefined"
       ? ""
       : ((navigator as Navigator & { userAgentData?: { platform?: string } })
           .userAgentData?.platform ?? navigator.platform);
   return /win/i.test(platform)
-    ? "http://koushi-thumbnail.localhost/"
-    : "koushi-thumbnail://localhost/";
+    ? `http://${protocol}.localhost/`
+    : `${protocol}://localhost/`;
+}
+
+function renderableThumbnailProtocolBase(): string {
+  return platformProtocolBase("koushi-thumbnail");
+}
+
+function mediaDownloadProtocolBase(): string {
+  return platformProtocolBase("koushi-media");
 }
 
 export const tauriLinkMediaPort: LinkMediaPort = {
@@ -30,24 +39,40 @@ export const tauriLinkMediaPort: LinkMediaPort = {
       window.open(url, "_blank", "noopener,noreferrer");
     }
   },
-  mediaSourceUrl(sourceUrl) {
+  mediaSourceUrl(sourceRef, mimeType) {
+    if (sourceRef.startsWith("download/")) {
+      return (
+        renderableMediaDownloadSourceUrl(
+          sourceRef,
+          mimeType,
+          mediaDownloadProtocolBase()
+        ) ?? ""
+      );
+    }
     if (
-      sourceUrl.startsWith("http://") ||
-      sourceUrl.startsWith("https://") ||
-      sourceUrl.startsWith("asset://") ||
-      sourceUrl.startsWith("data:") ||
-      sourceUrl.startsWith("blob:")
+      sourceRef.startsWith("http://") ||
+      sourceRef.startsWith("https://") ||
+      sourceRef.startsWith("asset://") ||
+      sourceRef.startsWith("data:") ||
+      sourceRef.startsWith("blob:")
     ) {
-      return sourceUrl;
+      return sourceRef;
     }
     try {
-      const localPath = sourceUrl.startsWith("file://")
-        ? decodeURIComponent(new URL(sourceUrl).pathname)
-        : sourceUrl;
+      const localPath = sourceRef.startsWith("file://")
+        ? decodeURIComponent(new URL(sourceRef).pathname)
+        : sourceRef;
       return convertFileSrc(localPath);
     } catch {
-      return sourceUrl;
+      return sourceRef;
     }
+  },
+  renderableMediaDownloadSourceUrl(sourceRef, mimeType) {
+    return renderableMediaDownloadSourceUrl(
+      sourceRef,
+      mimeType,
+      mediaDownloadProtocolBase()
+    );
   },
   renderableThumbnailSourceUrl(sourceRef) {
     if (sourceRef.startsWith("data:") || sourceRef.startsWith("blob:")) {
@@ -58,7 +83,7 @@ export const tauriLinkMediaPort: LinkMediaPort = {
     }
     return `${renderableThumbnailProtocolBase()}${sourceRef}`;
   },
-  async saveMediaFile(sourceUrl, filename, saveName, accountTabId) {
+  async saveMediaFile(sourceRef, filename, saveName, accountTabId) {
     if (accountTabId !== undefined && !isRendererSelectedAccountTabId(accountTabId)) {
       throw new Error("account tab is no longer selected");
     }
@@ -86,7 +111,7 @@ export const tauriLinkMediaPort: LinkMediaPort = {
       throw new Error("account tab is no longer selected");
     }
     await invoke("save_downloaded_media", {
-      sourceUrl,
+      sourceRef,
       destinationPath: selected,
       ...(accountTabId === undefined ? {} : { accountTabId })
     });

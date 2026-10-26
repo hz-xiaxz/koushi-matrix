@@ -124,6 +124,11 @@ for (const [label, csp] of [
     `${label}.img-src.koushiThumbnail`,
     "custom in-memory thumbnail protocol allowed for avatar/link-preview images"
   );
+  requireCheck(
+    typeof csp === "string" && csp.includes("koushi-media:"),
+    `${label}.img-src.koushiMedia`,
+    "custom managed-download protocol allowed for timeline media images"
+  );
 }
 
 requireCheck(

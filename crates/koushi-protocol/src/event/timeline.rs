@@ -152,7 +152,10 @@ pub enum TimelineEvent {
         request_id: RequestId,
         key: TimelineKey,
         event_id: String,
-        source_url: String,
+        /// Opaque `download/<room-hash>/<event-hash>` handle for the managed
+        /// cache entry. Never a filesystem path; only the platform adapter
+        /// resolves it to a render URL or file.
+        source_ref: String,
         byte_count: u64,
         mimetype: Option<String>,
         width: Option<u64>,
@@ -337,7 +340,7 @@ impl fmt::Debug for TimelineEvent {
                 .field("request_id", request_id)
                 .field("key", &"TimelineKey(..)")
                 .field("event_id", &"EventId(..)")
-                .field("source_url", &"SourceUrl(..)")
+                .field("source_ref", &"SourceRef(..)")
                 .field("byte_count", byte_count)
                 .field("mimetype", mimetype)
                 .field("width", width)

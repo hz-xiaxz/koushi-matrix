@@ -31,6 +31,7 @@ mod live_tail_freshness;
 pub mod local_upload;
 #[cfg(any(test, feature = "test-hooks"))]
 pub mod login_store_test_support;
+pub mod media_download_ref;
 pub mod media_preparation;
 pub mod media_save;
 pub mod media_staging;

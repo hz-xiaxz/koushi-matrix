@@ -974,7 +974,7 @@ fn derive_display_label_updates_resolves_from_profile_state() {
     assert_eq!(unknown.display_label, "@unknown:example.invalid");
 }
 #[test]
-fn media_download_events_redact_routing_and_source_url_in_debug() {
+fn media_download_events_redact_routing_and_source_ref_in_debug() {
     let key = TimelineKey::room(
         AccountKey("@alice:example.invalid".to_owned()),
         "!room:example.invalid",
@@ -986,7 +986,7 @@ fn media_download_events_redact_routing_and_source_url_in_debug() {
         },
         key: key.clone(),
         event_id: "$event:example.invalid".to_owned(),
-        source_url: "/data/secret.png".to_owned(),
+        source_ref: "download/1234567890123456/6543210987654321".to_owned(),
         byte_count: 1234,
         mimetype: Some("image/png".to_owned()),
         width: Some(640),
@@ -999,7 +999,10 @@ fn media_download_events_redact_routing_and_source_url_in_debug() {
     assert!(!debug.contains("!room:example.invalid"), "{debug}");
     assert!(!debug.contains("@alice:example.invalid"), "{debug}");
     assert!(!debug.contains("$event:example.invalid"), "{debug}");
-    assert!(!debug.contains("/data/secret.png"), "{debug}");
+    assert!(
+        !debug.contains("download/1234567890123456/6543210987654321"),
+        "{debug}"
+    );
 
     let failed = TimelineEvent::MediaDownloadFailed {
         request_id: RequestId {
@@ -1027,7 +1030,7 @@ fn media_download_event_serializes_with_camel_case_fields() {
         },
         key,
         event_id: "$event:example.invalid".to_owned(),
-        source_url: "/data/image.png".to_owned(),
+        source_ref: "download/1234567890123456/6543210987654321".to_owned(),
         byte_count: 1234,
         mimetype: Some("image/png".to_owned()),
         width: Some(640),
@@ -1037,8 +1040,8 @@ fn media_download_event_serializes_with_camel_case_fields() {
     let value = serde_json::to_value(&event).expect("MediaDownloadCompleted serializes");
     let completed = value.get("MediaDownloadCompleted").expect("tagged variant");
     assert_eq!(
-        completed.get("source_url").and_then(|v| v.as_str()),
-        Some("/data/image.png")
+        completed.get("source_ref").and_then(|v| v.as_str()),
+        Some("download/1234567890123456/6543210987654321")
     );
     assert_eq!(
         completed.get("byte_count").and_then(|v| v.as_u64()),
