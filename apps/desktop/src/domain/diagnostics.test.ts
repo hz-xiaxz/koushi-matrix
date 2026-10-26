@@ -497,7 +497,17 @@ describe("diagnosticReport", () => {
         mountedImages: 12,
         mountedTimelineRows: 34,
         jsHeapUsedBytes: 12_345_678,
-        jsHeapTotalBytes: 23_456_789
+        jsHeapTotalBytes: 23_456_789,
+        memoryDetails: {
+          domNodes: 50, domElements: 40, domTextUtf16BytesEstimate: 120,
+          imageNaturalRgbaBytesEstimate: 80_000,
+          uniqueImageNaturalRgbaBytesEstimate: 40_000, uniqueImageSources: 2,
+          imagesWithNaturalSize: 4, pendingImages: 1, brokenImages: 0,
+          canvases: 1, canvasRgbaBytesEstimate: 400,
+          objectUrls: 2, objectUrlBlobBytes: 350,
+          timelineStoreKeys: 3, timelineStoreItems: 240,
+          timelineStoreTextUtf16BytesEstimate: 2048
+        }
       }
     });
 
@@ -513,6 +523,14 @@ describe("diagnosticReport", () => {
     expect(measured).toContain("renderer.js_heap_accuracy=engine_reported_approximate");
     expect(measured).toContain("renderer.js_heap_used_bytes=12345678");
     expect(measured).toContain("renderer.js_heap_total_bytes=23456789");
+    expect(measured).toContain("renderer.dom_nodes=50");
+    expect(measured).toContain("renderer.dom_scope=attached_document_excludes_detached_nodes_and_shadow_roots");
+    expect(measured).toContain("renderer.unique_image_natural_rgba_bytes_estimate=40000");
+    expect(measured).toContain("renderer.object_url_blob_bytes=350");
+    expect(measured).toContain("renderer.timeline_store_items=240");
+    expect(measured).toContain("renderer.webkit_process_footprint_bytes=unavailable");
+    expect(measured).toContain("renderer.gpu_memory_bytes=unavailable");
+    expect(measured).toContain("not_measured_decoded_memory");
     expect(measured).toContain(
       "renderer.js_heap_scope=javascript_heap_only_excludes_webkit_gpu_and_native"
     );
@@ -704,4 +722,23 @@ describe("diagnosticReport", () => {
       { timestampMs: 3, source: "timeline", message: "new" }
     ], droppedEntries: 1 });
   });
+});
+
+
+test("reports own-avatar state and image event totals without profile or media identifiers", async () => {
+  const snapshot = await createDesktopApiFixture().getSnapshot();
+  snapshot.state.domain.profile.own = {
+    display_name: "Synthetic private display name",
+    avatar: { mxc_uri: "mxc://synthetic.invalid/private-avatar", thumbnail: { kind: "failed", request_id: 17, failureKind: "network" } }
+  };
+  const report = diagnosticReport({
+    snapshot, panelMode: "closed", sendStatus: "idle",
+    timelineDiagnostics: { visibleItems: 0, downloadedItems: 0, backfill: "idle", avatarMxcItems: 0, avatarReadyItems: 0, avatarPendingItems: 0, avatarFailedItems: 0, avatarMissingItems: 0, avatarRenderedImages: 0, avatarBrokenImages: 0 },
+    domDiagnostics: { screen: "timeline", rootChildren: 1, bodyTextLength: 0 },
+    uiLatencyDiagnostics: { samples: 0, lastFrameGapMs: 0, averageFrameGapMs: 0, maxFrameGapMs: 0, longFrameCount: 0 }
+  });
+  expect(report).toContain("Own avatar (renderer snapshot): avatar_present=true thumbnail=failed failure=network");
+  expect(report).toMatch(/Avatar image events: loads=\d+ errors=\d+ scope=entity_avatar_hook_page_lifetime_events_not_unique_images_or_own_avatar_only/);
+  expect(report).not.toContain("private-avatar");
+  expect(report).not.toContain("Synthetic private display name");
 });

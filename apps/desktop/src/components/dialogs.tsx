@@ -1,3 +1,4 @@
+import { createTrackedObjectURL, revokeTrackedObjectURL } from "../domain/objectUrlDiagnostics";
 import { ModalDialog, NativeModal } from "./ModalDialog";
 // Dialog components extracted from App.tsx.
 // Imports: React, lucide-react, i18n, domain types, uiShared.
@@ -1807,11 +1808,11 @@ function PreparedUploadPreview({
     void loadPreview(item.staged_id, selectedVariantId)
       .then((bytes) => {
         if (cancelled || bytes.length === 0) return;
-        const nextObjectUrl = URL.createObjectURL(
+        const nextObjectUrl = createTrackedObjectURL(
           new Blob([new Uint8Array(bytes)], { type: item.mime_type })
         );
         if (cancelled) {
-          URL.revokeObjectURL(nextObjectUrl);
+          revokeTrackedObjectURL(nextObjectUrl);
           return;
         }
         pendingObjectUrl = nextObjectUrl;
@@ -1822,14 +1823,14 @@ function PreparedUploadPreview({
         setPreviewUrl(nextObjectUrl);
         pendingObjectUrl = null;
         if (previousObjectUrl && previousObjectUrl !== nextObjectUrl) {
-          URL.revokeObjectURL(previousObjectUrl);
+          revokeTrackedObjectURL(previousObjectUrl);
         }
       })
       .catch(() => undefined);
     return () => {
       cancelled = true;
       if (pendingObjectUrl) {
-        URL.revokeObjectURL(pendingObjectUrl);
+        revokeTrackedObjectURL(pendingObjectUrl);
         pendingObjectUrl = null;
       }
     };
@@ -1839,7 +1840,7 @@ function PreparedUploadPreview({
     return () => {
       const activeObjectUrl = activePreviewUrlRef.current;
       activePreviewUrlRef.current = null;
-      if (activeObjectUrl) URL.revokeObjectURL(activeObjectUrl);
+      if (activeObjectUrl) revokeTrackedObjectURL(activeObjectUrl);
     };
   }, []);
 

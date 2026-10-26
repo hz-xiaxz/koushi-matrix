@@ -214,6 +214,82 @@ fn record_timeline_residency_summaries(
     }
 }
 
+fn record_event_queue_summaries(
+    queues: &[(usize, koushi_core::runtime::EventQueueDiagnostics)],
+    receivers: &[(
+        usize,
+        Option<koushi_core::runtime::EventReceiverDiagnostics>,
+    )],
+) {
+    use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel};
+    for (account_index, queue) in queues {
+        let mut event = DiagnosticEvent::new(DiagnosticLevel::Info, "core.event_queue", "summary")
+            .field(DiagnosticField::count(
+                "account_index",
+                *account_index as u64,
+            ))
+            .field(DiagnosticField::token(
+                "sample_scope",
+                "non_atomic_observation",
+            ))
+            .field(DiagnosticField::count(
+                "capacity_events",
+                queue.capacity_events as u64,
+            ))
+            .field(DiagnosticField::count(
+                "retained_events",
+                queue.retained_events as u64,
+            ))
+            .field(DiagnosticField::count(
+                "receiver_count",
+                queue.receiver_count as u64,
+            ))
+            .field(DiagnosticField::count(
+                "inline_slot_bytes_lower_bound",
+                queue.inline_slot_bytes_lower_bound,
+            ))
+            .field(DiagnosticField::token(
+                "slot_scope",
+                "inline_event_values_excludes_nested_heap_and_slot_overhead",
+            ))
+            .field(DiagnosticField::token("payload_heap_bytes", "unavailable"));
+        let receiver = receivers
+            .iter()
+            .find(|(index, _)| index == account_index)
+            .and_then(|(_, sample)| *sample);
+        if let Some(receiver) = receiver {
+            let distance = receiver.unread_position_distance_events;
+            event = event
+                .field(DiagnosticField::token(
+                    "cached_command_receiver_status",
+                    if receiver.subscribed {
+                        "available"
+                    } else {
+                        "not_subscribed"
+                    },
+                ))
+                .field(DiagnosticField::count(
+                    "cached_command_unread_position_distance_events",
+                    distance as u64,
+                ))
+                .field(DiagnosticField::count(
+                    "cached_command_pending_events",
+                    distance.min(queue.capacity_events) as u64,
+                ))
+                .field(DiagnosticField::count(
+                    "cached_command_overwritten_positions",
+                    distance.saturating_sub(queue.capacity_events) as u64,
+                ));
+        } else {
+            event = event.field(DiagnosticField::token(
+                "cached_command_receiver_status",
+                "not_cached_or_busy",
+            ));
+        }
+        koushi_diagnostics::record(event);
+    }
+}
+
 fn snapshot_with_media_memory_summaries(
     thumbnail_stats: koushi_core::renderable_thumbnail::RenderableThumbnailCacheStats,
     media_stats: koushi_core::media_preparation::MediaPreparationStats,
@@ -243,6 +319,17 @@ fn snapshot_with_media_memory_summaries(
 pub async fn get_diagnostic_snapshot(
     state: State<'_, CoreRuntimeState>,
 ) -> Result<FrontendDiagnosticLogSnapshot, String> {
+    for (index, (_, connection)) in state
+        .runtime
+        .tab_connections_without_events()
+        .iter()
+        .enumerate()
+    {
+        connection.record_own_avatar_diagnostics(index as u64);
+    }
+    let queues = state.runtime.event_queue_diagnostics();
+    let receivers = state.connection.cached_event_receiver_diagnostics().await;
+    record_event_queue_summaries(&queues, &receivers);
     Ok(snapshot_with_media_memory_summaries(
         koushi_core::renderable_thumbnail::renderable_thumbnail_cache_stats(),
         state.runtime.media_preparation().stats().await,

@@ -1,3 +1,4 @@
+import { createTrackedObjectURL, revokeTrackedObjectURL } from "../../domain/objectUrlDiagnostics";
 import { NativeModal } from "../ModalDialog";
 import { FloatingLayer, floatingPlacementStyle, useFloatingPlacement } from "../floatingLayer";
 import {
@@ -64,7 +65,7 @@ async function downloadMediaSource(sourceUrl: string, filename: string): Promise
       const response = await fetch(sourceUrl);
       if (response.ok) {
         const blob = await response.blob();
-        revokeUrl = URL.createObjectURL(blob);
+        revokeUrl = createTrackedObjectURL(blob);
         downloadUrl = revokeUrl;
       }
     } catch {
@@ -91,7 +92,7 @@ async function downloadMediaSource(sourceUrl: string, filename: string): Promise
   anchor.click();
   document.body.removeChild(anchor);
   if (revokeUrl) {
-    window.setTimeout(() => URL.revokeObjectURL(revokeUrl), 0);
+    window.setTimeout(() => revokeTrackedObjectURL(revokeUrl), 0);
   }
 }
 

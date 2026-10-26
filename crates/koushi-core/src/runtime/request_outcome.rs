@@ -581,7 +581,7 @@ impl CoreConnection {
                 tokio::select! {
                     biased;
                     changed = self.snapshot_rx.changed() => SnapshotWake::from_changed(changed),
-                    event = self.event_rx.recv() => SnapshotWake::from_event(event, self),
+                    event = Self::recv_raw_event(&mut self.event_rx) => SnapshotWake::from_event(event, self),
                 }
             })
             .await;

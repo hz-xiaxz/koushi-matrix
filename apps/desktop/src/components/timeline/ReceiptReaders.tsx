@@ -1,3 +1,4 @@
+import { createTrackedObjectURL, revokeTrackedObjectURL } from "../../domain/objectUrlDiagnostics";
 import { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from "react";
 
 import { useActiveLocaleKey } from "../../i18n/activeLocaleContext";
@@ -303,7 +304,7 @@ export function ReceiptReaders({
         }
       }
       if (cancelled) {
-        for (const url of ownedObjectUrls) URL.revokeObjectURL(url);
+        for (const url of ownedObjectUrls) revokeTrackedObjectURL(url);
         return;
       }
       setReaderResourceUrls(Object.fromEntries(entries));
@@ -311,7 +312,7 @@ export function ReceiptReaders({
     void loadResources();
     return () => {
       cancelled = true;
-      for (const url of ownedObjectUrls) URL.revokeObjectURL(url);
+      for (const url of ownedObjectUrls) revokeTrackedObjectURL(url);
     };
   }, [readerInstalledRevision, readerResourceIdentity, readerScope, receiptApi]);
   useEffect(() => {
@@ -608,8 +609,8 @@ function createReaderResourceUrl(
   const payload = Uint8Array.from(bytes);
   const type = mimeType || "application/octet-stream";
   if (typeof URL.createObjectURL === "function") {
-    const url = URL.createObjectURL(new Blob([payload], { type }));
-    return { url, revoke: () => URL.revokeObjectURL(url) };
+    const url = createTrackedObjectURL(new Blob([payload], { type }));
+    return { url, revoke: () => revokeTrackedObjectURL(url) };
   }
   if (typeof globalThis.btoa !== "function") return null;
   let binary = "";

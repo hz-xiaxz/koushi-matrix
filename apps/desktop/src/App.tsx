@@ -3536,7 +3536,7 @@ function AccountContent({
 
   async function openDiagnostics() {
     const requestGeneration = ++diagnosticsOpenIntentEpochRef.current;
-    const rendererContext = qaRendererContextDiagnostics();
+    const rendererContext = qaRendererContextDiagnostics(timelineStore);
     try {
       const nextSnapshot = await api.getDiagnosticSnapshot();
       if (requestGeneration !== diagnosticsOpenIntentEpochRef.current) {

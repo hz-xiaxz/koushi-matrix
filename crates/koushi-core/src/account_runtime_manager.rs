@@ -495,6 +495,17 @@ impl AccountRuntimeManager {
             .map(|tab| tab.runtime.attach())
     }
 
+    /// Command/snapshot access without retaining unread broadcast payloads.
+    pub fn tab_connection_without_events(&self, id: &AccountTabId) -> Option<CoreConnection> {
+        self.state
+            .lock()
+            .expect("account runtime manager mutex")
+            .tabs
+            .iter()
+            .find(|tab| &tab.descriptor.id == id)
+            .map(|tab| tab.runtime.attach_without_events())
+    }
+
     pub fn is_session_binding_current(&self, id: &AccountTabId, info: &SessionInfo) -> bool {
         let account_key = AccountKey(info.user_id.clone());
         let session_key_id = crate::store::session_key_id_from_info(info);
@@ -559,6 +570,18 @@ impl AccountRuntimeManager {
         rows
     }
 
+    /// Observe the existing buses without attaching diagnostic receivers.
+    pub fn event_queue_diagnostics(&self) -> Vec<(usize, crate::runtime::EventQueueDiagnostics)> {
+        self.state
+            .lock()
+            .expect("account runtime manager mutex")
+            .tabs
+            .iter()
+            .enumerate()
+            .map(|(index, tab)| (index, tab.runtime.event_queue_diagnostics()))
+            .collect()
+    }
+
     pub fn tab_connections(&self) -> Vec<(AccountTabDescriptor, CoreConnection)> {
         self.state
             .lock()
@@ -566,6 +589,17 @@ impl AccountRuntimeManager {
             .tabs
             .iter()
             .map(|tab| (tab.descriptor.clone(), tab.runtime.attach()))
+            .collect()
+    }
+
+    /// Snapshot watchers do not subscribe to the independent event broadcast.
+    pub fn tab_connections_without_events(&self) -> Vec<(AccountTabDescriptor, CoreConnection)> {
+        self.state
+            .lock()
+            .expect("account runtime manager mutex")
+            .tabs
+            .iter()
+            .map(|tab| (tab.descriptor.clone(), tab.runtime.attach_without_events()))
             .collect()
     }
 

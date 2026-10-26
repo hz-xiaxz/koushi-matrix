@@ -304,6 +304,15 @@ recovers a lagged consumer from the latest snapshot, and awaits ordered
 shutdown without importing Tauri. Serialized `FrontendDesktopSnapshot` mirrors
 remain adapter-only in `apps/desktop/src-tauri`.
 
+Connections used only for commands and latest-wins watch snapshots attach with
+`CoreRuntime::attach_without_events`; they never create a broadcast receiver.
+Desktop cached command connections and account snapshot watchers use this mode.
+Attempting an event receive on such a connection reports a closed stream and
+never creates a lazy subscription. Event forwarders and event-based operation
+waiters retain eager `attach()` subscriptions, established before submission so
+that early terminal events cannot be missed. An idle command or snapshot owner
+must not retain historical broadcast payloads.
+
 ### Core request outcomes (Phase A, issue #755)
 
 `koushi-core` owns request settlement through the closed, non-serde
@@ -2576,6 +2585,38 @@ Malformed/expired/mismatched cursors return typed resync_required errors. Result
 expose snapshot time, bounded observed coverage, truncation, content availability
 and continuation. Exhaustion makes no claim of complete Matrix history. Restart
 invalidates cursors; fresh reads cannot recover evicted history.
+
+## Memory-retention diagnostic sampling
+
+Avatar export samples each account's published own-profile thumbnail state and
+coarse failure kind, plus whether a Ready source still has retained bytes. It
+borrows the published state without subscribing to events or cloning AppState;
+cache presence uses a non-touching probe and cannot refresh LRU recency. State
+and byte presence are a non-atomic observation, not a promise about later loads.
+No profile identity, MXC, source reference, URL, or image content is exported.
+Renderer recoverable-image hooks retain only saturating page-lifetime load/error
+event totals. These include all hook users, not unique images or own-avatar-only
+failures, and survive replacement of failed images by fallback initials. They
+add no request, retry, timer, or eviction policy.
+
+Diagnostic export observes each account's event broadcast without creating a
+receiver or consuming events. It reports retained event count, receiver count,
+capacity and a lower bound for inline event slots. Cached command connections
+report `not_subscribed`; an absent or busy cached connection remains distinct.
+For subscribed connections, unread position distance includes positions already
+overwritten by the ring. Nested payload heap bytes remain explicitly unavailable;
+inline slots are never presented as the broadcast's total retained heap.
+
+Renderer export samples DOM counts, image natural-size RGBA8 reference sizes,
+canvas backing-store reference sizes, live renderer-owned Blob URLs and timeline
+store counts/text lengths. These are counts and representation-size estimates,
+not WebKit allocator or GPU measurements. Repeated image sources are also counted
+once in a separate estimate. DOM traversal covers the attached document, excluding
+detached nodes and shadow roots; image estimates exclude CSS background images
+and WebKit's internal caches. No DOM nodes, source URLs or message text survive
+sampling. Object-URL accounting follows existing creation/revocation owners and
+never changes their lifetime. Unsupported JS-heap, WebContent-footprint and GPU
+measurements stay unavailable; sampling never forces collection or eviction.
 
 ## Causal navigation diagnostics (#1543)
 

@@ -8,6 +8,7 @@
 //!   `StateDelta` per processed command batch
 
 mod activity;
+mod avatar_diagnostics;
 mod composer;
 mod connection;
 mod deferred_dispatch;
@@ -485,6 +486,7 @@ pub struct CoreRuntime {
     view_scopes: crate::view_scope_lifecycle::ViewScopeRegistry,
     command_tx: mpsc::Sender<CoreCommandEnvelope>,
     event_tx: broadcast::Sender<CoreEvent>,
+    event_capacity: usize,
     snapshot_rx: watch::Receiver<VersionedAppStateSnapshot>,
     composer_draft_leases: Arc<ComposerDraftLeaseRegistry>,
     sliding_sync_diagnostics: crate::SlidingSyncDiagnostics,
@@ -1016,6 +1018,7 @@ impl CoreRuntime {
             view_scopes,
             command_tx,
             event_tx,
+            event_capacity: event_capacity.next_power_of_two(),
             snapshot_rx,
             composer_draft_leases,
             sliding_sync_diagnostics,
@@ -1279,6 +1282,7 @@ impl CoreRuntime {
             view_scopes: _,
             command_tx,
             event_tx: _,
+            event_capacity: _,
             snapshot_rx: _,
             composer_draft_leases: _,
             sliding_sync_diagnostics: _,
@@ -6821,10 +6825,14 @@ fn map_state_search_scope_to_core(scope: AppSearchScope) -> SearchScope {
     }
 }
 
+mod event_queue_diagnostics;
+#[cfg(test)]
+mod event_queue_diagnostics_tests;
 #[cfg(test)]
 mod notification_delivery_tests;
 #[cfg(test)]
 mod tests;
+pub use event_queue_diagnostics::{EventQueueDiagnostics, EventReceiverDiagnostics};
 
 /// Reducer projection of an account-notifications command (#981). Only the
 /// operation kind crosses into reducer state; addresses and credentials stay

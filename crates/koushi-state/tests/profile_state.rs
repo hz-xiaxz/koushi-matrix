@@ -1536,3 +1536,158 @@ fn live_receipt_debug_redacts_identifiers_names_and_mxc_uris() {
         "{debug}"
     );
 }
+
+#[test]
+fn own_profile_metadata_refresh_preserves_same_source_thumbnail_state() {
+    for thumbnail in [
+        AvatarThumbnailState::Loading { request_id: 12 },
+        AvatarThumbnailState::Ready {
+            source_ref: "qa-thumbnail".to_owned(),
+            width: Some(120),
+            height: Some(120),
+            mime_type: None,
+        },
+        AvatarThumbnailState::Failed {
+            request_id: 12,
+            kind: koushi_state::AvatarThumbnailFailureKind::Network,
+        },
+    ] {
+        for update_succeeded in [false, true] {
+            let mut state = ready_state();
+            state.profile.own.avatar = Some(AvatarImage {
+                mxc_uri: "mxc://localhost/own".into(),
+                thumbnail: thumbnail.clone(),
+            });
+            // An unrelated copy must not overwrite the own avatar's stronger state.
+            state.profile.users.insert(
+                "@other:localhost".into(),
+                UserProfile {
+                    user_id: "@other:localhost".into(),
+                    display_name: None,
+                    display_label: String::new(),
+                    original_display_label: String::new(),
+                    mention_search_terms: vec![],
+                    avatar: Some(AvatarImage {
+                        mxc_uri: "mxc://localhost/own".into(),
+                        thumbnail: AvatarThumbnailState::Failed {
+                            request_id: 99,
+                            kind: koushi_state::AvatarThumbnailFailureKind::Capacity,
+                        },
+                    }),
+                },
+            );
+            let profile = OwnProfile {
+                display_name: Some("Refreshed QA name".into()),
+                avatar: Some(avatar("mxc://localhost/own")),
+            };
+            let action = if update_succeeded {
+                state.profile.update = ProfileUpdateState::SettingDisplayName {
+                    request_id: 12,
+                    display_name: Some("Refreshed QA name".into()),
+                };
+                AppAction::ProfileUpdateSucceeded {
+                    request_id: 12,
+                    profile,
+                }
+            } else {
+                AppAction::OwnProfileUpdated { profile }
+            };
+            reduce(&mut state, action);
+            assert_eq!(
+                state.profile.own.avatar.as_ref().unwrap().thumbnail,
+                thumbnail
+            );
+            assert_eq!(
+                state.profile.own.display_name.as_deref(),
+                Some("Refreshed QA name")
+            );
+        }
+    }
+}
+
+#[test]
+fn own_profile_refresh_honors_changed_removed_and_explicit_thumbnail_sources() {
+    for update_succeeded in [false, true] {
+        for next in [
+            Some(AvatarImage {
+                mxc_uri: "mxc://localhost/own".into(),
+                thumbnail: AvatarThumbnailState::Ready {
+                    source_ref: "qa-replacement-thumbnail".into(),
+                    width: None,
+                    height: None,
+                    mime_type: None,
+                },
+            }),
+            Some(AvatarImage {
+                mxc_uri: "mxc://localhost/own".into(),
+                thumbnail: AvatarThumbnailState::Failed {
+                    request_id: 99,
+                    kind: koushi_state::AvatarThumbnailFailureKind::Network,
+                },
+            }),
+            None,
+            Some(avatar("mxc://localhost/new")),
+            Some(AvatarImage {
+                mxc_uri: "mxc://localhost/own".into(),
+                thumbnail: AvatarThumbnailState::Loading { request_id: 99 },
+            }),
+        ] {
+            let mut state = ready_state();
+            state.profile.own.avatar = Some(AvatarImage {
+                mxc_uri: "mxc://localhost/own".into(),
+                thumbnail: AvatarThumbnailState::Ready {
+                    source_ref: "qa-old-thumbnail".into(),
+                    width: None,
+                    height: None,
+                    mime_type: None,
+                },
+            });
+            let profile = OwnProfile {
+                display_name: None,
+                avatar: next.clone(),
+            };
+            let action = if update_succeeded {
+                state.profile.update = ProfileUpdateState::SettingAvatar {
+                    request_id: 12,
+                    mime_type: "image/png".into(),
+                    byte_count: 12,
+                };
+                AppAction::ProfileUpdateSucceeded {
+                    request_id: 12,
+                    profile,
+                }
+            } else {
+                AppAction::OwnProfileUpdated { profile }
+            };
+            reduce(&mut state, action);
+            assert_eq!(state.profile.own.avatar, next);
+        }
+    }
+}
+
+#[test]
+fn stale_profile_update_cannot_replace_own_avatar_thumbnail() {
+    let mut state = ready_state();
+    state.profile.own.avatar = Some(AvatarImage {
+        mxc_uri: "mxc://localhost/own".into(),
+        thumbnail: AvatarThumbnailState::Loading { request_id: 12 },
+    });
+    state.profile.update = ProfileUpdateState::SettingDisplayName {
+        request_id: 12,
+        display_name: Some("QA name".into()),
+    };
+    let before = state.clone();
+    let effects = reduce(
+        &mut state,
+        AppAction::ProfileUpdateSucceeded {
+            request_id: 99,
+            profile: OwnProfile {
+                display_name: None,
+                avatar: None,
+            },
+        },
+    );
+    assert_eq!(state.profile.own, before.profile.own);
+    assert_eq!(state.profile.update, before.profile.update);
+    assert!(effects.is_empty());
+}
