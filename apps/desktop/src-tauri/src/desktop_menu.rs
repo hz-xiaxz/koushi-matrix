@@ -2,7 +2,10 @@ use std::collections::HashMap;
 
 use tauri::{
     Manager,
-    menu::{AboutMetadata, MenuBuilder, MenuItemBuilder, PredefinedMenuItem, SubmenuBuilder},
+    menu::{
+        AboutMetadata, Menu, MenuBuilder, MenuItem, MenuItemBuilder, MenuItemKind,
+        PredefinedMenuItem, SubmenuBuilder,
+    },
 };
 
 pub(super) const MENU_EVENT_NAME: &str = "koushi-desktop://menu";
@@ -242,19 +245,22 @@ pub(crate) fn set_native_menu_labels(
     let history_enabled = [MENU_ID_EDITOR_UNDO, MENU_ID_EDITOR_REDO].map(|id| {
         previous
             .as_ref()
-            .and_then(|menu| menu.get(id))
-            .and_then(|item| item.as_menuitem().cloned())
+            .and_then(|menu| find_menu_item(menu, id))
             .and_then(|item| item.is_enabled().ok())
             .unwrap_or(false)
     });
     let menu = build_desktop_menu(&app, &labels).map_err(|error| error.to_string())?;
-    set_history_availability(&menu, history_enabled[0], history_enabled[1])
+    let _ = set_history_availability(&menu, history_enabled[0], history_enabled[1])
         .map_err(|error| error.to_string())?;
     app.set_menu(menu).map_err(|error| error.to_string())?;
     Ok(())
 }
 
 /// Only availability crosses this platform boundary; draft history stays DOM-owned.
+///
+/// The reply is whether the native menu now owns the Z accelerators. Returning
+/// `false` keeps the webview's own history handler in charge, so a menu that
+/// cannot be reached can never swallow the shortcut into a disabled item.
 #[tauri::command]
 pub(crate) fn set_native_editor_history_availability(
     app: tauri::AppHandle,
@@ -264,21 +270,80 @@ pub(crate) fn set_native_editor_history_availability(
     let Some(menu) = app.menu() else {
         return Ok(false);
     };
-    set_history_availability(&menu, undo, redo).map_err(|error| error.to_string())?;
-    Ok(true)
+    set_history_availability(&menu, undo, redo).map_err(|error| error.to_string())
 }
 
 fn set_history_availability<R: tauri::Runtime>(
-    menu: &tauri::menu::Menu<R>,
+    menu: &Menu<R>,
     undo: bool,
     redo: bool,
-) -> tauri::Result<()> {
+) -> tauri::Result<bool> {
+    let mut applied = true;
     for (id, enabled) in [(MENU_ID_EDITOR_UNDO, undo), (MENU_ID_EDITOR_REDO, redo)] {
-        if let Some(item) = menu.get(id).and_then(|item| item.as_menuitem().cloned()) {
-            item.set_enabled(enabled)?;
+        match find_menu_item(menu, id) {
+            Some(item) => item.set_enabled(enabled)?,
+            None => applied = false,
         }
     }
-    Ok(())
+    Ok(applied)
+}
+
+/// What the history lookup needs from one entry of the menu tree.
+///
+/// Kept separate from Tauri's menu types so the descent below can be tested
+/// without building a platform menu, which some platforms only allow on the
+/// main thread.
+trait MenuEntry {
+    type Item;
+    fn entry_id(&self) -> &str;
+    fn take_item(self) -> Option<Self::Item>;
+    fn into_children(self) -> Option<Vec<Self>>
+    where
+        Self: Sized;
+}
+
+impl<R: tauri::Runtime> MenuEntry for MenuItemKind<R> {
+    type Item = MenuItem<R>;
+
+    fn entry_id(&self) -> &str {
+        self.id().as_ref()
+    }
+
+    fn take_item(self) -> Option<Self::Item> {
+        self.as_menuitem().cloned()
+    }
+
+    fn into_children(self) -> Option<Vec<Self>> {
+        self.as_submenu().and_then(|submenu| submenu.items().ok())
+    }
+}
+
+/// Find an item anywhere in the menu tree, not only on the menu bar.
+///
+/// `Menu::get` searches the menu bar's direct children, and the Edit items are
+/// one submenu deeper. Looking them up with `get` therefore left Undo/Redo
+/// disabled forever: the webview saw the availability bridge succeed and
+/// stopped handling Cmd/Ctrl+Z, while the native accelerator belonged to a
+/// disabled item. Walk into every submenu instead.
+fn find_menu_item<R: tauri::Runtime>(menu: &Menu<R>, id: &str) -> Option<MenuItem<R>> {
+    find_menu_entry(menu.items().ok()?, id)
+}
+
+fn find_menu_entry<E: MenuEntry>(entries: Vec<E>, id: &str) -> Option<E::Item> {
+    for entry in entries {
+        if entry.entry_id() == id {
+            if let Some(item) = entry.take_item() {
+                return Some(item);
+            }
+            continue;
+        }
+        if let Some(children) = entry.into_children()
+            && let Some(found) = find_menu_entry(children, id)
+        {
+            return Some(found);
+        }
+    }
+    None
 }
 
 pub(super) fn build_desktop_menu<R: tauri::Runtime, M: Manager<R>>(
@@ -416,6 +481,67 @@ mod tests {
     use super::{
         MenuLabels, desktop_menu_action_id, desktop_menu_items, localized, native_menu_label_keys,
     };
+
+    /// A platform menu cannot be built off the main thread (muda needs the main
+    /// thread to create a submenu), so the history lookup's descent is exercised
+    /// over a reduced tree with the same shape: a menu bar, the Edit submenu,
+    /// and the Undo/Redo items one level below.
+    #[derive(Clone)]
+    struct FakeMenuEntry {
+        id: &'static str,
+        item: Option<&'static str>,
+        children: Vec<FakeMenuEntry>,
+    }
+
+    impl super::MenuEntry for FakeMenuEntry {
+        type Item = &'static str;
+
+        fn entry_id(&self) -> &str {
+            self.id
+        }
+
+        fn take_item(self) -> Option<Self::Item> {
+            self.item
+        }
+
+        fn into_children(self) -> Option<Vec<Self>> {
+            (!self.children.is_empty()).then_some(self.children)
+        }
+    }
+
+    #[test]
+    fn history_lookup_descends_into_the_edit_submenu() {
+        let leaf = |id, item| FakeMenuEntry {
+            id,
+            item,
+            children: Vec::new(),
+        };
+        let menu_bar = vec![FakeMenuEntry {
+            id: "edit",
+            item: None,
+            children: vec![
+                leaf(super::MENU_ID_EDITOR_UNDO, Some("undo")),
+                leaf(super::MENU_ID_EDITOR_REDO, Some("redo")),
+            ],
+        }];
+
+        // A menu-bar-only lookup sees neither item; the descent must reach them
+        // or the native menu stays disabled while the webview hands off Cmd+Z.
+        assert_eq!(
+            super::find_menu_entry(menu_bar.clone(), super::MENU_ID_EDITOR_UNDO),
+            Some("undo")
+        );
+        assert_eq!(
+            super::find_menu_entry(menu_bar.clone(), super::MENU_ID_EDITOR_REDO),
+            Some("redo")
+        );
+        // A missing id reports absence, so the bridge can keep the DOM handler.
+        assert_eq!(super::find_menu_entry(menu_bar, "missing_item"), None);
+        assert_eq!(
+            super::find_menu_entry(Vec::<FakeMenuEntry>::new(), super::MENU_ID_EDITOR_UNDO),
+            None
+        );
+    }
 
     #[cfg(target_os = "macos")]
     #[test]
