@@ -2945,6 +2945,87 @@ async fn wait_for_runtime_session(
 }
 
 #[tokio::test]
+async fn avatar_thumbnail_updated_settles_activity_sender_avatar_copies() {
+    let data_dir = tempfile::tempdir().unwrap();
+    let room_id = "!room:example.org";
+    let sender_id = "@sender:example.org";
+    let mxc_uri = "mxc://example.org/sender-avatar";
+    let state = AppState {
+        session: SessionState::Ready(SessionInfo {
+            homeserver: "https://example.invalid".into(),
+            user_id: "@owner:example.org".into(),
+            device_id: "DEVICE".into(),
+            authentication_method: koushi_state::SessionAuthenticationMethod::Unknown,
+        }),
+        ..AppState::default()
+    };
+    let (
+        mut actor,
+        _commands,
+        _actions,
+        _account,
+        _events,
+        _snapshots,
+        _navigation,
+        _prepared,
+        _focused,
+    ) = app_actor_event_navigation_fixture(data_dir.path(), state);
+    actor.state.rooms = vec![unread_diagnostic_room(room_id)];
+    let mut row = koushi_state::ActivityRow::event(
+        room_id.to_owned(),
+        "$event:example.org".to_owned(),
+        Some(sender_id.to_owned()),
+        "Synthetic room".to_owned(),
+        Some("Member 1".to_owned()),
+        Some("Synthetic body".to_owned()),
+        42,
+        false,
+        false,
+    );
+    row.sender_avatar = Some(koushi_state::AvatarImage {
+        mxc_uri: mxc_uri.to_owned(),
+        thumbnail: koushi_state::AvatarThumbnailState::NotRequested,
+    });
+    actor.activity_projection.ingest(vec![row]);
+    let ready = koushi_state::AvatarThumbnailState::Ready {
+        source_ref: "avatar/0123456789abcdef".to_owned(),
+        width: Some(32),
+        height: Some(32),
+        mime_type: Some("image/png".to_owned()),
+    };
+    let _ = actor.reduce_app_action_state(AppAction::AvatarThumbnailUpdated {
+        mxc_uri: mxc_uri.to_owned(),
+        thumbnail: ready.clone(),
+    });
+
+    let (recent, _unread, _excluded) = actor.activity_projection.snapshot(&actor.state);
+
+    assert_eq!(recent.rows.len(), 1);
+    assert_eq!(
+        recent.rows[0]
+            .sender_avatar
+            .as_ref()
+            .map(|avatar| &avatar.thumbnail),
+        Some(&ready),
+        "a cached Activity row avatar is an owned copy and must settle from AvatarThumbnailUpdated"
+    );
+
+    let _ = actor.reduce_app_action_state(AppAction::AvatarThumbnailUpdated {
+        mxc_uri: mxc_uri.to_owned(),
+        thumbnail: koushi_state::AvatarThumbnailState::NotRequested,
+    });
+    let (recent, _unread, _excluded) = actor.activity_projection.snapshot(&actor.state);
+    assert_eq!(
+        recent.rows[0]
+            .sender_avatar
+            .as_ref()
+            .map(|avatar| &avatar.thumbnail),
+        Some(&koushi_state::AvatarThumbnailState::NotRequested),
+        "a retired source must not leave the cached Activity row Ready"
+    );
+}
+
+#[tokio::test]
 async fn receipt_resolution_borrows_current_alias_without_publishing_global_state() {
     let data_dir = tempfile::tempdir().unwrap();
     let state = AppState {

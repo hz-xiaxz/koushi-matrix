@@ -3,8 +3,9 @@ use std::collections::{BTreeMap, BTreeSet, HashMap};
 use koushi_diagnostics::{DiagnosticEvent, DiagnosticField, DiagnosticLevel, record};
 use koushi_state::{
     ActivityMarkReadTarget, ActivityResolutionState, ActivityRow, ActivityRowKind, ActivityState,
-    ActivityStream, ActivityTab, AppAction, AppState, RoomLatestEventSummary, RoomNotificationMode,
-    RoomSummary, SpaceSummary, room_activity_unread_count,
+    ActivityStream, ActivityTab, AppAction, AppState, AvatarImage, AvatarThumbnailState,
+    RoomLatestEventSummary, RoomNotificationMode, RoomSummary, SpaceSummary,
+    room_activity_unread_count,
 };
 
 use super::{ActivityResolutionRequest, RequestId};
@@ -75,6 +76,11 @@ pub(super) struct ActivityProjection {
     /// schedules resolution for a candidate absent here or newer (#1061), so
     /// a no-progress settlement stays retryable instead of looping.
     resolution_attempts: BTreeMap<String, u64>,
+    /// Thumbnail states for avatars copied into cached rows. `ActivityRow`
+    /// itself owns those copies, so the AppState reducer's
+    /// `AvatarThumbnailUpdated` settlement cannot reach them without this
+    /// projection-local record.
+    avatar_thumbnails_by_mxc: BTreeMap<String, AvatarThumbnailState>,
 }
 
 #[derive(Default)]
@@ -111,6 +117,112 @@ fn activity_latest_display_event_id(room: &RoomSummary) -> Option<&str> {
 }
 
 impl ActivityProjection {
+    /// Keep a downloaded avatar visible when the only remaining copy lives in
+    /// this projection's rows. Called for every `AvatarThumbnailUpdated`; the
+    /// map stays bounded to avatars the cached rows still reference.
+    pub(super) fn note_avatar_thumbnail(
+        &mut self,
+        mxc_uri: &str,
+        thumbnail: &AvatarThumbnailState,
+    ) {
+        if !self.cached_rows_reference_avatar(mxc_uri) {
+            return;
+        }
+        self.avatar_thumbnails_by_mxc
+            .insert(mxc_uri.to_owned(), thumbnail.clone());
+    }
+
+    fn cached_rows_reference_avatar(&self, mxc_uri: &str) -> bool {
+        self.cached_rows().any(|row| {
+            row.sender_avatar
+                .as_ref()
+                .is_some_and(|avatar| avatar.mxc_uri == mxc_uri)
+        })
+    }
+
+    fn cached_rows(&self) -> impl Iterator<Item = &ActivityRow> {
+        self.canonical_rows_by_room
+            .values()
+            .flat_map(BTreeMap::values)
+            .chain(self.resolution_rows_by_event_id.values())
+    }
+
+    fn retain_projecting_avatars(&mut self) {
+        let mut thumbnails = std::mem::take(&mut self.avatar_thumbnails_by_mxc);
+        {
+            let referenced = self
+                .cached_rows()
+                .filter_map(|row| {
+                    row.sender_avatar
+                        .as_ref()
+                        .map(|avatar| avatar.mxc_uri.as_str())
+                })
+                .collect::<BTreeSet<_>>();
+            thumbnails.retain(|mxc_uri, _| referenced.contains(mxc_uri.as_str()));
+        }
+        self.avatar_thumbnails_by_mxc = thumbnails;
+    }
+
+    fn settled_avatar(&self, avatar: Option<AvatarImage>) -> Option<AvatarImage> {
+        let mut avatar = avatar?;
+        // The recorded action state is authoritative for this MXC: it also
+        // carries the `NotRequested` downgrade that retires evicted bytes.
+        if let Some(thumbnail) = self.avatar_thumbnails_by_mxc.get(&avatar.mxc_uri) {
+            avatar.thumbnail = thumbnail.clone();
+        }
+        Some(avatar)
+    }
+
+    /// Resolve a sender avatar from the authoritative profile state first, so
+    /// the projection never joins profile maps in React and never relies on a
+    /// stale row copy when a live profile has the same source.
+    fn resolved_sender_avatar(
+        &self,
+        state: &AppState,
+        own_user_id: Option<&str>,
+        room_id: &str,
+        sender_id: Option<&str>,
+        embedded: Option<&AvatarImage>,
+    ) -> Option<AvatarImage> {
+        let Some(sender_id) = sender_id else {
+            return self.settled_avatar(embedded.cloned());
+        };
+        let own_profile_avatar = (own_user_id == Some(sender_id))
+            .then_some(state.profile.own.avatar.as_ref())
+            .flatten();
+        let profile_avatar = own_profile_avatar
+            .or_else(|| {
+                state
+                    .profile
+                    .room_users
+                    .get(room_id)
+                    .and_then(|profiles| profiles.get(sender_id))
+                    .and_then(|profile| profile.avatar.as_ref())
+            })
+            .or_else(|| {
+                state
+                    .profile
+                    .users
+                    .get(sender_id)
+                    .and_then(|profile| profile.avatar.as_ref())
+            });
+        // A same-source row copy may already carry a settled thumbnail while
+        // the profile entry is still NotRequested; keep the settled state.
+        let avatar = match (profile_avatar, embedded) {
+            (Some(profile), Some(embedded))
+                if profile.mxc_uri == embedded.mxc_uri
+                    && profile.thumbnail == AvatarThumbnailState::NotRequested
+                    && embedded.thumbnail != AvatarThumbnailState::NotRequested =>
+            {
+                Some(embedded.clone())
+            }
+            (Some(profile), _) => Some(profile.clone()),
+            (None, Some(embedded)) => Some(embedded.clone()),
+            (None, None) => None,
+        };
+        self.settled_avatar(avatar)
+    }
+
     /// Compatibility path for older tests/injectors. Production timelines use
     /// `CanonicalActivityWindowReconciled`; this path replaces each observed
     /// room too, spilling only its over-bound detail into resolver provenance.
@@ -631,6 +743,8 @@ impl ActivityProjection {
         &mut self,
         state: &AppState,
     ) -> (ActivityStream, ActivityStream, Vec<String>) {
+        self.retain_projecting_avatars();
+        let own_user_id = crate::event_projection::timeline_projection_own_user_id(state);
         let rooms_by_id: HashMap<&str, &RoomSummary> = state
             .rooms
             .iter()
@@ -668,12 +782,13 @@ impl ActivityProjection {
             if !activity_recent_row_visible(mode, row.highlight, room_activity_unread) {
                 continue;
             }
-            let sender_avatar = row
-                .sender_id
-                .as_ref()
-                .and_then(|user_id| state.profile.users.get(user_id))
-                .and_then(|profile| profile.avatar.clone())
-                .or_else(|| row.sender_avatar.clone());
+            let sender_avatar = self.resolved_sender_avatar(
+                state,
+                own_user_id,
+                &row.room_id,
+                row.sender_id.as_deref(),
+                row.sender_avatar.as_ref(),
+            );
             let context_label = activity_row_context_label(room, &state.spaces);
             let row = ActivityRow {
                 room_label: room.display_label.clone(),
@@ -724,7 +839,13 @@ impl ActivityProjection {
                 false,
                 false,
             );
-            row.sender_avatar = latest_event.sender_avatar.clone();
+            row.sender_avatar = self.resolved_sender_avatar(
+                state,
+                own_user_id,
+                &room.room_id,
+                row.sender_id.as_deref(),
+                latest_event.sender_avatar.as_ref(),
+            );
             row.thread_root_event_id = latest_event.thread_root_event_id.clone();
             row.context_label = activity_row_context_label(room, &state.spaces);
             recent.push(row);

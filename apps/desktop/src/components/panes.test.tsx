@@ -39,6 +39,32 @@ const eventRow: ActivityRow = {
   context_label: "Room"
 };
 
+class MockIntersectionObserver {
+  static instances: MockIntersectionObserver[] = [];
+  private readonly callback: IntersectionObserverCallback;
+  private readonly observed: Element[] = [];
+
+  constructor(callback: IntersectionObserverCallback) {
+    this.callback = callback;
+    MockIntersectionObserver.instances.push(this);
+  }
+
+  observe(element: Element): void {
+    this.observed.push(element);
+  }
+
+  disconnect(): void {}
+  unobserve(): void {}
+  takeRecords(): IntersectionObserverEntry[] { return []; }
+
+  trigger(isIntersecting = true): void {
+    this.callback(
+      this.observed.map((target) => ({ isIntersecting, target }) as IntersectionObserverEntry),
+      this as unknown as IntersectionObserver
+    );
+  }
+}
+
 const placeholderRow: ActivityRow = {
   kind: "roomUnread",
   room_id: "!placeholder:example.invalid",
@@ -62,7 +88,9 @@ describe("ActivityPane", () => {
 
   afterEach(() => {
     cleanup();
+    vi.unstubAllGlobals();
     setActiveLocaleProfile("en", "none");
+    MockIntersectionObserver.instances = [];
   });
 
   it("keeps verified unread summaries independent of Recent history loading", () => {
@@ -110,6 +138,38 @@ describe("ActivityPane", () => {
     expect(screen.queryByRole("button", { name: /Mark room read/ })).toBeNull();
     expect(onOpenRow).not.toHaveBeenCalled();
     expect(onMarkRead).not.toHaveBeenCalled();
+  });
+
+  it("requests thumbnails for visible event-row sender avatars", () => {
+    vi.stubGlobal("IntersectionObserver", MockIntersectionObserver);
+    const request = vi.fn();
+    const avatar = {
+      mxc_uri: "mxc://example.invalid/sender-avatar",
+      thumbnail: { kind: "notRequested" as const }
+    };
+    const state = activityState([{ ...eventRow, sender_avatar: avatar }]);
+    if (state.kind === "open") {
+      state.active_tab = "recent";
+      state.recent.rows = [{ ...eventRow, sender_avatar: avatar }];
+    }
+
+    render(
+      <ActivityPane
+        activity={state}
+        onClose={vi.fn()}
+        onLoadMore={vi.fn()}
+        onMarkRead={vi.fn()}
+        onOpenRow={vi.fn()}
+        onRequestAvatarThumbnail={request}
+        onRetryResolution={vi.fn()}
+        onSetTab={vi.fn()}
+      />
+    );
+
+    expect(request).not.toHaveBeenCalled();
+    MockIntersectionObserver.instances[0]?.trigger();
+    expect(request).toHaveBeenCalledOnce();
+    expect(request).toHaveBeenCalledWith("mxc://example.invalid/sender-avatar");
   });
 
   it("prefers observed event rows over placeholders for the same room", () => {

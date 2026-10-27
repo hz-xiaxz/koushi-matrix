@@ -122,6 +122,7 @@ export function ActivityPane({
   onClose,
   onLoadMore,
   onOpenRow,
+  onRequestAvatarThumbnail,
   onRetryResolution,
   onSetTab
 }: {
@@ -130,6 +131,8 @@ export function ActivityPane({
   onLoadMore: (tab: ActivityTab, cursor: string | null) => void;
   onMarkRead: (target: ActivityMarkReadTarget) => void;
   onOpenRow: (row: ActivityRow) => void;
+  /** Core-owned visible avatar demand callback shared with sidebar/member surfaces. */
+  onRequestAvatarThumbnail?: (mxcUri: string) => void | Promise<void | (() => void)>;
   onRetryResolution: () => void;
   onSetTab: (tab: ActivityTab) => void;
 }) {
@@ -270,6 +273,7 @@ export function ActivityPane({
                         className="activity-row-avatar is-user"
                         colorSeed={row.sender_id ?? row.room_id}
                         fallback={avatarInitial(row.sender_label ?? row.room_label)}
+                        onRequestAvatarThumbnail={onRequestAvatarThumbnail}
                       />
                       <span className="activity-row-body">
                         <span className="activity-row-topline">

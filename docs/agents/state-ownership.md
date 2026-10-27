@@ -567,9 +567,16 @@ npm --prefix apps/desktop run test -- --run src/components/TimelineView.live-sta
   Activity from `TimelineView` DOM state.
 - Activity rows are observed by room `TimelineActor`s as `ActivityRowsObserved`
   and materialized by the `AppActor`'s Activity projection cache. The projection
-  fills room labels, unread flags, highlight flags, and low-priority exclusion
-  from Rust-owned `AppState` facts. Keep this cache outside React and outside
-  per-view browser fake state.
+  fills room labels, unread flags, highlight flags, low-priority exclusion, and
+  sender avatars from Rust-owned `AppState` facts. Sender avatars resolve from
+  the own profile for self-authored rows, then relevant-room profiles, then the
+  global profile cache, and only then the row's copied avatar; React must not
+  join Activity rows to profile maps. Because cached rows own that avatar copy,
+  the projection settles it from exact-MXC `AvatarThumbnailUpdated` actions and
+  keeps only MXCs its rows still reference. React may discover visible
+  `notRequested` Activity avatars and submit typed thumbnail demand, as on other
+  visible surfaces. Keep this cache outside React and outside per-view browser
+  fake state.
 - Activity Unread is a notification inbox: plain unread messages without a
   notification, highlight, or manual unread mark stay sidebar-only (contract:
   `docs/architecture/state-machine.md` Activity, #1072).
