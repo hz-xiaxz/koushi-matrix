@@ -531,7 +531,8 @@ export function ContextualRightPanel({
         : { kind: "reply", in_reply_to_event_id: threadReplyTargetEventId },
     [threadReplyTargetEventId]
   );
-  // #1643: Reply on a thread-pane row targets the open thread's composer.
+  // #1643: Reply on a thread-pane row targets the open thread's composer. Rows
+  // of the open thread always share its room, so another room is a stale row.
   const threadReplyStable = useStableEvent((roomId: string, eventId: string) => {
     if (threadPreviewRoomId === roomId && threadPreviewRootEventId) {
       onThreadComposerReply(roomId, threadPreviewRootEventId, eventId);

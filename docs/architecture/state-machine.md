@@ -3895,6 +3895,11 @@ stateDiagram-v2
   only when the pending send was a reply and the current reply target still
   equals the captured target, exactly as for the main composer. A failed
   settlement preserves the reply mode.
+- The renderer reads the reply target from the snapshot when it submits and
+  passes it with the send; the reducer derives the pending kind from the mode
+  current at acceptance. As with the main composer, a target changed in the
+  narrow window between those two points only affects which mode completion
+  clears, never the relation Core sends.
 - `ThreadReplyFinished { room_id, root_event_id, transaction_id }` clears only
   the matching thread composer pending transaction and emits `ThreadChanged`.
   Stale room/root/transaction signals are ignored.

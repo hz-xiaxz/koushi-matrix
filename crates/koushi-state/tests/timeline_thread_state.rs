@@ -3092,3 +3092,34 @@ fn legacy_thread_reply_submitted_captures_the_reply_target() {
         })
     );
 }
+
+#[test]
+fn thread_reply_target_is_ignored_while_the_thread_is_opening() {
+    let mut state = selected_room_state("room-a");
+    reduce(
+        &mut state,
+        AppAction::OpenThread {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            intent: ThreadOpenIntent::ExistingThread,
+        },
+    );
+    assert!(matches!(state.thread, ThreadPaneState::Opening { .. }));
+    let effects = reduce(
+        &mut state,
+        AppAction::ThreadComposerReplyTargetSelected {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+            event_id: "$earlier".to_owned(),
+        },
+    );
+    assert!(effects.is_empty());
+    reduce(
+        &mut state,
+        AppAction::ThreadSubscribed {
+            room_id: "room-a".to_owned(),
+            root_event_id: "$root".to_owned(),
+        },
+    );
+    assert_eq!(open_thread_composer(&state).mode, ComposerMode::Plain);
+}
