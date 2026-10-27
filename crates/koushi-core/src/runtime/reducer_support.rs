@@ -254,7 +254,9 @@ impl super::AppActor {
         let receipt_source_changes = live_receipt_source_changes(&action);
         let room_profile_changes = live_room_profile_changes(&self.state, &action);
         let avatar_thumbnail_change = match &action {
-            AppAction::AvatarThumbnailUpdated { mxc_uri, .. } => Some(mxc_uri.clone()),
+            AppAction::AvatarThumbnailUpdated { mxc_uri, thumbnail } => {
+                Some((mxc_uri.clone(), thumbnail.clone()))
+            }
             _ => None,
         };
         let focused_timeline_before = self.current_focused_context_timeline_key();
@@ -295,8 +297,10 @@ impl super::AppActor {
         crate::session_check_diagnostics::observe_schedule(&self.state);
         // A scoped reader can be the only consumer of this resource. Its
         // completion must not depend on a legacy/global projection changing.
-        if let Some(mxc_uri) = avatar_thumbnail_change.as_deref() {
+        if let Some((mxc_uri, thumbnail)) = avatar_thumbnail_change.as_ref() {
             self.view_scopes.reader_avatar_thumbnail_changed(mxc_uri);
+            self.activity_projection
+                .note_avatar_thumbnail(mxc_uri, thumbnail);
         }
         if let Some((room_id, before)) = room_profile_changes {
             let changed_users: Vec<_> = before
