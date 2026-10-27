@@ -357,7 +357,9 @@ impl QaDeliveryFlow<'_> {
             .command(CoreCommand::App(AppCommand::UpdateSettings {
                 request_id,
                 patch: SettingsPatch {
-                    scope: Some(SettingsPatchScope::App),
+                    // Delivery is account-owned, exactly as the core writes it; an
+                    // `App`-scoped patch would not touch it at all.
+                    scope: Some(SettingsPatchScope::Account),
                     delivery: Some(self.settings.clone()),
                     ..SettingsPatch::default()
                 },
@@ -1396,12 +1398,7 @@ impl QaDeliveryFlow<'_> {
         let diagnostics = serde_json::to_string(&koushi_diagnostics::snapshot()).map_err(|_| {
             "notification delivery prefix hygiene: the diagnostics are not serializable".to_owned()
         })?;
-        let settings_path = qa_data_dir("notification-delivery-a")
-            .join("settings")
-            .join("settings.json");
-        let settings_file = std::fs::read(&settings_path).map_err(|_| {
-            "notification delivery prefix hygiene: the settings file was not readable".to_owned()
-        })?;
+        let settings_dir = qa_data_dir("notification-delivery-a");
 
         for marker in [QA_DELIVERY_PREFIX_MARKER, QA_DELIVERY_PREFIX_MEDIA_CAPTION] {
             if serialized.contains(marker) {
@@ -1425,9 +1422,9 @@ impl QaDeliveryFlow<'_> {
                         .to_owned(),
                 );
             }
-            if bytes_contain(&settings_file, marker) {
+            if settings_files_hold_text(&settings_dir, marker) {
                 return Err(
-                    "notification delivery prefix hygiene: the settings file carried message text"
+                    "notification delivery prefix hygiene: a settings file carried message text"
                         .to_owned(),
                 );
             }
@@ -1712,16 +1709,9 @@ impl QaDeliveryFlow<'_> {
             "notification delivery serverchan hygiene: the diagnostics are not serializable"
                 .to_owned()
         })?;
-        let settings_path = qa_data_dir("notification-delivery-a")
-            .join("settings")
-            .join("settings.json");
-        let settings_file = std::fs::read(&settings_path).map_err(|_| {
-            "notification delivery serverchan hygiene: the settings file was not readable"
-                .to_owned()
-        })?;
         let leaked = snapshot.contains(key)
             || diagnostics.contains(key)
-            || bytes_contain(&settings_file, key)
+            || settings_files_hold_text(&qa_data_dir("notification-delivery-a"), key)
             || request.body.contains(key)
             || request
                 .idempotency_key
@@ -2178,16 +2168,23 @@ fn assert_delivery_body(
     Ok(())
 }
 
-/// Whether any whitespace-delimited token in `body` is a Matrix identifier other than
-/// `partner`, the direct-message partner a digest names (#1492). Every other identifier
-/// is what the lane's private-data rule forbids in anything it emits.
+/// Whether `body` carries a Matrix identifier other than `partner`, the
+/// direct-message partner a digest names (#1492). Every other identifier is what
+/// the lane's private-data rule forbids in anything it emits.
+///
+/// The sink body is JSON, so an identifier is usually glued to the envelope
+/// (`@user:server","text":...`): the id is split out on the JSON punctuation
+/// rather than on whitespace, and the partner is removed wherever it is named.
 fn carries_matrix_identifier(body: &str, partner: Option<&str>) -> bool {
-    body.split_whitespace().any(|token| {
-        let token = token.trim_end_matches([':', ',', '.']);
-        matches!(token.chars().next(), Some('@' | '!' | '$'))
-            && token.contains(':')
-            && Some(token) != partner
-    })
+    let body = match partner {
+        Some(partner) => body.replace(partner, ""),
+        None => body.to_owned(),
+    };
+    let is_identifier_separator = |c: char| {
+        !(c.is_alphanumeric() || matches!(c, '@' | '!' | '$' | ':' | '_' | '-' | '.' | '='))
+    };
+    body.split(is_identifier_separator)
+        .any(|token| matches!(token.chars().next(), Some('@' | '!' | '$')) && token.contains(':'))
 }
 
 /// Assert the delivered body names the room with its own counts and quotes `marker`,
@@ -2269,6 +2266,38 @@ fn bytes_contain(haystack: &[u8], needle: &str) -> bool {
         && haystack
             .windows(needle.len())
             .any(|window| window == needle.as_bytes())
+}
+
+/// Whether a file inside any `settings` directory under `dir` carries `needle`.
+///
+/// Delivery is account-owned, so the block it stores lives in the encrypted account
+/// file under `accounts/v2/<store>/settings/`; the old device-wide
+/// `settings/settings.json` is checked the same way whenever it exists.
+fn settings_files_hold_text(dir: &std::path::Path, needle: &str) -> bool {
+    let mut pending = vec![dir.to_path_buf()];
+    while let Some(path) = pending.pop() {
+        let Ok(metadata) = std::fs::metadata(&path) else {
+            continue;
+        };
+        if metadata.is_dir() {
+            if let Ok(entries) = std::fs::read_dir(&path) {
+                for entry in entries.flatten() {
+                    pending.push(entry.path());
+                }
+            }
+            continue;
+        }
+        let inside_settings_dir = path
+            .parent()
+            .and_then(std::path::Path::file_name)
+            .is_some_and(|name| name == "settings");
+        if inside_settings_dir
+            && std::fs::read(&path).is_ok_and(|contents| bytes_contain(&contents, needle))
+        {
+            return true;
+        }
+    }
+    false
 }
 
 /// Whether any file under `dir` contains `needle` as raw bytes.

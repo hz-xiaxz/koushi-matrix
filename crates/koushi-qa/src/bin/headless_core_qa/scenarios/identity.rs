@@ -2061,7 +2061,10 @@ pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Res
         .candidate
         .as_ref()
         .ok_or_else(|| "native attention candidate was not projected".to_owned())?;
-    if candidate.kind != RoomAttentionKind::Mention || attention.summary.badge_count != 12 {
+    // A room-level highlight cannot name the event that carried it, so a mention room raises
+    // no candidate of its own (#994); of these three rooms the direct message wins, and the
+    // badge still adds every room's unread attention.
+    if candidate.kind != RoomAttentionKind::Dm || attention.summary.badge_count != 12 {
         return Err("native attention candidate priority or badge count was wrong".to_owned());
     }
 
@@ -2079,7 +2082,8 @@ pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Res
 
     let focused = native_attention_state_from_rooms(NativeAttentionProjectionInput {
         rooms: &rooms,
-        active_room_id: Some("!mention:example.invalid"),
+        // The room the candidate names is the one whose focus can suppress its banner.
+        active_room_id: Some("!dm:example.invalid"),
         muted_room_ids: &[],
         room_notification_modes: &std::collections::HashMap::new(),
         ignored_user_ids: &std::collections::BTreeSet::new(),
@@ -2130,7 +2134,7 @@ pub(super) async fn run_native_attention_stage(conn: &mut CoreConnection) -> Res
             .candidate
             .as_ref()
             .map(|candidate| candidate.kind)
-            != Some(RoomAttentionKind::Mention)
+            != Some(RoomAttentionKind::Message)
     {
         return Err("native attention did not respect per-room notification modes".to_owned());
     }

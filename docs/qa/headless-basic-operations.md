@@ -216,8 +216,8 @@ sync policy remains Rust-owned.
 `activity_recent=ok`, `activity_unread=ok`, and `activity_markread=ok` are the
 Phase A account-wide Activity proof. The core lane opens Activity through
 `CoreCommand`, verifies Rust-owned Recent and Unread streams from timeline
-observations plus room unread facts, and clears unread rows only through the
-Rust mark-read substate. This stage must not print Matrix room IDs, event IDs,
+observations plus room unread facts, and clears an unread room only by marking
+that room read, which is the affordance the UI offers. This stage must not print Matrix room IDs, event IDs,
 sender IDs, message previews, pagination tokens, or raw SDK errors.
 
 `send_fail=ok`, `resend=ok`, `cancel_send=ok`, `fifo=ok`, and
@@ -444,8 +444,8 @@ persistence and returning to a local signed-out snapshot.
 `clear_badge=ok` prove Rust-owned native attention candidates and platform
 capability mapping without message bodies or identifiers.
 `activity_recent=ok`, `activity_unread=ok`, and `activity_markread=ok` prove the
-Rust-owned Activity projection and mark-read substate without leaking event
-identity or previews. `ja_catalog=ok`, `cjk_normalize=ok`, `cjk_collation=ok`,
+Rust-owned Activity projection and room mark-read without leaking event identity
+or previews. `ja_catalog=ok`, `cjk_normalize=ok`, `cjk_collation=ok`,
 and `ime_guard=ok` prove Japanese/CJK catalog, normalization, ordering, and IME
 send-vs-commit contracts.
 `joined_room_restore=ok` proves the explicit #30 MVP restore scope from

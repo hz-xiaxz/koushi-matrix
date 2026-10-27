@@ -1532,3 +1532,31 @@ still drops requests resolved long after they were sent. Covered by
 Fork branch `fix/1462-late-decrypted-verification` (commit `5b6c8738d`).
 Koushi surfaces the request from the `ResolvedUtds` report because SDK event
 handlers do not fire for redecrypted events.
+
+## 2026-10-27: tantivy 0.27 dependency bump for RUSTSEC-2026-0391
+
+Dependency-maintenance delta, no SDK source change. `matrix-sdk-search` pinned
+`tantivy 0.26.2`, which pulls `tantivy-sstable 0.7` and therefore `zstd 0.13.3`.
+RUSTSEC-2026-0391 ("Data from an abandoned stream leaks into the next stream on a
+reused context") covers `zstd 0.13.2..0.14.2`, and the only fixed release is
+`0.14.3`; `tantivy-sstable 0.7` requires `zstd ^0.13`, so no lockfile update in a
+consuming workspace can clear it. `tantivy 0.27` pulls the 0.27 family
+(`-sstable`, `-columnar`, `-bitpacker`, `-common`, `-stacker`), which requires
+`zstd ^0.14` and resolves to 0.14.3.
+
+Fork branch `chore/tantivy-0.27` (PR shinaoka/matrix-rust-sdk-work#29, commit
+`8d05a4a7f`). The change is one requirement line in
+`crates/matrix-sdk-search/Cargo.toml`; the crate compiles unchanged against 0.27.
+
+- On-disk index compatibility: `INDEX_FORMAT_VERSION` is 7 in both 0.26.2 and
+  0.27.0 and `INDEX_FORMAT_OLDEST_SUPPORTED_VERSION` is 4 in both, and
+  `tantivy-sstable`'s `SSTABLE_VERSION` is 3 in both. An index written by
+  tantivy 0.26.2 (footer `index_format_version: 7`) opens, searches, and returns
+  stored fields under 0.27.0.
+- Tokenizer semantics: 0.27 replaces `rust-stemmers` with `frostem`. This crate
+  registers only the `default` and `matrix_ngram_1_*` tokenizers and no stemmer
+  filter, so the swap cannot change its terms or queries.
+- Upstream `matrix-org/matrix-rust-sdk` `main` still pins `tantivy = "0.26.2"` and
+  has no issue or PR for this advisory, so this is an explicit fork delta.
+  Upstreaming intent: drop it as soon as upstream moves to 0.27; it is a
+  one-line requirement bump and rebases trivially.

@@ -36,19 +36,18 @@ use super::registry::{
     TIMELINE_UNSUBSCRIBE_SETTLE_TIMEOUT, TimelineStressConfig,
 };
 use super::{
-    AccountCommand, AccountKey, ActivityEvent, ActivityMarkReadTarget, ActivityRowKind,
-    ActivityState, AppAction, AppCommand, AppState, AuthSecret, BTreeSet, ComposerDocument,
-    ComposerDraftScope, ComposerKey, ComposerKeyEvent, ComposerKeyModifiers,
-    ComposerResolvedAction, ComposerResolverContext, ComposerSelection, ComposerSendShortcut,
-    ComposerSurface, ComposerTarget, CoreCommand, CoreConnection, CoreEvent, CoreRuntime,
-    DisplaySettings, Duration, ImageUploadCompressionMode, ImageUploadCompressionPolicy,
-    ImageUploadCompressionState, ImageUploadDimensions, ImageUploadVariantInfo,
-    ImageUploadVariantKind, LinkPreviewState, LiveSignalsEvent, MediaDownloadSelection,
-    MentionIntent, MentionTarget, PaginationDirection, PaginationState, PresenceKind, RequestId,
-    RoomCommand, RoomEvent, ScheduledSendCapability, SessionInfo, SessionState, SettingsPatch,
-    StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind, SyncCommand, SystemTime,
-    TimelineBottomArrival, TimelineCommand, TimelineDiff, TimelineEvent, TimelineGapId,
-    TimelineGapPosition, TimelineItem, TimelineItemId, TimelineKey, TimelineKind,
+    AccountCommand, AccountKey, ActivityEvent, ActivityRowKind, ActivityState, AppAction,
+    AppCommand, AppState, AuthSecret, BTreeSet, ComposerDocument, ComposerDraftScope, ComposerKey,
+    ComposerKeyEvent, ComposerKeyModifiers, ComposerResolvedAction, ComposerResolverContext,
+    ComposerSelection, ComposerSendShortcut, ComposerSurface, ComposerTarget, CoreCommand,
+    CoreConnection, CoreEvent, CoreRuntime, DisplaySettings, Duration, ImageUploadCompressionMode,
+    ImageUploadCompressionPolicy, ImageUploadCompressionState, ImageUploadDimensions,
+    ImageUploadVariantInfo, ImageUploadVariantKind, LinkPreviewState, LiveSignalsEvent,
+    MediaDownloadSelection, MentionIntent, MentionTarget, PaginationDirection, PaginationState,
+    PresenceKind, RequestId, RoomCommand, RoomEvent, ScheduledSendCapability, SessionInfo,
+    SessionState, SettingsPatch, StagedUploadCompressionChoice, StagedUploadItem, StagedUploadKind,
+    SyncCommand, SystemTime, TimelineBottomArrival, TimelineCommand, TimelineDiff, TimelineEvent,
+    TimelineGapId, TimelineGapPosition, TimelineItem, TimelineItemId, TimelineKey, TimelineKind,
     TimelineMediaGalleryItem, TimelineMediaGalleryMedia, TimelineMediaGallerySource,
     TimelineMediaKind, TimelineSendState, TimelineUnreadPosition, TimelineViewportObservation,
     UNIX_EPOCH, UploadMediaKind, UploadMediaRequest, UploadMediaThumbnail,
@@ -2601,32 +2600,6 @@ async fn wait_for_activity_snapshot(
     }
 }
 
-async fn wait_for_activity_marked_read(
-    conn: &mut CoreConnection,
-    request_id: RequestId,
-    label: &str,
-) -> Result<(), String> {
-    loop {
-        let event = tokio::time::timeout(EVENT_TIMEOUT, conn.recv_event())
-            .await
-            .map_err(|_| format!("{label}: timed out waiting for Activity MarkedRead"))?
-            .map_err(|lag| format!("{label}: event stream lagged (skipped={})", lag.skipped))?;
-
-        match event {
-            CoreEvent::Activity(ActivityEvent::MarkedRead {
-                request_id: ev_id, ..
-            }) if ev_id == request_id => return Ok(()),
-            CoreEvent::OperationFailed {
-                request_id: ev_id,
-                failure,
-            } if ev_id == request_id => {
-                return Err(format!("{label}: Activity mark-read failed: {failure:?}"));
-            }
-            _ => {}
-        }
-    }
-}
-
 async fn wait_for_activity_unread_empty(
     conn: &mut CoreConnection,
     label: &str,
@@ -2712,23 +2685,24 @@ pub(super) async fn run_activity_stage(
         return Err("activity unread projection did not include the unread seed".to_owned());
     }
     println!("activity_unread=ok");
-    if !unread_event_ids
-        .iter()
-        .any(|event_id| event_id == &send_outcome.event_id)
-    {
-        return Err("activity unread projection did not resolve the unread event".to_owned());
+    // The SDK unread count is verified at room scope only, so the unread stream lists the
+    // room and no event may claim to be the unread one (#994/#1238).
+    if !unread_event_ids.is_empty() {
+        return Err("activity unread projection named a specific unread event".to_owned());
     }
     println!("activity_resolution=ok");
 
+    // Activity lists rooms and offers no mark-read of its own, so a room leaves the
+    // unread stream when the room itself is marked read (#994/#1238).
     let mark_id = conn_a.next_request_id();
     conn_a
-        .command(CoreCommand::App(AppCommand::MarkActivityRead {
+        .command(CoreCommand::Room(RoomCommand::MarkRoomAsRead {
             request_id: mark_id,
-            target: ActivityMarkReadTarget::All,
+            room_id: room_id.to_owned(),
+            event_id: send_outcome.event_id.clone(),
         }))
         .await
-        .map_err(|e| format!("activity: submit mark-read failed: {e}"))?;
-    wait_for_activity_marked_read(conn_a, mark_id, "activity mark read").await?;
+        .map_err(|e| format!("activity: submit mark read failed: {e}"))?;
     wait_for_activity_unread_empty(conn_a, "activity unread cleared").await?;
     println!("activity_markread=ok");
 
