@@ -151,7 +151,6 @@
   --directory-avatar-compact-size: 36px;
   --directory-avatar-compact-font-size: 12px;
   --tooltip-offset-inline: 10px;
-  --tooltip-min-inline-size: 160px;
   --tooltip-max-inline-size: 260px;
   --tooltip-max-viewport-inline-size: 70vw;
   --tooltip-padding-block: 7px;
@@ -1401,7 +1400,11 @@ button:disabled {
   z-index: var(--tooltip-z-index);
   inset-block-start: 50%;
   inset-inline-start: calc(100% + var(--tooltip-offset-inline));
-  min-width: var(--tooltip-min-inline-size);
+  /* An explanation hugs its label: a forced minimum width left short labels
+     (the composer's Italic, the rail's Home) inside a mostly empty box, so the
+     bubble looked like an oversized panel instead of the fact it states. Only
+     long text may grow, and the tokenized maximum caps and wraps it. */
+  inline-size: max-content;
   max-width: min(
     var(--tooltip-max-inline-size),
     var(--tooltip-max-viewport-inline-size)

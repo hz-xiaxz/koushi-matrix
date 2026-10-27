@@ -292,6 +292,15 @@ describe("styles.css token system", () => {
     expect(mentionBlock).toContain("line-height: 1.2;");
   });
 
+  test("a tooltip bubble hugs its label instead of a fixed minimum width", () => {
+    const bubble = selectorBlock(".tooltip-bubble");
+    expect(bubble).toContain("inline-size: max-content;");
+    expect(bubble).toContain("max-width: min(");
+    // A minimum width turns a two-word explanation into a mostly empty panel;
+    // long labels grow only up to the tokenized maximum.
+    expect(bubble).not.toMatch(/\bmin-(?:inline-)?size\s*:/);
+  });
+
   test("defines fixed-format sizing tokens for shared GUI controls", () => {
     expectTokens([
       "--icon-button-size",
