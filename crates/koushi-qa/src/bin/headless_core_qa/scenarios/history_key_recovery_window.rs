@@ -353,10 +353,14 @@ async fn flow(
             .await
             .map_err(|_| "history window: invite failed")?;
         let client = recipient.session().client();
+        // The SDK creates an invited room before its stripped invite state is stored,
+        // so a join that wins that race records no inviter and never queues the key
+        // bundle. Wait for the invite the UI would actually be showing.
         wait_until("invite arrival", || async {
-            Ok(client
-                .get_room(&history.room_id)
-                .is_some_and(|room| room.state() == RoomState::Invited))
+            let Some(room) = client.get_room(&history.room_id) else {
+                return Ok(false);
+            };
+            Ok(room.state() == RoomState::Invited && room.invite_details().await.is_ok())
         })
         .await?;
         client

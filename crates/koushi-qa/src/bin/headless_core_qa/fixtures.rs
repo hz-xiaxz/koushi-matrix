@@ -449,7 +449,21 @@ pub(super) fn native_attention_room(
         marked_unread: false,
         recency_stamp: None,
         conversation_activity: None,
-        latest_event: None,
+        // #994: the projection only raises a candidate for a room whose latest event
+        // is a readable, non-redacted event, so a fixture without one never projects.
+        latest_event: Some(koushi_state::RoomLatestEventSummary {
+            event_id: format!("$qa-native-attention-{room_id}"),
+            relation_type: None,
+            relation_event_id: None,
+            thread_root_event_id: None,
+            sender_id: None,
+            sender_label: None,
+            sender_avatar: None,
+            preview: None,
+            message_text: None,
+            timestamp_ms: 1,
+            is_redacted: false,
+        }),
         parent_space_ids: Vec::new(),
         dm_space_ids: Vec::new(),
         is_encrypted: false,
