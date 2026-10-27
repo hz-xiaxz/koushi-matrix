@@ -7522,6 +7522,9 @@ function AccountContent({
                 runInBackground(openActivityRoom(row.room_id));
               }
             }}
+            onRequestAvatarThumbnail={
+              AVATAR_THUMBNAIL_DOWNLOADS_ENABLED ? requestMemberAvatarThumbnail : undefined
+            }
             onRetryResolution={() => {
               runInBackground(retryActivityResolution());
             }}

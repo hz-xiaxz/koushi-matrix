@@ -3522,7 +3522,12 @@ stateDiagram-v2
 - Avatar thumbnail fields settle through Rust-owned snapshot actions. The
   existing `AvatarThumbnailUpdated` action updates every matching avatar copy by
   exact MXC URI across own/global/relevant-room user profiles, rooms, Spaces,
-  invites, and live-signal receipt readers. When any receipt copy changes, the reducer emits one
+  invites, live-signal receipt readers, and the `AppActor`'s cached Activity
+  projection rows. Activity rows are outside `AppState`, so the projection
+  records those thumbnail states itself and settles its row copy from them,
+  including the `NotRequested` downgrade that retires evicted bytes; the record
+  stays bounded to MXCs the cached rows reference.
+  When any receipt copy changes, the reducer emits one
   `LiveSignalsChanged` after existing profile/room-list effects. Duplicate
   thumbnail state and unrelated MXCs are inert; no new action or renderer-side
   profile join is required.

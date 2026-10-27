@@ -1025,3 +1025,78 @@ fn row_refresh_preserves_the_in_flight_resolution_generation() {
 
     assert_eq!(unread.resolution, resolving);
 }
+
+#[test]
+fn activity_sender_avatar_falls_back_to_the_own_profile_for_both_row_paths() {
+    let own_user_id = "@self:example.invalid";
+    let canonical_room_id = "!canonical:example.invalid";
+    let latest_room_id = "!latest:example.invalid";
+    let own_avatar = koushi_state::AvatarImage {
+        mxc_uri: "mxc://example.invalid/own-avatar".to_owned(),
+        thumbnail: Default::default(),
+    };
+    let mut state = AppState {
+        session: koushi_state::SessionState::Ready(koushi_state::SessionInfo {
+            homeserver: "https://example.invalid".to_owned(),
+            user_id: own_user_id.to_owned(),
+            device_id: "DEVICE".to_owned(),
+            authentication_method: Default::default(),
+        }),
+        ..Default::default()
+    };
+    state.profile.own.avatar = Some(own_avatar.clone());
+
+    let mut canonical_room = unread_diagnostic_room(canonical_room_id);
+    canonical_room.latest_event = Some(RoomLatestEventSummary {
+        event_id: "$canonical:example.invalid".to_owned(),
+        relation_type: None,
+        relation_event_id: None,
+        thread_root_event_id: None,
+        sender_id: Some(own_user_id.to_owned()),
+        sender_label: Some("Self".to_owned()),
+        sender_avatar: None,
+        preview: Some("Synthetic body".to_owned()),
+        message_text: None,
+        timestamp_ms: 42,
+        is_redacted: false,
+    });
+    let mut latest_room = unread_diagnostic_room(latest_room_id);
+    latest_room.latest_event = Some(RoomLatestEventSummary {
+        event_id: "$latest:example.invalid".to_owned(),
+        relation_type: None,
+        relation_event_id: None,
+        thread_root_event_id: None,
+        sender_id: Some(own_user_id.to_owned()),
+        sender_label: Some("Self".to_owned()),
+        sender_avatar: None,
+        preview: Some("Synthetic body".to_owned()),
+        message_text: None,
+        timestamp_ms: 41,
+        is_redacted: false,
+    });
+    state.rooms = vec![canonical_room, latest_room];
+
+    let mut projection = ActivityProjection::default();
+    projection.ingest(vec![ActivityRow::event(
+        canonical_room_id.to_owned(),
+        "$canonical:example.invalid".to_owned(),
+        Some(own_user_id.to_owned()),
+        "Canonical room".to_owned(),
+        Some("Self".to_owned()),
+        Some("Synthetic body".to_owned()),
+        42,
+        false,
+        false,
+    )]);
+
+    let (recent, _unread, _excluded) = projection.snapshot(&state);
+
+    assert_eq!(recent.rows.len(), 2);
+    for row in recent.rows {
+        assert_eq!(
+            row.sender_avatar.as_ref(),
+            Some(&own_avatar),
+            "each row path must use the own profile when the sender avatar is the local user"
+        );
+    }
+}
