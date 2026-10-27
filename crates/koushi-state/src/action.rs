@@ -1867,6 +1867,16 @@ pub enum AppAction {
         event_id: String,
     },
     ComposerReplyCancelled,
+    /// #1643: put the open thread's composer into reply mode for `event_id`.
+    ThreadComposerReplyTargetSelected {
+        room_id: String,
+        root_event_id: String,
+        event_id: String,
+    },
+    ThreadComposerReplyCancelled {
+        room_id: String,
+        root_event_id: String,
+    },
 }
 
 impl fmt::Debug for AppAction {
