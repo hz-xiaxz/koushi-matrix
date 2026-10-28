@@ -6095,10 +6095,13 @@ mark {
 
 .emoji-picker-grid {
   display: grid;
-  /* Column count is owned by EMOJI_PICKER_GRID_COLUMNS in EmojiPicker.tsx so
-     the grid and the ArrowUp/ArrowDown step cannot drift apart. */
-  grid-template-columns: repeat(var(--emoji-picker-columns, 10), minmax(0, 1fr));
-  gap: 2px;
+  /* Cell pitch is fixed; the column count is measured in EmojiPicker.tsx from
+     the body width so the grid and the ArrowUp/ArrowDown step cannot drift
+     apart. A larger panel shows more emoji, not wider spacing. */
+  grid-template-columns: repeat(var(--emoji-picker-columns, 10), var(--emoji-picker-cell-size, 24px));
+  grid-auto-rows: var(--emoji-picker-cell-size, 24px);
+  justify-content: start;
+  gap: var(--emoji-picker-cell-gap, 2px);
 }
 
 .emoji-picker-item {
