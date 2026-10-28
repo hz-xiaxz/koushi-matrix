@@ -154,9 +154,17 @@ mod tests {
     fn reads_a_private_endpoint_file() {
         let dir = tempfile::tempdir().expect("tempdir");
         let path = dir.path().join("endpoint.json");
+        let transport = if cfg!(windows) {
+            r"\\.\pipe\koushi-fixture"
+        } else {
+            "/tmp/x.sock"
+        };
         write_endpoint(
             &path,
-            r#"{"schema":1,"endpoint":"/tmp/x.sock","token":"abc","pid":7,"app_version":"0.26.0"}"#,
+            &serde_json::json!({
+                "schema":1,"endpoint":transport,"token":"abc","pid":7,"app_version":"0.26.0"
+            })
+            .to_string(),
         );
         let endpoint = read(&path).expect("read");
         assert_eq!(endpoint.schema, 1);

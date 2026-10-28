@@ -138,7 +138,7 @@ async fn an_untrusted_connected_pipe_receives_no_handshake_bytes() {
         dir.path(),
         json!({"schema":1,"endpoint":name,"token":"synthetic","pid":1,"app_version":"0"}),
     );
-    let task = tokio::spawn(async move {
+    let server_check = async move {
         server.connect().await.expect("connected");
         let mut byte = [0u8; 1];
         let read = tokio::time::timeout(std::time::Duration::from_secs(5), server.read(&mut byte))
@@ -148,17 +148,21 @@ async fn an_untrusted_connected_pipe_receives_no_handshake_bytes() {
             matches!(read, Ok(0)) || read.is_err(),
             "untrusted server received hello bytes"
         );
-    });
-    let connected = ipc::connect(
-        &path,
-        koushi_mcp::wire::ClientInfo {
-            name: "koushi-cli".into(),
-            version: "1".into(),
-        },
-    )
-    .await;
-    assert!(connected.is_err());
-    task.await.expect("server");
+    };
+    let client_check = async {
+        let connected = ipc::connect(
+            &path,
+            koushi_mcp::wire::ClientInfo {
+                name: "koushi-cli".into(),
+                version: "1".into(),
+            },
+        )
+        .await;
+        assert!(connected.is_err());
+    };
+    // Poll ConnectNamedPipe before opening/closing the rejected client. This
+    // makes zero-byte observation independent of task scheduling.
+    tokio::join!(biased; server_check, client_check);
 }
 
 #[cfg(windows)]

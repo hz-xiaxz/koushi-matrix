@@ -63,9 +63,20 @@ async fn open(endpoint_path: &EndpointFile) -> Result<Stream, WireError> {
     #[cfg(windows)]
     {
         use tokio::net::windows::named_pipe::ClientOptions;
-        let stream = ClientOptions::new()
-            .open(&endpoint_path.endpoint)
-            .map_err(|_| WireError::new_without_detail(ErrorCode::KoushiUnavailable))?;
+        let stream = loop {
+            match ClientOptions::new().open(&endpoint_path.endpoint) {
+                Ok(stream) => break stream,
+                // A connected instance can be busy while the host creates
+                // the next one. The outer CONNECT_TIMEOUT bounds this wait.
+                Err(error)
+                    if error.raw_os_error()
+                        == Some(windows_sys::Win32::Foundation::ERROR_PIPE_BUSY as i32) =>
+                {
+                    tokio::time::sleep(Duration::from_millis(10)).await;
+                }
+                Err(_) => return Err(WireError::new_without_detail(ErrorCode::KoushiUnavailable)),
+            }
+        };
         crate::windows_security::validate_pipe(&stream)
             .map_err(|_| WireError::new_without_detail(ErrorCode::Unauthorized))?;
         Ok(stream)

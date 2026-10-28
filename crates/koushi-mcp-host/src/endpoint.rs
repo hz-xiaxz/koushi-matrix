@@ -196,7 +196,7 @@ mod tests {
     #[test]
     fn writes_and_removes_a_private_endpoint_file() {
         let dir = tempfile::tempdir().expect("tempdir");
-        let path = write(dir.path(), "/tmp/mcp.sock", "tok", "0.26.0").expect("write");
+        let path = write(dir.path(), &transport_path(dir.path()), "tok", "0.26.0").expect("write");
         #[cfg(unix)]
         {
             use std::os::unix::fs::PermissionsExt;
