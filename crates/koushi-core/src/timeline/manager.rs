@@ -2313,12 +2313,13 @@ impl TimelineManagerActor {
                         )),
                     );
                 });
-            let timeline_result =
+            let timeline_result = Box::pin(
                 matrix_sdk::event_cache::focused_diagnostics::observe_focused_build(
                     observer,
                     koushi_timeline_builder(&room, focus).build(),
-                )
-                .await;
+                ),
+            )
+            .await;
             startup_trace::trace_phase(StartupPhase::TimelineBuild, build_started);
             record_subscribe_stage("build_done", None);
             // The actual SDK-internal wait for a completed build. Cancellation
