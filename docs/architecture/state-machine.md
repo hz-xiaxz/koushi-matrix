@@ -3002,6 +3002,8 @@ stateDiagram-v2
   resizes, and encodes PNG/JPEG/WebP candidates during staging. Re-encoded
   candidates report actual MIME, dimensions, byte count, metadata stripping,
   and thumbnail refresh; animated/unsupported sources remain original-only.
+  The source encoding is judged from content, not the declared MIME: a BMP
+  (WeChat serves one under `image/png`) is decoded and its Keep output is PNG.
 - Upload staging is Rust-owned. `AppState.upload_staging` is the reducer backing
   store and is not serialized directly. Projections are target-scoped:
   `TimelinePaneState.staged_uploads` for the active room composer and
