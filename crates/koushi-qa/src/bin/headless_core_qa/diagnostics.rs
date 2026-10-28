@@ -583,7 +583,8 @@ pub(super) fn verification_state_flow_id(state: &VerificationFlowState) -> Optio
 
 pub(super) struct QaTcpProxy {
     listen_addr: SocketAddr,
-    media_reads: Arc<QaMediaReadControl>,
+    media_reads: Arc<QaResponseHold>,
+    sliding_sync_responses: Arc<QaResponseHold>,
     enabled: Arc<AtomicBool>,
     room_send_forwarded: Arc<AtomicUsize>,
     room_send_responses_completed: Arc<AtomicUsize>,
@@ -600,6 +601,7 @@ enum QaProxyRequestKind {
     RoomSend,
     RoomMessages,
     ReadState,
+    SlidingSync,
     Other,
 }
 
@@ -837,16 +839,17 @@ impl Default for QaReadStateProxyControl {
 }
 
 #[derive(Default)]
-struct QaMediaReadControl {
+struct QaResponseHold {
     forwarded: AtomicUsize,
     hold: AtomicBool,
     held: AtomicUsize,
     peer_closed: AtomicUsize,
 }
 
-impl QaMediaReadControl {
+impl QaResponseHold {
     // Requests have reached the real upstream. Withhold response bytes, while
     // observing downstream close. This control stores only flags and counts.
+    // `forwarded` is counted by the caller where it is meaningful (media).
     fn wait_for_release(&self, client: &TcpStream) -> io::Result<()> {
         if !self.hold.load(Ordering::SeqCst) {
             return Ok(());
@@ -859,7 +862,7 @@ impl QaMediaReadControl {
                 if std::time::Instant::now() >= deadline {
                     return Err(io::Error::new(
                         io::ErrorKind::TimedOut,
-                        "QA media response hold expired",
+                        "QA response hold expired",
                     ));
                 }
                 match client.peek(&mut [0]) {
@@ -867,7 +870,7 @@ impl QaMediaReadControl {
                         self.peer_closed.fetch_add(1, Ordering::SeqCst);
                         return Err(io::Error::new(
                             io::ErrorKind::ConnectionAborted,
-                            "QA media downstream closed",
+                            "QA held downstream closed",
                         ));
                     }
                     Err(error)
@@ -888,7 +891,7 @@ impl QaMediaReadControl {
                     Ok(_) => {
                         return Err(io::Error::new(
                             io::ErrorKind::InvalidData,
-                            "unexpected pipelined QA media data",
+                            "unexpected pipelined data on a held QA response",
                         ));
                     }
                 }
@@ -913,7 +916,8 @@ impl QaTcpProxy {
             .local_addr()
             .map_err(|e| format!("send_queue proxy local_addr failed: {e}"))?;
         let enabled = Arc::new(AtomicBool::new(true));
-        let media_reads = Arc::new(QaMediaReadControl::default());
+        let media_reads = Arc::new(QaResponseHold::default());
+        let sliding_sync_responses = Arc::new(QaResponseHold::default());
         let room_send_forwarded = Arc::new(AtomicUsize::new(0));
         let room_send_responses_completed = Arc::new(AtomicUsize::new(0));
         let running = Arc::new(AtomicBool::new(true));
@@ -926,6 +930,7 @@ impl QaTcpProxy {
 
         let thread_enabled = enabled.clone();
         let thread_media_reads = media_reads.clone();
+        let thread_sliding_sync_responses = sliding_sync_responses.clone();
         let thread_room_send_forwarded = room_send_forwarded.clone();
         let thread_room_send_responses_completed = room_send_responses_completed.clone();
         let thread_running = running.clone();
@@ -949,6 +954,7 @@ impl QaTcpProxy {
                             thread_room_send_forwarded.clone(),
                             thread_room_send_responses_completed.clone(),
                             thread_media_reads.clone(),
+                            thread_sliding_sync_responses.clone(),
                         );
                     }
                     Err(error) if error.kind() == io::ErrorKind::WouldBlock => {
@@ -966,6 +972,7 @@ impl QaTcpProxy {
         Ok(Self {
             listen_addr,
             media_reads,
+            sliding_sync_responses,
             enabled,
             room_send_forwarded,
             room_send_responses_completed,
@@ -1002,6 +1009,25 @@ impl QaTcpProxy {
 
     pub(super) fn release_media_responses(&self) {
         self.media_reads.hold.store(false, Ordering::SeqCst);
+    }
+
+    /// Withholds every Simplified Sliding Sync response that becomes ready
+    /// while held, including a long poll that was already in flight, so the
+    /// client hears nothing new from sync until release.
+    pub(super) fn hold_sliding_sync_responses(&self) {
+        self.sliding_sync_responses
+            .hold
+            .store(true, Ordering::SeqCst);
+    }
+
+    pub(super) fn release_sliding_sync_responses(&self) {
+        self.sliding_sync_responses
+            .hold
+            .store(false, Ordering::SeqCst);
+    }
+
+    pub(super) fn sliding_sync_responses_held_count(&self) -> usize {
+        self.sliding_sync_responses.held.load(Ordering::SeqCst)
     }
 
     pub(super) fn media_responses_held_count(&self) -> usize {
@@ -1190,7 +1216,8 @@ fn spawn_proxy_pair(
     read_state_control: Arc<(Mutex<QaReadStateProxyControl>, Condvar)>,
     room_send_forwarded: Arc<AtomicUsize>,
     room_send_responses_completed: Arc<AtomicUsize>,
-    media_reads: Arc<QaMediaReadControl>,
+    media_reads: Arc<QaResponseHold>,
+    sliding_sync_responses: Arc<QaResponseHold>,
 ) {
     thread::spawn(move || {
         let _ = proxy_single_http_request(
@@ -1202,6 +1229,7 @@ fn spawn_proxy_pair(
             room_send_forwarded,
             room_send_responses_completed,
             media_reads,
+            sliding_sync_responses,
         );
         let _ = client.shutdown(Shutdown::Both);
     });
@@ -1219,7 +1247,8 @@ fn proxy_single_http_request(
     read_state_control: Arc<(Mutex<QaReadStateProxyControl>, Condvar)>,
     room_send_forwarded: Arc<AtomicUsize>,
     room_send_responses_completed: Arc<AtomicUsize>,
-    media_reads: Arc<QaMediaReadControl>,
+    media_reads: Arc<QaResponseHold>,
+    sliding_sync_responses: Arc<QaResponseHold>,
 ) -> io::Result<()> {
     let mut request_head = Vec::new();
     {
@@ -1298,6 +1327,12 @@ fn proxy_single_http_request(
     if request_kind == QaProxyRequestKind::MediaRead {
         media_reads.forwarded.fetch_add(1, Ordering::SeqCst);
         media_reads.wait_for_release(client)?;
+    }
+    if request_kind == QaProxyRequestKind::SlidingSync {
+        // Gate on the response being ready, not on the request being sent:
+        // a long poll forwarded before the hold must not slip through.
+        server.peek(&mut [0])?;
+        sliding_sync_responses.wait_for_release(client)?;
     }
     io::copy(&mut server, client)?;
     if count_forwarded_room_send {
@@ -1404,6 +1439,13 @@ fn qa_proxy_request_kind(request: &[u8]) -> io::Result<QaProxyRequestKind> {
                 && (path.contains("/receipt/") || path.ends_with("/read_markers")) =>
         {
             QaProxyRequestKind::ReadState
+        }
+        // Simplified Sliding Sync only; legacy `/v3/sync` is not a runtime path.
+        ("POST", path)
+            if path.starts_with("/_matrix/client/")
+                && path.ends_with("/org.matrix.simplified_msc3575/sync") =>
+        {
+            QaProxyRequestKind::SlidingSync
         }
         _ => QaProxyRequestKind::Other,
     })
