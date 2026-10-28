@@ -2292,7 +2292,33 @@ impl TimelineManagerActor {
             record_subscribe_stage("build_begin", None);
             let build_started = Some(startup_trace::now());
             let sdk_started = executor::Instant::now();
-            let timeline_result = koushi_timeline_builder(&room, focus).build().await;
+            let observer: matrix_sdk::event_cache::focused_diagnostics::FocusedBuildObserver =
+                Arc::new(move |stage, outcome, duration_ms| {
+                    koushi_diagnostics::record(
+                        koushi_diagnostics::DiagnosticEvent::new(
+                            koushi_diagnostics::DiagnosticLevel::Debug,
+                            "core.focused_build",
+                            stage,
+                        )
+                        .field(koushi_diagnostics::DiagnosticField::count(
+                            "build",
+                            actor_generation,
+                        ))
+                        .field(koushi_diagnostics::DiagnosticField::token(
+                            "outcome", outcome,
+                        ))
+                        .field(koushi_diagnostics::DiagnosticField::count(
+                            "duration_ms",
+                            duration_ms,
+                        )),
+                    );
+                });
+            let timeline_result =
+                matrix_sdk::event_cache::focused_diagnostics::observe_focused_build(
+                    observer,
+                    koushi_timeline_builder(&room, focus).build(),
+                )
+                .await;
             startup_trace::trace_phase(StartupPhase::TimelineBuild, build_started);
             record_subscribe_stage("build_done", None);
             // The actual SDK-internal wait for a completed build. Cancellation
