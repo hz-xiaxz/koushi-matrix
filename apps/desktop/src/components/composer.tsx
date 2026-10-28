@@ -1269,6 +1269,7 @@ function mentionOptionAriaLabel(candidate: MentionCandidate): string {
 
 const ThreadComposer = memo(function ThreadComposer({
   canEdit,
+  composerMode = PLAIN_COMPOSER_MODE,
   document,
   draftKey,
   hasStagedUploads = false,
@@ -1283,6 +1284,7 @@ const ThreadComposer = memo(function ThreadComposer({
   roomName = t("panel.thread"),
   resolveComposerKeyAction,
   onAttachFiles,
+  onCancelReply = ignoreCancelReply,
   onDocumentChange,
   onMathModeChange,
   onRecentEmojisChange,
@@ -1294,6 +1296,8 @@ const ThreadComposer = memo(function ThreadComposer({
   sendingAccount = null
 }: {
   canEdit: boolean;
+  /** #1643: the open thread composer's Rust-owned reply mode. */
+  composerMode?: ComposerModeProp;
   document: ComposerDocument;
   draftKey: string;
   hasStagedUploads?: boolean;
@@ -1309,6 +1313,7 @@ const ThreadComposer = memo(function ThreadComposer({
   roomName?: string;
   resolveComposerKeyAction: ResolveComposerKeyAction;
   onAttachFiles?: (files: File[]) => void | Promise<void>;
+  onCancelReply?: () => void;
   onDocumentChange: (document: ComposerDocument) => void;
   onMathModeChange?: (enabled: boolean) => void | Promise<void>;
   onRecentEmojisChange?: (emojis: string[]) => void | Promise<void>;
@@ -1326,7 +1331,7 @@ const ThreadComposer = memo(function ThreadComposer({
       surface="thread"
       sendingAccount={sendingAccount}
       canEdit={canEdit}
-      composerMode={PLAIN_COMPOSER_MODE}
+      composerMode={composerMode}
       hasStagedUploads={hasStagedUploads}
       stagedUploadsReady={stagedUploadsReady}
       isSending={isSending}
@@ -1345,7 +1350,7 @@ const ThreadComposer = memo(function ThreadComposer({
       placeholder={t("timeline.threadPlaceholder")}
       roomName={roomName}
       onAttachFiles={onAttachFiles}
-      onCancelReply={ignoreCancelReply}
+      onCancelReply={onCancelReply}
       onDocumentChange={onDocumentChange}
       onMentionQueryChange={onMentionQueryChange}
       onScheduleSend={onScheduleSend}
@@ -1358,7 +1363,7 @@ const ThreadComposer = memo(function ThreadComposer({
 
 const PLAIN_COMPOSER_MODE = { kind: "plain" } as const;
 
-/** Thread replies have no reply target to cancel; one identity keeps Composer's memo. */
+/** Default for a thread composer without a cancel route; one identity keeps Composer's memo. */
 function ignoreCancelReply(): void {}
 
 export { ThreadComposer };

@@ -1296,7 +1296,8 @@ export class TauriDesktopApi implements DesktopApi {
     roomId: string,
     rootEventId: string,
     document: ComposerDocument,
-    draftRevision: ComposerDraftRevision = COMPOSER_DRAFT_REVISION_ZERO
+    draftRevision: ComposerDraftRevision = COMPOSER_DRAFT_REVISION_ZERO,
+    inReplyToEventId: string | null = null
   ): Promise<SubmissionResponse> {
     return this.invokeCommand<SubmissionResponse>("send_thread_reply", {
       accountHomeserver: account.homeserver,
@@ -1307,6 +1308,7 @@ export class TauriDesktopApi implements DesktopApi {
       submissionId,
       roomId,
       rootEventId,
+      inReplyToEventId,
       document,
       draftRevision
     });
@@ -1550,6 +1552,25 @@ export class TauriDesktopApi implements DesktopApi {
 
   async cancelComposerReply(): Promise<CommandAdmission> {
     return this.invokeCommand<CommandAdmission>("cancel_composer_reply");
+  }
+
+  async setThreadComposerReplyTarget(
+    roomId: string,
+    rootEventId: string,
+    eventId: string
+  ): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("set_thread_composer_reply_target", {
+      roomId,
+      rootEventId,
+      eventId
+    });
+  }
+
+  async cancelThreadComposerReply(roomId: string, rootEventId: string): Promise<CommandAdmission> {
+    return this.invokeCommand<CommandAdmission>("cancel_thread_composer_reply", {
+      roomId,
+      rootEventId
+    });
   }
 
   async sendReply(

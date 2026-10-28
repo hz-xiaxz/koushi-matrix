@@ -1986,6 +1986,8 @@ pub fn run() {
             commands::room::invite_targets,
             commands::timeline::set_composer_reply_target,
             commands::timeline::cancel_composer_reply,
+            commands::timeline::set_thread_composer_reply_target,
+            commands::timeline::cancel_thread_composer_reply,
             commands::timeline::set_composer_draft,
             commands::timeline::set_thread_composer_draft,
             commands::timeline::send_reaction,
