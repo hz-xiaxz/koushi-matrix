@@ -460,3 +460,69 @@ fn live_tail_proxy_enforces_tokenless_refresh_and_exact_continuation_requests() 
     assert!(state.observation.expected_end_token_was_used);
     assert_eq!(state.observation.expected_end_token_request_count, 1);
 }
+
+#[test]
+fn held_sliding_sync_responses_include_a_long_poll_forwarded_before_the_hold() {
+    use std::{
+        io::{Read, Write},
+        net::{TcpListener, TcpStream},
+        sync::mpsc,
+        time::{Duration, Instant},
+    };
+    let server = TcpListener::bind("127.0.0.1:0").unwrap();
+    let proxy =
+        super::QaTcpProxy::start(&format!("http://{}", server.local_addr().unwrap())).unwrap();
+    let (forwarded_tx, forwarded_rx) = mpsc::channel();
+    let (respond_tx, respond_rx) = mpsc::channel::<()>();
+    let serving = std::thread::spawn(move || {
+        let (mut stream, _) = server.accept().unwrap();
+        stream
+            .set_read_timeout(Some(Duration::from_secs(2)))
+            .unwrap();
+        let mut head = Vec::new();
+        while !head.ends_with(b"\r\n\r\n") {
+            let mut byte = [0];
+            stream.read_exact(&mut byte).unwrap();
+            head.push(byte[0]);
+        }
+        forwarded_tx.send(()).unwrap();
+        // The long poll answers only after the test has started the hold.
+        respond_rx.recv().unwrap();
+        stream
+            .write_all(b"HTTP/1.1 200 OK\r\nContent-Length: 2\r\nConnection: close\r\n\r\nok")
+            .unwrap();
+    });
+    let mut client = TcpStream::connect(proxy.listen_addr).unwrap();
+    write!(
+        client,
+        "POST /_matrix/client/unstable/org.matrix.simplified_msc3575/sync HTTP/1.1\r\n\
+         Host: localhost\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"
+    )
+    .unwrap();
+    forwarded_rx
+        .recv_timeout(Duration::from_secs(2))
+        .expect("sync request was not forwarded");
+    proxy.hold_sliding_sync_responses();
+    respond_tx.send(()).unwrap();
+    let deadline = Instant::now() + Duration::from_secs(2);
+    while proxy.sliding_sync_responses_held_count() != 1 {
+        assert!(Instant::now() < deadline, "sync response was not held");
+        std::thread::sleep(Duration::from_millis(5));
+    }
+    client
+        .set_read_timeout(Some(Duration::from_millis(50)))
+        .unwrap();
+    assert!(matches!(
+        client.peek(&mut [0]).unwrap_err().kind(),
+        std::io::ErrorKind::WouldBlock | std::io::ErrorKind::TimedOut
+    ));
+    proxy.release_sliding_sync_responses();
+    client
+        .set_read_timeout(Some(Duration::from_secs(2)))
+        .unwrap();
+    let mut response = String::new();
+    client.read_to_string(&mut response).unwrap();
+    assert!(response.ends_with("ok"));
+    assert_eq!(proxy.sliding_sync_responses_held_count(), 0);
+    serving.join().unwrap();
+}

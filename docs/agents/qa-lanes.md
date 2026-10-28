@@ -513,6 +513,10 @@ node scripts/cli-local-qa.mjs
 With CI-profile binaries use `node scripts/cli-local-qa.mjs --ci` and set
 `CARGO_TARGET_DIR` when the target root differs. Required tokens:
 `cli_accounts=ok`, `cli_encrypted_read=ok`, `cli_encrypted_search=ok`.
-The PR Tuwunel job enforces this lane. Host fixtures enable
+The PR Tuwunel job enforces this lane. `MCP_HOST_READY` means the snapshot the
+bridge serves already lists the seeded room by name as encrypted: the host runs
+behind the QA proxy, withholds Sliding Sync responses while seeding (create and
+send settle on their own HTTP responses, but the name arrives only by sync),
+then waits for that room-list projection. Host fixtures enable
 `KOUSHI_QA_CLI_FIXTURE=1` only in the existing debug/test-gated QA host mode;
 this is not a product credential injection or executable option.
