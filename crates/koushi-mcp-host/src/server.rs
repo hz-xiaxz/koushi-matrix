@@ -462,7 +462,10 @@ impl NamedPipeListener {
             ServerOptions::new()
                 .first_pipe_instance(first)
                 .reject_remote_clients(true)
-                .create_with_security_attributes_raw(name, (&mut attributes as *mut _).cast())
+                .create_with_security_attributes_raw(
+                    name,
+                    std::ptr::from_mut(&mut attributes).cast(),
+                )
         }
         .map_err(|_| "mcp pipe".to_owned())?;
         Ok(Self {

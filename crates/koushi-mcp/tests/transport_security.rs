@@ -176,7 +176,7 @@ async fn windows_unread_stdout_does_not_block_the_command_deadline() {
     let server = unsafe {
         ServerOptions::new()
             .first_pipe_instance(true)
-            .create_with_security_attributes_raw(&name, (&mut attrs as *mut _).cast())
+            .create_with_security_attributes_raw(&name, std::ptr::from_mut(&mut attrs).cast())
     }
     .expect("private pipe");
     let path = write_endpoint(
