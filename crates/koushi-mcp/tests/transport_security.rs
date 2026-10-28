@@ -89,7 +89,7 @@ fn endpoint_symlinks_fifos_and_broad_parent_permissions_are_refused() {
 #[cfg(windows)]
 #[test]
 fn windows_endpoint_dacl_is_restrictive_and_broad_acl_is_rejected() {
-    use std::os::windows::io::AsRawHandle;
+    use std::os::windows::{fs::OpenOptionsExt, io::AsRawHandle};
     use windows_sys::Win32::Security::Authorization::{SE_FILE_OBJECT, SetSecurityInfo};
     use windows_sys::Win32::Security::DACL_SECURITY_INFORMATION;
     let dir = tempfile::tempdir().expect("tempdir");
@@ -99,8 +99,9 @@ fn windows_endpoint_dacl_is_restrictive_and_broad_acl_is_rejected() {
     );
     assert!(endpoint::read(&path).is_ok());
     let file = std::fs::OpenOptions::new()
-        .read(true)
-        .write(true)
+        // READ_CONTROL is included by GENERIC_READ; deliberately modifying
+        // the fixture ACL additionally requires WRITE_DAC on this handle.
+        .access_mode(windows_sys::Win32::Foundation::GENERIC_READ | 0x0004_0000)
         .open(&path)
         .expect("open");
     // SAFETY: handle is live. A NULL DACL deliberately grants everyone access
