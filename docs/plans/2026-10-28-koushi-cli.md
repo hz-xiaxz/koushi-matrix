@@ -23,7 +23,10 @@ review approved. Integrated review found and reproduced two blockers: blocked
 stdout escaped cancellation/deadlines, and the new QA runner used a password
 environment value. Result delivery now stays inside the live async deadline
 and signal selection, with child-process backpressure regressions; generated
-QA credentials now enter through a private FIFO. Final re-review is pending.
+QA credentials now enter through a private FIFO. Final independent re-review approved the integrated diff and independently
+reproduced successful deadline/status-4 and Ctrl-C/status-130 exits under
+blocked stdout. No actionable blocker remains; actual Windows runtime and all
+PR CI jobs remain merge gates.
 
 Local evidence:
 
