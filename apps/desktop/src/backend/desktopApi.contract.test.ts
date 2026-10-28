@@ -114,7 +114,8 @@ describe("DesktopApi command contract", () => {
         "joinSuggestedSpaceRooms",
         "dismissSuggestedSpaceRooms",
         "setThreadComposerReplyTarget",
-        "cancelThreadComposerReply"
+        "cancelThreadComposerReply",
+        "dismissAssistantDraftMarker"
       )
       .sort();
     expect(new Set(current).size).toBe(current.length);
