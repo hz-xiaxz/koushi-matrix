@@ -20,6 +20,7 @@ use std::sync::Arc;
 use koushi_core::runtime::CoreRuntime;
 use koushi_mcp_host::{BridgeAccount, BridgeAccounts};
 
+use super::diagnostics::QaTcpProxy;
 use super::participants::{QaParticipantLoginGate, login_synced_participant_for_qa, qa_data_dir};
 use super::registry::{ENV_HOMESERVER, ENV_PASSWORD_A, ENV_USER_A};
 
@@ -155,9 +156,18 @@ async fn host(
         None => (required(ENV_USER_A)?, required(ENV_PASSWORD_A)?),
     };
 
+    // The CLI fixture runs behind the QA proxy so seeding can withhold sync
+    // (see `cli_fixture::seed`). The proxy lives as long as the host.
+    let fixture_proxy = (std::env::var("KOUSHI_QA_CLI_FIXTURE").as_deref() == Ok("1"))
+        .then(|| QaTcpProxy::start(&homeserver))
+        .transpose()?;
+    let login_homeserver = fixture_proxy
+        .as_ref()
+        .map_or_else(|| homeserver.clone(), QaTcpProxy::homeserver_url);
+
     let data_dir = qa_data_dir("mcp-host");
     let mut participant = login_synced_participant_for_qa(
-        &homeserver,
+        &login_homeserver,
         data_dir.clone(),
         &username,
         &password,
@@ -168,8 +178,8 @@ async fn host(
     )
     .await?;
 
-    if std::env::var("KOUSHI_QA_CLI_FIXTURE").as_deref() == Ok("1") {
-        cli_fixture::seed(&mut participant).await?;
+    if let Some(proxy) = &fixture_proxy {
+        cli_fixture::seed(&mut participant, proxy).await?;
     }
 
     let account_id = format!("account:{}", participant.account_key.0);
