@@ -5062,9 +5062,12 @@ button:disabled {
   height: 20px;
   padding-inline: 6px;
   overflow: visible;
-  border-radius: var(--r-pill);
+  /* A speech bubble: the tail corner points back at the chip. */
+  border-radius: 10px;
+  border-end-start-radius: 3px;
   color: var(--brand-contrast);
   background: var(--danger);
+  box-shadow: 0 0 0 2px var(--surface);
   font-size: 12px;
   font-weight: 700;
   font-variant-numeric: tabular-nums;
@@ -5079,22 +5082,6 @@ button:disabled {
 .thread-summary-chip:focus-visible {
   outline: 2px solid var(--brand);
   outline-offset: 2px;
-}
-
-.thread-new-replies-chip {
-  min-inline-size: 28px;
-  justify-content: center;
-  padding-inline: 4px;
-  border: 0;
-  border-radius: 4px;
-  color: var(--mention);
-  background: transparent;
-  font-variant-numeric: tabular-nums;
-}
-
-.thread-new-replies-chip:hover {
-  background: transparent;
-  text-decoration: underline;
 }
 
 .reply-link {

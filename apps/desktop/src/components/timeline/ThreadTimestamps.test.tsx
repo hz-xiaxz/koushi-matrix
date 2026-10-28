@@ -52,6 +52,7 @@ function renderRoot(options: {
     contentTimestampMs={timestamp}
     roomId="!room:example.invalid"
     presentationContext={options.context ?? "room"}
+    showThreadSummary={options.context !== "thread"}
     onReply={vi.fn()}
     onOpenThread={onOpenThread}
     onSendReaction={vi.fn()}
@@ -141,6 +142,13 @@ describe("thread unread badge", () => {
     expect(chip.getAttribute("aria-label")).toContain(t("timeline.threadNotificationCount", { count: 3 }));
     fireEvent.click(badge);
     expect(onOpenThread).toHaveBeenCalledWith("!room:example.invalid", rootId, "existingThread");
+  });
+
+  it("shows no unread count on the root inside the open thread pane", () => {
+    const { container } = renderRoot({ unread: 1, context: "thread" });
+    expect(container.querySelector(".thread-new-replies-chip")).toBeNull();
+    expect(container.querySelector(".thread-summary-unread-badge")).toBeNull();
+    expect(container.querySelector(".thread-summary-chip")).toBeNull();
   });
 
   it("omits the badge when the thread has no unread replies", () => {
