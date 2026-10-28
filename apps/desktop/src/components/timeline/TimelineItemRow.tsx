@@ -1309,17 +1309,6 @@ export function TimelineItemRow({
             )}
           </p>
         ) : null}
-        {threadUnreadCount > 0 && !canShowThreadSummary ? (
-          <button
-            className="thread-summary-chip thread-new-replies-chip"
-            type="button"
-            aria-label={t("timeline.openThreadSummary", { summary: threadNotificationsText })}
-            title={threadNotificationsText}
-            onClick={submitOpenThread}
-          >
-            <span>{uiNumberFormat().format(threadUnreadCount)}</span>
-          </button>
-        ) : null}
         {canShowThreadSummary ? (
           <div className="thread-summary">
             <button
