@@ -128,6 +128,7 @@ export const ko: Catalog = {
   "menu.selectAll": "모두 선택",
   "menu.closeWindow": "창 닫기",
   "menu.quit": "Koushi 종료",
+  "menu.showKoushi": "Koushi 표시",
   "auth.failureForbidden": "이 계정에서는 로그인 방법을 사용할 수 없습니다",
   "auth.failureInvalidCredentials": "Matrix ID 또는 비밀번호가 올바르지 않습니다",
   "auth.failureNetwork": "홈서버에 연결할 수 없습니다",

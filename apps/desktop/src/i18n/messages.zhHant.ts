@@ -128,6 +128,7 @@ export const zhHant: Catalog = {
   "menu.selectAll": "全選",
   "menu.closeWindow": "關閉視窗",
   "menu.quit": "結束 Koushi",
+  "menu.showKoushi": "顯示 Koushi",
   "auth.failureForbidden": "此帳號無法使用登入方式",
   "auth.failureInvalidCredentials": "Matrix ID 或密碼不正確",
   "auth.failureNetwork": "無法連線至主伺服器",

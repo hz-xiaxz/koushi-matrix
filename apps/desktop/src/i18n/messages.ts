@@ -130,6 +130,7 @@ export type MessageId =
   | "menu.selectAll"
   | "menu.closeWindow"
   | "menu.quit"
+  | "menu.showKoushi"
   | "auth.failureForbidden"
   | "auth.failureInvalidCredentials"
   | "auth.failureNetwork"
@@ -2406,6 +2407,7 @@ const en: Catalog = {
   "menu.selectAll": "Select All",
   "menu.closeWindow": "Close Window",
   "menu.quit": "Quit Koushi",
+  "menu.showKoushi": "Show Koushi",
   "auth.failureForbidden": "Login methods are not available for this account",
   "auth.failureInvalidCredentials": "Incorrect Matrix ID or password",
   "auth.failureNetwork": "Could not reach the homeserver",
@@ -4752,6 +4754,7 @@ const ja: Catalog = {
   "menu.selectAll": "すべてを選択",
   "menu.closeWindow": "ウインドウを閉じる",
   "menu.quit": "Koushi を終了",
+  "menu.showKoushi": "Koushi を表示",
   "auth.matrixAccount": "Matrixアカウント",
   "auth.matrixDesktop": "Koushi（光子・格子）",
   "auth.noLoginMethods": "ログイン方法がありません",

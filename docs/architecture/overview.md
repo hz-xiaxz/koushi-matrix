@@ -1366,7 +1366,9 @@ records the failure as a diagnostic, reports the capability as unavailable, and
 the app must still run as an ordinary windowed application. The tray carries no
 Matrix data — only a static tooltip and two commands, Show and Quit — so it is
 not an attention rendering surface and must not display room labels, counts, or
-message content.
+message content. Its Show and Quit labels are catalog message ids that ride the
+native app-menu label round trip, so they follow the app language like the app
+menu does.
 
 Close-to-hide is the default window-close behavior on all three desktop
 platforms. Requesting a window close hides the `main` window instead of
