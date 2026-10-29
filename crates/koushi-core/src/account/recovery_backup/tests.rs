@@ -1112,6 +1112,9 @@ fn is_blocked_failed_timeout(gate: &koushi_state::SecureBackupGateState) -> bool
 async fn deferred_inspection_deadline_exits_checking_without_connectivity() {
     let (handle, mut action_rx) =
         verified_actor_with_short_deadline(Duration::from_millis(50)).await;
+    // Paused time: the deadline fires only once the actor is idle, never
+    // between the defer and the owner snapshot below (#1674).
+    tokio::time::pause();
     handle.send(AccountMessage::InspectSecureBackup).await;
     let owners = inspect_secure_backup_owners(&handle).await;
     assert!(owners.inspection_pending, "defer must set pending");
@@ -1146,6 +1149,7 @@ async fn deferred_inspection_deadline_exits_checking_without_connectivity() {
 async fn repeated_defers_coalesce_onto_one_deadline() {
     let (handle, mut action_rx) =
         verified_actor_with_short_deadline(Duration::from_millis(120)).await;
+    tokio::time::pause();
     handle.send(AccountMessage::InspectSecureBackup).await;
     // second defer before expiry must keep the original deadline task
     handle.send(AccountMessage::InspectSecureBackup).await;
