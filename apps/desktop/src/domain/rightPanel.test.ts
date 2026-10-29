@@ -4,10 +4,16 @@ import { COMPOSER_DRAFT_REVISION_ZERO } from "./composerDraftRevision";
 import {
   effectiveRightPanelModeForSnapshot,
   rightPanelIntentForContextMenuAction,
+  rightPanelModeForEventNavigation,
   rightPanelModeForSearchQuery,
   roomOrSpaceForPeoplePanelScope
 } from "./rightPanel";
-import type { DesktopSnapshot, RoomSummary, SpaceSummary } from "./types";
+import type {
+  DesktopSnapshot,
+  EventNavigationSource,
+  RoomSummary,
+  SpaceSummary
+} from "./types";
 
 describe("right panel context menu routing", () => {
   test("routes room and Space menu actions through selection plus panel mode", () => {
@@ -53,6 +59,25 @@ describe("right panel context menu routing", () => {
   test("opens a search context panel only for non-empty searches", () => {
     expect(rightPanelModeForSearchQuery(" Alpha ")).toBe("search");
     expect(rightPanelModeForSearchQuery("   ")).toBeNull();
+  });
+
+  test("maps each anchored event-navigation source to its panel", () => {
+    for (const current of ["closed", "thread", "search", "pinned"] as const) {
+      expect(rightPanelModeForEventNavigation("activity", current)).toBe("closed");
+      expect(rightPanelModeForEventNavigation("notification", current)).toBe("closed");
+      expect(rightPanelModeForEventNavigation("search", current)).toBe("search");
+      expect(rightPanelModeForEventNavigation("pinned", current)).toBe("pinned");
+    }
+  });
+
+  test("keeps the current panel for a reply-quote jump except a focused context (#1667)", () => {
+    for (const current of ["closed", "thread", "search", "roomInfo"] as const) {
+      expect(rightPanelModeForEventNavigation("replyQuote", current)).toBe(current);
+    }
+    expect(rightPanelModeForEventNavigation("replyQuote", "focusedContext")).toBe("closed");
+    expect(
+      rightPanelModeForEventNavigation("futureSource" as EventNavigationSource, "thread")
+    ).toBe("thread");
   });
 
   test("resolves People/Profile context from an explicit room or Space scope", () => {
