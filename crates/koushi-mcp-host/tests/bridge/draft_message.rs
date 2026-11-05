@@ -42,6 +42,7 @@ impl BridgeAccounts for OneAccount {
 
 struct Harness {
     dir: tempfile::TempDir,
+    core: Arc<CoreRuntime>,
     bridge: koushi_mcp_host::BridgeHandle,
     reader: BufReader<tokio::net::unix::OwnedReadHalf>,
     writer: tokio::net::unix::OwnedWriteHalf,
@@ -78,7 +79,10 @@ impl Harness {
         support::wait_for_room(&core, ROOM).await;
         let media = dir.path().join("media");
         std::fs::create_dir_all(&media).expect("media dir");
-        let accounts: Arc<dyn BridgeAccounts> = Arc::new(OneAccount { core, media });
+        let accounts: Arc<dyn BridgeAccounts> = Arc::new(OneAccount {
+            core: Arc::clone(&core),
+            media,
+        });
         let broker = ConsentBroker::new(data_dir.clone(), ConsentMode::FailClosed);
         let bridge = koushi_mcp_host::start(accounts, data_dir.clone(), broker).expect("bridge");
 
@@ -90,6 +94,7 @@ impl Harness {
         let (read, writer) = stream.into_split();
         let mut harness = Self {
             dir,
+            core,
             bridge,
             reader: BufReader::new(read),
             writer,
@@ -294,5 +299,66 @@ async fn an_unjoined_room_is_reported_only_after_consent() {
         )
         .await;
     assert_eq!(error_code(&approved), "room_not_found");
+    harness.stop().await;
+}
+
+/// The user changes the room composer, as the renderer's
+/// `set_composer_draft` does.
+async fn user_sets_composer(harness: &Harness, text: &str) {
+    support::apply_actions(
+        &harness.core,
+        vec![koushi_state::AppAction::ComposerDraftChanged {
+            room_id: ROOM.to_owned(),
+            document: koushi_state::ComposerDocument::from_plain_text(text),
+        }],
+    )
+    .await;
+}
+
+/// Reads the composer draft back until it reports `status`; injected actions
+/// are only queued.
+async fn draft_state_until(harness: &mut Harness, status: &str) -> Value {
+    let mut reply = Value::Null;
+    for _ in 0..100 {
+        reply = harness
+            .call(
+                "get_draft",
+                json!({ "account_id": ACCOUNT, "room_id": ROOM }),
+            )
+            .await;
+        if reply["result"]["structuredContent"]["status"] == status {
+            return reply;
+        }
+        tokio::time::sleep(Duration::from_millis(20)).await;
+    }
+    panic!("the draft never read back as {status}: {reply}");
+}
+
+/// An assistant that staged a draft can learn what became of it: the user
+/// may keep, edit, or clear it by hand, and `draft_message` answers only
+/// `staged` or `conflict`, so without a read-back the assistant believes a
+/// cleared draft is still waiting and cannot tell its text from the user's.
+#[tokio::test(flavor = "multi_thread", worker_threads = 2)]
+async fn a_staged_draft_reads_back_after_the_user_edits_or_clears_it() {
+    let mut harness = Harness::start(Some(Harness::account_grant(false, true))).await;
+    wait_until_staged(&mut harness).await;
+
+    let staged = draft_state_until(&mut harness, "assistant").await;
+    assert_eq!(
+        staged["result"]["structuredContent"]["body"],
+        "from the assistant"
+    );
+
+    user_sets_composer(&harness, "from the assistant, edited by hand").await;
+    let edited = draft_state_until(&mut harness, "user_edited").await;
+    assert_eq!(
+        edited["result"]["structuredContent"]["body"],
+        "from the assistant, edited by hand"
+    );
+
+    user_sets_composer(&harness, "").await;
+    let cleared = draft_state_until(&mut harness, "empty").await;
+    assert!(cleared["result"]["structuredContent"]["body"].is_null());
+
     harness.stop().await;
 }
