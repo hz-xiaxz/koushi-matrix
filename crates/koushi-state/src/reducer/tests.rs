@@ -5,6 +5,8 @@ use crate::state::{
     RoomLatestEventSummary, RoomLiveSignals, TimelineMediaDownloadState, UserProfile,
 };
 
+mod native_attention_candidate_lifetime;
+
 fn ready_state() -> AppState {
     let mut state = AppState::default();
     state.session = SessionState::Ready(crate::state::SessionInfo {
