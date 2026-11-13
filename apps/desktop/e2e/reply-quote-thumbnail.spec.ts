@@ -3,7 +3,7 @@ import { expect, test } from "@playwright/test";
 import {
   HARNESS_ROOM_KEY,
   gotoReadyShell,
-  seedTimelineItems
+  seedTimelineItems,
 } from "./support/basicOperations";
 
 const QUOTED_EVENT_ID = "$off-window-picture:example.invalid";
@@ -18,15 +18,15 @@ const quote = {
     animated: false,
     width: 640,
     height: 480,
-    has_thumbnail_source: false
+    has_thumbnail_source: false,
   },
   permalink: null,
   can_open: true,
-  state: "ready"
+  state: "ready",
 };
 
 test("a reply to an off-window picture requests one thumbnail and renders it", async ({
-  page
+  page,
 }) => {
   await gotoReadyShell(page);
   await page.evaluate(() => window.__harness.clearInvocations());
@@ -49,7 +49,7 @@ test("a reply to an off-window picture requests one thumbnail and renders it", a
       can_redact: true,
       is_edited: false,
       can_edit: true,
-      reactions: []
+      reactions: [],
     },
     {
       id: { Event: { event_id: "$reply-b:example.invalid" } },
@@ -68,8 +68,8 @@ test("a reply to an off-window picture requests one thumbnail and renders it", a
       can_redact: true,
       is_edited: false,
       can_edit: true,
-      reactions: []
-    }
+      reactions: [],
+    },
   ]);
 
   await expect
@@ -77,58 +77,66 @@ test("a reply to an off-window picture requests one thumbnail and renders it", a
       page.evaluate(() =>
         window.__harness
           .invocationsOf("request_reply_quote_thumbnail")
-          .map((invocation) => invocation.args)
-      )
+          .map((invocation) => invocation.args),
+      ),
     )
     .toEqual([
       {
         roomId: "!harness-room:example.invalid",
         quotedEventId: QUOTED_EVENT_ID,
-        timelineKey: HARNESS_ROOM_KEY
-      }
+        timelineKey: HARNESS_ROOM_KEY,
+      },
     ]);
 
   const thumbnailUrl =
     "data:image/gif;base64,R0lGODlhAQABAAD/ACwAAAAAAQABAAACADs=";
-  await page.evaluate(async ({ quotedEventId, sourceRef }) => {
-    const snapshot = window.__harness.currentSnapshot();
-    window.__harness.setSnapshot({
-      ...snapshot,
-      state: {
-        ...snapshot.state,
-        ui: {
-          ...snapshot.state.ui,
-          timeline: {
-            ...snapshot.state.ui.timeline,
-            reply_quote_thumbnails: {
-              [quotedEventId]: {
-                kind: "ready",
-                source_ref: sourceRef,
-                width: 480,
-                height: 360,
-                mime_type: "image/gif"
-              }
+  await page.evaluate(
+    async ({ quotedEventId, sourceRef }) => {
+      const snapshot = window.__harness.currentSnapshot();
+      window.__harness.setSnapshot({
+        ...snapshot,
+        state: {
+          ...snapshot.state,
+          ui: {
+            ...snapshot.state.ui,
+            timeline: {
+              ...snapshot.state.ui.timeline,
+              reply_quote_thumbnails: {
+                [quotedEventId]: {
+                  kind: "ready",
+                  source_ref: sourceRef,
+                  width: 480,
+                  height: 360,
+                  mime_type: "image/gif",
+                },
+              },
+              media_downloads: {
+                ...snapshot.state.ui.timeline.media_downloads,
+                [quotedEventId]: {
+                  kind: "ready",
+                  source_ref: sourceRef,
+                  width: 640,
+                  height: 480,
+                  mime_type: "image/gif",
+                },
+              },
             },
-            media_downloads: {
-              ...snapshot.state.ui.timeline.media_downloads,
-              [quotedEventId]: {
-                kind: "ready",
-                source_ref: sourceRef,
-                width: 640,
-                height: 480,
-                mime_type: "image/gif"
-              }
-            }
-          }
-        }
-      }
-    });
-    window.__harness.pushStateUpdate();
-  }, { quotedEventId: QUOTED_EVENT_ID, sourceRef: thumbnailUrl });
+          },
+        },
+      });
+      window.__harness.pushStateUpdate();
+    },
+    { quotedEventId: QUOTED_EVENT_ID, sourceRef: thumbnailUrl },
+  );
 
-  const slots = page.getByRole("button", { name: "Open image from Harness Alice" });
+  const slots = page.getByRole("button", {
+    name: "Open image from Harness Alice",
+  });
   await expect(slots).toHaveCount(2);
-  await expect(slots.first().locator("img")).toHaveAttribute("src", thumbnailUrl);
+  await expect(slots.first().locator("img")).toHaveAttribute(
+    "src",
+    thumbnailUrl,
+  );
   await slots.first().click();
   await expect(page.getByRole("dialog")).toBeVisible();
 });
@@ -139,7 +147,7 @@ const PORTRAIT_IMAGE =
   "data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' width='120' height='480'%3E%3Crect width='120' height='480' fill='%23b83333'/%3E%3C/svg%3E";
 
 test("an off-ratio thumbnail is centered in the reserved box and the quote keeps its height", async ({
-  page
+  page,
 }) => {
   await gotoReadyShell(page);
 
@@ -162,8 +170,8 @@ test("an off-ratio thumbnail is centered in the reserved box and the quote keeps
           animated: false,
           width: null,
           height: null,
-          has_thumbnail_source: false
-        }
+          has_thumbnail_source: false,
+        },
       },
       thread_root: null,
       thread_summary: null,
@@ -174,8 +182,8 @@ test("an off-ratio thumbnail is centered in the reserved box and the quote keeps
       can_redact: true,
       is_edited: false,
       can_edit: true,
-      reactions: []
-    }
+      reactions: [],
+    },
   ]);
 
   const row = page.locator(`[data-item-id="${replyId}"]`);
@@ -188,7 +196,8 @@ test("an off-ratio thumbnail is centered in the reserved box and the quote keeps
     }
     return box;
   };
-  const boxHeight = async () => (await quoteBox.boundingBox())?.height ?? Number.NaN;
+  const boxHeight = async () =>
+    (await quoteBox.boundingBox())?.height ?? Number.NaN;
 
   const reservedPreview = await rectOf(preview);
   const reservedHeight = await boxHeight();
@@ -210,16 +219,16 @@ test("an off-ratio thumbnail is centered in the reserved box and the quote keeps
                   source_ref: sourceRef,
                   width: 480,
                   height: 360,
-                  mime_type: "image/svg+xml"
-                }
-              }
-            }
-          }
-        }
+                  mime_type: "image/svg+xml",
+                },
+              },
+            },
+          },
+        },
       });
       window.__harness.pushStateUpdate();
     },
-    { quotedEventId, sourceRef: PORTRAIT_IMAGE }
+    { quotedEventId, sourceRef: PORTRAIT_IMAGE },
   );
 
   const image = preview.locator("img");
@@ -229,7 +238,7 @@ test("an off-ratio thumbnail is centered in the reserved box and the quote keeps
       image.evaluate((element) => {
         const img = element as HTMLImageElement;
         return img.complete && img.naturalHeight === 480;
-      })
+      }),
     )
     .toBe(true);
 
@@ -240,36 +249,44 @@ test("an off-ratio thumbnail is centered in the reserved box and the quote keeps
   expect(readyPreview.width).toBeCloseTo(reservedPreview.width, 1);
   expect(readyPreview.y).toBeCloseTo(reservedPreview.y, 1);
 
-  // (b) The image fills the box's padding box, so `object-fit: cover` crops it
-  // symmetrically instead of letting its intrinsic height overflow the box and
-  // anchoring the visible part at the top.
-  const { contentBox, imageBox } = await preview.evaluate((element) => {
-    const img = element.querySelector("img");
-    if (!img) {
-      throw new Error("no image");
-    }
-    const outer = element.getBoundingClientRect();
-    const style = getComputedStyle(element);
-    const rect = img.getBoundingClientRect();
-    const borderX = parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
-    const borderY = parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
-    return {
-      contentBox: {
-        top: outer.top + parseFloat(style.borderTopWidth),
-        left: outer.left + parseFloat(style.borderLeftWidth),
-        width: outer.width - borderX,
-        height: outer.height - borderY
-      },
-      imageBox: {
-        top: rect.top,
-        left: rect.left,
-        width: rect.width,
-        height: rect.height
+  // (b) The image element fills the box's padding box instead of letting its
+  // intrinsic height overflow the box, and `object-fit: contain` draws the whole
+  // off-ratio picture centered in it rather than cropping its edges.
+  const { contentBox, imageBox, objectFit, objectPosition } =
+    await preview.evaluate((element) => {
+      const img = element.querySelector("img");
+      if (!img) {
+        throw new Error("no image");
       }
-    };
-  });
+      const outer = element.getBoundingClientRect();
+      const style = getComputedStyle(element);
+      const rect = img.getBoundingClientRect();
+      const imageStyle = getComputedStyle(img);
+      const borderX =
+        parseFloat(style.borderLeftWidth) + parseFloat(style.borderRightWidth);
+      const borderY =
+        parseFloat(style.borderTopWidth) + parseFloat(style.borderBottomWidth);
+      return {
+        contentBox: {
+          top: outer.top + parseFloat(style.borderTopWidth),
+          left: outer.left + parseFloat(style.borderLeftWidth),
+          width: outer.width - borderX,
+          height: outer.height - borderY,
+        },
+        imageBox: {
+          top: rect.top,
+          left: rect.left,
+          width: rect.width,
+          height: rect.height,
+        },
+        objectFit: imageStyle.objectFit,
+        objectPosition: imageStyle.objectPosition,
+      };
+    });
   expect(imageBox.height).toBeCloseTo(contentBox.height, 1);
   expect(imageBox.width).toBeCloseTo(contentBox.width, 1);
   expect(imageBox.top).toBeCloseTo(contentBox.top, 1);
   expect(imageBox.left).toBeCloseTo(contentBox.left, 1);
+  expect(objectFit).toBe("contain");
+  expect(objectPosition).toBe("50% 50%");
 });
